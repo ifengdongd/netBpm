@@ -1,0 +1,156 @@
+{
+  "caseName" : "from-activiti/sequence/CustomTaskAssignmentTest.testReleaseTask",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/CustomTaskAssignmentTest.testReleaseTask",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445741",
+      "PROC_INST_ID_" : "445741",
+      "BUSINESS_KEY_" : "from-activiti/sequence/CustomTaskAssignmentTest.testReleaseTask",
+      "PROC_DEF_ID_" : "releaseTaskProcess:1:445740",
+      "START_TIME_" : "2026-10-12 15:13:59.427",
+      "END_TIME_" : "2026-10-12 15:13:59.436",
+      "DURATION_" : "9",
+      "START_ACT_ID_" : "theStart",
+      "END_ACT_ID_" : "theEnd",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445744",
+      "PROC_DEF_ID_" : "releaseTaskProcess:1:445740",
+      "PROC_INST_ID_" : "445741",
+      "EXECUTION_ID_" : "445742",
+      "ACT_ID_" : "task1",
+      "TASK_ID_" : "445745",
+      "ACT_NAME_" : "Schedule meeting",
+      "ACT_TYPE_" : "userTask",
+      "ASSIGNEE_" : "fozzie",
+      "START_TIME_" : "2026-10-12 15:13:59.427",
+      "END_TIME_" : "2026-10-12 15:13:59.433",
+      "DURATION_" : "6",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445747",
+      "PROC_DEF_ID_" : "releaseTaskProcess:1:445740",
+      "PROC_INST_ID_" : "445741",
+      "EXECUTION_ID_" : "445742",
+      "ACT_ID_" : "theEnd",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:13:59.433",
+      "END_TIME_" : "2026-10-12 15:13:59.433",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445743",
+      "PROC_DEF_ID_" : "releaseTaskProcess:1:445740",
+      "PROC_INST_ID_" : "445741",
+      "EXECUTION_ID_" : "445742",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:13:59.427",
+      "END_TIME_" : "2026-10-12 15:13:59.427",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "445745",
+      "PROC_DEF_ID_" : "releaseTaskProcess:1:445740",
+      "TASK_DEF_KEY_" : "task1",
+      "PROC_INST_ID_" : "445741",
+      "EXECUTION_ID_" : "445742",
+      "NAME_" : "Schedule meeting",
+      "DESCRIPTION_" : "Schedule a meeting with management.",
+      "ASSIGNEE_" : "fozzie",
+      "START_TIME_" : "2026-10-12 15:13:59.427",
+      "END_TIME_" : "2026-10-12 15:13:59.432",
+      "DURATION_" : "5",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "445746",
+      "TYPE_" : "participant",
+      "USER_ID_" : "fozzie",
+      "PROC_INST_ID_" : "445741"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "releaseTaskProcess:1:445740",
+      "REV_" : "1",
+      "CATEGORY_" : "Examples",
+      "NAME_" : "Custom task assignment Example",
+      "KEY_" : "releaseTaskProcess",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445738",
+      "RESOURCE_NAME_" : "CustomTaskAssignmentTest.testReleaseTask.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445738",
+      "NAME_" : "from-activiti/sequence/CustomTaskAssignmentTest.testReleaseTask",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:13:59.417",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445739",
+      "REV_" : "1",
+      "NAME_" : "CustomTaskAssignmentTest.testReleaseTask.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445738",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIGlkPSJ0YXNrTGlzdGVuZXJFeGFtcGxlIgogIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIgogIHhtbG5zOmFjdGl2aXRpPSJodHRwOi8vYWN0aXZpdGkub3JnL2JwbW4iCgl0YXJnZXROYW1lc3BhY2U9IkV4YW1wbGVzIj4KCgk8cHJvY2VzcyBpZD0icmVsZWFzZVRhc2tQcm9jZXNzIiBuYW1lPSJDdXN0b20gdGFzayBhc3NpZ25tZW50IEV4YW1wbGUiPgoKCQk8c3RhcnRFdmVudCBpZD0idGhlU3RhcnQiIC8+CgoJCTxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cxIiBzb3VyY2VSZWY9InRoZVN0YXJ0IiB0YXJnZXRSZWY9InRhc2sxIiAvPgoKCQk8dXNlclRhc2sgaWQ9InRhc2sxIiBuYW1lPSJTY2hlZHVsZSBtZWV0aW5nIiBhY3Rpdml0aTphc3NpZ25lZT0iZm96emllIj4KCQkgIDxkb2N1bWVudGF0aW9uPgoJCSAgICBTY2hlZHVsZSBhIG1lZXRpbmcgd2l0aCBtYW5hZ2VtZW50LgoJCSAgPC9kb2N1bWVudGF0aW9uPgoJCTwvdXNlclRhc2s+CgoJCTxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cyIiBzb3VyY2VSZWY9InRhc2sxIiB0YXJnZXRSZWY9InRoZUVuZCIgLz4KCgkJPGVuZEV2ZW50IGlkPSJ0aGVFbmQiIC8+CgoJPC9wcm9jZXNzPgoKPC9kZWZpbml0aW9ucz4K",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "task1"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "task1"
+  }, {
+    "type" : "TASK_ASSIGNED",
+    "taskDefinitionKey" : "task1"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "task1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "task1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

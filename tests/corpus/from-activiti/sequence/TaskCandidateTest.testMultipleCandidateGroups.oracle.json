@@ -1,0 +1,156 @@
+{
+  "caseName" : "from-activiti/sequence/TaskCandidateTest.testMultipleCandidateGroups",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/TaskCandidateTest.testMultipleCandidateGroups",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "446525",
+      "PROC_INST_ID_" : "446525",
+      "BUSINESS_KEY_" : "from-activiti/sequence/TaskCandidateTest.testMultipleCandidateGroups",
+      "PROC_DEF_ID_" : "multipleCandidatesGroup:1:446524",
+      "START_TIME_" : "2026-10-12 15:14:03.561",
+      "END_TIME_" : "2026-10-12 15:14:03.570",
+      "DURATION_" : "9",
+      "START_ACT_ID_" : "theStart",
+      "END_ACT_ID_" : "theEnd",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "446532",
+      "PROC_DEF_ID_" : "multipleCandidatesGroup:1:446524",
+      "PROC_INST_ID_" : "446525",
+      "EXECUTION_ID_" : "446526",
+      "ACT_ID_" : "theEnd",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:03.568",
+      "END_TIME_" : "2026-10-12 15:14:03.568",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446527",
+      "PROC_DEF_ID_" : "multipleCandidatesGroup:1:446524",
+      "PROC_INST_ID_" : "446525",
+      "EXECUTION_ID_" : "446526",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:03.561",
+      "END_TIME_" : "2026-10-12 15:14:03.561",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446528",
+      "PROC_DEF_ID_" : "multipleCandidatesGroup:1:446524",
+      "PROC_INST_ID_" : "446525",
+      "EXECUTION_ID_" : "446526",
+      "ACT_ID_" : "theTask",
+      "TASK_ID_" : "446529",
+      "ACT_NAME_" : "Approve expenses",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:03.561",
+      "END_TIME_" : "2026-10-12 15:14:03.568",
+      "DURATION_" : "7",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "446529",
+      "PROC_DEF_ID_" : "multipleCandidatesGroup:1:446524",
+      "TASK_DEF_KEY_" : "theTask",
+      "PROC_INST_ID_" : "446525",
+      "EXECUTION_ID_" : "446526",
+      "NAME_" : "Approve expenses",
+      "DESCRIPTION_" : "Judge expenses of employees before end of fiscal quarter.",
+      "START_TIME_" : "2026-10-12 15:14:03.561",
+      "END_TIME_" : "2026-10-12 15:14:03.567",
+      "DURATION_" : "6",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "446530",
+      "GROUP_ID_" : "accountancy",
+      "TYPE_" : "candidate",
+      "TASK_ID_" : "446529"
+    }, {
+      "ID_" : "446531",
+      "GROUP_ID_" : "management",
+      "TYPE_" : "candidate",
+      "TASK_ID_" : "446529"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "multipleCandidatesGroup:1:446524",
+      "REV_" : "1",
+      "CATEGORY_" : "Examples",
+      "NAME_" : "Multiple candidate groups example",
+      "KEY_" : "multipleCandidatesGroup",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "446522",
+      "RESOURCE_NAME_" : "TaskCandidateTest.testMultipleCandidateGroups.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "446522",
+      "NAME_" : "from-activiti/sequence/TaskCandidateTest.testMultipleCandidateGroups",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:03.553",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "446523",
+      "REV_" : "1",
+      "NAME_" : "TaskCandidateTest.testMultipleCandidateGroups.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "446522",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIGlkPSJ0YXNrQXNzaWduZWVFeGFtcGxlIgogIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIgogIHhtbG5zOmFjdGl2aXRpPSJodHRwOi8vYWN0aXZpdGkub3JnL2JwbW4iCiAgdGFyZ2V0TmFtZXNwYWNlPSJFeGFtcGxlcyI+CgoJPHByb2Nlc3MgaWQ9Im11bHRpcGxlQ2FuZGlkYXRlc0dyb3VwIiBuYW1lPSJNdWx0aXBsZSBjYW5kaWRhdGUgZ3JvdXBzIGV4YW1wbGUiPgoKCQk8c3RhcnRFdmVudCBpZD0idGhlU3RhcnQiIC8+CgoJCTxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cxIiBzb3VyY2VSZWY9InRoZVN0YXJ0IiB0YXJnZXRSZWY9InRoZVRhc2siIC8+CgoJCTx1c2VyVGFzayBpZD0idGhlVGFzayIgbmFtZT0iQXBwcm92ZSBleHBlbnNlcyIgPgoJCSAgPGRvY3VtZW50YXRpb24+CgkJICAgIEp1ZGdlIGV4cGVuc2VzIG9mIGVtcGxveWVlcyBiZWZvcmUgZW5kIG9mIGZpc2NhbCBxdWFydGVyLgoJCSAgPC9kb2N1bWVudGF0aW9uPgoJCSAgPHBvdGVudGlhbE93bmVyPgoJCSAgICA8cmVzb3VyY2VBc3NpZ25tZW50RXhwcmVzc2lvbj4KCQkgICAgICA8Zm9ybWFsRXhwcmVzc2lvbj5ncm91cChhY2NvdW50YW5jeSksIGdyb3VwKG1hbmFnZW1lbnQpPC9mb3JtYWxFeHByZXNzaW9uPgoJCSAgICA8L3Jlc291cmNlQXNzaWdubWVudEV4cHJlc3Npb24+CgkJICA8L3BvdGVudGlhbE93bmVyPgoJCTwvdXNlclRhc2s+CgoJCTxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cyIiBzb3VyY2VSZWY9InRoZVRhc2siIHRhcmdldFJlZj0idGhlRW5kIiAvPgoKCQk8ZW5kRXZlbnQgaWQ9InRoZUVuZCIgLz4KCgk8L3Byb2Nlc3M+Cgo8L2RlZmluaXRpb25zPgo=",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theTask"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "theTask"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "theTask"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theTask"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

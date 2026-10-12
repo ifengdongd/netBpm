@@ -1,0 +1,28 @@
+# Build
+bin/
+obj/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+
+# IDE
+.vs/
+.idea/
+*.swp
+
+# Node (web/designer)
+node_modules/
+web/designer/dist/
+web/designer/.vite/
+web/designer/.tmp/
+
+# Container / OCR artifacts
+*.log

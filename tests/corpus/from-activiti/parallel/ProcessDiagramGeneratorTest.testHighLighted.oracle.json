@@ -1,0 +1,349 @@
+{
+  "caseName" : "from-activiti/parallel/ProcessDiagramGeneratorTest.testHighLighted",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/parallel/ProcessDiagramGeneratorTest.testHighLighted",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445400",
+      "PROC_INST_ID_" : "445400",
+      "BUSINESS_KEY_" : "from-activiti/parallel/ProcessDiagramGeneratorTest.testHighLighted",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "START_TIME_" : "2026-10-12 15:13:57.690",
+      "END_TIME_" : "2026-10-12 15:13:57.733",
+      "DURATION_" : "43",
+      "START_ACT_ID_" : "startevent1",
+      "END_ACT_ID_" : "endevent2",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445413",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445404",
+      "ACT_ID_" : "endevent1",
+      "ACT_NAME_" : "End",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:13:57.715",
+      "END_TIME_" : "2026-10-12 15:13:57.715",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445416",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "ACT_ID_" : "endevent2",
+      "ACT_NAME_" : "End",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:13:57.730",
+      "END_TIME_" : "2026-10-12 15:13:57.730",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445403",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "ACT_ID_" : "parallelgateway1",
+      "ACT_NAME_" : "Parallel Gateway",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:57.690",
+      "END_TIME_" : "2026-10-12 15:13:57.690",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445402",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "ACT_ID_" : "startevent1",
+      "ACT_NAME_" : "Start",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:13:57.690",
+      "END_TIME_" : "2026-10-12 15:13:57.690",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445407",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445404",
+      "ACT_ID_" : "usertask1",
+      "TASK_ID_" : "445408",
+      "ACT_NAME_" : "User Task1",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:57.691",
+      "END_TIME_" : "2026-10-12 15:13:57.700",
+      "DURATION_" : "9",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445405",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "ACT_ID_" : "usertask2",
+      "TASK_ID_" : "445406",
+      "ACT_NAME_" : "User Task2",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:57.690",
+      "END_TIME_" : "2026-10-12 15:13:57.708",
+      "DURATION_" : "18",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445409",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445404",
+      "ACT_ID_" : "usertask3",
+      "TASK_ID_" : "445410",
+      "ACT_NAME_" : "User Task3",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:57.700",
+      "END_TIME_" : "2026-10-12 15:13:57.715",
+      "DURATION_" : "15",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445411",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "ACT_ID_" : "usertask4",
+      "TASK_ID_" : "445412",
+      "ACT_NAME_" : "User Task4",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:57.708",
+      "END_TIME_" : "2026-10-12 15:13:57.722",
+      "DURATION_" : "14",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445414",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "ACT_ID_" : "usertask5",
+      "TASK_ID_" : "445415",
+      "ACT_NAME_" : "User Task5",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:57.723",
+      "END_TIME_" : "2026-10-12 15:13:57.730",
+      "DURATION_" : "7",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "445408",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "TASK_DEF_KEY_" : "usertask1",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445404",
+      "NAME_" : "User Task1",
+      "START_TIME_" : "2026-10-12 15:13:57.691",
+      "END_TIME_" : "2026-10-12 15:13:57.699",
+      "DURATION_" : "8",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445406",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "TASK_DEF_KEY_" : "usertask2",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "NAME_" : "User Task2",
+      "START_TIME_" : "2026-10-12 15:13:57.691",
+      "END_TIME_" : "2026-10-12 15:13:57.706",
+      "DURATION_" : "15",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445410",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "TASK_DEF_KEY_" : "usertask3",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445404",
+      "NAME_" : "User Task3",
+      "START_TIME_" : "2026-10-12 15:13:57.700",
+      "END_TIME_" : "2026-10-12 15:13:57.714",
+      "DURATION_" : "14",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445412",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "TASK_DEF_KEY_" : "usertask4",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "NAME_" : "User Task4",
+      "START_TIME_" : "2026-10-12 15:13:57.708",
+      "END_TIME_" : "2026-10-12 15:13:57.722",
+      "DURATION_" : "14",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445415",
+      "PROC_DEF_ID_" : "myProcess:1:445399",
+      "TASK_DEF_KEY_" : "usertask5",
+      "PROC_INST_ID_" : "445400",
+      "EXECUTION_ID_" : "445401",
+      "NAME_" : "User Task5",
+      "START_TIME_" : "2026-10-12 15:13:57.723",
+      "END_TIME_" : "2026-10-12 15:13:57.729",
+      "DURATION_" : "6",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "myProcess:1:445399",
+      "REV_" : "1",
+      "CATEGORY_" : "http://www.activiti.org/test",
+      "NAME_" : "My process",
+      "KEY_" : "myProcess",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445397",
+      "RESOURCE_NAME_" : "ProcessDiagramGeneratorTest.testHighLighted.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "1",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445397",
+      "NAME_" : "from-activiti/parallel/ProcessDiagramGeneratorTest.testHighLighted",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:13:57.676",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445398",
+      "REV_" : "1",
+      "NAME_" : "ProcessDiagramGeneratorTest.testHighLighted.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445397",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIiB4bWxuczp4c2Q9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczphY3Rpdml0aT0iaHR0cDovL2FjdGl2aXRpLm9yZy9icG1uIiB4bWxuczpicG1uZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvREkiIHhtbG5zOm9tZ2RjPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9ERC8yMDEwMDUyNC9EQyIgeG1sbnM6b21nZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RJIiB0eXBlTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiBleHByZXNzaW9uTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvWFBhdGgiIHRhcmdldE5hbWVzcGFjZT0iaHR0cDovL3d3dy5hY3Rpdml0aS5vcmcvdGVzdCI+CiAgPHByb2Nlc3MgaWQ9Im15UHJvY2VzcyIgbmFtZT0iTXkgcHJvY2VzcyIgaXNFeGVjdXRhYmxlPSJ0cnVlIj4KICAgIDxzdGFydEV2ZW50IGlkPSJzdGFydGV2ZW50MSIgbmFtZT0iU3RhcnQiPjwvc3RhcnRFdmVudD4KICAgIDxwYXJhbGxlbEdhdGV3YXkgaWQ9InBhcmFsbGVsZ2F0ZXdheTEiIG5hbWU9IlBhcmFsbGVsIEdhdGV3YXkiPjwvcGFyYWxsZWxHYXRld2F5PgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzEiIHNvdXJjZVJlZj0ic3RhcnRldmVudDEiIHRhcmdldFJlZj0icGFyYWxsZWxnYXRld2F5MSI+PC9zZXF1ZW5jZUZsb3c+CiAgICA8dXNlclRhc2sgaWQ9InVzZXJ0YXNrMSIgbmFtZT0iVXNlciBUYXNrMSI+PC91c2VyVGFzaz4KICAgIDx1c2VyVGFzayBpZD0idXNlcnRhc2syIiBuYW1lPSJVc2VyIFRhc2syIj48L3VzZXJUYXNrPgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzIiIHNvdXJjZVJlZj0icGFyYWxsZWxnYXRld2F5MSIgdGFyZ2V0UmVmPSJ1c2VydGFzazIiPjwvc2VxdWVuY2VGbG93PgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzMiIHNvdXJjZVJlZj0icGFyYWxsZWxnYXRld2F5MSIgdGFyZ2V0UmVmPSJ1c2VydGFzazEiPjwvc2VxdWVuY2VGbG93PgogICAgPHVzZXJUYXNrIGlkPSJ1c2VydGFzazMiIG5hbWU9IlVzZXIgVGFzazMiPjwvdXNlclRhc2s+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93NCIgc291cmNlUmVmPSJ1c2VydGFzazEiIHRhcmdldFJlZj0idXNlcnRhc2szIj48L3NlcXVlbmNlRmxvdz4KICAgIDx1c2VyVGFzayBpZD0idXNlcnRhc2s0IiBuYW1lPSJVc2VyIFRhc2s0Ij48L3VzZXJUYXNrPgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzUiIHNvdXJjZVJlZj0idXNlcnRhc2syIiB0YXJnZXRSZWY9InVzZXJ0YXNrNCI+PC9zZXF1ZW5jZUZsb3c+CiAgICA8dXNlclRhc2sgaWQ9InVzZXJ0YXNrNSIgbmFtZT0iVXNlciBUYXNrNSI+PC91c2VyVGFzaz4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3c2IiBzb3VyY2VSZWY9InVzZXJ0YXNrNCIgdGFyZ2V0UmVmPSJ1c2VydGFzazUiPjwvc2VxdWVuY2VGbG93PgogICAgPGVuZEV2ZW50IGlkPSJlbmRldmVudDEiIG5hbWU9IkVuZCI+PC9lbmRFdmVudD4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3c3IiBzb3VyY2VSZWY9InVzZXJ0YXNrMyIgdGFyZ2V0UmVmPSJlbmRldmVudDEiPjwvc2VxdWVuY2VGbG93PgogICAgPGVuZEV2ZW50IGlkPSJlbmRldmVudDIiIG5hbWU9IkVuZCI+PC9lbmRFdmVudD4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3c4IiBzb3VyY2VSZWY9InVzZXJ0YXNrNSIgdGFyZ2V0UmVmPSJlbmRldmVudDIiPjwvc2VxdWVuY2VGbG93PgogIDwvcHJvY2Vzcz4KICA8YnBtbmRpOkJQTU5EaWFncmFtIGlkPSJCUE1ORGlhZ3JhbV9teVByb2Nlc3MiPgogICAgPGJwbW5kaTpCUE1OUGxhbmUgYnBtbkVsZW1lbnQ9Im15UHJvY2VzcyIgaWQ9IkJQTU5QbGFuZV9teVByb2Nlc3MiPgogICAgICA8YnBtbmRpOkJQTU5TaGFwZSBicG1uRWxlbWVudD0ic3RhcnRldmVudDEiIGlkPSJCUE1OU2hhcGVfc3RhcnRldmVudDEiPgogICAgICAgIDxvbWdkYzpCb3VuZHMgaGVpZ2h0PSIzNS4wIiB3aWR0aD0iMzUuMCIgeD0iMzAuMCIgeT0iMTAwLjAiPjwvb21nZGM6Qm91bmRzPgogICAgICA8L2JwbW5kaTpCUE1OU2hhcGU+CiAgICAgIDxicG1uZGk6QlBNTlNoYXBlIGJwbW5FbGVtZW50PSJwYXJhbGxlbGdhdGV3YXkxIiBpZD0iQlBNTlNoYXBlX3BhcmFsbGVsZ2F0ZXdheTEiPgogICAgICAgIDxvbWdkYzpCb3VuZHMgaGVpZ2h0PSI0MC4wIiB3aWR0aD0iNDAuMCIgeD0iMTQwLjAiIHk9Ijk3LjAiPjwvb21nZGM6Qm91bmRzPgogICAgICA8L2JwbW5kaTpCUE1OU2hhcGU+CiAgICAgIDxicG1uZGk6QlBNTlNoYXBlIGJwbW5FbGVtZW50PSJ1c2VydGFzazEiIGlkPSJCUE1OU2hhcGVfdXNlcnRhc2sxIj4KICAgICAgICA8b21nZGM6Qm91bmRzIGhlaWdodD0iNTUuMCIgd2lkdGg9IjEwNS4wIiB4PSIyNDAuMCIgeT0iMzAuMCI+PC9vbWdkYzpCb3VuZHM+CiAgICAgIDwvYnBtbmRpOkJQTU5TaGFwZT4KICAgICAgPGJwbW5kaTpCUE1OU2hhcGUgYnBtbkVsZW1lbnQ9InVzZXJ0YXNrMiIgaWQ9IkJQTU5TaGFwZV91c2VydGFzazIiPgogICAgICAgIDxvbWdkYzpCb3VuZHMgaGVpZ2h0PSI1NS4wIiB3aWR0aD0iMTA1LjAiIHg9IjI0MC4wIiB5PSIxNjAuMCI+PC9vbWdkYzpCb3VuZHM+CiAgICAgIDwvYnBtbmRpOkJQTU5TaGFwZT4KICAgICAgPGJwbW5kaTpCUE1OU2hhcGUgYnBtbkVsZW1lbnQ9InVzZXJ0YXNrMyIgaWQ9IkJQTU5TaGFwZV91c2VydGFzazMiPgogICAgICAgIDxvbWdkYzpCb3VuZHMgaGVpZ2h0PSI1NS4wIiB3aWR0aD0iMTA1LjAiIHg9IjM5MC4wIiB5PSIzMC4wIj48L29tZ2RjOkJvdW5kcz4KICAgICAgPC9icG1uZGk6QlBNTlNoYXBlPgogICAgICA8YnBtbmRpOkJQTU5TaGFwZSBicG1uRWxlbWVudD0idXNlcnRhc2s0IiBpZD0iQlBNTlNoYXBlX3VzZXJ0YXNrNCI+CiAgICAgICAgPG9tZ2RjOkJvdW5kcyBoZWlnaHQ9IjU1LjAiIHdpZHRoPSIxMDUuMCIgeD0iMzkwLjAiIHk9IjE2MC4wIj48L29tZ2RjOkJvdW5kcz4KICAgICAgPC9icG1uZGk6QlBNTlNoYXBlPgogICAgICA8YnBtbmRpOkJQTU5TaGFwZSBicG1uRWxlbWVudD0idXNlcnRhc2s1IiBpZD0iQlBNTlNoYXBlX3VzZXJ0YXNrNSI+CiAgICAgICAgPG9tZ2RjOkJvdW5kcyBoZWlnaHQ9IjU1LjAiIHdpZHRoPSIxMDUuMCIgeD0iNTIwLjAiIHk9IjE2MC4wIj48L29tZ2RjOkJvdW5kcz4KICAgICAgPC9icG1uZGk6QlBNTlNoYXBlPgogICAgICA8YnBtbmRpOkJQTU5TaGFwZSBicG1uRWxlbWVudD0iZW5kZXZlbnQxIiBpZD0iQlBNTlNoYXBlX2VuZGV2ZW50MSI+CiAgICAgICAgPG9tZ2RjOkJvdW5kcyBoZWlnaHQ9IjM1LjAiIHdpZHRoPSIzNS4wIiB4PSI1NTAuMCIgeT0iNDAuMCI+PC9vbWdkYzpCb3VuZHM+CiAgICAgIDwvYnBtbmRpOkJQTU5TaGFwZT4KICAgICAgPGJwbW5kaTpCUE1OU2hhcGUgYnBtbkVsZW1lbnQ9ImVuZGV2ZW50MiIgaWQ9IkJQTU5TaGFwZV9lbmRldmVudDIiPgogICAgICAgIDxvbWdkYzpCb3VuZHMgaGVpZ2h0PSIzNS4wIiB3aWR0aD0iMzUuMCIgeD0iNjgwLjAiIHk9IjE3MC4wIj48L29tZ2RjOkJvdW5kcz4KICAgICAgPC9icG1uZGk6QlBNTlNoYXBlPgogICAgICA8YnBtbmRpOkJQTU5FZGdlIGJwbW5FbGVtZW50PSJmbG93MSIgaWQ9IkJQTU5FZGdlX2Zsb3cxIj4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iNjUuMCIgeT0iMTE3LjAiPjwvb21nZGk6d2F5cG9pbnQ+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjE0MC4wIiB5PSIxMTcuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgPC9icG1uZGk6QlBNTkVkZ2U+CiAgICAgIDxicG1uZGk6QlBNTkVkZ2UgYnBtbkVsZW1lbnQ9ImZsb3cyIiBpZD0iQlBNTkVkZ2VfZmxvdzIiPgogICAgICAgIDxvbWdkaTp3YXlwb2ludCB4PSIxNjAuMCIgeT0iMTM3LjAiPjwvb21nZGk6d2F5cG9pbnQ+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjE2MC4wIiB5PSIxODcuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iMjQwLjAiIHk9IjE4Ny4wIj48L29tZ2RpOndheXBvaW50PgogICAgICA8L2JwbW5kaTpCUE1ORWRnZT4KICAgICAgPGJwbW5kaTpCUE1ORWRnZSBicG1uRWxlbWVudD0iZmxvdzMiIGlkPSJCUE1ORWRnZV9mbG93MyI+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjE2MC4wIiB5PSI5Ny4wIj48L29tZ2RpOndheXBvaW50PgogICAgICAgIDxvbWdkaTp3YXlwb2ludCB4PSIxNjAuMCIgeT0iNTcuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iMjQwLjAiIHk9IjU3LjAiPjwvb21nZGk6d2F5cG9pbnQ+CiAgICAgIDwvYnBtbmRpOkJQTU5FZGdlPgogICAgICA8YnBtbmRpOkJQTU5FZGdlIGJwbW5FbGVtZW50PSJmbG93NCIgaWQ9IkJQTU5FZGdlX2Zsb3c0Ij4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iMzQ1LjAiIHk9IjU3LjAiPjwvb21nZGk6d2F5cG9pbnQ+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjM5MC4wIiB5PSI1Ny4wIj48L29tZ2RpOndheXBvaW50PgogICAgICA8L2JwbW5kaTpCUE1ORWRnZT4KICAgICAgPGJwbW5kaTpCUE1ORWRnZSBicG1uRWxlbWVudD0iZmxvdzUiIGlkPSJCUE1ORWRnZV9mbG93NSI+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjM0NS4wIiB5PSIxODcuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iMzkwLjAiIHk9IjE4Ny4wIj48L29tZ2RpOndheXBvaW50PgogICAgICA8L2JwbW5kaTpCUE1ORWRnZT4KICAgICAgPGJwbW5kaTpCUE1ORWRnZSBicG1uRWxlbWVudD0iZmxvdzYiIGlkPSJCUE1ORWRnZV9mbG93NiI+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjQ5NS4wIiB5PSIxODcuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iNTIwLjAiIHk9IjE4Ny4wIj48L29tZ2RpOndheXBvaW50PgogICAgICA8L2JwbW5kaTpCUE1ORWRnZT4KICAgICAgPGJwbW5kaTpCUE1ORWRnZSBicG1uRWxlbWVudD0iZmxvdzciIGlkPSJCUE1ORWRnZV9mbG93NyI+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjQ5NS4wIiB5PSI1Ny4wIj48L29tZ2RpOndheXBvaW50PgogICAgICAgIDxvbWdkaTp3YXlwb2ludCB4PSI1NTAuMCIgeT0iNTcuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgPC9icG1uZGk6QlBNTkVkZ2U+CiAgICAgIDxicG1uZGk6QlBNTkVkZ2UgYnBtbkVsZW1lbnQ9ImZsb3c4IiBpZD0iQlBNTkVkZ2VfZmxvdzgiPgogICAgICAgIDxvbWdkaTp3YXlwb2ludCB4PSI2MjUuMCIgeT0iMTg3LjAiPjwvb21nZGk6d2F5cG9pbnQ+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjY4MC4wIiB5PSIxODcuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgPC9icG1uZGk6QlBNTkVkZ2U+CiAgICA8L2JwbW5kaTpCUE1OUGxhbmU+CiAgPC9icG1uZGk6QlBNTkRpYWdyYW0+CjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "startevent1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "startevent1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "parallelgateway1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "parallelgateway1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow3"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask2"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask1"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask1"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow4"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask3"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask3"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask2"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow5"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask4"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask4"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask3"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask3"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow7"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "endevent1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "endevent1"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask4"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask4"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow6"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask5"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask5"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask5"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask5"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow8"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "endevent2"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "endevent2"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

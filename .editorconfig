@@ -1,0 +1,53 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,xml,csproj,props,targets,slnx}]
+indent_size = 2
+
+[*.{ts,js,css,html}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+dotnet_sort_system_directives_first = true
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_predefined_type_for_locals_parameters_members = true:warning
+dotnet_style_predefined_type_for_member_access = true:warning
+
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_prefer_braces = true:warning
+
+# 命名
+dotnet_naming_rule.interfaces_start_with_i.severity = warning
+dotnet_naming_rule.interfaces_start_with_i.symbols = interface_symbols
+dotnet_naming_rule.interfaces_start_with_i.style = i_prefixed
+dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
+dotnet_naming_style.i_prefixed.required_prefix = I
+
+# 开发计划 §5.7 / R4：禁止线程静态状态
+dotnet_diagnostic.RS0030.severity = error
+
+# 允许以 ACT_* 表名 / 列名作为常量与成员名（对齐 Activiti DDL，见 §7.1）
+dotnet_diagnostic.CA1707.severity = none
+
+# 类名有意对齐 Activiti（如 IServiceTaskDelegate ← JavaDelegate、ExtensionAttribute），
+# 见 §1.1 L2「同元素名、同属性名」：便于比对、招聘与查资料，优先于 .NET 命名惯例。
+dotnet_diagnostic.CA1711.severity = none
+
+# 引擎内部日志全部在低频路径（每命令 / 每操作一次），信息量与可读性优先于
+# LoggerMessage 源生成的微优化。高频热路径（操作循环内部）已显式做 IsEnabled 判定。
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none

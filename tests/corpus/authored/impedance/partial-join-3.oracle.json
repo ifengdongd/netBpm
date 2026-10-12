@@ -1,0 +1,408 @@
+{
+  "caseName" : "authored/impedance/partial-join-3",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "authored/impedance/partial-join-3",
+      "isEnded" : false,
+      "unfinishedActivityIds" : [ "sign3" ]
+    } ],
+    "tasks" : [ {
+      "taskDefinitionKey" : "sign3",
+      "assignee" : "u3"
+    } ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ {
+      "ID_" : "445167",
+      "REV_" : "3",
+      "PROC_INST_ID_" : "445167",
+      "BUSINESS_KEY_" : "authored/impedance/partial-join-3",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "ROOT_PROC_INST_ID_" : "445167",
+      "IS_ACTIVE_" : "1",
+      "IS_CONCURRENT_" : "0",
+      "IS_SCOPE_" : "1",
+      "IS_EVENT_SCOPE_" : "0",
+      "IS_MI_ROOT_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : "",
+      "START_TIME_" : "2026-10-12 15:13:56.417",
+      "IS_COUNT_ENABLED_" : "0",
+      "EVT_SUBSCR_COUNT_" : "0",
+      "TASK_COUNT_" : "0",
+      "JOB_COUNT_" : "0",
+      "TIMER_JOB_COUNT_" : "0",
+      "SUSP_JOB_COUNT_" : "0",
+      "DEADLETTER_JOB_COUNT_" : "0",
+      "VAR_COUNT_" : "0",
+      "ID_LINK_COUNT_" : "0"
+    }, {
+      "ID_" : "445168",
+      "REV_" : "2",
+      "PROC_INST_ID_" : "445167",
+      "PARENT_ID_" : "445167",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "ROOT_PROC_INST_ID_" : "445167",
+      "ACT_ID_" : "join",
+      "IS_ACTIVE_" : "0",
+      "IS_CONCURRENT_" : "0",
+      "IS_SCOPE_" : "0",
+      "IS_EVENT_SCOPE_" : "0",
+      "IS_MI_ROOT_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : "",
+      "START_TIME_" : "2026-10-12 15:13:56.417",
+      "IS_COUNT_ENABLED_" : "0",
+      "EVT_SUBSCR_COUNT_" : "0",
+      "TASK_COUNT_" : "0",
+      "JOB_COUNT_" : "0",
+      "TIMER_JOB_COUNT_" : "0",
+      "SUSP_JOB_COUNT_" : "0",
+      "DEADLETTER_JOB_COUNT_" : "0",
+      "VAR_COUNT_" : "0",
+      "ID_LINK_COUNT_" : "0"
+    }, {
+      "ID_" : "445171",
+      "REV_" : "2",
+      "PROC_INST_ID_" : "445167",
+      "PARENT_ID_" : "445167",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "ROOT_PROC_INST_ID_" : "445167",
+      "ACT_ID_" : "join",
+      "IS_ACTIVE_" : "0",
+      "IS_CONCURRENT_" : "0",
+      "IS_SCOPE_" : "0",
+      "IS_EVENT_SCOPE_" : "0",
+      "IS_MI_ROOT_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : "",
+      "START_TIME_" : "2026-10-12 15:13:56.418",
+      "IS_COUNT_ENABLED_" : "0",
+      "EVT_SUBSCR_COUNT_" : "0",
+      "TASK_COUNT_" : "0",
+      "JOB_COUNT_" : "0",
+      "TIMER_JOB_COUNT_" : "0",
+      "SUSP_JOB_COUNT_" : "0",
+      "DEADLETTER_JOB_COUNT_" : "0",
+      "VAR_COUNT_" : "0",
+      "ID_LINK_COUNT_" : "0"
+    }, {
+      "ID_" : "445172",
+      "REV_" : "1",
+      "PROC_INST_ID_" : "445167",
+      "PARENT_ID_" : "445167",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "ROOT_PROC_INST_ID_" : "445167",
+      "ACT_ID_" : "sign3",
+      "IS_ACTIVE_" : "1",
+      "IS_CONCURRENT_" : "0",
+      "IS_SCOPE_" : "0",
+      "IS_EVENT_SCOPE_" : "0",
+      "IS_MI_ROOT_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : "",
+      "START_TIME_" : "2026-10-12 15:13:56.418",
+      "IS_COUNT_ENABLED_" : "0",
+      "EVT_SUBSCR_COUNT_" : "0",
+      "TASK_COUNT_" : "0",
+      "JOB_COUNT_" : "0",
+      "TIMER_JOB_COUNT_" : "0",
+      "SUSP_JOB_COUNT_" : "0",
+      "DEADLETTER_JOB_COUNT_" : "0",
+      "VAR_COUNT_" : "0",
+      "ID_LINK_COUNT_" : "0"
+    } ],
+    "ACT_RU_TASK" : [ {
+      "ID_" : "445180",
+      "REV_" : "1",
+      "EXECUTION_ID_" : "445172",
+      "PROC_INST_ID_" : "445167",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "NAME_" : "会签3",
+      "BUSINESS_KEY_" : "authored/impedance/partial-join-3",
+      "TASK_DEF_KEY_" : "sign3",
+      "ASSIGNEE_" : "u3",
+      "PRIORITY_" : "0",
+      "CREATE_TIME_" : "2026-10-12 15:13:56.418",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RU_IDENTITYLINK" : [ {
+      "ID_" : "445175",
+      "REV_" : "1",
+      "TYPE_" : "participant",
+      "USER_ID_" : "u1",
+      "PROC_INST_ID_" : "445167"
+    }, {
+      "ID_" : "445178",
+      "REV_" : "1",
+      "TYPE_" : "participant",
+      "USER_ID_" : "u2",
+      "PROC_INST_ID_" : "445167"
+    }, {
+      "ID_" : "445181",
+      "REV_" : "1",
+      "TYPE_" : "participant",
+      "USER_ID_" : "u3",
+      "PROC_INST_ID_" : "445167"
+    } ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445167",
+      "PROC_INST_ID_" : "445167",
+      "BUSINESS_KEY_" : "authored/impedance/partial-join-3",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "START_TIME_" : "2026-10-12 15:13:56.417",
+      "START_ACT_ID_" : "start",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445170",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445168",
+      "ACT_ID_" : "fork",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:56.417",
+      "END_TIME_" : "2026-10-12 15:13:56.418",
+      "DURATION_" : "1",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445182",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445168",
+      "ACT_ID_" : "join",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:56.431",
+      "END_TIME_" : "2026-10-12 15:13:56.432",
+      "DURATION_" : "1",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445183",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445171",
+      "ACT_ID_" : "join",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:56.441",
+      "END_TIME_" : "2026-10-12 15:13:56.441",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445173",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445168",
+      "ACT_ID_" : "sign1",
+      "TASK_ID_" : "445174",
+      "ACT_NAME_" : "会签1",
+      "ACT_TYPE_" : "userTask",
+      "ASSIGNEE_" : "u1",
+      "START_TIME_" : "2026-10-12 15:13:56.418",
+      "END_TIME_" : "2026-10-12 15:13:56.431",
+      "DURATION_" : "13",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445176",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445171",
+      "ACT_ID_" : "sign2",
+      "TASK_ID_" : "445177",
+      "ACT_NAME_" : "会签2",
+      "ACT_TYPE_" : "userTask",
+      "ASSIGNEE_" : "u2",
+      "START_TIME_" : "2026-10-12 15:13:56.418",
+      "END_TIME_" : "2026-10-12 15:13:56.441",
+      "DURATION_" : "23",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445179",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445172",
+      "ACT_ID_" : "sign3",
+      "TASK_ID_" : "445180",
+      "ACT_NAME_" : "会签3",
+      "ACT_TYPE_" : "userTask",
+      "ASSIGNEE_" : "u3",
+      "START_TIME_" : "2026-10-12 15:13:56.418",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445169",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445168",
+      "ACT_ID_" : "start",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:13:56.417",
+      "END_TIME_" : "2026-10-12 15:13:56.417",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "445174",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "TASK_DEF_KEY_" : "sign1",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445168",
+      "NAME_" : "会签1",
+      "ASSIGNEE_" : "u1",
+      "START_TIME_" : "2026-10-12 15:13:56.418",
+      "END_TIME_" : "2026-10-12 15:13:56.430",
+      "DURATION_" : "12",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445177",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "TASK_DEF_KEY_" : "sign2",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445171",
+      "NAME_" : "会签2",
+      "ASSIGNEE_" : "u2",
+      "START_TIME_" : "2026-10-12 15:13:56.418",
+      "END_TIME_" : "2026-10-12 15:13:56.439",
+      "DURATION_" : "21",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445180",
+      "PROC_DEF_ID_" : "partial-join-3:1:445166",
+      "TASK_DEF_KEY_" : "sign3",
+      "PROC_INST_ID_" : "445167",
+      "EXECUTION_ID_" : "445172",
+      "NAME_" : "会签3",
+      "ASSIGNEE_" : "u3",
+      "START_TIME_" : "2026-10-12 15:13:56.419",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "445175",
+      "TYPE_" : "participant",
+      "USER_ID_" : "u1",
+      "PROC_INST_ID_" : "445167"
+    }, {
+      "ID_" : "445178",
+      "TYPE_" : "participant",
+      "USER_ID_" : "u2",
+      "PROC_INST_ID_" : "445167"
+    }, {
+      "ID_" : "445181",
+      "TYPE_" : "participant",
+      "USER_ID_" : "u3",
+      "PROC_INST_ID_" : "445167"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "partial-join-3:1:445166",
+      "REV_" : "1",
+      "CATEGORY_" : "http://netbpm/corpus",
+      "NAME_" : "partial-join-3",
+      "KEY_" : "partial-join-3",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445164",
+      "RESOURCE_NAME_" : "partial-join-3.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445164",
+      "NAME_" : "authored/impedance/partial-join-3",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:13:56.403",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445165",
+      "REV_" : "1",
+      "NAME_" : "partial-join-3.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445164",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxkZWZpbml0aW9ucyB4bWxucz0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCINCiAgICAgICAgICAgICB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIg0KICAgICAgICAgICAgIHhtbG5zOmFjdGl2aXRpPSJodHRwOi8vYWN0aXZpdGkub3JnL2JwbW4iDQogICAgICAgICAgICAgdGFyZ2V0TmFtZXNwYWNlPSJodHRwOi8vbmV0YnBtL2NvcnB1cyI+DQogIDxwcm9jZXNzIGlkPSJwYXJ0aWFsLWpvaW4tMyIgbmFtZT0icGFydGlhbC1qb2luLTMiIGlzRXhlY3V0YWJsZT0idHJ1ZSI+DQogIDxzdGFydEV2ZW50IGlkPSJzdGFydCIgLz4NCiAgPHBhcmFsbGVsR2F0ZXdheSBpZD0iZm9yayIgLz4NCiAgPHVzZXJUYXNrIGlkPSJzaWduMSIgbmFtZT0i5Lya562+MSIgYWN0aXZpdGk6YXNzaWduZWU9InUxIiAvPg0KICA8dXNlclRhc2sgaWQ9InNpZ24yIiBuYW1lPSLkvJrnrb4yIiBhY3Rpdml0aTphc3NpZ25lZT0idTIiIC8+DQogIDx1c2VyVGFzayBpZD0ic2lnbjMiIG5hbWU9IuS8muetvjMiIGFjdGl2aXRpOmFzc2lnbmVlPSJ1MyIgLz4NCiAgPHBhcmFsbGVsR2F0ZXdheSBpZD0iam9pbiIgLz4NCiAgPHVzZXJUYXNrIGlkPSJhcmNoaXZlIiBuYW1lPSLlvZLmoaMiIGFjdGl2aXRpOmFzc2lnbmVlPSJhcmNoaXZpc3QiIC8+DQogIDxlbmRFdmVudCBpZD0iZW5kIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJmMCIgc291cmNlUmVmPSJzdGFydCIgdGFyZ2V0UmVmPSJmb3JrIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJmb3JrMSIgc291cmNlUmVmPSJmb3JrIiB0YXJnZXRSZWY9InNpZ24xIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJqb2luMSIgc291cmNlUmVmPSJzaWduMSIgdGFyZ2V0UmVmPSJqb2luIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJmb3JrMiIgc291cmNlUmVmPSJmb3JrIiB0YXJnZXRSZWY9InNpZ24yIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJqb2luMiIgc291cmNlUmVmPSJzaWduMiIgdGFyZ2V0UmVmPSJqb2luIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJmb3JrMyIgc291cmNlUmVmPSJmb3JrIiB0YXJnZXRSZWY9InNpZ24zIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJqb2luMyIgc291cmNlUmVmPSJzaWduMyIgdGFyZ2V0UmVmPSJqb2luIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJmQXJjaGl2ZSIgc291cmNlUmVmPSJqb2luIiB0YXJnZXRSZWY9ImFyY2hpdmUiIC8+DQogIDxzZXF1ZW5jZUZsb3cgaWQ9ImZFbmQiIHNvdXJjZVJlZj0iYXJjaGl2ZSIgdGFyZ2V0UmVmPSJlbmQiIC8+DQogIDwvcHJvY2Vzcz4NCjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "start"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "start"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "f0"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "fork"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "fork"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "fork1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "fork2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "fork3"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sign1"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "sign1"
+  }, {
+    "type" : "TASK_ASSIGNED",
+    "taskDefinitionKey" : "sign1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sign2"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "sign2"
+  }, {
+    "type" : "TASK_ASSIGNED",
+    "taskDefinitionKey" : "sign2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sign3"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "sign3"
+  }, {
+    "type" : "TASK_ASSIGNED",
+    "taskDefinitionKey" : "sign3"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "sign1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "sign1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "join1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "join"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "sign2"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "sign2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "join2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "join"
+  } ]
+}

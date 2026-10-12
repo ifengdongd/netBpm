@@ -1,0 +1,16 @@
+{
+  "name": "all-false-uses-default-2",
+  "group": "authored/condition",
+  "description": "2 \u6761\u6761\u4EF6\u5168\u4E3A\u5047 \u2192 \u5FC5\u987B\u8D70\u9ED8\u8BA4\u6D41\uFF08\u6392\u4ED6\u7F51\u5173\u8BED\u4E49\uFF09",
+  "variables": {
+    "c1": false,
+    "c2": false
+  },
+  "actions": [
+    {
+      "kind": "completeTask",
+      "assignee": "applicant"
+    }
+  ],
+  "resourceName": "all-false-uses-default-2.bpmn20.xml"
+}

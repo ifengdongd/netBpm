@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Bpmn.Validation</RootNamespace>
+    <AssemblyName>NetBpm.Bpmn.Validation</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+  </ItemGroup>
+
+</Project>

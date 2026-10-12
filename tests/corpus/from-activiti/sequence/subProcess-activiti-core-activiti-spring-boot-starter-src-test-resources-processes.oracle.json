@@ -1,0 +1,144 @@
+{
+  "caseName" : "from-activiti/sequence/subProcess-activiti-core-activiti-spring-boot-starter-src-test-resources-processes",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/subProcess-activiti-core-activiti-spring-boot-starter-src-test-resources-processes",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "447113",
+      "PROC_INST_ID_" : "447113",
+      "BUSINESS_KEY_" : "from-activiti/sequence/subProcess-activiti-core-activiti-spring-boot-starter-src-test-resources-processes",
+      "PROC_DEF_ID_" : "subProcess:1:447112",
+      "START_TIME_" : "2026-10-12 15:14:06.592",
+      "END_TIME_" : "2026-10-12 15:14:06.599",
+      "DURATION_" : "7",
+      "START_ACT_ID_" : "theStart",
+      "END_ACT_ID_" : "theEnd",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "447116",
+      "PROC_DEF_ID_" : "subProcess:1:447112",
+      "PROC_INST_ID_" : "447113",
+      "EXECUTION_ID_" : "447114",
+      "ACT_ID_" : "task",
+      "TASK_ID_" : "447117",
+      "ACT_NAME_" : "Task in subprocess",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:06.592",
+      "END_TIME_" : "2026-10-12 15:14:06.597",
+      "DURATION_" : "5",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "447118",
+      "PROC_DEF_ID_" : "subProcess:1:447112",
+      "PROC_INST_ID_" : "447113",
+      "EXECUTION_ID_" : "447114",
+      "ACT_ID_" : "theEnd",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:06.597",
+      "END_TIME_" : "2026-10-12 15:14:06.597",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "447115",
+      "PROC_DEF_ID_" : "subProcess:1:447112",
+      "PROC_INST_ID_" : "447113",
+      "EXECUTION_ID_" : "447114",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:06.592",
+      "END_TIME_" : "2026-10-12 15:14:06.592",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "447117",
+      "PROC_DEF_ID_" : "subProcess:1:447112",
+      "TASK_DEF_KEY_" : "task",
+      "PROC_INST_ID_" : "447113",
+      "EXECUTION_ID_" : "447114",
+      "NAME_" : "Task in subprocess",
+      "START_TIME_" : "2026-10-12 15:14:06.592",
+      "END_TIME_" : "2026-10-12 15:14:06.596",
+      "DURATION_" : "4",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "subProcess:1:447112",
+      "REV_" : "1",
+      "CATEGORY_" : "org.activiti.enginge.test.api.runtime",
+      "KEY_" : "subProcess",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "447110",
+      "RESOURCE_NAME_" : "subProcess-activiti-core-activiti-spring-boot-starter-src-test-resources-processes.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "447110",
+      "NAME_" : "from-activiti/sequence/subProcess-activiti-core-activiti-spring-boot-starter-src-test-resources-processes",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:06.583",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "447111",
+      "REV_" : "1",
+      "NAME_" : "subProcess-activiti-core-activiti-spring-boot-starter-src-test-resources-processes.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "447110",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIGlkPSJkZWZpbml0aW9ucyIKICB4bWxucz0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCIKICB4bWxuczphY3Rpdml0aT0iaHR0cDovL2FjdGl2aXRpLm9yZy9icG1uIgogIHRhcmdldE5hbWVzcGFjZT0ib3JnLmFjdGl2aXRpLmVuZ2luZ2UudGVzdC5hcGkucnVudGltZSI+CgogIDxwcm9jZXNzIGlkPSJzdWJQcm9jZXNzIj4KCiAgICA8c3RhcnRFdmVudCBpZD0idGhlU3RhcnQiIC8+CgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzEiIHNvdXJjZVJlZj0idGhlU3RhcnQiIHRhcmdldFJlZj0idGFzayIgLz4KCiAgICA8dXNlclRhc2sgaWQ9InRhc2siIG5hbWU9IlRhc2sgaW4gc3VicHJvY2VzcyIgLz4KCiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MiIgc291cmNlUmVmPSJ0YXNrIiB0YXJnZXRSZWY9InRoZUVuZCIgLz4KCiAgICA8ZW5kRXZlbnQgaWQ9InRoZUVuZCIgLz4KCiAgPC9wcm9jZXNzPgoKPC9kZWZpbml0aW9ucz4K",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "task"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "task"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "task"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "task"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

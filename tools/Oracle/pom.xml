@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>netbpm</groupId>
+  <artifactId>netbpm-oracle</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>NetBpm Oracle（Java 预言机）</name>
+  <description>
+    开发计划 §9.2 / P10：用真 Activiti 跑同一批语料，产出三维度快照（API 返回值 / ACT_* 行 / 事件序列），
+    作为对拍的真值。它不参与 .NET 构建。
+  </description>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!--
+      ⚠️ Activiti 9.0.0 未必在 Maven 中央仓库（可能是企业版构件）。
+      本机已有源码（默认 E:\DataCode\Activiti-9.0.0），先把它装进本地仓库即可：
+        mvn -f E:\DataCode\Activiti-9.0.0\pom.xml install -DskipTests -pl activiti-core/activiti-engine -am
+      若你的构件坐标不同，改这一行即可（见 README）。
+    -->
+    <activiti.version>9.0.0</activiti.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.activiti</groupId>
+      <artifactId>activiti-engine</artifactId>
+      <version>${activiti.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <version>8.4.0</version>
+    </dependency>
+
+    <!-- 与 C# 侧共用同一份 JSON 契约：属性名 camelCase、null 字段省略 -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.17.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.13</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.2.0</version>
+        <configuration>
+          <mainClass>netbpm.oracle.OracleRunner</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

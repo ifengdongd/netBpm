@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:activiti="http://activiti.org/bpmn"
+             targetNamespace="http://netbpm/corpus">
+  <process id="nested-parallel-exclusive-2" name="nested-parallel-exclusive-2" isExecutable="true">
+  <startEvent id="start" />
+  <parallelGateway id="fork" />
+  <exclusiveGateway id="gwA" default="flowAFallback" />
+  <manualTask id="aFallback" name="A 默认" />
+  <manualTask id="aMerge" name="A 汇合" />
+  <userTask id="b1" name="B 分支" activiti:assignee="b1user" />
+  <parallelGateway id="join" />
+  <userTask id="archive" name="归档" activiti:assignee="archivist" />
+  <endEvent id="end" />
+  <sequenceFlow id="f0" sourceRef="start" targetRef="fork" />
+  <sequenceFlow id="fA" sourceRef="fork" targetRef="gwA" />
+  <sequenceFlow id="fB" sourceRef="fork" targetRef="b1" />
+  <manualTask id="a1" name="A1" />
+  <sequenceFlow id="condA1" sourceRef="gwA" targetRef="a1">
+    <conditionExpression xsi:type="tFormalExpression">${a1}</conditionExpression>
+  </sequenceFlow>
+  <sequenceFlow id="mergeA1" sourceRef="a1" targetRef="aMerge" />
+  <manualTask id="a2" name="A2" />
+  <sequenceFlow id="condA2" sourceRef="gwA" targetRef="a2">
+    <conditionExpression xsi:type="tFormalExpression">${a2}</conditionExpression>
+  </sequenceFlow>
+  <sequenceFlow id="mergeA2" sourceRef="a2" targetRef="aMerge" />
+  <sequenceFlow id="flowAFallback" sourceRef="gwA" targetRef="aFallback" />
+  <sequenceFlow id="mergeFallback" sourceRef="aFallback" targetRef="aMerge" />
+  <sequenceFlow id="joinA" sourceRef="aMerge" targetRef="join" />
+  <sequenceFlow id="joinB" sourceRef="b1" targetRef="join" />
+  <sequenceFlow id="fArchive" sourceRef="join" targetRef="archive" />
+  <sequenceFlow id="fEnd" sourceRef="archive" targetRef="end" />
+  </process>
+</definitions>

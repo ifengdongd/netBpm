@@ -1,0 +1,144 @@
+{
+  "caseName" : "from-activiti/sequence/simpleSubProcess2",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/simpleSubProcess2",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "447075",
+      "PROC_INST_ID_" : "447075",
+      "BUSINESS_KEY_" : "from-activiti/sequence/simpleSubProcess2",
+      "PROC_DEF_ID_" : "simpleSubProcess2:1:447074",
+      "START_TIME_" : "2026-10-12 15:14:06.396",
+      "END_TIME_" : "2026-10-12 15:14:06.405",
+      "DURATION_" : "9",
+      "START_ACT_ID_" : "theStart",
+      "END_ACT_ID_" : "theEnd",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "447078",
+      "PROC_DEF_ID_" : "simpleSubProcess2:1:447074",
+      "PROC_INST_ID_" : "447075",
+      "EXECUTION_ID_" : "447076",
+      "ACT_ID_" : "task",
+      "TASK_ID_" : "447079",
+      "ACT_NAME_" : "Task in subprocess 2",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:06.397",
+      "END_TIME_" : "2026-10-12 15:14:06.402",
+      "DURATION_" : "5",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "447080",
+      "PROC_DEF_ID_" : "simpleSubProcess2:1:447074",
+      "PROC_INST_ID_" : "447075",
+      "EXECUTION_ID_" : "447076",
+      "ACT_ID_" : "theEnd",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:06.402",
+      "END_TIME_" : "2026-10-12 15:14:06.402",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "447077",
+      "PROC_DEF_ID_" : "simpleSubProcess2:1:447074",
+      "PROC_INST_ID_" : "447075",
+      "EXECUTION_ID_" : "447076",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:06.396",
+      "END_TIME_" : "2026-10-12 15:14:06.396",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "447079",
+      "PROC_DEF_ID_" : "simpleSubProcess2:1:447074",
+      "TASK_DEF_KEY_" : "task",
+      "PROC_INST_ID_" : "447075",
+      "EXECUTION_ID_" : "447076",
+      "NAME_" : "Task in subprocess 2",
+      "START_TIME_" : "2026-10-12 15:14:06.397",
+      "END_TIME_" : "2026-10-12 15:14:06.402",
+      "DURATION_" : "5",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "simpleSubProcess2:1:447074",
+      "REV_" : "1",
+      "CATEGORY_" : "Examples",
+      "KEY_" : "simpleSubProcess2",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "447072",
+      "RESOURCE_NAME_" : "simpleSubProcess2.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "447072",
+      "NAME_" : "from-activiti/sequence/simpleSubProcess2",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:06.388",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "447073",
+      "REV_" : "1",
+      "NAME_" : "simpleSubProcess2.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "447072",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIGlkPSJkZWZpbml0aW9ucyIKICB4bWxucz0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCIKICB4bWxuczpicG1uMj0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCIKICB4bWxuczphY3Rpdml0aT0iaHR0cDovL2FjdGl2aXRpLm9yZy9icG1uIgogIHRhcmdldE5hbWVzcGFjZT0iRXhhbXBsZXMiPgoKICA8cHJvY2VzcyBpZD0ic2ltcGxlU3ViUHJvY2VzczIiPgoKICAgIDxzdGFydEV2ZW50IGlkPSJ0aGVTdGFydCIgLz4KCiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MSIgc291cmNlUmVmPSJ0aGVTdGFydCIgdGFyZ2V0UmVmPSJ0YXNrIiAvPgoKICAgIDx1c2VyVGFzayBpZD0idGFzayIgbmFtZT0iVGFzayBpbiBzdWJwcm9jZXNzIDIiIC8+CgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzIiIHNvdXJjZVJlZj0idGFzayIgdGFyZ2V0UmVmPSJ0aGVFbmQiIC8+CgogICAgPGVuZEV2ZW50IGlkPSJ0aGVFbmQiIC8+CgogIDwvcHJvY2Vzcz4KCjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "task"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "task"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "task"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "task"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

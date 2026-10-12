@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:activiti="http://activiti.org/bpmn"
+             targetNamespace="http://netbpm/corpus">
+  <process id="all-false-default-3" name="all-false-default-3" isExecutable="true">
+  <startEvent id="start" />
+  <userTask id="apply" name="申请" activiti:assignee="applicant" />
+  <exclusiveGateway id="gw" default="flowFallback" />
+  <manualTask id="branch1" name="分支1" />
+  <manualTask id="branch2" name="分支2" />
+  <manualTask id="branch3" name="分支3" />
+  <manualTask id="fallback" name="默认分支" />
+  <endEvent id="end" />
+  <sequenceFlow id="f1" sourceRef="start" targetRef="apply" />
+  <sequenceFlow id="f2" sourceRef="apply" targetRef="gw" />
+  <sequenceFlow id="cond1" sourceRef="gw" targetRef="branch1">
+    <conditionExpression xsi:type="tFormalExpression">${c1}</conditionExpression>
+  </sequenceFlow>
+  <sequenceFlow id="out1" sourceRef="branch1" targetRef="end" />
+  <sequenceFlow id="cond2" sourceRef="gw" targetRef="branch2">
+    <conditionExpression xsi:type="tFormalExpression">${c2}</conditionExpression>
+  </sequenceFlow>
+  <sequenceFlow id="out2" sourceRef="branch2" targetRef="end" />
+  <sequenceFlow id="cond3" sourceRef="gw" targetRef="branch3">
+    <conditionExpression xsi:type="tFormalExpression">${c3}</conditionExpression>
+  </sequenceFlow>
+  <sequenceFlow id="out3" sourceRef="branch3" targetRef="end" />
+  <sequenceFlow id="flowFallback" sourceRef="gw" targetRef="fallback" />
+  <sequenceFlow id="fallbackOut" sourceRef="fallback" targetRef="end" />
+  </process>
+</definitions>

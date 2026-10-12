@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Rest</RootNamespace>
+    <AssemblyName>NetBpm.Rest</AssemblyName>
+    <UserSecretsId>netbpm-rest</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetBpm.Bpmn.Converter\NetBpm.Bpmn.Converter.csproj" />
+    <ProjectReference Include="..\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+    <ProjectReference Include="..\NetBpm.Engine\NetBpm.Engine.csproj" />
+    <ProjectReference Include="..\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+</Project>

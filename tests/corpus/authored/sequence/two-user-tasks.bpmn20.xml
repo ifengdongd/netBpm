@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:activiti="http://activiti.org/bpmn"
+             targetNamespace="http://netbpm/corpus">
+  <process id="seq-two-user-tasks" name="seq-two-user-tasks" isExecutable="true">
+<startEvent id="start" />
+<userTask id="apply" name="申请" activiti:assignee="applicant" />
+<userTask id="review" name="审批" activiti:assignee="manager" />
+<endEvent id="end" />
+<sequenceFlow id="f1" sourceRef="start" targetRef="apply" />
+<sequenceFlow id="f2" sourceRef="apply" targetRef="review" />
+<sequenceFlow id="f3" sourceRef="review" targetRef="end" />
+  </process>
+</definitions>

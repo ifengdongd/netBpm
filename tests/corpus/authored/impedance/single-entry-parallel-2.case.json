@@ -1,0 +1,12 @@
+{
+  "name": "single-entry-parallel-2",
+  "group": "authored/impedance",
+  "description": "\u5E76\u884C\u7F51\u5173\u53EA\u6709 1 \u6761\u5165\u6D41 1 \u6761\u51FA\u6D41\uFF08fork/join \u9000\u5316\u5F62\u6001\uFF09",
+  "actions": [
+    {
+      "kind": "completeTask",
+      "assignee": "u1"
+    }
+  ],
+  "resourceName": "single-entry-parallel-2.bpmn20.xml"
+}

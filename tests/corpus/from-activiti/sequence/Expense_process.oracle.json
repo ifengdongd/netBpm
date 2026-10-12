@@ -1,0 +1,205 @@
+{
+  "caseName" : "from-activiti/sequence/Expense_process",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/Expense_process",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445802",
+      "PROC_INST_ID_" : "445802",
+      "BUSINESS_KEY_" : "from-activiti/sequence/Expense_process",
+      "PROC_DEF_ID_" : "adhoc_Expense_process:1:445801",
+      "START_TIME_" : "2026-10-12 15:13:59.777",
+      "END_TIME_" : "2026-10-12 15:13:59.794",
+      "DURATION_" : "17",
+      "START_ACT_ID_" : "theStart",
+      "END_ACT_ID_" : "theEnd",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445806",
+      "PROC_DEF_ID_" : "adhoc_Expense_process:1:445801",
+      "PROC_INST_ID_" : "445802",
+      "EXECUTION_ID_" : "445804",
+      "ACT_ID_" : "task_1",
+      "TASK_ID_" : "445807",
+      "ACT_NAME_" : "Request expense refund",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:59.777",
+      "END_TIME_" : "2026-10-12 15:13:59.784",
+      "DURATION_" : "7",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445808",
+      "PROC_DEF_ID_" : "adhoc_Expense_process:1:445801",
+      "PROC_INST_ID_" : "445802",
+      "EXECUTION_ID_" : "445804",
+      "ACT_ID_" : "task_2",
+      "TASK_ID_" : "445809",
+      "ACT_NAME_" : "Handle expense request",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:59.784",
+      "END_TIME_" : "2026-10-12 15:13:59.791",
+      "DURATION_" : "7",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445811",
+      "PROC_DEF_ID_" : "adhoc_Expense_process:1:445801",
+      "PROC_INST_ID_" : "445802",
+      "EXECUTION_ID_" : "445804",
+      "ACT_ID_" : "theEnd",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:13:59.791",
+      "END_TIME_" : "2026-10-12 15:13:59.791",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445805",
+      "PROC_DEF_ID_" : "adhoc_Expense_process:1:445801",
+      "PROC_INST_ID_" : "445802",
+      "EXECUTION_ID_" : "445804",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:13:59.777",
+      "END_TIME_" : "2026-10-12 15:13:59.777",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "445809",
+      "PROC_DEF_ID_" : "adhoc_Expense_process:1:445801",
+      "TASK_DEF_KEY_" : "task_2",
+      "PROC_INST_ID_" : "445802",
+      "EXECUTION_ID_" : "445804",
+      "NAME_" : "Handle expense request",
+      "DESCRIPTION_" : " has filed an expense\n\t\t\t\trefund request.",
+      "START_TIME_" : "2026-10-12 15:13:59.785",
+      "END_TIME_" : "2026-10-12 15:13:59.790",
+      "DURATION_" : "5",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445807",
+      "PROC_DEF_ID_" : "adhoc_Expense_process:1:445801",
+      "TASK_DEF_KEY_" : "task_1",
+      "PROC_INST_ID_" : "445802",
+      "EXECUTION_ID_" : "445804",
+      "NAME_" : "Request expense refund",
+      "DESCRIPTION_" : "Request the refund of an expense\n\t\t\t\trelated to company business.",
+      "START_TIME_" : "2026-10-12 15:13:59.777",
+      "END_TIME_" : "2026-10-12 15:13:59.783",
+      "DURATION_" : "6",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ {
+      "ID_" : "445803",
+      "PROC_INST_ID_" : "445802",
+      "EXECUTION_ID_" : "445802",
+      "NAME_" : "initiator",
+      "VAR_TYPE_" : "null",
+      "REV_" : "0",
+      "CREATE_TIME_" : "2026-10-12 15:13:59.777",
+      "LAST_UPDATED_TIME_" : "2026-10-12 15:13:59.777"
+    } ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "445810",
+      "GROUP_ID_" : "management",
+      "TYPE_" : "candidate",
+      "TASK_ID_" : "445809"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "adhoc_Expense_process:1:445801",
+      "REV_" : "1",
+      "CATEGORY_" : "adhoc",
+      "NAME_" : "Expense process",
+      "KEY_" : "adhoc_Expense_process",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445799",
+      "RESOURCE_NAME_" : "Expense_process.bpmn20.xml",
+      "DESCRIPTION_" : "Example process created using Activiti KickStart",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "1",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445799",
+      "NAME_" : "from-activiti/sequence/Expense_process",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:13:59.765",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445800",
+      "REV_" : "1",
+      "NAME_" : "Expense_process.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445799",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8ZGVmaW5pdGlvbnMgdGFyZ2V0TmFtZXNwYWNlPSJhZGhvYyIKICB4bWxucz0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCIKICB4bWxuczpuczM9Imh0dHA6Ly9hY3Rpdml0aS5vcmcvYnBtbiIKICB4bWxuczpuczU9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RDIgogIHhtbG5zOm5zND0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvREQvMjAxMDA1MjQvREkiCiAgeG1sbnM6bnM2PSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L0RJIj4KCTxwcm9jZXNzIG5hbWU9IkV4cGVuc2UgcHJvY2VzcyIgaWQ9ImFkaG9jX0V4cGVuc2VfcHJvY2VzcyI+CgkJPGRvY3VtZW50YXRpb24gaWQ9ImFkaG9jX0V4cGVuc2VfcHJvY2Vzc19kb2N1bWVudGF0aW9uIj4gRXhhbXBsZSBwcm9jZXNzIGNyZWF0ZWQgdXNpbmcgQWN0aXZpdGkgS2lja1N0YXJ0PC9kb2N1bWVudGF0aW9uPgoJCTxzdGFydEV2ZW50IG5zMzppbml0aWF0b3I9ImluaXRpYXRvciIgaWQ9InRoZVN0YXJ0IiAvPgoJCTxzZXF1ZW5jZUZsb3cgdGFyZ2V0UmVmPSJ0YXNrXzEiIHNvdXJjZVJlZj0idGhlU3RhcnQiIGlkPSJmbG93XzEiIC8+CgkJPHVzZXJUYXNrIG5hbWU9IlJlcXVlc3QgZXhwZW5zZSByZWZ1bmQiIGlkPSJ0YXNrXzEiPgoJCQk8ZG9jdW1lbnRhdGlvbiBpZD0idGFza18xX2RvY3VtZW50YXRpb24iPlJlcXVlc3QgdGhlIHJlZnVuZCBvZiBhbiBleHBlbnNlCgkJCQlyZWxhdGVkIHRvIGNvbXBhbnkgYnVzaW5lc3MuPC9kb2N1bWVudGF0aW9uPgoJCQk8ZXh0ZW5zaW9uRWxlbWVudHM+CgkJCQk8bnMzOmZvcm1Qcm9wZXJ0eSByZXF1aXJlZD0idHJ1ZSIgdHlwZT0ibG9uZyIgbmFtZT0iQW1vdW50IgoJCQkJCWlkPSJBbW91bnQiIC8+CgkJCQk8bnMzOmZvcm1Qcm9wZXJ0eSByZXF1aXJlZD0iZmFsc2UiIHR5cGU9InN0cmluZyIKCQkJCQluYW1lPSJNb3RpdmF0aW9uIiBpZD0iTW90aXZhdGlvbiIgLz4KCQkJPC9leHRlbnNpb25FbGVtZW50cz4KCQkJPGh1bWFuUGVyZm9ybWVyCgkJCQlpZD0ic2lkLTY1NzM5MWMwLTY3YWEtNDhkOS1hMjY1LTVmODY0Nzk5MTkyNl9odW1hblBlcmZvcm1lciI+CgkJCQk8cmVzb3VyY2VBc3NpZ25tZW50RXhwcmVzc2lvbgoJCQkJCWlkPSJzaWQtNjU3MzkxYzAtNjdhYS00OGQ5LWEyNjUtNWY4NjQ3OTkxOTI2X2h1bWFuUGVyZm9ybWVyX2Fzc2lnbm1lbnRFeHByZXNzaW9uIj4KCQkJCQk8Zm9ybWFsRXhwcmVzc2lvbgoJCQkJCQlpZD0ic2lkLTY1NzM5MWMwLTY3YWEtNDhkOS1hMjY1LTVmODY0Nzk5MTkyNl9odW1hblBlcmZvcm1lcl9mb3JtYWxFeHByZXNzaW9ucyI+JHtpbml0aWF0b3J9PC9mb3JtYWxFeHByZXNzaW9uPgoJCQkJPC9yZXNvdXJjZUFzc2lnbm1lbnRFeHByZXNzaW9uPgoJCQk8L2h1bWFuUGVyZm9ybWVyPgoJCTwvdXNlclRhc2s+CgkJPHNlcXVlbmNlRmxvdyB0YXJnZXRSZWY9InRhc2tfMiIgc291cmNlUmVmPSJ0YXNrXzEiIGlkPSJmbG93XzIiIC8+CgkJPHVzZXJUYXNrIG5hbWU9IkhhbmRsZSBleHBlbnNlIHJlcXVlc3QiIGlkPSJ0YXNrXzIiPgoJCQk8ZG9jdW1lbnRhdGlvbiBpZD0idGFza18yX2RvY3VtZW50YXRpb24iPiR7aW5pdGlhdG9yfSBoYXMgZmlsZWQgYW4gZXhwZW5zZQoJCQkJcmVmdW5kIHJlcXVlc3QuPC9kb2N1bWVudGF0aW9uPgoJCQk8ZXh0ZW5zaW9uRWxlbWVudHM+CgkJCQk8bnMzOmZvcm1Qcm9wZXJ0eSByZXF1aXJlZD0idHJ1ZSIgdHlwZT0ic3RyaW5nIgoJCQkJCW5hbWU9IkRvIHlvdSBhZ3JlZT8iIGlkPSJEbyB5b3UgYWdyZWU/IiAvPgoJCQk8L2V4dGVuc2lvbkVsZW1lbnRzPgoJCQk8cG90ZW50aWFsT3duZXIKCQkJCWlkPSJzaWQtYjc1ZjBjNjAtZmVkNy00ZjA5LTkzMzQtYjI2MTViZWQ2YzcxX3BvdGVudGlhbE93bmVyIj4KCQkJCTxyZXNvdXJjZUFzc2lnbm1lbnRFeHByZXNzaW9uCgkJCQkJaWQ9InNpZC1iNzVmMGM2MC1mZWQ3LTRmMDktOTMzNC1iMjYxNWJlZDZjNzFfcG90ZW50aWFsT3duZXJfYXNzaWdubWVudEV4cHJlc3Npb24iPgoJCQkJCTxmb3JtYWxFeHByZXNzaW9uCgkJCQkJCWlkPSJzaWQtYjc1ZjBjNjAtZmVkNy00ZjA5LTkzMzQtYjI2MTViZWQ2YzcxX3BvdGVudGlhbE93bmVyX2Zvcm1hbEV4cHJlc3Npb25zIj5tYW5hZ2VtZW50PC9mb3JtYWxFeHByZXNzaW9uPgoJCQkJPC9yZXNvdXJjZUFzc2lnbm1lbnRFeHByZXNzaW9uPgoJCQk8L3BvdGVudGlhbE93bmVyPgoJCTwvdXNlclRhc2s+CgkJPGVuZEV2ZW50IGlkPSJ0aGVFbmQiIC8+CgkJPHNlcXVlbmNlRmxvdyB0YXJnZXRSZWY9InRoZUVuZCIgc291cmNlUmVmPSJ0YXNrXzIiIGlkPSJmbG93XzMiIC8+Cgk8L3Byb2Nlc3M+Cgk8bnM2OkJQTU5EaWFncmFtIGlkPSJFeHBlbnNlX3Byb2Nlc3NfZGlhZ3JhbSI+CgkJPG5zNjpCUE1OUGxhbmUgYnBtbkVsZW1lbnQ9ImFkaG9jX0V4cGVuc2VfcHJvY2VzcyIgaWQ9IkV4cGVuc2VfcHJvY2Vzc19wbGFuZSI+CgkJCTxuczY6QlBNTlNoYXBlIGJwbW5FbGVtZW50PSJ0aGVTdGFydCIgaWQ9InRoZVN0YXJ0X3NoYXBlIj4KCQkJCTxuczU6Qm91bmRzIGhlaWdodD0iMjAuMCIgd2lkdGg9IjIwLjAiIHk9IjQ1LjAiIHg9IjAuMCIgLz4KCQkJPC9uczY6QlBNTlNoYXBlPgoJCQk8bnM2OkJQTU5FZGdlIGJwbW5FbGVtZW50PSJmbG93XzEiIGlkPSJmbG93XzFfZWRnZSI+CgkJCQk8bnM0OndheXBvaW50IHk9IjU1LjAiIHg9IjIwLjAiIC8+CgkJCQk8bnM0OndheXBvaW50IHk9IjU1LjAiIHg9IjcwLjAiIC8+CgkJCTwvbnM2OkJQTU5FZGdlPgoJCQk8bnM2OkJQTU5TaGFwZSBicG1uRWxlbWVudD0idGFza18xIiBpZD0idGFza18xX3NoYXBlIj4KCQkJCTxuczU6Qm91bmRzIGhlaWdodD0iNjAuMCIgd2lkdGg9IjEzMC4wIiB5PSIyNS4wIiB4PSI3MC4wIiAvPgoJCQk8L25zNjpCUE1OU2hhcGU+CgkJCTxuczY6QlBNTkVkZ2UgYnBtbkVsZW1lbnQ9ImZsb3dfMiIgaWQ9ImZsb3dfMl9lZGdlIj4KCQkJCTxuczQ6d2F5cG9pbnQgeT0iNTUuMCIgeD0iMjAwLjAiIC8+CgkJCQk8bnM0OndheXBvaW50IHk9IjU1LjAiIHg9IjI1MC4wIiAvPgoJCQk8L25zNjpCUE1ORWRnZT4KCQkJPG5zNjpCUE1OU2hhcGUgYnBtbkVsZW1lbnQ9InRhc2tfMiIgaWQ9InRhc2tfMl9zaGFwZSI+CgkJCQk8bnM1OkJvdW5kcyBoZWlnaHQ9IjYwLjAiIHdpZHRoPSIxMzAuMCIgeT0iMjUuMCIgeD0iMjUwLjAiIC8+CgkJCTwvbnM2OkJQTU5TaGFwZT4KCQkJPG5zNjpCUE1ORWRnZSBicG1uRWxlbWVudD0iZmxvd18zIiBpZD0iZmxvd18zX2VkZ2UiPgoJCQkJPG5zNDp3YXlwb2ludCB5PSI1NS4wIiB4PSIzODAuMCIgLz4KCQkJCTxuczQ6d2F5cG9pbnQgeT0iNTUuMCIgeD0iNDMwLjAiIC8+CgkJCTwvbnM2OkJQTU5FZGdlPgoJCQk8bnM2OkJQTU5TaGFwZSBicG1uRWxlbWVudD0idGhlRW5kIiBpZD0idGhlRW5kX3NoYXBlIj4KCQkJCTxuczU6Qm91bmRzIGhlaWdodD0iMjAuMCIgd2lkdGg9IjIwLjAiIHk9IjQ1LjAiIHg9IjQzMC4wIiAvPgoJCQk8L25zNjpCUE1OU2hhcGU+CgkJPC9uczY6QlBNTlBsYW5lPgoJPC9uczY6QlBNTkRpYWdyYW0+CjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "VARIABLE_CREATED",
+    "variableName" : "initiator"
+  }, {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow_1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "task_1"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "task_1"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "task_1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "task_1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow_2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "task_2"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "task_2"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "task_2"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "task_2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow_3"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

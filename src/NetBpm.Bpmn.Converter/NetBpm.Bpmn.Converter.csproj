@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Bpmn.Converter</RootNamespace>
+    <AssemblyName>NetBpm.Bpmn.Converter</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+    <ProjectReference Include="..\NetBpm.El\NetBpm.El.csproj" />
+  </ItemGroup>
+
+</Project>

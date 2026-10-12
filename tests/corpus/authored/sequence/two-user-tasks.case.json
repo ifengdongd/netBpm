@@ -1,0 +1,16 @@
+{
+  "name": "two-user-tasks",
+  "group": "authored/sequence",
+  "description": "\u987A\u5E8F\u6D41\u57FA\u7EBF\uFF1A\u7533\u8BF7 \u2192 \u5BA1\u6279 \u2192 \u7ED3\u675F",
+  "actions": [
+    {
+      "kind": "completeTask",
+      "assignee": "applicant"
+    },
+    {
+      "kind": "completeTask",
+      "assignee": "manager"
+    }
+  ],
+  "resourceName": "two-user-tasks.bpmn20.xml"
+}

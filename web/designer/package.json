@@ -1,0 +1,24 @@
+{
+  "name": "netbpm-designer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NetBpm 流程设计器（bpmn-js + Activiti moddle 扩展）。对应开发计划 §6。",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "esbuild test/designer.test.ts --bundle --platform=node --format=esm --target=node22 --alias:@bpmn-io/properties-panel=./test/propertiesPanelStub.ts --outfile=.tmp/designer.test.mjs --log-level=warning && node --test .tmp/designer.test.mjs"
+  },
+  "dependencies": {
+    "@bpmn-io/properties-panel": "^3.26.0",
+    "bpmn-js": "^18.0.0",
+    "bpmn-js-properties-panel": "^5.30.0",
+    "diagram-js-minimap": "^5.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

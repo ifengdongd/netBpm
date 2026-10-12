@@ -1,0 +1,223 @@
+using System.Text;
+using Dapper;
+using NetBpm.Bpmn.Converter;
+using NetBpm.Bpmn.Model;
+using NetBpm.El;
+using NetBpm.Engine;
+using NetBpm.Engine.Behavior;
+using NetBpm.Engine.Command;
+using NetBpm.Engine.Command.Interceptors;
+using NetBpm.Engine.Execution;
+using NetBpm.Engine.History;
+using NetBpm.Engine.Services;
+using NetBpm.Persistence;
+using NetBpm.Persistence.Database;
+using NetBpm.Persistence.Deployment;
+using NetBpm.Persistence.Execution;
+using NetBpm.Persistence.History;
+using NetBpm.Persistence.Tasks;
+
+// BPMN 模型里也有 Task 类型，会与 System.Threading.Tasks.Task 冲突
+using Task = System.Threading.Tasks.Task;
+
+namespace NetBpm.IntegrationTests;
+
+/// <summary>某次服务任务执行时刻的执行树快照。</summary>
+/// <param name="ActivityId">触发快照的节点 id。</param>
+/// <param name="Rows">当时的 <c>ACT_RU_EXECUTION</c> 全量行。</param>
+internal sealed record ExecutionSnapshot(string ActivityId, List<ExecutionRow> Rows);
+
+/// <summary>
+/// 数据库宿主下的引擎装配（与 <c>NetBpm.Runtime</c> 的 DI 组合根保持一致，
+/// 只是显式 new 出来，便于测试期间抓取中间态）。
+/// </summary>
+internal sealed class DatabaseEngineHarness
+{
+    public DatabaseEngineHarness()
+    {
+        SessionFactory = MySqlTestDatabase.CreateSessionFactory();
+
+        var sessions = new CommandScopedDbSessionProvider(SessionFactory);
+        Sessions = sessions;
+
+        IdGenerator = new DbIdGenerator(new DapperPropertyStore(sessions));
+
+        // 与 NetBpm.Runtime 的 DI 组合根保持同一张依赖图（含历史与变量）
+        HistoryManager = new DapperHistoryManager(sessions, IdGenerator);
+        VariableInstances = new DapperVariableInstanceManager(sessions, IdGenerator, HistoryManager);
+        TaskManager = new DapperTaskManager(sessions, IdGenerator, HistoryManager);
+        Executions = new DapperExecutionManager(sessions, IdGenerator, TaskManager, VariableInstances, HistoryManager);
+        Definitions = new DapperProcessDefinitionStore(sessions, IdGenerator, new BpmnXmlConverter());
+        Recorder = new ExecutionSnapshotRecorder(sessions);
+
+        IEngineServices? holder = null;
+        var behaviorFactory = new ActivityBehaviorFactory(() => holder!);
+
+        var services = EngineServices.Create(
+            Executions,
+            HistoryManager,
+            new ExpressionManager(),
+            IdGenerator,
+            behaviorFactory,
+            new FixedDelegateResolver(Recorder),
+            TaskManager,
+            new ProcessDefinitionResolver(Definitions));
+
+        holder = services;
+
+        // 与生产同序：Transaction 在外、CommandContext（排空议程）在内
+        Executor = new CommandExecutor(
+            [new TransactionInterceptor(), new CommandContextInterceptor()],
+            () => new CommandContext(services, SessionFactory.Create()));
+    }
+
+    public IDbSessionFactory SessionFactory { get; }
+
+    public IDbSessionProvider Sessions { get; }
+
+    public IIdGenerator IdGenerator { get; }
+
+    public DapperExecutionManager Executions { get; }
+
+    public DapperTaskManager TaskManager { get; }
+
+    public DapperVariableInstanceManager VariableInstances { get; }
+
+    public DapperHistoryManager HistoryManager { get; }
+
+    public DapperProcessDefinitionStore Definitions { get; }
+
+    public ExecutionSnapshotRecorder Recorder { get; }
+
+    public ICommandExecutor Executor { get; }
+
+    public void Reset()
+    {
+        using var session = SessionFactory.Create();
+        MySqlTestDatabase.Reset(session);
+    }
+
+    /// <summary>直接读库取当前执行树（不走一级缓存，看的是库里的真实内容）。</summary>
+    public List<ExecutionRow> ReadExecutions()
+    {
+        using var session = SessionFactory.Create();
+        return ExecutionRowReader.ReadAll(session);
+    }
+
+    public long CountRows(string table)
+    {
+        using var session = SessionFactory.Create();
+        return session.Connection.ExecuteScalar<long>($"select count(*) from {table}");
+    }
+
+    /// <summary>完成任务（走完整命令链路）。</summary>
+    public async Task CompleteTaskAsync(
+        string taskId,
+        IDictionary<string, object?>? variables = null,
+        CancellationToken ct = default)
+    {
+        await Executor.ExecuteAsync(new CompleteTaskCommand(taskId, variables), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>认领 / 取消认领任务（走完整命令链路）。</summary>
+    public async Task ClaimTaskAsync(string taskId, string? userId, CancellationToken ct = default)
+    {
+        await Executor.ExecuteAsync(new ClaimTaskCommand(taskId, userId), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>部署 + 启动实例 + 排空议程（= 一个命令的完整生命周期）。</summary>
+    public Task<(ProcessDefinition Definition, string ProcessInstanceId)> DeployAndStartAsync(
+        string bpmnXml,
+        CancellationToken ct = default) => DeployAndStartAsync(bpmnXml, variables: null, ct);
+
+    /// <summary>同上，并带上启动变量（用于变量持久化验收）。</summary>
+    public async Task<(ProcessDefinition Definition, string ProcessInstanceId)> DeployAndStartAsync(
+        string bpmnXml,
+        IDictionary<string, object?>? variables,
+        CancellationToken ct = default)
+    {
+        var model = new BpmnXmlConverter().ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(bpmnXml)));
+        var process = model.GetMainProcess()!;
+
+        var definition = await Definitions.DeployAsync(model, "test.bpmn20.xml", ct: ct).ConfigureAwait(false);
+
+        var command = new StartProcessInstanceCommand(process, definition.Id, "BIZ-DB-001", "tester", variables);
+        var processInstanceId = await Executor.ExecuteAsync(command, ct).ConfigureAwait(false);
+
+        return (definition, processInstanceId);
+    }
+
+    /// <summary>并行网关流程：start → fork → {taskA, taskB} → join → taskAfterJoin → end。</summary>
+    public static string ParallelGatewayProcessXml => """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="parallel-db" name="并行网关（库级验证）" isExecutable="true">
+            <startEvent id="start" />
+            <parallelGateway id="fork" />
+            <serviceTask id="taskA" activiti:delegateExpression="recorder" />
+            <serviceTask id="taskB" activiti:delegateExpression="recorder" />
+            <parallelGateway id="join" />
+            <serviceTask id="taskAfterJoin" activiti:delegateExpression="recorder" />
+            <endEvent id="end" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="fork" />
+            <sequenceFlow id="f2" sourceRef="fork" targetRef="taskA" />
+            <sequenceFlow id="f3" sourceRef="fork" targetRef="taskB" />
+            <sequenceFlow id="f4" sourceRef="taskA" targetRef="join" />
+            <sequenceFlow id="f5" sourceRef="taskB" targetRef="join" />
+            <sequenceFlow id="f6" sourceRef="join" targetRef="taskAfterJoin" />
+            <sequenceFlow id="f7" sourceRef="taskAfterJoin" targetRef="end" />
+          </process>
+        </definitions>
+        """;
+}
+
+/// <summary>
+/// 在服务任务执行时刻抓取 <c>ACT_RU_EXECUTION</c> 快照。
+/// <para>
+/// 之所以能抓到「命令中途」的状态：它取的是<b>当前命令的会话</b>，
+/// 因此看到的是同一事务内未提交的行 —— 这正好把 Join 的中间态钉死。
+/// </para>
+/// </summary>
+internal sealed class ExecutionSnapshotRecorder : IServiceTaskDelegate
+{
+    private readonly IDbSessionProvider _sessions;
+
+    public ExecutionSnapshotRecorder(IDbSessionProvider sessions)
+    {
+        ArgumentNullException.ThrowIfNull(sessions);
+        _sessions = sessions;
+    }
+
+    public List<ExecutionSnapshot> Snapshots { get; } = [];
+
+    public async ValueTask ExecuteAsync(IDelegateExecution execution, CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+
+        // 先 flush 一级缓存：否则读到的是库里尚未被内存改动覆盖的陈旧行
+        // （Activiti 的 DbSqlSession.flush() 同样是查询前必经的一步）
+        await lease.Session.FlushAsync(ct).ConfigureAwait(false);
+
+        Snapshots.Add(new ExecutionSnapshot(
+            execution.CurrentActivityId ?? "<null>",
+            ExecutionRowReader.ReadAll(lease.Session)));
+    }
+}
+
+/// <summary>把所有 <c>activiti:delegateExpression</c> 都解析到同一个委托实例。</summary>
+internal sealed class FixedDelegateResolver : IActivityDelegateResolver
+{
+    private readonly IServiceTaskDelegate _serviceTaskDelegate;
+
+    public FixedDelegateResolver(IServiceTaskDelegate serviceTaskDelegate)
+    {
+        ArgumentNullException.ThrowIfNull(serviceTaskDelegate);
+        _serviceTaskDelegate = serviceTaskDelegate;
+    }
+
+    public object? ResolveByClassName(string className) => null;
+
+    public object? ResolveByExpressionName(string name) => _serviceTaskDelegate;
+}

@@ -1,0 +1,145 @@
+{
+  "caseName" : "from-activiti/sequence/chinese-activiti-core-activiti-engine-src-test-resources-org-activiti-standalone-parsing",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/chinese-activiti-core-activiti-engine-src-test-resources-org-activiti-standalone-parsing",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "446835",
+      "PROC_INST_ID_" : "446835",
+      "BUSINESS_KEY_" : "from-activiti/sequence/chinese-activiti-core-activiti-engine-src-test-resources-org-activiti-standalone-parsing",
+      "PROC_DEF_ID_" : "process:1:446834",
+      "START_TIME_" : "2026-10-12 15:14:05.127",
+      "END_TIME_" : "2026-10-12 15:14:05.135",
+      "DURATION_" : "8",
+      "START_ACT_ID_" : "sid-8457F2D1-87A7-4B25-A6ED-FDE50CD54162",
+      "END_ACT_ID_" : "sid-70125006-F947-48E1-9C59-0575139B833B",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "446840",
+      "PROC_DEF_ID_" : "process:1:446834",
+      "PROC_INST_ID_" : "446835",
+      "EXECUTION_ID_" : "446836",
+      "ACT_ID_" : "sid-70125006-F947-48E1-9C59-0575139B833B",
+      "ACT_NAME_" : "end",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:05.133",
+      "END_TIME_" : "2026-10-12 15:14:05.133",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446837",
+      "PROC_DEF_ID_" : "process:1:446834",
+      "PROC_INST_ID_" : "446835",
+      "EXECUTION_ID_" : "446836",
+      "ACT_ID_" : "sid-8457F2D1-87A7-4B25-A6ED-FDE50CD54162",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:05.127",
+      "END_TIME_" : "2026-10-12 15:14:05.127",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446838",
+      "PROC_DEF_ID_" : "process:1:446834",
+      "PROC_INST_ID_" : "446835",
+      "EXECUTION_ID_" : "446836",
+      "ACT_ID_" : "sid-8FD9BE8E-3040-496B-8F0D-FAC03E245A56",
+      "TASK_ID_" : "446839",
+      "ACT_NAME_" : "中文名称去",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:05.127",
+      "END_TIME_" : "2026-10-12 15:14:05.132",
+      "DURATION_" : "5",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "446839",
+      "PROC_DEF_ID_" : "process:1:446834",
+      "TASK_DEF_KEY_" : "sid-8FD9BE8E-3040-496B-8F0D-FAC03E245A56",
+      "PROC_INST_ID_" : "446835",
+      "EXECUTION_ID_" : "446836",
+      "NAME_" : "中文名称去",
+      "START_TIME_" : "2026-10-12 15:14:05.127",
+      "END_TIME_" : "2026-10-12 15:14:05.132",
+      "DURATION_" : "5",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "process:1:446834",
+      "REV_" : "1",
+      "CATEGORY_" : "http://www.activiti.org/test",
+      "KEY_" : "process",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "446832",
+      "RESOURCE_NAME_" : "chinese-activiti-core-activiti-engine-src-test-resources-org-activiti-standalone-parsing.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "1",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "446832",
+      "NAME_" : "from-activiti/sequence/chinese-activiti-core-activiti-engine-src-test-resources-org-activiti-standalone-parsing",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:05.118",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "446833",
+      "REV_" : "1",
+      "NAME_" : "chinese-activiti-core-activiti-engine-src-test-resources-org-activiti-standalone-parsing.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "446832",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIiB4bWxuczphY3Rpdml0aT0iaHR0cDovL2FjdGl2aXRpLm9yZy9icG1uIiB4bWxuczpicG1uZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvREkiIHhtbG5zOm9tZ2RjPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9ERC8yMDEwMDUyNC9EQyIgeG1sbnM6b21nZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RJIiB0eXBlTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiBleHByZXNzaW9uTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvWFBhdGgiIHRhcmdldE5hbWVzcGFjZT0iaHR0cDovL3d3dy5hY3Rpdml0aS5vcmcvdGVzdCI+CiAgPHByb2Nlc3MgaWQ9InByb2Nlc3MiIGlzRXhlY3V0YWJsZT0idHJ1ZSI+CiAgICA8c3RhcnRFdmVudCBpZD0ic2lkLTg0NTdGMkQxLTg3QTctNEIyNS1BNkVELUZERTUwQ0Q1NDE2MiI+PC9zdGFydEV2ZW50PgogICAgPHVzZXJUYXNrIGlkPSJzaWQtOEZEOUJFOEUtMzA0MC00OTZCLThGMEQtRkFDMDNFMjQ1QTU2IiBuYW1lPSLkuK3mloflkI3np7DljrsiPjwvdXNlclRhc2s+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJzaWQtNkQwQjY4NzgtODg5NC00OUIzLUJCQzktQ0ZCOTI5QTRCQ0U3IiBzb3VyY2VSZWY9InNpZC04NDU3RjJEMS04N0E3LTRCMjUtQTZFRC1GREU1MENENTQxNjIiIHRhcmdldFJlZj0ic2lkLThGRDlCRThFLTMwNDAtNDk2Qi04RjBELUZBQzAzRTI0NUE1NiI+PC9zZXF1ZW5jZUZsb3c+CiAgICA8ZW5kRXZlbnQgaWQ9InNpZC03MDEyNTAwNi1GOTQ3LTQ4RTEtOUM1OS0wNTc1MTM5QjgzM0IiIG5hbWU9ImVuZCI+PC9lbmRFdmVudD4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9InNpZC0yNzBFQTYyNC0yODUzLTQ2OUUtOEM3My03N0I0RUZDODU3MTkiIHNvdXJjZVJlZj0ic2lkLThGRDlCRThFLTMwNDAtNDk2Qi04RjBELUZBQzAzRTI0NUE1NiIgdGFyZ2V0UmVmPSJzaWQtNzAxMjUwMDYtRjk0Ny00OEUxLTlDNTktMDU3NTEzOUI4MzNCIj48L3NlcXVlbmNlRmxvdz4KICA8L3Byb2Nlc3M+CiAgPGJwbW5kaTpCUE1ORGlhZ3JhbSBpZD0iQlBNTkRpYWdyYW1fcHJvY2VzcyI+CiAgICA8YnBtbmRpOkJQTU5QbGFuZSBicG1uRWxlbWVudD0icHJvY2VzcyIgaWQ9IkJQTU5QbGFuZV9wcm9jZXNzIj4KICAgICAgPGJwbW5kaTpCUE1OU2hhcGUgYnBtbkVsZW1lbnQ9InNpZC04NDU3RjJEMS04N0E3LTRCMjUtQTZFRC1GREU1MENENTQxNjIiIGlkPSJCUE1OU2hhcGVfc2lkLTg0NTdGMkQxLTg3QTctNEIyNS1BNkVELUZERTUwQ0Q1NDE2MiI+CiAgICAgICAgPG9tZ2RjOkJvdW5kcyBoZWlnaHQ9IjMwLjAiIHdpZHRoPSIzMC4wIiB4PSIyNDcuMCIgeT0iMTM1LjAiPjwvb21nZGM6Qm91bmRzPgogICAgICA8L2JwbW5kaTpCUE1OU2hhcGU+CiAgICAgIDxicG1uZGk6QlBNTlNoYXBlIGJwbW5FbGVtZW50PSJzaWQtOEZEOUJFOEUtMzA0MC00OTZCLThGMEQtRkFDMDNFMjQ1QTU2IiBpZD0iQlBNTlNoYXBlX3NpZC04RkQ5QkU4RS0zMDQwLTQ5NkItOEYwRC1GQUMwM0UyNDVBNTYiPgogICAgICAgIDxvbWdkYzpCb3VuZHMgaGVpZ2h0PSI4MC4wIiB3aWR0aD0iMTAwLjAiIHg9IjMyMi4wIiB5PSIxMTAuMCI+PC9vbWdkYzpCb3VuZHM+CiAgICAgIDwvYnBtbmRpOkJQTU5TaGFwZT4KICAgICAgPGJwbW5kaTpCUE1OU2hhcGUgYnBtbkVsZW1lbnQ9InNpZC03MDEyNTAwNi1GOTQ3LTQ4RTEtOUM1OS0wNTc1MTM5QjgzM0IiIGlkPSJCUE1OU2hhcGVfc2lkLTcwMTI1MDA2LUY5NDctNDhFMS05QzU5LTA1NzUxMzlCODMzQiI+CiAgICAgICAgPG9tZ2RjOkJvdW5kcyBoZWlnaHQ9IjI4LjAiIHdpZHRoPSIyOC4wIiB4PSI0NjcuMCIgeT0iMTM2LjAiPjwvb21nZGM6Qm91bmRzPgogICAgICA8L2JwbW5kaTpCUE1OU2hhcGU+CiAgICAgIDxicG1uZGk6QlBNTkVkZ2UgYnBtbkVsZW1lbnQ9InNpZC0yNzBFQTYyNC0yODUzLTQ2OUUtOEM3My03N0I0RUZDODU3MTkiIGlkPSJCUE1ORWRnZV9zaWQtMjcwRUE2MjQtMjg1My00NjlFLThDNzMtNzdCNEVGQzg1NzE5Ij4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iNDIyLjAiIHk9IjE1MC4wIj48L29tZ2RpOndheXBvaW50PgogICAgICAgIDxvbWdkaTp3YXlwb2ludCB4PSI0NjcuMCIgeT0iMTUwLjAiPjwvb21nZGk6d2F5cG9pbnQ+CiAgICAgIDwvYnBtbmRpOkJQTU5FZGdlPgogICAgICA8YnBtbmRpOkJQTU5FZGdlIGJwbW5FbGVtZW50PSJzaWQtNkQwQjY4NzgtODg5NC00OUIzLUJCQzktQ0ZCOTI5QTRCQ0U3IiBpZD0iQlBNTkVkZ2Vfc2lkLTZEMEI2ODc4LTg4OTQtNDlCMy1CQkM5LUNGQjkyOUE0QkNFNyI+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjI3Ny4wIiB5PSIxNTAuMCI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iMzIyLjAiIHk9IjE1MC4wIj48L29tZ2RpOndheXBvaW50PgogICAgICA8L2JwbW5kaTpCUE1ORWRnZT4KICAgIDwvYnBtbmRpOkJQTU5QbGFuZT4KICA8L2JwbW5kaTpCUE1ORGlhZ3JhbT4KPC9kZWZpbml0aW9ucz4K",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sid-8457F2D1-87A7-4B25-A6ED-FDE50CD54162"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "sid-8457F2D1-87A7-4B25-A6ED-FDE50CD54162"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "sid-6D0B6878-8894-49B3-BBC9-CFB929A4BCE7"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sid-8FD9BE8E-3040-496B-8F0D-FAC03E245A56"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "sid-8FD9BE8E-3040-496B-8F0D-FAC03E245A56"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "sid-8FD9BE8E-3040-496B-8F0D-FAC03E245A56"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "sid-8FD9BE8E-3040-496B-8F0D-FAC03E245A56"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "sid-270EA624-2853-469E-8C73-77B4EFC85719"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sid-70125006-F947-48E1-9C59-0575139B833B"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "sid-70125006-F947-48E1-9C59-0575139B833B"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

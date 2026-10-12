@@ -1,0 +1,16 @@
+{
+  "name": "first-true-wins-2",
+  "group": "authored/condition",
+  "description": "2 \u6761\u6761\u4EF6\u540C\u65F6\u4E3A\u771F \u2192 \u5FC5\u987B\u53EA\u8D70\u7B2C\u4E00\u6761\uFF08\u98CE\u9669 R2 \u7684\u6838\u5FC3\u8BED\u4E49\uFF09",
+  "variables": {
+    "c1": true,
+    "c2": true
+  },
+  "actions": [
+    {
+      "kind": "completeTask",
+      "assignee": "applicant"
+    }
+  ],
+  "resourceName": "first-true-wins-2.bpmn20.xml"
+}

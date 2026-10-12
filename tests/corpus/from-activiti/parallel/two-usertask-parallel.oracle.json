@@ -1,0 +1,316 @@
+{
+  "caseName" : "from-activiti/parallel/two-usertask-parallel",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/parallel/two-usertask-parallel",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445570",
+      "PROC_INST_ID_" : "445570",
+      "BUSINESS_KEY_" : "from-activiti/parallel/two-usertask-parallel",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "START_TIME_" : "2026-10-12 15:13:58.468",
+      "END_TIME_" : "2026-10-12 15:13:58.498",
+      "DURATION_" : "30",
+      "START_ACT_ID_" : "startevent1",
+      "END_ACT_ID_" : "endevent1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445589",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445574",
+      "ACT_ID_" : "endevent1",
+      "ACT_NAME_" : "End",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:13:58.494",
+      "END_TIME_" : "2026-10-12 15:13:58.494",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445573",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445571",
+      "ACT_ID_" : "parallelgateway1",
+      "ACT_NAME_" : "Parallel Gateway",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:58.468",
+      "END_TIME_" : "2026-10-12 15:13:58.468",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445585",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445571",
+      "ACT_ID_" : "parallelgateway2",
+      "ACT_NAME_" : "Parallel Gateway",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:58.478",
+      "END_TIME_" : "2026-10-12 15:13:58.479",
+      "DURATION_" : "1",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445586",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445574",
+      "ACT_ID_" : "parallelgateway2",
+      "ACT_NAME_" : "Parallel Gateway",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:58.485",
+      "END_TIME_" : "2026-10-12 15:13:58.485",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445572",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445571",
+      "ACT_ID_" : "startevent1",
+      "ACT_NAME_" : "Start",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:13:58.468",
+      "END_TIME_" : "2026-10-12 15:13:58.468",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445575",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445571",
+      "ACT_ID_" : "usertask1",
+      "TASK_ID_" : "445576",
+      "ACT_NAME_" : "User Task",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:58.468",
+      "END_TIME_" : "2026-10-12 15:13:58.478",
+      "DURATION_" : "10",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445579",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445574",
+      "ACT_ID_" : "usertask2",
+      "TASK_ID_" : "445580",
+      "ACT_NAME_" : "User Task",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:58.469",
+      "END_TIME_" : "2026-10-12 15:13:58.485",
+      "DURATION_" : "16",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445587",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445574",
+      "ACT_ID_" : "usertask3",
+      "TASK_ID_" : "445588",
+      "ACT_NAME_" : "User Task",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:13:58.486",
+      "END_TIME_" : "2026-10-12 15:13:58.494",
+      "DURATION_" : "8",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "445576",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "TASK_DEF_KEY_" : "usertask1",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445571",
+      "NAME_" : "User Task",
+      "START_TIME_" : "2026-10-12 15:13:58.469",
+      "END_TIME_" : "2026-10-12 15:13:58.478",
+      "DURATION_" : "9",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445580",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "TASK_DEF_KEY_" : "usertask2",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445574",
+      "NAME_" : "User Task",
+      "START_TIME_" : "2026-10-12 15:13:58.469",
+      "END_TIME_" : "2026-10-12 15:13:58.484",
+      "DURATION_" : "15",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445588",
+      "PROC_DEF_ID_" : "twoTaskProcess:1:445569",
+      "TASK_DEF_KEY_" : "usertask3",
+      "PROC_INST_ID_" : "445570",
+      "EXECUTION_ID_" : "445574",
+      "NAME_" : "User Task",
+      "START_TIME_" : "2026-10-12 15:13:58.487",
+      "END_TIME_" : "2026-10-12 15:13:58.493",
+      "DURATION_" : "6",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "445583",
+      "TYPE_" : "candidate",
+      "USER_ID_" : "dean",
+      "TASK_ID_" : "445580"
+    }, {
+      "ID_" : "445581",
+      "TYPE_" : "candidate",
+      "USER_ID_" : "garth",
+      "TASK_ID_" : "445580"
+    }, {
+      "ID_" : "445577",
+      "TYPE_" : "candidate",
+      "USER_ID_" : "user",
+      "TASK_ID_" : "445576"
+    }, {
+      "ID_" : "445584",
+      "TYPE_" : "participant",
+      "USER_ID_" : "dean",
+      "PROC_INST_ID_" : "445570"
+    }, {
+      "ID_" : "445582",
+      "TYPE_" : "participant",
+      "USER_ID_" : "garth",
+      "PROC_INST_ID_" : "445570"
+    }, {
+      "ID_" : "445578",
+      "TYPE_" : "participant",
+      "USER_ID_" : "user",
+      "PROC_INST_ID_" : "445570"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "twoTaskProcess:1:445569",
+      "REV_" : "1",
+      "CATEGORY_" : "Examples",
+      "KEY_" : "twoTaskProcess",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445567",
+      "RESOURCE_NAME_" : "two-usertask-parallel.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445567",
+      "NAME_" : "from-activiti/parallel/two-usertask-parallel",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:13:58.458",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445568",
+      "REV_" : "1",
+      "NAME_" : "two-usertask-parallel.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445567",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zCiAgdGFyZ2V0TmFtZXNwYWNlPSJFeGFtcGxlcyIKICB4bWxucz0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCIKICB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIgogIHhtbG5zOnhzZD0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEiCiAgeG1sbnM6YWN0aXZpdGk9Imh0dHA6Ly9hY3Rpdml0aS5vcmcvYnBtbiIKICB4bWxuczpicG1uZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvREkiCiAgeG1sbnM6b21nZGM9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RDIgogIHhtbG5zOm9tZ2RpPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9ERC8yMDEwMDUyNC9ESSIKICB0eXBlTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIgogIGV4cHJlc3Npb25MYW5ndWFnZT0iaHR0cDovL3d3dy53My5vcmcvMTk5OS9YUGF0aCI+CiAgPHByb2Nlc3MgaWQ9InR3b1Rhc2tQcm9jZXNzIj4KICAgIDxzdGFydEV2ZW50IGlkPSJzdGFydGV2ZW50MSIgbmFtZT0iU3RhcnQiPjwvc3RhcnRFdmVudD4KICAgIDxwYXJhbGxlbEdhdGV3YXkgaWQ9InBhcmFsbGVsZ2F0ZXdheTEiIG5hbWU9IlBhcmFsbGVsIEdhdGV3YXkiPjwvcGFyYWxsZWxHYXRld2F5PgogICAgPGVuZEV2ZW50IGlkPSJlbmRldmVudDEiIG5hbWU9IkVuZCI+PC9lbmRFdmVudD4KICAgIDx1c2VyVGFzayBpZD0idXNlcnRhc2sxIiBuYW1lPSJVc2VyIFRhc2siIGFjdGl2aXRpOmNhbmRpZGF0ZVVzZXJzPSJ1c2VyIj48L3VzZXJUYXNrPgogICAgPHVzZXJUYXNrIGlkPSJ1c2VydGFzazIiIG5hbWU9IlVzZXIgVGFzayIgYWN0aXZpdGk6Y2FuZGlkYXRlVXNlcnM9ImdhcnRoLGRlYW4iPjwvdXNlclRhc2s+CiAgICA8cGFyYWxsZWxHYXRld2F5IGlkPSJwYXJhbGxlbGdhdGV3YXkyIiBuYW1lPSJQYXJhbGxlbCBHYXRld2F5Ij48L3BhcmFsbGVsR2F0ZXdheT4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cxIiBzb3VyY2VSZWY9InN0YXJ0ZXZlbnQxIiB0YXJnZXRSZWY9InBhcmFsbGVsZ2F0ZXdheTEiPjwvc2VxdWVuY2VGbG93PgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzIiIHNvdXJjZVJlZj0icGFyYWxsZWxnYXRld2F5MSIgdGFyZ2V0UmVmPSJ1c2VydGFzazEiPjwvc2VxdWVuY2VGbG93PgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzMiIHNvdXJjZVJlZj0icGFyYWxsZWxnYXRld2F5MSIgdGFyZ2V0UmVmPSJ1c2VydGFzazIiPjwvc2VxdWVuY2VGbG93PgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzQiIHNvdXJjZVJlZj0idXNlcnRhc2sxIiB0YXJnZXRSZWY9InBhcmFsbGVsZ2F0ZXdheTIiPjwvc2VxdWVuY2VGbG93PgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzUiIHNvdXJjZVJlZj0idXNlcnRhc2syIiB0YXJnZXRSZWY9InBhcmFsbGVsZ2F0ZXdheTIiPjwvc2VxdWVuY2VGbG93PgogICAgPHVzZXJUYXNrIGlkPSJ1c2VydGFzazMiIG5hbWU9IlVzZXIgVGFzayI+PC91c2VyVGFzaz4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3c2IiBzb3VyY2VSZWY9InBhcmFsbGVsZ2F0ZXdheTIiIHRhcmdldFJlZj0idXNlcnRhc2szIj48L3NlcXVlbmNlRmxvdz4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3c3IiBzb3VyY2VSZWY9InVzZXJ0YXNrMyIgdGFyZ2V0UmVmPSJlbmRldmVudDEiPjwvc2VxdWVuY2VGbG93PgogIDwvcHJvY2Vzcz4KPC9kZWZpbml0aW9ucz4K",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "startevent1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "startevent1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "parallelgateway1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "parallelgateway1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow3"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask1"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask2"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask2"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow4"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "parallelgateway2"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask2"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow5"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "parallelgateway2"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "parallelgateway2"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow6"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask3"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask3"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask3"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask3"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow7"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "endevent1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "endevent1"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

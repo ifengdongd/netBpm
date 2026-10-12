@@ -1,0 +1,145 @@
+{
+  "caseName" : "from-activiti/sequence/customnamespaceattributemodel",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/customnamespaceattributemodel",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "446844",
+      "PROC_INST_ID_" : "446844",
+      "BUSINESS_KEY_" : "from-activiti/sequence/customnamespaceattributemodel",
+      "PROC_DEF_ID_" : "process:1:446843",
+      "START_TIME_" : "2026-10-12 15:14:05.174",
+      "END_TIME_" : "2026-10-12 15:14:05.182",
+      "DURATION_" : "8",
+      "START_ACT_ID_" : "sid-F62B554B-FF4F-475E-94FF-A3F44EDA6A6A",
+      "END_ACT_ID_" : "sid-F7795B38-72CD-41A4-9549-6CFB7D3E5FB5",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "446846",
+      "PROC_DEF_ID_" : "process:1:446843",
+      "PROC_INST_ID_" : "446844",
+      "EXECUTION_ID_" : "446845",
+      "ACT_ID_" : "sid-F62B554B-FF4F-475E-94FF-A3F44EDA6A6A",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:05.174",
+      "END_TIME_" : "2026-10-12 15:14:05.174",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446849",
+      "PROC_DEF_ID_" : "process:1:446843",
+      "PROC_INST_ID_" : "446844",
+      "EXECUTION_ID_" : "446845",
+      "ACT_ID_" : "sid-F7795B38-72CD-41A4-9549-6CFB7D3E5FB5",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:05.180",
+      "END_TIME_" : "2026-10-12 15:14:05.180",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446847",
+      "PROC_DEF_ID_" : "process:1:446843",
+      "PROC_INST_ID_" : "446844",
+      "EXECUTION_ID_" : "446845",
+      "ACT_ID_" : "usertask",
+      "TASK_ID_" : "446848",
+      "ACT_NAME_" : "User Task",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:05.174",
+      "END_TIME_" : "2026-10-12 15:14:05.180",
+      "DURATION_" : "6",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "446848",
+      "PROC_DEF_ID_" : "process:1:446843",
+      "TASK_DEF_KEY_" : "usertask",
+      "PROC_INST_ID_" : "446844",
+      "EXECUTION_ID_" : "446845",
+      "NAME_" : "User Task",
+      "START_TIME_" : "2026-10-12 15:14:05.174",
+      "END_TIME_" : "2026-10-12 15:14:05.179",
+      "DURATION_" : "5",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "process:1:446843",
+      "REV_" : "1",
+      "CATEGORY_" : "http://www.activiti.org/test",
+      "NAME_" : "process1",
+      "KEY_" : "process",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "446841",
+      "RESOURCE_NAME_" : "customnamespaceattributemodel.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "446841",
+      "NAME_" : "from-activiti/sequence/customnamespaceattributemodel",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:05.166",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "446842",
+      "REV_" : "1",
+      "NAME_" : "customnamespaceattributemodel.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "446841",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIgogICAgICAgICAgICAgeG1sbnM6Y3VzdG9tPSJodHRwOi8vY3VzdG9tLm9yZy9icG1uIgogICAgICAgICAgICAgeG1sbnM6YWN0aXZpdGk9Imh0dHA6Ly9hY3Rpdml0aS5vcmcvYnBtbiIgeG1sbnM6YnBtbmRpPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L0RJIgogICAgICAgICAgICAgeG1sbnM6b21nZGM9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RDIgogICAgICAgICAgICAgeG1sbnM6b21nZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RJIiB0eXBlTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIgogICAgICAgICAgICAgZXhwcmVzc2lvbkxhbmd1YWdlPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L1hQYXRoIgogICAgICAgICAgICAgdGFyZ2V0TmFtZXNwYWNlPSJodHRwOi8vd3d3LmFjdGl2aXRpLm9yZy90ZXN0Ij4KICAgIDxwcm9jZXNzIGlkPSJwcm9jZXNzIiBuYW1lPSJwcm9jZXNzMSIgaXNFeGVjdXRhYmxlPSJ0cnVlIiBjdXN0b206dmVyc2lvbj0iOSI+CiAgICAgICAgPGVuZEV2ZW50IGlkPSJzaWQtRjc3OTVCMzgtNzJDRC00MUE0LTk1NDktNkNGQjdEM0U1RkI1Ij48L2VuZEV2ZW50PgogICAgICAgIDxzZXF1ZW5jZUZsb3cgaWQ9InNpZC1DNkM1NkFDMy05NTYxLTQ5RTAtQTU4QS02MjRGNkNCOEJCODIiIHNvdXJjZVJlZj0ic2lkLUY2MkI1NTRCLUZGNEYtNDc1RS05NEZGLUEzRjQ0RURBNkE2QSIKICAgICAgICAgICAgICAgICAgICAgIHRhcmdldFJlZj0idXNlcnRhc2siPjwvc2VxdWVuY2VGbG93PgogICAgICAgIDx1c2VyVGFzayBpZD0idXNlcnRhc2siIG5hbWU9IlVzZXIgVGFzayIgeG1sbnM6Y3VzdG9tMj0iaHR0cDovL2N1c3RvbTIub3JnL2JwbW4iIGN1c3RvbTI6aWQ9InRlc3QiCiAgICAgICAgICAgICAgICAgIGN1c3RvbTI6YXR0cj0iYXR0clZhbHVlIj48L3VzZXJUYXNrPgogICAgICAgIDxzdGFydEV2ZW50IGlkPSJzaWQtRjYyQjU1NEItRkY0Ri00NzVFLTk0RkYtQTNGNDRFREE2QTZBIj48L3N0YXJ0RXZlbnQ+CiAgICAgICAgPHNlcXVlbmNlRmxvdyBpZD0ic2lkLTkxQzBGM0EwLTY0OUYtNDYyRS1BMUMxLTFDRTQ5OUZFREUzRSIgc291cmNlUmVmPSJ1c2VydGFzayIKICAgICAgICAgICAgICAgICAgICAgIHRhcmdldFJlZj0ic2lkLUY3Nzk1QjM4LTcyQ0QtNDFBNC05NTQ5LTZDRkI3RDNFNUZCNSI+PC9zZXF1ZW5jZUZsb3c+CiAgICA8L3Byb2Nlc3M+CjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sid-F62B554B-FF4F-475E-94FF-A3F44EDA6A6A"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "sid-F62B554B-FF4F-475E-94FF-A3F44EDA6A6A"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "sid-C6C56AC3-9561-49E0-A58A-624F6CB8BB82"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "usertask"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "usertask"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "usertask"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "usertask"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "sid-91C0F3A0-649F-462E-A1C1-1CE499FEDE3E"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "sid-F7795B38-72CD-41A4-9549-6CFB7D3E5FB5"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "sid-F7795B38-72CD-41A4-9549-6CFB7D3E5FB5"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

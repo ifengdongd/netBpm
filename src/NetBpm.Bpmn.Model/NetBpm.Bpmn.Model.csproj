@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Bpmn.Model</RootNamespace>
+    <AssemblyName>NetBpm.Bpmn.Model</AssemblyName>
+  </PropertyGroup>
+
+</Project>

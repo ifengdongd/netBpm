@@ -1,0 +1,165 @@
+{
+  "caseName" : "from-activiti/sequence/oneTaskWithFormKeyProcess",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/oneTaskWithFormKeyProcess",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "446978",
+      "PROC_INST_ID_" : "446978",
+      "BUSINESS_KEY_" : "from-activiti/sequence/oneTaskWithFormKeyProcess",
+      "PROC_DEF_ID_" : "oneTaskWithFormProcess:1:446977",
+      "START_TIME_" : "2026-10-12 15:14:05.894",
+      "END_TIME_" : "2026-10-12 15:14:05.902",
+      "DURATION_" : "8",
+      "START_ACT_ID_" : "theStart",
+      "END_ACT_ID_" : "theEnd",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "446985",
+      "PROC_DEF_ID_" : "oneTaskWithFormProcess:1:446977",
+      "PROC_INST_ID_" : "446978",
+      "EXECUTION_ID_" : "446979",
+      "ACT_ID_" : "theEnd",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:05.900",
+      "END_TIME_" : "2026-10-12 15:14:05.900",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446980",
+      "PROC_DEF_ID_" : "oneTaskWithFormProcess:1:446977",
+      "PROC_INST_ID_" : "446978",
+      "EXECUTION_ID_" : "446979",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:05.894",
+      "END_TIME_" : "2026-10-12 15:14:05.894",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446981",
+      "PROC_DEF_ID_" : "oneTaskWithFormProcess:1:446977",
+      "PROC_INST_ID_" : "446978",
+      "EXECUTION_ID_" : "446979",
+      "ACT_ID_" : "theTask",
+      "TASK_ID_" : "446982",
+      "ACT_NAME_" : "my task",
+      "ACT_TYPE_" : "userTask",
+      "ASSIGNEE_" : "myAssignee",
+      "START_TIME_" : "2026-10-12 15:14:05.894",
+      "END_TIME_" : "2026-10-12 15:14:05.900",
+      "DURATION_" : "6",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "446982",
+      "PROC_DEF_ID_" : "oneTaskWithFormProcess:1:446977",
+      "TASK_DEF_KEY_" : "theTask",
+      "PROC_INST_ID_" : "446978",
+      "EXECUTION_ID_" : "446979",
+      "NAME_" : "my task",
+      "OWNER_" : "myOwner",
+      "ASSIGNEE_" : "myAssignee",
+      "START_TIME_" : "2026-10-12 15:14:05.894",
+      "END_TIME_" : "2026-10-12 15:14:05.899",
+      "DURATION_" : "5",
+      "PRIORITY_" : "60",
+      "DUE_DATE_" : "2021-01-01 00:00:00.000",
+      "FORM_KEY_" : "myFormKey",
+      "CATEGORY_" : "myCategory",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "446983",
+      "TYPE_" : "participant",
+      "USER_ID_" : "myAssignee",
+      "PROC_INST_ID_" : "446978"
+    }, {
+      "ID_" : "446984",
+      "TYPE_" : "participant",
+      "USER_ID_" : "myOwner",
+      "PROC_INST_ID_" : "446978"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "oneTaskWithFormProcess:1:446977",
+      "REV_" : "1",
+      "CATEGORY_" : "Examples",
+      "NAME_" : "The One Task Process",
+      "KEY_" : "oneTaskWithFormProcess",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "446975",
+      "RESOURCE_NAME_" : "oneTaskWithFormKeyProcess.bpmn20.xml",
+      "DESCRIPTION_" : "This is a process for testing purposes",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "446975",
+      "NAME_" : "from-activiti/sequence/oneTaskWithFormKeyProcess",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:05.884",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "446976",
+      "REV_" : "1",
+      "NAME_" : "oneTaskWithFormKeyProcess.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "446975",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zCiAgeG1sbnM9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvTU9ERUwiCiAgeG1sbnM6YnBtbjI9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvTU9ERUwiCiAgeG1sbnM6YWN0aXZpdGk9Imh0dHA6Ly9hY3Rpdml0aS5vcmcvYnBtbiIKICB0YXJnZXROYW1lc3BhY2U9IkV4YW1wbGVzIj4KCiAgPHByb2Nlc3MgaWQ9Im9uZVRhc2tXaXRoRm9ybVByb2Nlc3MiIG5hbWU9IlRoZSBPbmUgVGFzayBQcm9jZXNzIj4KICAgIDxkb2N1bWVudGF0aW9uPlRoaXMgaXMgYSBwcm9jZXNzIGZvciB0ZXN0aW5nIHB1cnBvc2VzPC9kb2N1bWVudGF0aW9uPgoKICAgIDxzdGFydEV2ZW50IGlkPSJ0aGVTdGFydCIgLz4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cxIiBzb3VyY2VSZWY9InRoZVN0YXJ0IiB0YXJnZXRSZWY9InRoZVRhc2siIC8+CiAgICA8dXNlclRhc2sgaWQ9InRoZVRhc2siIG5hbWU9Im15IHRhc2siIGFjdGl2aXRpOmZvcm1LZXk9Im15Rm9ybUtleSIgYWN0aXZpdGk6YXNzaWduZWU9Im15QXNzaWduZWUiIGFjdGl2aXRpOm93bmVyPSJteU93bmVyIgogICAgCWFjdGl2aXRpOnByaW9yaXR5PSI2MCIgYWN0aXZpdGk6Y2F0ZWdvcnk9Im15Q2F0ZWdvcnkiIGFjdGl2aXRpOmR1ZURhdGU9IjIwMjEtMDEtMDEiIC8+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MiIgc291cmNlUmVmPSJ0aGVUYXNrIiB0YXJnZXRSZWY9InRoZUVuZCIgLz4KICAgIDxlbmRFdmVudCBpZD0idGhlRW5kIiAvPgoKICA8L3Byb2Nlc3M+Cgo8L2RlZmluaXRpb25zPgo=",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theTask"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "theTask"
+  }, {
+    "type" : "TASK_ASSIGNED",
+    "taskDefinitionKey" : "theTask"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "theTask"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theTask"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

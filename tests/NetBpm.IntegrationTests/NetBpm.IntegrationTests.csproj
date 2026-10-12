@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.IntegrationTests</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NetBpm.Engine\NetBpm.Engine.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Persistence\NetBpm.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Rest\NetBpm.Rest.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 端到端测试要起 ASP.NET Core 宿主 -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.MsSql" />
+    <PackageReference Include="Testcontainers.MySql" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+</Project>

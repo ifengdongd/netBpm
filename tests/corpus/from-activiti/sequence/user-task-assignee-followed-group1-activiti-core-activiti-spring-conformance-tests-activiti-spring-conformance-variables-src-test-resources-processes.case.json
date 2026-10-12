@@ -1,0 +1,128 @@
+{
+  "name": "user-task-assignee-followed-group1-activiti-core-activiti-spring-conformance-tests-activiti-spring-conformance-variables-src-test-resources-processes",
+  "group": "from-activiti/sequence",
+  "description": "\u5BFC\u5165\u81EA Activiti \u6E90\u7801\uFF1Aactiviti-core/activiti-spring-conformance-tests/activiti-spring-conformance-variables/src/test/resources/processes/user-task-assignee-followed-group1.bpmn20.xml\uFF082 \u4E2A\u7528\u6237\u4EFB\u52A1\uFF09",
+  "actions": [
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    }
+  ],
+  "resourceName": "user-task-assignee-followed-group1-activiti-core-activiti-spring-conformance-tests-activiti-spring-conformance-variables-src-test-resources-processes.bpmn20.xml"
+}

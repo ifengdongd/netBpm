@@ -1,0 +1,128 @@
+{
+  "name": "simpleParallelSubProcess",
+  "group": "from-activiti/parallel",
+  "description": "\u5BFC\u5165\u81EA Activiti \u6E90\u7801\uFF1Aactiviti-core/activiti-engine/src/test/resources/org/activiti/engine/test/bpmn/callactivity/simpleParallelSubProcess.bpmn20.xml\uFF082 \u4E2A\u7528\u6237\u4EFB\u52A1\uFF09",
+  "actions": [
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    }
+  ],
+  "resourceName": "simpleParallelSubProcess.bpmn20.xml"
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:activiti="http://activiti.org/bpmn"
+             targetNamespace="http://netbpm/corpus">
+  <process id="single-entry-parallel-3" name="single-entry-parallel-3" isExecutable="true">
+  <startEvent id="start" />
+  <parallelGateway id="single" />
+  <userTask id="after" name="之后" activiti:assignee="u1" />
+  <endEvent id="end" />
+  <sequenceFlow id="f1" sourceRef="start" targetRef="single" />
+  <sequenceFlow id="f2" sourceRef="single" targetRef="after" />
+  <sequenceFlow id="f3" sourceRef="after" targetRef="end" />
+  </process>
+</definitions>

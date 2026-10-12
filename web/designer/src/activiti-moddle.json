@@ -1,0 +1,98 @@
+{
+  "name": "Activiti",
+  "uri": "http://activiti.org/bpmn",
+  "prefix": "activiti",
+  "xml": {
+    "tagAlias": "lowerCase"
+  },
+  "associations": [],
+  "types": [
+    {
+      "name": "UserTaskProps",
+      "extends": ["bpmn:UserTask"],
+      "properties": [
+        { "name": "assignee", "isAttr": true, "type": "String" },
+        { "name": "candidateUsers", "isAttr": true, "type": "String" },
+        { "name": "candidateGroups", "isAttr": true, "type": "String" },
+        { "name": "formKey", "isAttr": true, "type": "String" },
+        { "name": "dueDate", "isAttr": true, "type": "String" },
+        { "name": "priority", "isAttr": true, "type": "String" },
+        { "name": "category", "isAttr": true, "type": "String" },
+        { "name": "skipExpression", "isAttr": true, "type": "String" }
+      ]
+    },
+    {
+      "name": "ServiceTaskProps",
+      "extends": ["bpmn:ServiceTask"],
+      "properties": [
+        { "name": "class", "isAttr": true, "type": "String" },
+        { "name": "delegateExpression", "isAttr": true, "type": "String" },
+        { "name": "expression", "isAttr": true, "type": "String" },
+        { "name": "resultVariableName", "isAttr": true, "type": "String" }
+      ]
+    },
+    {
+      "name": "ScriptTaskProps",
+      "extends": ["bpmn:ScriptTask"],
+      "properties": [
+        { "name": "autoStoreVariables", "isAttr": true, "type": "String" },
+        { "name": "resultVariable", "isAttr": true, "type": "String" }
+      ]
+    },
+    {
+      "name": "ProcessProps",
+      "extends": ["bpmn:Process"],
+      "properties": [
+        { "name": "candidateStarterUsers", "isAttr": true, "type": "String" },
+        { "name": "candidateStarterGroups", "isAttr": true, "type": "String" }
+      ]
+    },
+    {
+      "name": "ExtensionElements",
+      "extends": ["bpmn:ExtensionElements"],
+      "properties": [
+        { "name": "executionListener", "type": "ExecutionListener", "isMany": true },
+        { "name": "taskListener", "type": "TaskListener", "isMany": true },
+        { "name": "field", "type": "Field", "isMany": true },
+        { "name": "potentialStarter", "type": "PotentialStarter" }
+      ]
+    },
+    {
+      "name": "ExecutionListener",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "event", "isAttr": true, "type": "String" },
+        { "name": "class", "isAttr": true, "type": "String" },
+        { "name": "expression", "isAttr": true, "type": "String" },
+        { "name": "delegateExpression", "isAttr": true, "type": "String" }
+      ]
+    },
+    {
+      "name": "TaskListener",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "event", "isAttr": true, "type": "String" },
+        { "name": "class", "isAttr": true, "type": "String" },
+        { "name": "expression", "isAttr": true, "type": "String" },
+        { "name": "delegateExpression", "isAttr": true, "type": "String" }
+      ]
+    },
+    {
+      "name": "Field",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "name", "isAttr": true, "type": "String" },
+        { "name": "stringValue", "isAttr": true, "type": "String" },
+        { "name": "expression", "isAttr": true, "type": "String" },
+        { "name": "string", "type": "String" }
+      ]
+    },
+    {
+      "name": "PotentialStarter",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "resourceAssignmentExpression", "type": "String", "isBody": true }
+      ]
+    }
+  ]
+}

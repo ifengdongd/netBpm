@@ -1,0 +1,14 @@
+netbpm\oracle\Snapshot$ApiTask.class
+netbpm\oracle\CorpusCase$Action.class
+netbpm\oracle\OracleRunner$Arguments.class
+netbpm\oracle\TraceEventListener.class
+netbpm\oracle\Snapshot$TraceEvent.class
+netbpm\oracle\Contract.class
+netbpm\oracle\Snapshot$ApiProcessInstance.class
+netbpm\oracle\Snapshot$ApiView.class
+netbpm\oracle\Snapshot$ApiVariable.class
+netbpm\oracle\OracleRunner.class
+netbpm\oracle\Snapshot.class
+netbpm\oracle\Snapshot$OracleSnapshot.class
+netbpm\oracle\CorpusCase.class
+netbpm\oracle\TableDumper.class

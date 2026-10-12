@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Runtime</RootNamespace>
+    <AssemblyName>NetBpm.Runtime</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetBpm.Bpmn.Converter\NetBpm.Bpmn.Converter.csproj" />
+    <ProjectReference Include="..\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+    <ProjectReference Include="..\NetBpm.Bpmn.Validation\NetBpm.Bpmn.Validation.csproj" />
+    <ProjectReference Include="..\NetBpm.El\NetBpm.El.csproj" />
+    <ProjectReference Include="..\NetBpm.Engine\NetBpm.Engine.csproj" />
+    <ProjectReference Include="..\NetBpm.Identity\NetBpm.Identity.csproj" />
+    <ProjectReference Include="..\NetBpm.Persistence\NetBpm.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+</Project>

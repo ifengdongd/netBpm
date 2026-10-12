@@ -1,0 +1,20 @@
+{
+  "name": "nested-parallel-then-exclusive-2",
+  "group": "authored/gateway",
+  "description": "\u5E76\u884C\u5206\u53C9\u5185\u5D4C\u6392\u4ED6\u7F51\u5173\uFF08\u6392\u4ED6\u5206\u652F\u5148\u5408\u6D41\u518D\u8FDB Join\uFF09\uFF1AJoin \u7684\u4E24\u6761\u5165\u6D41\u5206\u522B\u6765\u81EA A \u6C47\u5408\u70B9\u4E0E B \u5206\u652F",
+  "variables": {
+    "a1": false,
+    "a2": false
+  },
+  "actions": [
+    {
+      "kind": "completeTask",
+      "assignee": "b1user"
+    },
+    {
+      "kind": "completeTask",
+      "assignee": "archivist"
+    }
+  ],
+  "resourceName": "nested-parallel-then-exclusive-2.bpmn20.xml"
+}

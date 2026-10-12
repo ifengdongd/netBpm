@@ -1,0 +1,154 @@
+{
+  "caseName" : "from-activiti/sequence/FullHistoryTest.testHistoricDetailQueryMixed",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/FullHistoryTest.testHistoricDetailQueryMixed",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445848",
+      "PROC_INST_ID_" : "445848",
+      "BUSINESS_KEY_" : "from-activiti/sequence/FullHistoryTest.testHistoricDetailQueryMixed",
+      "PROC_DEF_ID_" : "historicDetailMixed:1:445847",
+      "START_TIME_" : "2026-10-12 15:14:00.023",
+      "END_TIME_" : "2026-10-12 15:14:00.033",
+      "DURATION_" : "10",
+      "START_ACT_ID_" : "start",
+      "END_ACT_ID_" : "end",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445854",
+      "PROC_DEF_ID_" : "historicDetailMixed:1:445847",
+      "PROC_INST_ID_" : "445848",
+      "EXECUTION_ID_" : "445849",
+      "ACT_ID_" : "end",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:00.030",
+      "END_TIME_" : "2026-10-12 15:14:00.030",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445850",
+      "PROC_DEF_ID_" : "historicDetailMixed:1:445847",
+      "PROC_INST_ID_" : "445848",
+      "EXECUTION_ID_" : "445849",
+      "ACT_ID_" : "start",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:00.023",
+      "END_TIME_" : "2026-10-12 15:14:00.023",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445851",
+      "PROC_DEF_ID_" : "historicDetailMixed:1:445847",
+      "PROC_INST_ID_" : "445848",
+      "EXECUTION_ID_" : "445849",
+      "ACT_ID_" : "task",
+      "TASK_ID_" : "445852",
+      "ACT_NAME_" : "Schedule meeting",
+      "ACT_TYPE_" : "userTask",
+      "ASSIGNEE_" : "kermit",
+      "START_TIME_" : "2026-10-12 15:14:00.023",
+      "END_TIME_" : "2026-10-12 15:14:00.030",
+      "DURATION_" : "7",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "445852",
+      "PROC_DEF_ID_" : "historicDetailMixed:1:445847",
+      "TASK_DEF_KEY_" : "task",
+      "PROC_INST_ID_" : "445848",
+      "EXECUTION_ID_" : "445849",
+      "NAME_" : "Schedule meeting",
+      "ASSIGNEE_" : "kermit",
+      "START_TIME_" : "2026-10-12 15:14:00.023",
+      "END_TIME_" : "2026-10-12 15:14:00.029",
+      "DURATION_" : "6",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "445853",
+      "TYPE_" : "participant",
+      "USER_ID_" : "kermit",
+      "PROC_INST_ID_" : "445848"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "historicDetailMixed:1:445847",
+      "REV_" : "1",
+      "CATEGORY_" : "Examples",
+      "KEY_" : "historicDetailMixed",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445845",
+      "RESOURCE_NAME_" : "FullHistoryTest.testHistoricDetailQueryMixed.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445845",
+      "NAME_" : "from-activiti/sequence/FullHistoryTest.testHistoricDetailQueryMixed",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:00.013",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445846",
+      "REV_" : "1",
+      "NAME_" : "FullHistoryTest.testHistoricDetailQueryMixed.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445845",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KCjxkZWZpbml0aW9ucyBpZD0iZGVmaW5pdGlvbnMiCiAgeG1sbnM9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvTU9ERUwiCiAgeG1sbnM6YWN0aXZpdGk9Imh0dHA6Ly9hY3Rpdml0aS5vcmcvYnBtbiIKICB0YXJnZXROYW1lc3BhY2U9IkV4YW1wbGVzIj4KCiAgPHByb2Nlc3MgaWQ9Imhpc3RvcmljRGV0YWlsTWl4ZWQiPgoKICAgIDxzdGFydEV2ZW50IGlkPSJzdGFydCI+CiAgICAgIDxleHRlbnNpb25FbGVtZW50cz4KICAgICAgICA8YWN0aXZpdGk6Zm9ybVByb3BlcnR5IGlkPSJmb3JtUHJvcDEiCiAgICAgICAgICBuYW1lPSJQcm9wZXJ0eSAxIgogICAgICAgICAgdmFyaWFibGU9InZhcmlhYmxlMSIKICAgICAgICAgIHR5cGU9InN0cmluZyIgLz4KCiAgICAgICA8YWN0aXZpdGk6Zm9ybVByb3BlcnR5IGlkPSJmb3JtUHJvcDIiCiAgICAgICAgICBuYW1lPSJQcm9wZXJ0eSAyIgogICAgICAgICAgdmFyaWFibGU9InZhcmlhYmxlMiIKICAgICAgICAgIHR5cGU9ImxvbmciIC8+CiAgICAgICAgPC9leHRlbnNpb25FbGVtZW50cz4KICAgIDwvc3RhcnRFdmVudD4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cxIiBzb3VyY2VSZWY9InN0YXJ0IiB0YXJnZXRSZWY9InRhc2siIC8+CiAgICA8dXNlclRhc2sgaWQ9InRhc2siIG5hbWU9IlNjaGVkdWxlIG1lZXRpbmciIGFjdGl2aXRpOmFzc2lnbmVlPSJrZXJtaXQiIC8+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MiIgc291cmNlUmVmPSJ0YXNrIiB0YXJnZXRSZWY9ImVuZCIgLz4KCiAgICA8ZW5kRXZlbnQgaWQ9ImVuZCIgLz4KCiAgPC9wcm9jZXNzPgoKPC9kZWZpbml0aW9ucz4K",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "start"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "start"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "task"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "task"
+  }, {
+    "type" : "TASK_ASSIGNED",
+    "taskDefinitionKey" : "task"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "task"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "task"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "end"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "end"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

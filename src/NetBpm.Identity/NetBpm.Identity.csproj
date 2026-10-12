@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Identity</RootNamespace>
+    <AssemblyName>NetBpm.Identity</AssemblyName>
+  </PropertyGroup>
+
+</Project>

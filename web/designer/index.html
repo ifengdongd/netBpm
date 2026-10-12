@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NetBpm 流程设计器</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <strong>NetBpm 设计器</strong>
+      <button id="btn-new" type="button">新建</button>
+      <button id="btn-import" type="button">导入 XML</button>
+      <button id="btn-export" type="button">导出 XML</button>
+      <button id="btn-deploy" type="button">部署</button>
+      <span id="status" class="status"></span>
+    </header>
+    <main class="canvas-row">
+      <div id="canvas" class="canvas"></div>
+      <aside id="properties" class="properties"></aside>
+    </main>
+    <!-- 即时校验清单（§6.2 第 3 项）：点击可定位到出问题的元素 -->
+    <footer id="issues" class="issues"></footer>
+    <input id="file-input" type="file" accept=".xml,.bpmn,.bpmn20.xml" hidden />
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

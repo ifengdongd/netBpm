@@ -1,0 +1,142 @@
+{
+  "caseName" : "from-activiti/sequence/process-usertask-01",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/process-usertask-01",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "446998",
+      "PROC_INST_ID_" : "446998",
+      "BUSINESS_KEY_" : "from-activiti/sequence/process-usertask-01",
+      "PROC_DEF_ID_" : "process-usertask-01:1:446997",
+      "START_TIME_" : "2026-10-12 15:14:05.993",
+      "END_TIME_" : "2026-10-12 15:14:06.004",
+      "DURATION_" : "11",
+      "START_ACT_ID_" : "theStart",
+      "END_ACT_ID_" : "theEnd",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "447003",
+      "PROC_DEF_ID_" : "process-usertask-01:1:446997",
+      "PROC_INST_ID_" : "446998",
+      "EXECUTION_ID_" : "446999",
+      "ACT_ID_" : "theEnd",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:06.000",
+      "END_TIME_" : "2026-10-12 15:14:06.000",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "447000",
+      "PROC_DEF_ID_" : "process-usertask-01:1:446997",
+      "PROC_INST_ID_" : "446998",
+      "EXECUTION_ID_" : "446999",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:05.993",
+      "END_TIME_" : "2026-10-12 15:14:05.993",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "447001",
+      "PROC_DEF_ID_" : "process-usertask-01:1:446997",
+      "PROC_INST_ID_" : "446998",
+      "EXECUTION_ID_" : "446999",
+      "ACT_ID_" : "theTask",
+      "TASK_ID_" : "447002",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:05.993",
+      "END_TIME_" : "2026-10-12 15:14:06.000",
+      "DURATION_" : "7",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "447002",
+      "PROC_DEF_ID_" : "process-usertask-01:1:446997",
+      "TASK_DEF_KEY_" : "theTask",
+      "PROC_INST_ID_" : "446998",
+      "EXECUTION_ID_" : "446999",
+      "START_TIME_" : "2026-10-12 15:14:05.993",
+      "END_TIME_" : "2026-10-12 15:14:05.999",
+      "DURATION_" : "6",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "process-usertask-01:1:446997",
+      "REV_" : "1",
+      "CATEGORY_" : "http://www.activiti.org/bpmn2.0",
+      "KEY_" : "process-usertask-01",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "446995",
+      "RESOURCE_NAME_" : "process-usertask-01.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "446995",
+      "NAME_" : "from-activiti/sequence/process-usertask-01",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:05.983",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "446996",
+      "REV_" : "1",
+      "NAME_" : "process-usertask-01.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "446995",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIgogIHhtbG5zOnhzaT0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEtaW5zdGFuY2UiCiAgeHNpOnNjaGVtYUxvY2F0aW9uPSJodHRwOi8vc2NoZW1hLm9tZy5vcmcvc3BlYy9CUE1OLzIuMCBCUE1OMjAueHNkIgogIHR5cGVMYW5ndWFnZT0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEiIHRhcmdldE5hbWVzcGFjZT0iaHR0cDovL3d3dy5hY3Rpdml0aS5vcmcvYnBtbjIuMCI+CgogIDxwcm9jZXNzIGlkPSJwcm9jZXNzLXVzZXJ0YXNrLTAxIj4KICAgIDxzdGFydEV2ZW50IGlkPSJ0aGVTdGFydCIgLz4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3cxIiBzb3VyY2VSZWY9InRoZVN0YXJ0IiB0YXJnZXRSZWY9InRoZVRhc2siIC8+CiAgICA8dXNlclRhc2sgaWQ9InRoZVRhc2siIC8+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MiIgc291cmNlUmVmPSJ0aGVUYXNrIiB0YXJnZXRSZWY9InRoZUVuZCIgLz4KICAgIDxlbmRFdmVudCBpZD0idGhlRW5kIiAvPgogIDwvcHJvY2Vzcz4KCjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theTask"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "theTask"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "theTask"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theTask"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theEnd"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

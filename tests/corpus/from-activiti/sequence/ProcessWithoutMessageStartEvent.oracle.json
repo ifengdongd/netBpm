@@ -1,0 +1,157 @@
+{
+  "caseName" : "from-activiti/sequence/ProcessWithoutMessageStartEvent",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/ProcessWithoutMessageStartEvent",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "446303",
+      "PROC_INST_ID_" : "446303",
+      "BUSINESS_KEY_" : "from-activiti/sequence/ProcessWithoutMessageStartEvent",
+      "PROC_DEF_ID_" : "ProcessWithoutMessageStartEvent:1:446302",
+      "START_TIME_" : "2026-10-12 15:14:02.541",
+      "END_TIME_" : "2026-10-12 15:14:02.550",
+      "DURATION_" : "9",
+      "START_ACT_ID_" : "Event_1",
+      "END_ACT_ID_" : "Event_0ukn0y4",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "446307",
+      "PROC_DEF_ID_" : "ProcessWithoutMessageStartEvent:1:446302",
+      "PROC_INST_ID_" : "446303",
+      "EXECUTION_ID_" : "446304",
+      "ACT_ID_" : "Activity_1sl56l9",
+      "TASK_ID_" : "446308",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:02.541",
+      "END_TIME_" : "2026-10-12 15:14:02.547",
+      "DURATION_" : "6",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446309",
+      "PROC_DEF_ID_" : "ProcessWithoutMessageStartEvent:1:446302",
+      "PROC_INST_ID_" : "446303",
+      "EXECUTION_ID_" : "446304",
+      "ACT_ID_" : "Event_0ukn0y4",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:02.547",
+      "END_TIME_" : "2026-10-12 15:14:02.547",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446306",
+      "PROC_DEF_ID_" : "ProcessWithoutMessageStartEvent:1:446302",
+      "PROC_INST_ID_" : "446303",
+      "EXECUTION_ID_" : "446304",
+      "ACT_ID_" : "Event_1",
+      "ACT_NAME_" : "messageEvent",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:02.541",
+      "END_TIME_" : "2026-10-12 15:14:02.541",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "446308",
+      "PROC_DEF_ID_" : "ProcessWithoutMessageStartEvent:1:446302",
+      "TASK_DEF_KEY_" : "Activity_1sl56l9",
+      "PROC_INST_ID_" : "446303",
+      "EXECUTION_ID_" : "446304",
+      "START_TIME_" : "2026-10-12 15:14:02.541",
+      "END_TIME_" : "2026-10-12 15:14:02.546",
+      "DURATION_" : "5",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ {
+      "ID_" : "446305",
+      "PROC_INST_ID_" : "446303",
+      "EXECUTION_ID_" : "446303",
+      "NAME_" : "initiator",
+      "VAR_TYPE_" : "string",
+      "REV_" : "0",
+      "TEXT_" : "1",
+      "CREATE_TIME_" : "2026-10-12 15:14:02.541",
+      "LAST_UPDATED_TIME_" : "2026-10-12 15:14:02.541"
+    } ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "ProcessWithoutMessageStartEvent:1:446302",
+      "REV_" : "1",
+      "CATEGORY_" : "",
+      "NAME_" : "ProcessWithoutMessageStartEvent",
+      "KEY_" : "ProcessWithoutMessageStartEvent",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "446300",
+      "RESOURCE_NAME_" : "ProcessWithoutMessageStartEvent.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "1",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "446300",
+      "NAME_" : "from-activiti/sequence/ProcessWithoutMessageStartEvent",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:02.532",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "446301",
+      "REV_" : "1",
+      "NAME_" : "ProcessWithoutMessageStartEvent.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "446300",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGJwbW4yOmRlZmluaXRpb25zIHhtbG5zOmFjdGl2aXRpPSJodHRwOi8vYWN0aXZpdGkub3JnL2JwbW4iIHhtbG5zOnhzaT0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEtaW5zdGFuY2UiIHhtbG5zOmJwbW4yPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIiB4bWxuczpicG1uZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvREkiIHhtbG5zOmRjPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9ERC8yMDEwMDUyNC9EQyIgeG1sbnM6ZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RJIiBpZD0ibW9kZWwtMzE0OWIxMjYtY2M2MS00ZjQwLWFkNzktMzM5ZDBmY2FmNTRhIiBuYW1lPSJtZXNzYWdlU3RhcnRFdmVudCIgdGFyZ2V0TmFtZXNwYWNlPSIiIHhzaTpzY2hlbWFMb2NhdGlvbj0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCBCUE1OMjAueHNkIj4KICA8YnBtbjI6cHJvY2VzcyBpZD0iUHJvY2Vzc1dpdGhvdXRNZXNzYWdlU3RhcnRFdmVudCIgbmFtZT0iUHJvY2Vzc1dpdGhvdXRNZXNzYWdlU3RhcnRFdmVudCIgaXNFeGVjdXRhYmxlPSJ0cnVlIj4KICAgIDxicG1uMjpkb2N1bWVudGF0aW9uIC8+CiAgICA8YnBtbjI6dXNlclRhc2sgaWQ9IkFjdGl2aXR5XzFzbDU2bDkiIGFjdGl2aXRpOmFzc2lnbmVlPSIke2luaXRpYXRvcn0iIGFjdGl2aXRpOnByaW9yaXR5PSIwIj4KICAgICAgPGJwbW4yOmluY29taW5nPkZsb3dfMDFyZHF0cDwvYnBtbjI6aW5jb21pbmc+CiAgICAgIDxicG1uMjpvdXRnb2luZz5GbG93XzBnZDZtc2c8L2JwbW4yOm91dGdvaW5nPgogICAgPC9icG1uMjp1c2VyVGFzaz4KICAgIDxicG1uMjpzZXF1ZW5jZUZsb3cgaWQ9IkZsb3dfMDFyZHF0cCIgc291cmNlUmVmPSJFdmVudF8xIiB0YXJnZXRSZWY9IkFjdGl2aXR5XzFzbDU2bDkiIC8+CiAgICA8YnBtbjI6ZW5kRXZlbnQgaWQ9IkV2ZW50XzB1a24weTQiPgogICAgICA8YnBtbjI6aW5jb21pbmc+Rmxvd18wZ2Q2bXNnPC9icG1uMjppbmNvbWluZz4KICAgIDwvYnBtbjI6ZW5kRXZlbnQ+CiAgICA8YnBtbjI6c2VxdWVuY2VGbG93IGlkPSJGbG93XzBnZDZtc2ciIHNvdXJjZVJlZj0iQWN0aXZpdHlfMXNsNTZsOSIgdGFyZ2V0UmVmPSJFdmVudF8wdWtuMHk0IiAvPgogICAgPGJwbW4yOnN0YXJ0RXZlbnQgaWQ9IkV2ZW50XzEiIG5hbWU9Im1lc3NhZ2VFdmVudCI+CiAgICAgIDxicG1uMjpvdXRnb2luZz5GbG93XzAxcmRxdHA8L2JwbW4yOm91dGdvaW5nPgogICAgPC9icG1uMjpzdGFydEV2ZW50PgogIDwvYnBtbjI6cHJvY2Vzcz4KICA8YnBtbmRpOkJQTU5EaWFncmFtIGlkPSJCUE1ORGlhZ3JhbV8xIj4KICAgIDxicG1uZGk6QlBNTlBsYW5lIGlkPSJCUE1OUGxhbmVfMSIgYnBtbkVsZW1lbnQ9IlByb2Nlc3NfWFB5VWxmcnMiPgogICAgICA8YnBtbmRpOkJQTU5TaGFwZSBpZD0iQWN0aXZpdHlfMXNsNTZsOV9kaSIgYnBtbkVsZW1lbnQ9IkFjdGl2aXR5XzFzbDU2bDkiPgogICAgICAgIDxkYzpCb3VuZHMgeD0iNDcwIiB5PSIyMzAiIHdpZHRoPSIxMDAiIGhlaWdodD0iODAiIC8+CiAgICAgIDwvYnBtbmRpOkJQTU5TaGFwZT4KICAgICAgPGJwbW5kaTpCUE1OU2hhcGUgaWQ9IkV2ZW50XzB1a24weTRfZGkiIGJwbW5FbGVtZW50PSJFdmVudF8wdWtuMHk0Ij4KICAgICAgICA8ZGM6Qm91bmRzIHg9IjY0MiIgeT0iMjUyIiB3aWR0aD0iMzYiIGhlaWdodD0iMzYiIC8+CiAgICAgIDwvYnBtbmRpOkJQTU5TaGFwZT4KICAgICAgPGJwbW5kaTpCUE1OU2hhcGUgaWQ9IkV2ZW50XzAxYmhjOW5fZGkiIGJwbW5FbGVtZW50PSJFdmVudF8xIj4KICAgICAgICA8ZGM6Qm91bmRzIHg9IjM2MiIgeT0iMjQwIiB3aWR0aD0iMzYiIGhlaWdodD0iMzYiIC8+CiAgICAgICAgPGJwbW5kaTpCUE1OTGFiZWw+CiAgICAgICAgICA8ZGM6Qm91bmRzIHg9IjM0NSIgeT0iMjgzIiB3aWR0aD0iNzMiIGhlaWdodD0iMTQiIC8+CiAgICAgICAgPC9icG1uZGk6QlBNTkxhYmVsPgogICAgICA8L2JwbW5kaTpCUE1OU2hhcGU+CiAgICAgIDxicG1uZGk6QlBNTkVkZ2UgaWQ9IkZsb3dfMDFyZHF0cF9kaSIgYnBtbkVsZW1lbnQ9IkZsb3dfMDFyZHF0cCI+CiAgICAgICAgPGRpOndheXBvaW50IHg9IjM5OCIgeT0iMjU4IiAvPgogICAgICAgIDxkaTp3YXlwb2ludCB4PSI0MzQiIHk9IjI1OCIgLz4KICAgICAgICA8ZGk6d2F5cG9pbnQgeD0iNDM0IiB5PSIyNzAiIC8+CiAgICAgICAgPGRpOndheXBvaW50IHg9IjQ3MCIgeT0iMjcwIiAvPgogICAgICA8L2JwbW5kaTpCUE1ORWRnZT4KICAgICAgPGJwbW5kaTpCUE1ORWRnZSBpZD0iRmxvd18wZ2Q2bXNnX2RpIiBicG1uRWxlbWVudD0iRmxvd18wZ2Q2bXNnIj4KICAgICAgICA8ZGk6d2F5cG9pbnQgeD0iNTcwIiB5PSIyNzAiIC8+CiAgICAgICAgPGRpOndheXBvaW50IHg9IjY0MiIgeT0iMjcwIiAvPgogICAgICA8L2JwbW5kaTpCUE1ORWRnZT4KICAgIDwvYnBtbmRpOkJQTU5QbGFuZT4KICA8L2JwbW5kaTpCUE1ORGlhZ3JhbT4KPC9icG1uMjpkZWZpbml0aW9ucz4K",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "VARIABLE_CREATED",
+    "variableName" : "initiator"
+  }, {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "Event_1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "Event_1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "Flow_01rdqtp"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "Activity_1sl56l9"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "Activity_1sl56l9"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "Activity_1sl56l9"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "Activity_1sl56l9"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "Flow_0gd6msg"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "Event_0ukn0y4"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "Event_0ukn0y4"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

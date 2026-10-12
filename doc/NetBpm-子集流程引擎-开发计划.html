@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetBpm · 子集流程引擎开发计划</title>
+<style>
+  :root{
+    --bg:#f6f7f9;
+    --paper:#ffffff;
+    --ink:#1a1d21;
+    --ink-2:#4a5158;
+    --ink-3:#7b848c;
+    --line:#e3e6ea;
+    --line-2:#eef0f3;
+    --brand:#c8102e;
+    --brand-soft:#fdeef0;
+    --accent:#0b6bcb;
+    --accent-soft:#eaf3fd;
+    --ok:#1a7f4b;
+    --ok-soft:#e8f6ee;
+    --warn:#b26a00;
+    --warn-soft:#fdf3e3;
+    --danger:#b3231f;
+    --danger-soft:#fdeceb;
+    --code-bg:#f2f4f7;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px -12px rgba(16,24,40,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1216; --paper:#161a1f; --ink:#e8ecf1; --ink-2:#b6bfc9; --ink-3:#8b96a3;
+      --line:#2a3037; --line-2:#21262c; --brand:#ff5c72; --brand-soft:#2a161a;
+      --accent:#5aa9f7; --accent-soft:#12222f; --ok:#4cc98a; --ok-soft:#122319;
+      --warn:#e0a349; --warn-soft:#2a2113; --danger:#f4756f; --danger-soft:#2b1615;
+      --code-bg:#1c2229;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,-apple-system,sans-serif;
+    font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px 72px}
+  .hero{background:linear-gradient(135deg,#5a1f8f 0%,#7b2fc4 45%,#a05ad6 100%);color:#fff;padding:52px 0 46px;margin-bottom:34px}
+  .hero .wrap{padding-bottom:0}
+  .hero .kicker{font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;opacity:.85;font-weight:600}
+  .hero h1{margin:12px 0 10px;font-size:33px;line-height:1.3;font-weight:700;letter-spacing:-.01em}
+  .hero p{margin:0;opacity:.94;font-size:15px;max-width:860px}
+  .hero .meta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
+  .chip{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:5px 13px;font-size:12.5px}
+  section{margin:0 0 42px}
+  h2{font-size:22px;margin:0 0 6px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  h2 .no{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:var(--brand);color:#fff;font-size:14px;font-weight:700;flex:none}
+  h3{font-size:16.5px;margin:26px 0 10px;font-weight:700;color:var(--ink)}
+  .sub{color:var(--ink-3);font-size:13.5px;margin:0 0 20px}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:22px 24px;box-shadow:var(--shadow)}
+  p{margin:10px 0}
+  ul{margin:10px 0;padding-left:22px}
+  li{margin:5px 0}
+  code{background:var(--code-bg);padding:2px 6px;border-radius:5px;font-family:"Cascadia Code",Consolas,monospace;font-size:12.8px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:14px;margin-bottom:8px}
+  .kpi{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:16px 18px;box-shadow:var(--shadow)}
+  .kpi .v{font-size:26px;font-weight:700;line-height:1.15;letter-spacing:-.02em;color:var(--brand);font-variant-numeric:tabular-nums}
+  .kpi .l{font-size:12.5px;color:var(--ink-3);margin-top:4px}
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--paper);box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:13.6px;min-width:600px}
+  th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line-2);vertical-align:top}
+  th{background:var(--line-2);font-weight:700;font-size:12.6px;letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--accent-soft)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .bar{position:relative;height:9px;border-radius:5px;background:var(--line-2);overflow:hidden;min-width:64px}
+  .bar > i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:linear-gradient(90deg,#7b2fc4,#b47ae8)}
+  .bar > i.warnbar{background:linear-gradient(90deg,#b26a00,#e0a349)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.6px;font-weight:700;white-space:nowrap}
+  .p-ok{background:var(--ok-soft);color:var(--ok)}
+  .p-warn{background:var(--warn-soft);color:var(--warn)}
+  .p-danger{background:var(--danger-soft);color:var(--danger)}
+  .p-info{background:var(--accent-soft);color:var(--accent)}
+  .p-mut{background:var(--line-2);color:var(--ink-3)}
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
+  .callout.danger{border-left-color:var(--danger);background:var(--danger-soft)}
+  .callout.ok{border-left-color:var(--ok);background:var(--ok-soft)}
+  .callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+  .callout p:first-child{margin-top:0}
+  .callout p:last-child{margin-bottom:0}
+  .phases{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+  .phase{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:16px 18px;box-shadow:var(--shadow);border-top:3px solid var(--brand);display:flex;flex-direction:column}
+  .phase.hot{border-top-color:var(--danger)}
+  .phase.cool{border-top-color:var(--accent)}
+  .phase .ph{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .phase .pid{font-weight:700;font-size:14.5px}
+  .phase .pm{font-size:12.5px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .phase .pt{font-size:12.8px;color:var(--ink-2);margin:8px 0 0}
+  .phase .pd{font-size:12.3px;color:var(--ink-3);margin:8px 0 0;border-top:1px dashed var(--line);padding-top:8px}
+  .gantt{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--paper);padding:16px 18px;box-shadow:var(--shadow)}
+  .g{display:grid;grid-template-columns:250px repeat(7,1fr);gap:5px 4px;min-width:820px;align-items:center}
+  .g .hd{font-size:10.5px;color:var(--ink-3);text-align:center;font-variant-numeric:tabular-nums;font-weight:700}
+  .g .nm{font-size:12.3px;color:var(--ink-2);padding-right:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .g .cell{height:20px;border-radius:5px;background:var(--line-2)}
+  .g .cell.on{background:linear-gradient(90deg,#7b2fc4,#b47ae8)}
+  .g .cell.crit{background:linear-gradient(90deg,#8f0a20,#c8102e)}
+  .g .cell.ms{background:var(--ok);height:20px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12.3px;color:var(--ink-3);margin-top:14px}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:6px;vertical-align:-2px}
+  .svgbox{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:10px;box-shadow:var(--shadow);overflow-x:auto}
+  .svgbox svg{display:block;margin:0 auto;min-width:760px;width:100%;height:auto}
+  footer{border-top:1px solid var(--line);margin-top:20px;padding-top:22px;color:var(--ink-3);font-size:12.6px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:860px){.grid2{grid-template-columns:1fr}}
+  /* SVG theme-aware text */
+  .svgbox svg text{fill:var(--ink)}
+  .svgbox svg .t2{fill:var(--ink-2)}
+  .svgbox svg .t3{fill:var(--ink-3)}
+  .svgbox svg .ttl{fill:var(--ink);font-weight:700}
+  .svgbox svg .mono{font-family:"Cascadia Code",Consolas,monospace}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="kicker">Design Proposal · Subset BPMN Engine</div>
+    <h1>NetBpm —— 参照 Activiti 定义的<br>.NET 轻量子集流程引擎</h1>
+    <p>只做「顺序执行 / 分支合并 / 并行同步」三类语义，元素与解析规则照搬 Activiti 的 BPMN 2.0 定义，配一个基于 bpmn-js 的浏览器设计器。目标平台 .NET 10 LTS，数据库 SQL Server + MySQL。</p>
+    <div class="meta">
+      <span class="chip">.NET 10 LTS / C# 14</span>
+      <span class="chip">SQL Server + MySQL</span>
+      <span class="chip">27.5 人月（核心）</span>
+      <span class="chip">5 人 · 约 7 个月</span>
+      <span class="chip">P0 – P11 共 12 阶段</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- ==================== 0. 概览 ==================== -->
+  <section>
+    <h2><span class="no">0</span>方案概览</h2>
+    <p class="sub">用 Activiti 的「定义格式 + 解析行为 + 运行时语义」三件套，只实现其中一个子集</p>
+    <div class="kpis">
+      <div class="kpi"><div class="v">58 → 8</div><div class="l">BPMN 行为类</div></div>
+      <div class="kpi"><div class="v">25 → 13</div><div class="l">数据库表</div></div>
+      <div class="kpi"><div class="v">143 → 35</div><div class="l">Command 命令</div></div>
+      <div class="kpi"><div class="v">12</div><div class="l">明确不做的能力</div></div>
+      <div class="kpi"><div class="v">11%</div><div class="l">相对 Java 代码量</div></div>
+      <div class="kpi"><div class="v">554</div><div class="l">可直接对拍语料</div></div>
+    </div>
+    <div class="callout ok">
+      <p><b>它不是「移植」，也不是「从零发明语义」</b> —— 而是以 Activiti 为<b>行为字典</b>的受控子集实现：架构与命名向 Activiti 对齐（便于比对、招人、查资料），代码从零撰写（异步原生、无 Java 包袱）。</p>
+    </div>
+  </section>
+
+  <!-- ==================== 1. 范围收缩 ==================== -->
+  <section>
+    <h2><span class="no">1</span>范围边界：把复杂度砍在哪</h2>
+    <p class="sub">支持的元素与运行时语义全部照搬 Activiti 定义；12 项长尾能力整体砍掉 —— 它们占 Activiti 全部复杂度的 70% 以上</p>
+
+    <div class="svgbox">
+      <svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="范围收缩图">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+            <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <!-- 左：全量 -->
+        <rect x="30" y="52" width="238" height="228" rx="14" fill="var(--line-2)" stroke="var(--line)" stroke-width="1.5"/>
+        <text x="149" y="82" text-anchor="middle" class="ttl" font-size="15">Activiti 9.0.0 全量</text>
+        <text x="149" y="104" text-anchor="middle" class="t3" font-size="11.5">3,060 个 Java 文件 / 344,267 行</text>
+        <text x="52" y="140" class="t2" font-size="12.5">行为类</text><text x="252" y="140" text-anchor="end" class="t2" font-size="12.5" font-weight="700">58</text>
+        <text x="52" y="166" class="t2" font-size="12.5">Command</text><text x="252" y="166" text-anchor="end" class="t2" font-size="12.5" font-weight="700">143</text>
+        <text x="52" y="192" class="t2" font-size="12.5">持久化实体</text><text x="252" y="192" text-anchor="end" class="t2" font-size="12.5" font-weight="700">29 × 4 层</text>
+        <text x="52" y="218" class="t2" font-size="12.5">数据库表</text><text x="252" y="218" text-anchor="end" class="t2" font-size="12.5" font-weight="700">25</text>
+        <text x="52" y="244" class="t2" font-size="12.5">DDL 方言</text><text x="252" y="244" text-anchor="end" class="t2" font-size="12.5" font-weight="700">8</text>
+        <text x="52" y="270" class="t2" font-size="12.5">解析处理器</text><text x="252" y="270" text-anchor="end" class="t2" font-size="12.5" font-weight="700">34</text>
+
+        <!-- 中：砍掉的 -->
+        <rect x="330" y="52" width="238" height="228" rx="14" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="449" y="82" text-anchor="middle" class="ttl" font-size="15" fill="var(--danger)">砍掉 · 12 项长尾</text>
+        <text x="352" y="108" class="t3" font-size="11.5">（占全量复杂度 70%+）</text>
+        <g font-size="11.8" class="t2">
+          <text x="352" y="134">子流程 / 调用活动</text>
+          <text x="352" y="156">边界事件</text>
+          <text x="352" y="178">定时器 / 消息 / 信号 / 错误 / 补偿</text>
+          <text x="352" y="200">事件子流程 / 事件网关</text>
+          <text x="352" y="222">多实例（会签 / 串签）</text>
+          <text x="352" y="244">包容 / 复杂网关</text>
+          <text x="352" y="266">异步作业 / 重试 / 死信</text>
+        </g>
+
+        <!-- 右：本方案 -->
+        <rect x="632" y="52" width="238" height="228" rx="14" fill="var(--ok-soft)" stroke="var(--ok)" stroke-width="1.8"/>
+        <text x="751" y="82" text-anchor="middle" class="ttl" font-size="15" fill="var(--ok)">NetBpm 子集</text>
+        <text x="751" y="104" text-anchor="middle" class="t3" font-size="11.5">约 3.7 万行 C# + 6 千行 TS</text>
+        <text x="654" y="140" class="t2" font-size="12.5">行为类</text><text x="854" y="140" text-anchor="end" class="t2" font-size="12.5" font-weight="700">8 + 3</text>
+        <text x="654" y="166" class="t2" font-size="12.5">Command</text><text x="854" y="166" text-anchor="end" class="t2" font-size="12.5" font-weight="700">≈ 35</text>
+        <text x="654" y="192" class="t2" font-size="12.5">持久化仓储</text><text x="854" y="192" text-anchor="end" class="t2" font-size="12.5" font-weight="700">13 张表</text>
+        <text x="654" y="218" class="t2" font-size="12.5">数据库表</text><text x="854" y="218" text-anchor="end" class="t2" font-size="12.5" font-weight="700">13</text>
+        <text x="654" y="244" class="t2" font-size="12.5">DDL 方言</text><text x="854" y="244" text-anchor="end" class="t2" font-size="12.5" font-weight="700">2</text>
+        <text x="654" y="270" class="t2" font-size="12.5">解析处理器</text><text x="854" y="270" text-anchor="end" class="t2" font-size="12.5" font-weight="700">≈ 9</text>
+
+        <line x1="272" y1="166" x2="322" y2="166" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar)"/>
+        <line x1="572" y1="166" x2="624" y2="166" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar)"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ==================== 2. 支持的元素 ==================== -->
+  <section>
+    <h2><span class="no">2</span>支持的 BPMN 元素（子集定义）</h2>
+    <p class="sub">「照搬」的精确依据 —— 每个元素的 XML 标签、属性、以及对应的 Activiti 行为类</p>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>元素</th><th>XML 标签</th><th>关键属性</th><th>Activiti 行为类（照搬依据）</th><th>语义</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>开始事件</td><td><code>startEvent</code></td><td><code>id</code> <code>name</code></td>
+            <td><code>NoneStartEventActivityBehavior</code></td><td><span class="pill p-info">顺序</span></td>
+          </tr>
+          <tr>
+            <td>结束事件</td><td><code>endEvent</code></td><td><code>id</code> <code>name</code></td>
+            <td><code>NoneEndEventActivityBehavior</code></td><td><span class="pill p-info">顺序</span></td>
+          </tr>
+          <tr>
+            <td>顺序流</td><td><code>sequenceFlow</code></td><td><code>sourceRef</code> <code>targetRef</code><br><code>conditionExpression</code></td>
+            <td><code>TakeOutgoingSequenceFlowsOperation</code></td><td><span class="pill p-info">顺序</span></td>
+          </tr>
+          <tr>
+            <td><b>排他网关</b></td><td><code>exclusiveGateway</code></td><td><code>default</code></td>
+            <td><code>ExclusiveGatewayActivityBehavior</code></td><td><span class="pill p-warn">分支 / 合并</span></td>
+          </tr>
+          <tr>
+            <td><b>并行网关</b></td><td><code>parallelGateway</code></td><td>—（出口<b>不</b>判条件）</td>
+            <td><code>ParallelGatewayActivityBehavior</code></td><td><span class="pill p-danger">同步</span></td>
+          </tr>
+          <tr>
+            <td>用户任务</td><td><code>userTask</code></td>
+            <td><code>activiti:assignee</code><br><code>activiti:candidateUsers</code><br><code>activiti:candidateGroups</code><br><code>activiti:formKey</code></td>
+            <td><code>UserTaskActivityBehavior</code></td><td><span class="pill p-mut">人工</span></td>
+          </tr>
+          <tr>
+            <td>服务任务</td><td><code>serviceTask</code></td>
+            <td><code>activiti:class</code><br><code>activiti:delegateExpression</code><br><code>activiti:expression</code></td>
+            <td><code>ServiceTask*ActivityBehavior</code>（3 个）</td><td><span class="pill p-mut">自动</span></td>
+          </tr>
+          <tr>
+            <td>手工任务</td><td><code>manualTask</code></td><td><code>id</code></td>
+            <td><code>ManualTaskActivityBehavior</code></td><td><span class="pill p-mut">自动</span></td>
+          </tr>
+          <tr>
+            <td>脚本任务 <span class="pill p-warn">可选</span></td><td><code>scriptTask</code></td>
+            <td><code>scriptFormat</code><br><code>activiti:autoStoreVariables</code></td>
+            <td><code>ScriptTaskActivityBehavior</code></td><td><span class="pill p-mut">自动</span></td>
+          </tr>
+          <tr>
+            <td>流程</td><td><code>process</code></td><td><code>id</code> <code>name</code> <code>isExecutable</code></td>
+            <td><code>ProcessParser</code></td><td>—</td>
+          </tr>
+          <tr>
+            <td>图形信息</td><td><code>bpmndi:*</code></td>
+            <td><code>BPMNShape</code> <code>BPMNEdge</code><br><code>dc:Bounds</code> <code>di:waypoint</code></td>
+            <td><code>BpmnShapeParser</code> / <code>BpmnEdgeParser</code></td><td><span class="pill p-info">设计器必需</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn">
+      <p><b>「同步执行」的口径</b>：本文按经典三要素理解 —— 顺序流＝顺序执行，排他网关＝分支/合并，<b>并行网关＝同步执行</b>。若你的「同步」另有所指（如外部系统回调等待 / 多分支汇总回调），需在 P0 阶段澄清 —— 这会改变合并判定逻辑的设计。</p>
+    </div>
+  </section>
+
+  <!-- ==================== 3. 语料实测 ==================== -->
+  <section>
+    <h2><span class="no">3</span>实测依据：现成语料能覆盖多少</h2>
+    <p class="sub">对仓库 1,292 个 BPMN 测试文件做了分类扫描（<code>docs/tools/scan-corpus.py</code>），结论直接决定了测试策略</p>
+
+    <div class="kpis">
+      <div class="kpi"><div class="v">1,292</div><div class="l">BPMN 文件总数</div></div>
+      <div class="kpi" style="border-color:var(--ok)"><div class="v" style="color:var(--ok)">554</div><div class="l">仅含子集元素 · 可直接对拍（42.9%）</div></div>
+      <div class="kpi"><div class="v">738</div><div class="l">含子集外元素 · 需改造</div></div>
+      <div class="kpi"><div class="v">457</div><div class="l">纯顺序流（回归基线）</div></div>
+      <div class="kpi" style="border-color:var(--warn)"><div class="v" style="color:var(--warn)">49 + 48</div><div class="l">含网关（语义覆盖很薄）</div></div>
+      <div class="kpi" style="border-color:var(--danger)"><div class="v" style="color:var(--danger)">0</div><div class="l">排他 + 并行混合结构</div></div>
+    </div>
+
+    <h3>子集语料（554 个）的元素覆盖</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>元素 / 特征</th><th class="num">文件数</th><th class="num">占比</th><th style="width:34%">覆盖度</th><th>评价</th></tr></thead>
+        <tbody>
+          <tr><td><code>sequenceFlow</code></td><td class="num">547</td><td class="num">99%</td><td><div class="bar"><i style="width:99%"></i></div></td><td><span class="pill p-ok">充足</span></td></tr>
+          <tr><td><code>startEvent</code></td><td class="num">550</td><td class="num">99%</td><td><div class="bar"><i style="width:99%"></i></div></td><td><span class="pill p-ok">充足</span></td></tr>
+          <tr><td><code>endEvent</code></td><td class="num">535</td><td class="num">97%</td><td><div class="bar"><i style="width:97%"></i></div></td><td><span class="pill p-ok">充足</span></td></tr>
+          <tr><td><code>userTask</code></td><td class="num">382</td><td class="num">69%</td><td><div class="bar"><i style="width:69%"></i></div></td><td><span class="pill p-ok">充足</span></td></tr>
+          <tr><td><code>serviceTask</code></td><td class="num">154</td><td class="num">28%</td><td><div class="bar"><i style="width:28%"></i></div></td><td><span class="pill p-ok">够用</span></td></tr>
+          <tr><td><code>exclusiveGateway</code></td><td class="num">49</td><td class="num">9%</td><td><div class="bar"><i class="warnbar" style="width:9%"></i></div></td><td><span class="pill p-warn">偏薄</span></td></tr>
+          <tr><td><code>parallelGateway</code></td><td class="num">48</td><td class="num">9%</td><td><div class="bar"><i class="warnbar" style="width:9%"></i></div></td><td><span class="pill p-warn">偏薄</span></td></tr>
+          <tr><td>带 <code>conditionExpression</code></td><td class="num">55</td><td class="num">10%</td><td><div class="bar"><i class="warnbar" style="width:10%"></i></div></td><td><span class="pill p-warn">偏薄</span></td></tr>
+          <tr><td>带 <code>default</code> 默认流</td><td class="num">12</td><td class="num">2%</td><td><div class="bar"><i class="warnbar" style="width:2%"></i></div></td><td><span class="pill p-danger">不足</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout danger">
+      <p><b>关键发现</b>：现成语料能覆盖「顺序流」，但<b>几乎覆盖不了「网关」—— 而网关恰恰是本方案的全部难度所在</b>。</p>
+      <p>· 457 个纯顺序流用例 → 作为<b>回归基线</b>非常充足；<br>
+         · 网关只有 49 + 48 个，且<b>没有一个是「排他 + 并行」混合结构</b>；条件表达式仅 10%、默认流仅 2%。</p>
+      <p>→ 因此 <b>网关语义的验证语料必须自建</b>（计划 §9.3 建议自建约 120 个，用脚本生成保证组合是穷举的、而非「想起来的」）。这是整个计划里最容易被忽略、却最可能导致「上线才发现问题」的一处。</p>
+    </div>
+
+    <h3>不可直接使用的 738 个文件 —— 排除主力</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>命中元素</th><th class="num">文件数</th><th style="width:44%">出现频次</th></tr></thead>
+        <tbody>
+          <tr><td><code>boundaryEvent</code> 边界事件</td><td class="num">245</td><td><div class="bar"><i style="width:100%"></i></div></td></tr>
+          <tr><td><code>subProcess</code> 子流程</td><td class="num">221</td><td><div class="bar"><i style="width:90%"></i></div></td></tr>
+          <tr><td><code>multiInstanceLoopCharacteristics</code> 多实例</td><td class="num">161</td><td><div class="bar"><i style="width:66%"></i></div></td></tr>
+          <tr><td><code>timerEventDefinition</code> 定时器</td><td class="num">142</td><td><div class="bar"><i style="width:58%"></i></div></td></tr>
+          <tr><td><code>messageEventDefinition</code> 消息</td><td class="num">104</td><td><div class="bar"><i style="width:42%"></i></div></td></tr>
+          <tr><td><code>callActivity</code> 调用活动</td><td class="num">97</td><td><div class="bar"><i style="width:40%"></i></div></td></tr>
+          <tr><td><code>signalEventDefinition</code> 信号</td><td class="num">82</td><td><div class="bar"><i style="width:33%"></i></div></td></tr>
+          <tr><td><code>receiveTask</code> 接收任务</td><td class="num">74</td><td><div class="bar"><i style="width:30%"></i></div></td></tr>
+          <tr><td><code>terminateEventDefinition</code> 终止</td><td class="num">61</td><td><div class="bar"><i style="width:25%"></i></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ==================== 4. 架构 ==================== -->
+  <section>
+    <h2><span class="no">4</span>解决方案架构</h2>
+    <p class="sub">模块划分向 Activiti 对齐 —— 便于比对、便于招人、便于查资料</p>
+
+    <div class="svgbox">
+      <svg viewBox="0 0 900 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="分层架构图">
+        <defs>
+          <marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+            <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <!-- 前端 -->
+        <rect x="40" y="24" width="820" height="82" rx="12" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+        <text x="60" y="50" class="ttl" font-size="14" fill="var(--accent)">web / designer —— 浏览器设计器</text>
+        <text x="60" y="72" class="t2" font-size="12">bpmn-js + 自定义 moddle 扩展（activiti: 命名空间）· 调色板裁剪 · 属性面板 · 即时校验</text>
+        <text x="60" y="92" class="t2" font-size="12">只读实例视图（用 ACT_HI_ACTINST 着色，替代 Activiti 的 image-generator）</text>
+
+        <!-- REST -->
+        <rect x="40" y="128" width="820" height="70" rx="12" fill="var(--paper)" stroke="var(--line)" stroke-width="1.6"/>
+        <text x="60" y="154" class="ttl" font-size="14">NetBpm.Rest · NetBpm.Runtime</text>
+        <text x="60" y="176" class="t2" font-size="12">Minimal API：部署 / 启动 / 待办 / 完成任务 / 变量 / 历史 / 流程图数据 · 组合根与 DI</text>
+
+        <!-- 引擎核心 -->
+        <rect x="40" y="222" width="500" height="228" rx="12" fill="var(--brand-soft)" stroke="var(--brand)" stroke-width="1.8"/>
+        <text x="60" y="248" class="ttl" font-size="14" fill="var(--brand)">NetBpm.Engine —— 运行时（核心）</text>
+        <g font-size="12" class="t2">
+          <text x="60" y="274">执行树：ExecutionEntity · IsActive / IsConcurrent / IsScope</text>
+          <text x="60" y="296">Agenda 调度 + 3 个 Operation（非递归）</text>
+          <text x="60" y="318">8 个 ActivityBehavior（顺序 / 排他 / 并行 / 任务）</text>
+          <text x="60" y="340">CommandContext + 拦截器链（日志 / 事务 / 上下文）</text>
+          <text x="60" y="362">事件分发器 · 历史记录器 · 一级缓存与脏检查</text>
+          <text x="60" y="384">命令 ≈ 35 个（对照 Activiti 143 个）</text>
+        </g>
+        <rect x="300" y="404" width="224" height="30" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.4" stroke-dasharray="4 3"/>
+        <text x="412" y="424" text-anchor="middle" font-size="11.5" fill="var(--danger)" font-weight="700">难点集中区 · 关键路径 P6（5.0 人月）</text>
+
+        <!-- 右列三个模块 -->
+        <rect x="564" y="222" width="296" height="66" rx="12" fill="var(--paper)" stroke="var(--line)" stroke-width="1.6"/>
+        <text x="582" y="246" class="ttl" font-size="13">NetBpm.Bpmn.Model</text>
+        <text x="582" y="266" class="t2" font-size="11.5">~25 类（对照 Activiti 94 个）</text>
+
+        <rect x="564" y="300" width="296" height="66" rx="12" fill="var(--paper)" stroke="var(--line)" stroke-width="1.6"/>
+        <text x="582" y="324" class="ttl" font-size="13">NetBpm.Bpmn.Converter</text>
+        <text x="582" y="344" class="t2" font-size="11.5">XML ⇄ Model · 流式读取 · 往返保真</text>
+
+        <rect x="564" y="378" width="296" height="66" rx="12" fill="var(--paper)" stroke="var(--line)" stroke-width="1.6"/>
+        <text x="582" y="402" class="ttl" font-size="13">NetBpm.El · Bpmn.Validation</text>
+        <text x="582" y="422" class="t2" font-size="11.5">JUEL 子集（自研）· 8 条校验规则</text>
+
+        <!-- 持久化 -->
+        <rect x="40" y="478" width="820" height="66" rx="12" fill="var(--paper)" stroke="var(--line)" stroke-width="1.6"/>
+        <text x="60" y="502" class="ttl" font-size="14">NetBpm.Persistence</text>
+        <text x="60" y="524" class="t2" font-size="12">Dapper 仓储 · 13 张 <code style="font-size:11px">ACT_*</code> 表（沿用 Activiti 表名与列名）· DbIdGenerator 等价 ID 生成器 · 事务</text>
+
+        <!-- 数据库 -->
+        <rect x="40" y="562" width="820" height="42" rx="12" fill="var(--line-2)" stroke="var(--line)" stroke-width="1.6"/>
+        <text x="450" y="589" text-anchor="middle" class="ttl" font-size="13">SQL Server 　|　 MySQL　（DDL 取自 Activiti 的 mssql / mysql 建表脚本子集）</text>
+
+        <line x1="450" y1="106" x2="450" y2="124" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="450" y1="198" x2="450" y2="218" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="450" y1="450" x2="450" y2="474" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="450" y1="544" x2="450" y2="558" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar2)"/>
+        <line x1="544" y1="252" x2="560" y2="252" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar2)"/>
+      </svg>
+    </div>
+
+    <h3>技术选型映射</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>领域</th><th>Activiti (Java)</th><th>本方案 (.NET)</th><th>选型理由</th></tr></thead>
+        <tbody>
+          <tr><td>运行时</td><td>Java 25</td><td><b>.NET 10 LTS</b></td><td>.NET 8/9 均于 2026-11 EOL，不可作基线</td></tr>
+          <tr><td>XML 解析</td><td>StAX <code>XMLStreamReader</code></td><td><code>System.Xml.XmlReader</code></td><td>保持<b>流式</b>读取，不整树加载</td></tr>
+          <tr><td>数据访问</td><td>MyBatis XML Mapper</td><td><b>Dapper</b>（手写 SQL）</td><td>贴近 MyBatis 心智：SQL 可控、无隐式行为。<b>不建议 EF Core</b>（跟踪/延迟加载会给「单命令单事务」引入不确定性）</td></tr>
+          <tr><td>表达式语言</td><td>JUEL (jakarta)</td><td><b>自研 JUEL 子集</b></td><td>不引第三方，见风险 R2</td></tr>
+          <tr><td>依赖注入</td><td>Spring</td><td>Microsoft.Extensions.DI</td><td>—</td></tr>
+          <tr><td>图形</td><td>Java AWT</td><td><b>不做</b> → 前端 bpmn-js 渲染</td><td>省掉整个 image-generator 模块</td></tr>
+          <tr><td>设计器</td><td>bpmn-js（bpmn.io）</td><td>bpmn-js + moddle 扩展</td><td>同源方案，见 §5</td></tr>
+          <tr><td>测试</td><td>JUnit + H2</td><td>xUnit + Testcontainers</td><td>起真实 SQL Server / MySQL</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ==================== 5. 设计器 ==================== -->
+  <section>
+    <h2><span class="no">5</span>浏览器设计器方案</h2>
+    <p class="sub">选 bpmn-js + 自定义 moddle 扩展，不自研画布 —— 因为「照搬 Activiti 定义」这件事几乎零成本</p>
+
+    <div class="grid2">
+      <div class="card">
+        <h3 style="margin-top:0">为什么是 bpmn-js</h3>
+        <ul>
+          <li><b>格式天然对齐</b>：bpmn-js 是 BPMN 2.0 的参考实现级工具链，它输出的 <code>BPMN 2.0 XML + BPMNDI</code> <b>正好就是 Activiti 转换器的输入契约</b>。自研画布反而要重新对齐一遍格式。</li>
+          <li><b>与 Activiti 同源</b>：Activiti 6 之后官方即采用 bpmn-js 替代早期基于 Oryx 的 Activiti Modeler。</li>
+          <li><b>省 3–4 人月</b>：拖拽、连线、吸附、对齐、撤销重做、导入导出、缩放平移全部自带。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">需要自己做的五件事</h3>
+        <ol style="padding-left:22px;margin:10px 0">
+          <li><b><code>activiti-moddle.json</code> 描述符</b> —— 声明 <code>activiti:</code> 命名空间下的全部属性。没有它，bpmn-js 会在往返中<b>丢掉这些属性</b>。</li>
+          <li><b>调色板裁剪</b> —— 只留子集元素，移除其余按钮。</li>
+          <li><b>属性面板</b> —— 顺序流条件表达式 + 默认流开关；用户任务办理人/候选组；服务任务实现方式三选一。</li>
+          <li><b>即时校验</b> —— 前端高亮 + 后端 <code>Bpmn.Validation</code> 复校（前端校验只是体验，不能作可信边界）。</li>
+          <li><b>只读实例视图</b> —— 复用 Viewer + <code>ACT_HI_ACTINST</code> 着色。</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><b>契约只有两个端点</b>：<code>POST /api/designer/deploy</code>（提交 BPMN XML）、<code>GET /api/designer/definition/{id}/xml</code>（回显）。设计器<b>不直接操作数据库</b>，一切经后端解析 → 校验 → 落库。</p>
+      <p>技术栈：TypeScript + Vite + bpmn-js@18 + bpmn-js-properties-panel，打包为可嵌入的 Web Component / iframe。</p>
+    </div>
+  </section>
+
+  <!-- ==================== 6. 运行时语义 ==================== -->
+  <section>
+    <h2><span class="no">6</span>运行时语义：两条必须照搬的 Activiti 特有行为</h2>
+    <p class="sub">这两条<b>不是 BPMN 规范原文</b>，是 Activiti 的实现选择 —— 照搬它们才能保证同一份流程在两端行为一致</p>
+
+    <div class="grid2">
+      <div class="card" style="border-top:3px solid var(--warn)">
+        <h3 style="margin-top:0">① 排他网关：取「第一个条件为真」</h3>
+        <p style="font-size:13.5px;color:var(--ink-2)">源码依据：<code>ExclusiveGatewayActivityBehavior.leave()</code></p>
+        <ul style="font-size:13.5px">
+          <li>遍历出口流，取<b>第一条</b>「条件为真且不是 default」的流 → 立即停止选择</li>
+          <li>都不满足 → 走 <code>default</code> 流</li>
+          <li>连 default 都没有 → <b>抛异常</b></li>
+          <li>⚠️ Activiti <b>没有</b>「多条件同时为真则报错」的检查（BPMN 规范建议报错）—— <b>不要「顺手加个校验」</b>，那会导致两端不一致</li>
+        </ul>
+      </div>
+      <div class="card" style="border-top:3px solid var(--danger)">
+        <h3 style="margin-top:0">② 并行网关：按「入流条数」计数</h3>
+        <p style="font-size:13.5px;color:var(--ink-2)">源码依据：<code>ParallelGatewayActivityBehavior.execute()</code></p>
+        <p style="font-size:13px;color:var(--ink-3);font-style:italic;margin-top:0">类注释中明确写了这是对规范 p.436 的有意偏离：「<i>if two tokens would arrive through the same sequence flow, our implementation would activate the gateway</i>」</p>
+        <ul style="font-size:13.5px">
+          <li>先 <code>inactivate()</code> 把自己置为非活动</li>
+          <li>查「当前活动 = 同一网关」的<b>非活动</b>执行数</li>
+          <li>判定用 <b>总数相等</b>（≠ 每条流都到过）</li>
+          <li>✅ 到齐 → 删除其余执行 → Fork</li>
+          <li>⏸️ 未到齐 → <b>什么都不做，静默等待</b></li>
+          <li>⚠️ 并行网关出口 <b>不做条件判定</b></li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>推进模型：Agenda + Operation（不要写成递归）</h3>
+    <div class="svgbox">
+      <svg viewBox="0 0 880 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agenda 调度模型">
+        <defs>
+          <marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+            <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="24" y="30" width="180" height="52" rx="10" fill="var(--brand-soft)" stroke="var(--brand)" stroke-width="1.6"/>
+        <text x="114" y="53" text-anchor="middle" class="ttl" font-size="12.5">命令入口（1 个命令 = 1 事务）</text>
+        <text x="114" y="71" text-anchor="middle" class="t3" font-size="11">StartProcessInstance</text>
+
+        <rect x="248" y="30" width="150" height="52" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+        <text x="323" y="53" text-anchor="middle" class="ttl" font-size="12.5" fill="var(--accent)">Agenda 队列</text>
+        <text x="323" y="71" text-anchor="middle" class="t3" font-size="11">循环排空 drain</text>
+
+        <rect x="442" y="18" width="410" height="76" rx="10" fill="var(--paper)" stroke="var(--line)" stroke-width="1.5"/>
+        <text x="462" y="40" class="t2" font-size="12">① <tspan font-weight="700">ContinueProcessOperation</tspan> — 执行当前元素的 Behavior</text>
+        <text x="462" y="61" class="t2" font-size="12">② <tspan font-weight="700">TakeOutgoingSequenceFlowsOperation</tspan> — 选流、建并行子执行</text>
+        <text x="462" y="82" class="t2" font-size="12">③ <tspan font-weight="700">EndExecutionOperation</tspan> — 清理执行 / 判定流程实例结束</text>
+
+        <line x1="206" y1="56" x2="244" y2="56" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar3)"/>
+        <line x1="400" y1="56" x2="438" y2="56" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar3)"/>
+
+        <path d="M438,90 C400,118 380,118 323,118 C266,118 258,100 258,84" fill="none" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar3)"/>
+        <text x="340" y="136" text-anchor="middle" class="t3" font-size="11">行为内部又可 plan 新操作 → 回到队列</text>
+
+        <rect x="24" y="176" width="828" height="46" rx="10" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+        <text x="46" y="205" class="ttl" font-size="12.5" fill="var(--danger)">为什么不用递归：递归写法在并行 Join 场景下会因「谁先到达」的时序不确定而产生错误结果 —— 这不是设计偏好，是正确性要求</text>
+
+        <rect x="24" y="240" width="828" height="46" rx="10" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+        <text x="46" y="269" class="ttl" font-size="12.5" fill="var(--warn)">硬约束：事务内必须把 Agenda 排空；不要把排放到事务外，也不要在循环里 await 外部 IO（否则事务时长不可控）</text>
+      </svg>
+    </div>
+
+    <h3>三处相对 Activiti 的「现代化」改动</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>改动</th><th>Activiti</th><th>本方案</th><th>理由</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>异步模型</td><td>同步阻塞</td><td><b>全链路 <code>ValueTask</code></b></td>
+            <td>.NET 原生；但<b>必须保持「单命令内同步排空 Agenda」</b>，否则语义漂移</td>
+          </tr>
+          <tr>
+            <td>上下文传递</td><td><code>ThreadLocal</code> + <code>Context</code> 静态类</td><td><b><code>AsyncLocal&lt;CommandContext&gt;</code></b></td>
+            <td>.NET 下 <code>ThreadLocal</code> 在 async 续体间会丢/串。<b>加分析器规则禁止 <code>[ThreadStatic]</code></b></td>
+          </tr>
+          <tr>
+            <td>变量序列化</td><td>Java 原生序列化 → <code>ACT_GE_BYTEARRAY</code></td><td><b>JSON (System.Text.Json)</b></td>
+            <td>Java 序列化产物 .NET 读不了；JSON 兼具可读性与跨语言性</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ==================== 7. 数据库 ==================== -->
+  <section>
+    <h2><span class="no">7</span>数据库设计：沿用 <code>ACT_*</code> 表名与列名</h2>
+    <p class="sub">25 张 → 13 张；这个决定是本方案「可对拍」能力的根基</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>类别</th><th>保留</th><th>裁剪</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>运行时</b></td>
+            <td><code>ACT_GE_PROPERTY</code> <code>ACT_GE_BYTEARRAY</code> <code>ACT_RE_DEPLOYMENT</code> <code>ACT_RE_PROCDEF</code> <code>ACT_RU_EXECUTION</code> <code>ACT_RU_TASK</code> <code>ACT_RU_IDENTITYLINK</code> <code>ACT_RU_VARIABLE</code><br><span class="pill p-ok">8 张</span></td>
+            <td><code>ACT_RE_MODEL</code> <code>ACT_RU_JOB</code> <code>ACT_RU_TIMER_JOB</code> <code>ACT_RU_SUSPENDED_JOB</code> <code>ACT_RU_DEADLETTER_JOB</code> <code>ACT_RU_EVENT_SUBSCR</code> <code>ACT_EVT_LOG</code> <code>ACT_PROCDEF_INFO</code> <code>ACT_RU_INTEGRATION</code><br><span class="pill p-danger">9 张</span></td>
+          </tr>
+          <tr>
+            <td><b>历史</b></td>
+            <td><code>ACT_HI_PROCINST</code> <code>ACT_HI_ACTINST</code> <code>ACT_HI_TASKINST</code> <code>ACT_HI_VARINST</code> <code>ACT_HI_IDENTITYLINK</code><br><span class="pill p-ok">5 张</span></td>
+            <td><code>ACT_HI_DETAIL</code> <code>ACT_HI_COMMENT</code> <code>ACT_HI_ATTACHMENT</code><br><span class="pill p-danger">3 张</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid2" style="margin-top:18px">
+      <div class="card">
+        <h3 style="margin-top:0">沿用表结构的四项收益</h3>
+        <ul style="font-size:13.5px">
+          <li><b>零设计成本</b> —— DDL 直接取 Activiti 建表脚本的子集</li>
+          <li><b>对拍可行</b> —— 两端读写同一表结构 → 可做<b>库级 dump 差异比对</b>（最强验证手段）</li>
+          <li><b>灰度可行</b> —— 同一套库，Java 跑存量 / .NET 跑新增</li>
+          <li><b>生态复用</b> —— 基于 <code>ACT_*</code> 的报表、监控工具可直接用</li>
+        </ul>
+      </div>
+      <div class="card" style="border-top:3px solid var(--danger)">
+        <h3 style="margin-top:0">⚠️ ID 生成器必须逐行对齐</h3>
+        <p style="font-size:13.5px">Activiti 9 默认 <code>DbIdGenerator</code>：从 <code>ACT_GE_PROPERTY</code> 读 <code>next.dbid</code>，<b>一次性占走一个区块</b>（<code>idBlockSize</code>，默认 <b>2500</b>），进程内自增发放，用尽再占下一块。</p>
+        <p style="font-size:13.5px;color:var(--danger)">若改成 UUID 或数据库自增，两端 ID 空间不同，<b>对拍的库级 diff 会全线失败</b>。</p>
+        <p style="font-size:12.5px;color:var(--ink-3)">初值：<code>('schema.version','8.1.4',1)</code>、<code>('next.dbid','1',1)</code></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== 8. 阶段计划 ==================== -->
+  <section>
+    <h2><span class="no">8</span>分阶段开发计划（P0 – P11）</h2>
+    <p class="sub">合计 <b>27.5 人月</b>（核心）/ 31–35 人月（含生产硬化、文档、示例工程）</p>
+
+    <div class="phases">
+      <div class="phase cool">
+        <div class="ph"><span class="pid">P0 · 工程底座</span><span class="pm">0.5 人月</span></div>
+        <p class="pt">SLNX 骨架、集中包版本、CI、日志/异常/DI、分析器规则（禁 <code>[ThreadStatic]</code>）</p>
+        <p class="pd">验收：CI 在 PR 上全绿；空引擎跑通一个 NoOpCommand</p>
+      </div>
+      <div class="phase">
+        <div class="ph"><span class="pid">P1 · BPMN 模型层</span><span class="pm">1.0 人月</span></div>
+        <p class="pt">~25 个模型类（对照 Activiti 94 个）</p>
+        <p class="pd">验收：模型单测全绿；类名/属性名对照表评审通过</p>
+      </div>
+      <div class="phase">
+        <div class="ph"><span class="pid">P2 · BPMN 转换层</span><span class="pm">3.0 人月</span></div>
+        <p class="pt">流式 XML 读取、10 个元素转换器、6 个解析器、DI、扩展属性、反向导出</p>
+        <p class="pd">验收：<b>554 个语料 100% 解析成功</b>；往返保真零丢失</p>
+      </div>
+      <div class="phase hot">
+        <div class="ph"><span class="pid">P3 · 表达式语言</span><span class="pm">2.5 人月</span></div>
+        <p class="pt">词法/语法/AST/求值器、类型转换、方法调用解析</p>
+        <p class="pd">验收：与 JUEL 对拍 ≥200 条用例逐条一致（含隐式转换边界）</p>
+      </div>
+      <div class="phase cool">
+        <div class="ph"><span class="pid">P4 · 校验层</span><span class="pm">0.5 人月</span></div>
+        <p class="pt">8 条规则：无出流、排他网关默认流、孤立节点、ID 唯一、并行网关入出流…</p>
+        <p class="pd">验收：每条规则配正/反用例；错误可定位到元素 ID</p>
+      </div>
+      <div class="phase hot">
+        <div class="ph"><span class="pid">P5 · 持久化层</span><span class="pm">3.0 人月</span></div>
+        <p class="pt">Dapper 仓储（13 表）、DbIdGenerator 等价实现、一级缓存与脏检查、事务拦截器、双库 DDL</p>
+        <p class="pd">验收：对拍 <code>ACT_*</code> 行长一致；并发取 ID 无重复无空洞</p>
+      </div>
+      <div class="phase hot">
+        <div class="ph"><span class="pid">P6 · 引擎运行时</span><span class="pm">5.0 人月</span></div>
+        <p class="pt">执行树、Agenda + 3 个 Operation、8 个 Behavior、CommandContext + 拦截器链、≈35 个命令</p>
+        <p class="pd">验收：三类语义对拍一致率 ≥99.5%；<b>执行树快照逐节点比对通过</b>（本阶段是全部难点所在）</p>
+      </div>
+      <div class="phase">
+        <div class="ph"><span class="pid">P7 · 任务与身份</span><span class="pm">1.5 人月</span></div>
+        <p class="pt">UserTask 全生命周期（create / assignee / candidate / claim / complete）、IdentityLink</p>
+        <p class="pd">验收：382 个含 userTask 的语料全跑通；候选组解析与 Activiti 一致</p>
+      </div>
+      <div class="phase cool">
+        <div class="ph"><span class="pid">P8 · 设计器前端</span><span class="pm">3.5 人月</span></div>
+        <p class="pt">bpmn-js 集成、moddle 扩展、调色板裁剪、属性面板、即时校验、只读实例视图</p>
+        <p class="pd">验收：画出全部子集元素，后端解析成功率 100%；<b>往返不丢属性</b></p>
+      </div>
+      <div class="phase">
+        <div class="ph"><span class="pid">P9 · REST + 宿主</span><span class="pm">2.5 人月</span></div>
+        <p class="pt">Minimal API 端点、认证授权钩子、组合根</p>
+        <p class="pd">验收：一条完整业务流（申请→审批→并行会签→归档）端到端跑通</p>
+      </div>
+      <div class="phase hot">
+        <div class="ph"><span class="pid">P10 · 对拍验证体系</span><span class="pm">2.5 人月</span></div>
+        <p class="pt">Java 预言机跑批工具、三维度比对器、554 现成 + 120 自建语料、CI 集成</p>
+        <p class="pd">验收：一致率 ≥99.5%，差异清单 100% 有结论</p>
+      </div>
+      <div class="phase">
+        <div class="ph"><span class="pid">P11 · 硬化与文档</span><span class="pm">2.0 人月</span></div>
+        <p class="pt">并发压测、长流程性能、崩溃恢复、部署文档、开发指南、示例工程</p>
+        <p class="pd">验收：≥500 流程实例/秒启动；新人 1 天上手</p>
+      </div>
+    </div>
+
+    <h3>排期（5 人 · 约 7 个月）</h3>
+    <div class="gantt">
+      <div class="g">
+        <div class="hd" style="text-align:left">阶段</div>
+        <div class="hd">M1</div><div class="hd">M2</div><div class="hd">M3</div><div class="hd">M4</div><div class="hd">M5</div><div class="hd">M6</div><div class="hd">M7</div>
+
+        <div class="nm">P0 工程底座</div>
+        <div class="cell on"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P1 BPMN 模型层</div>
+        <div class="cell on"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P2 转换层</div>
+        <div class="cell"></div><div class="cell on"></div><div class="cell on"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P3 表达式语言</div>
+        <div class="cell"></div><div class="cell on"></div><div class="cell on"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P4 校验层</div>
+        <div class="cell"></div><div class="cell"></div><div class="cell on"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P5 持久化层</div>
+        <div class="cell"></div><div class="cell on"></div><div class="cell on"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm" style="font-weight:700">P6 引擎运行时 ★关键路径</div>
+        <div class="cell"></div><div class="cell"></div><div class="cell crit"></div><div class="cell crit"></div><div class="cell crit"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P7 任务与身份</div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell on"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P8 设计器前端</div>
+        <div class="cell on"></div><div class="cell on"></div><div class="cell on"></div><div class="cell on"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+
+        <div class="nm">P9 REST + 宿主</div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell on"></div><div class="cell on"></div><div class="cell"></div>
+
+        <div class="nm">P10 对拍验证体系</div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell on"></div><div class="cell on"></div><div class="cell on"></div><div class="cell"></div>
+
+        <div class="nm">P11 硬化与文档</div>
+        <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell on"></div>
+
+        <div class="nm" style="font-weight:700;color:var(--ok)">◆ 里程碑</div>
+        <div class="cell"></div><div class="cell"></div><div class="cell ms"></div><div class="cell"></div><div class="cell ms"></div><div class="cell"></div><div class="cell ms"></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:linear-gradient(90deg,#7b2fc4,#b47ae8)"></i>普通阶段</span>
+        <span><i style="background:linear-gradient(90deg,#8f0a20,#c8102e)"></i>关键路径 P6（不可分担）</span>
+        <span><i style="background:var(--ok)"></i>里程碑：M3 POC 门禁 · M5 引擎完成 · M7 发布 1.0</span>
+      </div>
+    </div>
+
+    <div class="callout">
+      <p><b>关键路径</b>：P0 → P1 → { P2 | P3 | P5 } → <b>P6</b> → P7 → P9 → P10 → P11</p>
+      <p>P2 / P3 / P5 在 P1 完成后可三线并行；P8 设计器只需 P1 交付的「元素契约」即可同时开工；P10 对拍在 P6 启动后即滚动搭建。</p>
+      <p><b>人员配置</b>：引擎架构师（独占 P6，不可分担）· 后端 A（P2→P4）· 后端 B（P3→P10）· 后端 C（P5→P9）· 前端（P8）。<b>4 人 → 顺延至 9–10 个月；不建议低于 3 人</b>。</p>
+    </div>
+  </section>
+
+  <!-- ==================== 9. 对拍验证 ==================== -->
+  <section>
+    <h2><span class="no">9</span>质量方法：对拍验证（Differential Testing）</h2>
+    <p class="sub">把 Activiti Java 版当作「预言机」—— 这是「照搬语义」策略最核心的红利，比自建基准便宜一个数量级</p>
+
+    <div class="svgbox">
+      <svg viewBox="0 0 880 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="对拍验证流程">
+        <defs>
+          <marker id="ar4" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+            <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--ink-3)"/>
+          </marker>
+        </defs>
+
+        <rect x="270" y="20" width="340" height="54" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+        <text x="440" y="43" text-anchor="middle" class="ttl" font-size="13" fill="var(--accent)">同一份 BPMN + 同一操作脚本</text>
+        <text x="440" y="62" text-anchor="middle" class="t3" font-size="11.5">554 现成语料 + 120 自建语料</text>
+
+        <line x1="330" y1="78" x2="215" y2="128" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar4)"/>
+        <line x1="550" y1="78" x2="665" y2="128" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar4)"/>
+
+        <rect x="80" y="134" width="270" height="72" rx="10" fill="var(--paper)" stroke="var(--ok)" stroke-width="1.8"/>
+        <text x="215" y="159" text-anchor="middle" class="ttl" font-size="13">Java Activiti 版</text>
+        <text x="215" y="179" text-anchor="middle" class="t2" font-size="11.5">预言机 · 产出预期真值</text>
+        <text x="215" y="196" text-anchor="middle" class="t3" font-size="11">无需自建基准</text>
+
+        <rect x="530" y="134" width="270" height="72" rx="10" fill="var(--paper)" stroke="var(--brand)" stroke-width="1.8"/>
+        <text x="665" y="159" text-anchor="middle" class="ttl" font-size="13" fill="var(--brand)">NetBpm .NET 版</text>
+        <text x="665" y="179" text-anchor="middle" class="t2" font-size="11.5">被测对象</text>
+        <text x="665" y="196" text-anchor="middle" class="t3" font-size="11">同一份流程定义</text>
+
+        <line x1="215" y1="210" x2="360" y2="252" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar4)"/>
+        <line x1="665" y1="210" x2="520" y2="252" stroke="var(--ink-3)" stroke-width="1.6" marker-end="url(#ar4)"/>
+
+        <rect x="240" y="258" width="400" height="134" rx="10" fill="var(--line-2)" stroke="var(--line)" stroke-width="1.6"/>
+        <text x="440" y="282" text-anchor="middle" class="ttl" font-size="13">三维度比对</text>
+
+        <rect x="258" y="296" width="364" height="26" rx="7" fill="var(--paper)" stroke="var(--line)" stroke-width="1.2"/>
+        <text x="272" y="314" class="t2" font-size="11.5">① API 返回值 / DTO 结构</text>
+        <text x="608" y="314" text-anchor="end" class="t3" font-size="11">目标 ≥99.5%</text>
+
+        <rect x="258" y="328" width="364" height="26" rx="7" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.4"/>
+        <text x="272" y="346" font-size="11.5" fill="var(--danger)" font-weight="700">② ACT_* 行快照（表结构相同！）</text>
+        <text x="608" y="346" text-anchor="end" font-size="11" fill="var(--danger)">目标 ≥99.5%</text>
+
+        <rect x="258" y="360" width="364" height="26" rx="7" fill="var(--paper)" stroke="var(--line)" stroke-width="1.2"/>
+        <text x="272" y="378" class="t2" font-size="11.5">③ 事件序列（ACTIVITY_* / SEQUENCEFLOW_TAKEN）</text>
+        <text x="608" y="378" text-anchor="end" class="t3" font-size="11">目标 ≥99%</text>
+      </svg>
+    </div>
+
+    <div class="callout ok">
+      <p><b>② 是杀手锏。</b>因为沿用 <code>ACT_*</code> 表名与列名，两端跑完后可以直接 dump 所有行做<b>逐列比对</b> —— 这能捕获 API 层看不出的执行树内部差异：<code>IS_CONCURRENT_</code> / <code>IS_SCOPE_</code> 标志位错、子执行多建/少建、Join 时该删的执行没删。</p>
+      <p>若当初选了「自定义表结构」，这一整套验证手段都不可用，只能退回到靠 API 返回值猜内部状态。<b>这正是沿用表结构那个决定的真正价值。</b></p>
+    </div>
+
+    <h3>语料策略（基于 §3 实测）</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>来源</th><th class="num">数量</th><th>用途</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>现成 · 纯顺序流</td><td class="num">457</td><td>回归基线 —— 保证基础路径不退化</td><td><span class="pill p-ok">直接可用</span></td></tr>
+          <tr><td>现成 · 含排他网关</td><td class="num">49</td><td>分支 / 合并语义</td><td><span class="pill p-ok">直接可用</span></td></tr>
+          <tr><td>现成 · 含并行网关</td><td class="num">48</td><td>同步语义</td><td><span class="pill p-ok">直接可用</span></td></tr>
+          <tr><td>自建 · 网关组合</td><td class="num">~60</td><td><b>排他 + 并行混合结构</b>（现成 0 个）、嵌套分支、菱形合并</td><td><span class="pill p-danger">必须自建</span></td></tr>
+          <tr><td>自建 · 条件表达式</td><td class="num">~40</td><td>多条件全假走 default、表达式边界（null / 类型转换 / 短路）</td><td><span class="pill p-danger">必须自建</span></td></tr>
+          <tr><td>自建 · 阻抗用例</td><td class="num">~20</td><td>同一入流多 token、Join 部分到达即挂起、单入单出网关</td><td><span class="pill p-danger">必须自建</span></td></tr>
+          <tr><td><b>合计</b></td><td class="num"><b>~674</b></td><td colspan="2">自建语料用<b>脚本生成</b>，保证组合覆盖是穷举的而非「想起来的」</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ==================== 10. 风险 ==================== -->
+  <section>
+    <h2><span class="no">10</span>风险登记与对策</h2>
+    <p class="sub">风险高低不是按「技术难不难」排，而是按「出错后能不能被发现」排</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>#</th><th>风险</th><th>概率</th><th>影响</th><th>等级</th><th>对策</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>R1</td><td><b>并行网关同步语义实现偏差</b>（计数逻辑、<code>inactivate</code> 时机、Join 后删除哪些执行）</td>
+            <td>高</td><td>高</td><td><span class="pill p-danger">极高</span></td>
+            <td>唯一致胜手段：<b>死磕对拍</b>。把 5 个步骤 + <code>ACT_RU_EXECUTION</code> 行快照作为硬门禁，不通过不进入下一阶段</td>
+          </tr>
+          <tr>
+            <td>R2</td><td><b>表达式语言与 JUEL 语义漂移</b>（隐式转换 / null 比较 / 方法调用）</td>
+            <td>高</td><td>高</td><td><span class="pill p-danger">极高</span></td>
+            <td>自研不引第三方；建 ≥200 条表达式对拍语料；P3 必须在 P6 之前完成并验收</td>
+          </tr>
+          <tr>
+            <td>R3</td><td><b>执行树标志位组合错误</b>（isActive / isConcurrent / isScope）</td>
+            <td>高</td><td>高</td><td><span class="pill p-danger">高</span></td>
+            <td>不用「最终状态」验收，改用<b>树形快照对拍</b>（每步都 diff）；写标志位不变量断言</td>
+          </tr>
+          <tr>
+            <td>R4</td><td><b>async/await 与 Agenda 排空的交错</b></td>
+            <td>中高</td><td>高</td><td><span class="pill p-warn">高</span></td>
+            <td>硬约束「单命令内同步排空 Agenda」；分析器禁止 <code>[ThreadStatic]</code>；<code>AsyncLocal</code> 上下文专项测试</td>
+          </tr>
+          <tr>
+            <td>R5</td><td><b>设计器往返丢属性 / 丢 DI</b></td>
+            <td>中</td><td>中</td><td><span class="pill p-warn">中</span></td>
+            <td><code>activiti-moddle.json</code> 描述符必须先行；P8 验收含「往返保真」断言；设计器导出的 XML 全部纳入 P2 回归集</td>
+          </tr>
+          <tr style="background:var(--danger-soft)">
+            <td>R6</td><td><b>范围蔓延</b> —— 有人要加子流程 / 多实例 / 会签</td>
+            <td><b>高</b></td><td>高</td><td><span class="pill p-danger">最大管理风险</span></td>
+            <td>12 条「不做」写成<b>书面签字基线</b>；任何追加走变更评审并重算人月。<b>引擎项目最常见的死因就是这个，不是技术</b></td>
+          </tr>
+          <tr>
+            <td>R7</td><td>存量 Java 数据 / 流程迁移</td>
+            <td>中</td><td>中</td><td><span class="pill p-warn">中</span></td>
+            <td>表结构同构已大幅缓解；变量序列化差异（Java 序列化 vs JSON）需工具转换；若确需迁移，单独立项</td>
+          </tr>
+          <tr>
+            <td>R8</td><td>DbIdGenerator 对齐不当导致 ID 空间冲突</td>
+            <td>中</td><td>中</td><td><span class="pill p-warn">中</span></td>
+            <td>逐行对齐 + 并发专项测试；若两端同库并行，务必确认区块分配互斥</td>
+          </tr>
+          <tr>
+            <td>R9</td><td>商标 / 命名合规</td>
+            <td>低</td><td>中</td><td><span class="pill p-info">低</span></td>
+            <td>代码 Apache 2.0 但商标归 Hyland —— 产品名避开「Activiti」；<b>XML 命名空间 <code>http://activiti.org/bpmn</code> 属技术必需，应保留</b></td>
+          </tr>
+          <tr>
+            <td>R10</td><td>设计器与后端元素契约不同步</td>
+            <td>中</td><td>低</td><td><span class="pill p-info">低</span></td>
+            <td>元素契约以 <code>Bpmn.Model</code> 为单一事实源；CI 加「moddle 描述符 ↔ 模型类」一致性检查</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ==================== 11. 首 8 周 ==================== -->
+  <section>
+    <h2><span class="no">11</span>首个 8 周行动清单</h2>
+    <p class="sub">原则：前面 90 天不追求功能数量，而是把 R1 / R2 两个最大风险打穿、把工程底座焊死</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>周</th><th>目标</th><th>具体动作</th><th>完成标志</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>W1</b></td><td>立项与基线冻结</td>
+            <td>12 条「不做」形成书面基线并签字；确认「同步执行」口径；确认是否需要会签（多实例）</td>
+            <td>基线文档签字</td>
+          </tr>
+          <tr>
+            <td><b>W1–W2</b></td><td>P0 工程底座</td>
+            <td>SLNX、<code>Directory.Build.props</code>、集中包版本、CI（build + test + format）、异常体系、DI 扩展、分析器规则</td>
+            <td>CI 全绿；空命令跑通</td>
+          </tr>
+          <tr>
+            <td><b>W2–W3</b></td><td>P1 模型层</td>
+            <td>25 个模型类 + 与 Activiti 类名/属性名对照表</td>
+            <td>模型单测全绿，对照表评审通过</td>
+          </tr>
+          <tr>
+            <td><b>W3</b></td><td>语料准备</td>
+            <td>跑 <code>scan-corpus.py</code> 抽出 554 个现成语料；确认纯顺序流 457 个全部可解析</td>
+            <td>语料目录就位</td>
+          </tr>
+          <tr>
+            <td><b>W3–W6</b></td><td><b>P2 转换层（重点）</b></td>
+            <td>流式 XML 读取 + 元素转换器 + DI + 扩展属性 + 反向导出</td>
+            <td><b>554 个语料 100% 解析成功</b>；往返保真零丢失</td>
+          </tr>
+          <tr>
+            <td><b>W4–W7</b></td><td><b>P3 表达式语言（重点）</b></td>
+            <td>词法 / 语法 / AST / 求值器 + 类型转换</td>
+            <td>与 JUEL 对拍 ≥200 条用例通过</td>
+          </tr>
+          <tr>
+            <td><b>W5–W7</b></td><td>P5 持久化</td>
+            <td>Dapper 仓储 + DbIdGenerator 对齐 + 双库 DDL</td>
+            <td>13 张表读写通；并发取 ID 无重复无空洞</td>
+          </tr>
+          <tr>
+            <td><b>W6</b></td><td>预言机工具</td>
+            <td>Java 版跑批工具：输入 BPMN + 操作脚本 → 输出三维度快照 JSON</td>
+            <td>工具输出可复现、可入库</td>
+          </tr>
+          <tr style="background:var(--warn-soft)">
+            <td><b>W8</b></td><td><b>POC 门禁</b> ⚠️</td>
+            <td>端到端最小闭环：设计器画「开始→排他网关→两条分支→并行合并→结束」→ 导出 XML → 后端解析校验部署 → 启动实例 → 用 457+97 语料对拍</td>
+            <td><b>判定点</b>：若 EL 一致率 &lt;95%，或执行树快照出现系统性偏差 → <b>回到方案层重新评估，不要继续堆代码</b></td>
+          </tr>
+          <tr>
+            <td><b>W8</b></td><td>设计器脚手架</td>
+            <td>bpmn-js 集成 + <code>activiti-moddle.json</code> + 调色板裁剪</td>
+            <td>能画出全部子集元素并导出正确 XML</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ==================== 12. 待确认 ==================== -->
+  <section>
+    <h2><span class="no">12</span>需要你确认的 4 个问题</h2>
+    <p class="sub">这 4 项会影响人月与架构，建议在 P0 阶段落定</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>#</th><th>问题</th><th>影响</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>1</td><td><b>「同步执行」的口径</b>：是否就是并行网关（AND）的分叉 + 同步合并？</td>
+            <td>若有「外部回调等待」含义，需追加语义设计</td>
+          </tr>
+          <tr>
+            <td>2</td><td><b>是否需要「会签 / 多实例」</b>？<code>multiInstanceLoopCharacteristics</code> 已列入不做，但它是审批场景最高频的追加需求。</td>
+            <td>若确定需要 → <b>+2.5 人月</b>，并提前到 P6 一并设计</td>
+          </tr>
+          <tr>
+            <td>3</td><td><b>是否沿用 <code>ACT_*</code> 表结构</b>？这是对拍能力的基础。</td>
+            <td>若改为「自定义表 + EF Core」→ <b>+1.5 人月</b>，且<b>永久失去库级对拍能力</b></td>
+          </tr>
+          <tr>
+            <td>4</td><td><b>设计器宿主形态</b>：独立 Web 应用，还是必须嵌入现有业务系统？</td>
+            <td>若需嵌入（Web Component / iframe）→ P8 <b>+0.5 人月</b>做集成适配</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>NetBpm · 子集流程引擎开发计划</b> ｜ 编制日期 2026-10-12 ｜ 编制依据 <code>E:\DataCode\Activiti-9.0.0</code>（Activiti 9.0.0）</p>
+    <p>数据依据：仓库实测（<code>docs/tools/scan-corpus.py</code> 扫描 1,292 个 BPMN 文件）与源码逐行阅读 —— <code>ExclusiveGatewayActivityBehavior</code> · <code>ParallelGatewayActivityBehavior</code> · <code>TakeOutgoingSequenceFlowsOperation</code> · <code>ContinueProcessOperation</code> · <code>EndExecutionOperation</code> · <code>ConditionUtil</code> · <code>BpmnActivityBehavior</code> · <code>ProcessEngineConfigurationImpl.initIdGenerator</code>。</p>
+    <p>完整版（含代码骨架、三维对拍细节、逐阶段验收标准）见 <code>docs/NetBpm-子集流程引擎-开发计划.md</code>。</p>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "partial-join-3",
+  "group": "authored/impedance",
+  "description": "3 \u6761\u5206\u652F\u53EA\u5B8C\u6210 2 \u6761 \u21D2 Join \u4E0D\u5F97\u8FBE\u6210\uFF0C\u5F52\u6863\u4EFB\u52A1\u4E0D\u5F97\u51FA\u73B0",
+  "actions": [
+    {
+      "kind": "completeTask",
+      "assignee": "u1"
+    },
+    {
+      "kind": "completeTask",
+      "assignee": "u2"
+    }
+  ],
+  "resourceName": "partial-join-3.bpmn20.xml"
+}

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NetBpm.CorpusImporter</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\NetBpm.Bpmn.Converter\NetBpm.Bpmn.Converter.csproj" />
+    <ProjectReference Include="..\..\..\src\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+    <ProjectReference Include="..\..\..\src\NetBpm.Bpmn.Validation\NetBpm.Bpmn.Validation.csproj" />
+  </ItemGroup>
+
+</Project>

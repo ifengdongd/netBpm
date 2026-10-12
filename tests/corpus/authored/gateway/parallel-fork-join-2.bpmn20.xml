@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:activiti="http://activiti.org/bpmn"
+             targetNamespace="http://netbpm/corpus">
+  <process id="parallel-fork-join-2" name="parallel-fork-join-2" isExecutable="true">
+  <startEvent id="start" />
+  <parallelGateway id="fork" />
+  <userTask id="sign1" name="会签1" activiti:assignee="u1" />
+  <userTask id="sign2" name="会签2" activiti:assignee="u2" />
+  <parallelGateway id="join" />
+  <userTask id="archive" name="归档" activiti:assignee="archivist" />
+  <endEvent id="end" />
+  <sequenceFlow id="f0" sourceRef="start" targetRef="fork" />
+  <sequenceFlow id="fork1" sourceRef="fork" targetRef="sign1" />
+  <sequenceFlow id="join1" sourceRef="sign1" targetRef="join" />
+  <sequenceFlow id="fork2" sourceRef="fork" targetRef="sign2" />
+  <sequenceFlow id="join2" sourceRef="sign2" targetRef="join" />
+  <sequenceFlow id="fArchive" sourceRef="join" targetRef="archive" />
+  <sequenceFlow id="fEnd" sourceRef="archive" targetRef="end" />
+  </process>
+</definitions>

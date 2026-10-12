@@ -1,0 +1,128 @@
+{
+  "name": "twoTasksProcess",
+  "group": "from-activiti/sequence",
+  "description": "\u5BFC\u5165\u81EA Activiti \u6E90\u7801\uFF1Aactiviti-core/activiti-engine/src/test/resources/org/activiti/engine/test/api/twoTasksProcess.bpmn20.xml\uFF082 \u4E2A\u7528\u6237\u4EFB\u52A1\uFF09",
+  "actions": [
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    },
+    {
+      "kind": "completeAnyTask"
+    }
+  ],
+  "resourceName": "twoTasksProcess.bpmn20.xml"
+}

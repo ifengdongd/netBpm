@@ -1,0 +1,148 @@
+{
+  "caseName" : "from-activiti/sequence/InclusiveGatewayTest.testJoinAfterCallSubProcess",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/sequence/InclusiveGatewayTest.testJoinAfterCallSubProcess",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "446151",
+      "PROC_INST_ID_" : "446151",
+      "BUSINESS_KEY_" : "from-activiti/sequence/InclusiveGatewayTest.testJoinAfterCallSubProcess",
+      "PROC_DEF_ID_" : "InclusiveGatewayAfterCallSubProcess:1:446150",
+      "START_TIME_" : "2026-10-12 15:14:01.680",
+      "END_TIME_" : "2026-10-12 15:14:01.688",
+      "DURATION_" : "8",
+      "START_ACT_ID_" : "startevent1",
+      "END_ACT_ID_" : "endevent1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "446156",
+      "PROC_DEF_ID_" : "InclusiveGatewayAfterCallSubProcess:1:446150",
+      "PROC_INST_ID_" : "446151",
+      "EXECUTION_ID_" : "446152",
+      "ACT_ID_" : "endevent1",
+      "ACT_NAME_" : "End",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:14:01.686",
+      "END_TIME_" : "2026-10-12 15:14:01.686",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446153",
+      "PROC_DEF_ID_" : "InclusiveGatewayAfterCallSubProcess:1:446150",
+      "PROC_INST_ID_" : "446151",
+      "EXECUTION_ID_" : "446152",
+      "ACT_ID_" : "startevent1",
+      "ACT_NAME_" : "Start",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:14:01.680",
+      "END_TIME_" : "2026-10-12 15:14:01.680",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "446154",
+      "PROC_DEF_ID_" : "InclusiveGatewayAfterCallSubProcess:1:446150",
+      "PROC_INST_ID_" : "446151",
+      "EXECUTION_ID_" : "446152",
+      "ACT_ID_" : "taskC",
+      "TASK_ID_" : "446155",
+      "ACT_NAME_" : "Task C",
+      "ACT_TYPE_" : "userTask",
+      "START_TIME_" : "2026-10-12 15:14:01.680",
+      "END_TIME_" : "2026-10-12 15:14:01.686",
+      "DURATION_" : "6",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "446155",
+      "PROC_DEF_ID_" : "InclusiveGatewayAfterCallSubProcess:1:446150",
+      "TASK_DEF_KEY_" : "taskC",
+      "PROC_INST_ID_" : "446151",
+      "EXECUTION_ID_" : "446152",
+      "NAME_" : "Task C",
+      "START_TIME_" : "2026-10-12 15:14:01.680",
+      "END_TIME_" : "2026-10-12 15:14:01.685",
+      "DURATION_" : "5",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "InclusiveGatewayAfterCallSubProcess:1:446150",
+      "REV_" : "1",
+      "CATEGORY_" : "http://www.activiti.org/test",
+      "NAME_" : "InclusiveGatewayAfterCallSubProcess",
+      "KEY_" : "InclusiveGatewayAfterCallSubProcess",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "446148",
+      "RESOURCE_NAME_" : "InclusiveGatewayTest.testJoinAfterCallSubProcess.bpmn20.xml",
+      "DESCRIPTION_" : "Subprocess for testJoinAfterCall. act-1026",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "1",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "446148",
+      "NAME_" : "from-activiti/sequence/InclusiveGatewayTest.testJoinAfterCallSubProcess",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:14:01.671",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "446149",
+      "REV_" : "1",
+      "NAME_" : "InclusiveGatewayTest.testJoinAfterCallSubProcess.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "446148",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIiB4bWxuczphY3Rpdml0aT0iaHR0cDovL2FjdGl2aXRpLm9yZy9icG1uIiB4bWxuczpicG1uZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0JQTU4vMjAxMDA1MjQvREkiIHhtbG5zOm9tZ2RjPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9ERC8yMDEwMDUyNC9EQyIgeG1sbnM6b21nZGk9Imh0dHA6Ly93d3cub21nLm9yZy9zcGVjL0RELzIwMTAwNTI0L0RJIiB0eXBlTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiBleHByZXNzaW9uTGFuZ3VhZ2U9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvWFBhdGgiIHRhcmdldE5hbWVzcGFjZT0iaHR0cDovL3d3dy5hY3Rpdml0aS5vcmcvdGVzdCI+CiAgPHByb2Nlc3MgaWQ9IkluY2x1c2l2ZUdhdGV3YXlBZnRlckNhbGxTdWJQcm9jZXNzIiBuYW1lPSJJbmNsdXNpdmVHYXRld2F5QWZ0ZXJDYWxsU3ViUHJvY2VzcyI+CiAgICA8ZG9jdW1lbnRhdGlvbj5TdWJwcm9jZXNzIGZvciB0ZXN0Sm9pbkFmdGVyQ2FsbC4gYWN0LTEwMjY8L2RvY3VtZW50YXRpb24+CiAgICA8c3RhcnRFdmVudCBpZD0ic3RhcnRldmVudDEiIG5hbWU9IlN0YXJ0Ij48L3N0YXJ0RXZlbnQ+CiAgICA8ZW5kRXZlbnQgaWQ9ImVuZGV2ZW50MSIgbmFtZT0iRW5kIj48L2VuZEV2ZW50PgogICAgPHVzZXJUYXNrIGlkPSJ0YXNrQyIgbmFtZT0iVGFzayBDIj48L3VzZXJUYXNrPgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzEiIG5hbWU9IiIgc291cmNlUmVmPSJzdGFydGV2ZW50MSIgdGFyZ2V0UmVmPSJ0YXNrQyI+PC9zZXF1ZW5jZUZsb3c+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MiIgbmFtZT0iIiBzb3VyY2VSZWY9InRhc2tDIiB0YXJnZXRSZWY9ImVuZGV2ZW50MSI+PC9zZXF1ZW5jZUZsb3c+CiAgPC9wcm9jZXNzPgogIDxicG1uZGk6QlBNTkRpYWdyYW0gaWQ9IkJQTU5EaWFncmFtX0luY2x1c2l2ZUdhdGV3YXlBZnRlckNhbGxTdWJQcm9jZXNzIj4KICAgIDxicG1uZGk6QlBNTlBsYW5lIGJwbW5FbGVtZW50PSJJbmNsdXNpdmVHYXRld2F5QWZ0ZXJDYWxsU3ViUHJvY2VzcyIgaWQ9IkJQTU5QbGFuZV9JbmNsdXNpdmVHYXRld2F5QWZ0ZXJDYWxsU3ViUHJvY2VzcyI+CiAgICAgIDxicG1uZGk6QlBNTlNoYXBlIGJwbW5FbGVtZW50PSJzdGFydGV2ZW50MSIgaWQ9IkJQTU5TaGFwZV9zdGFydGV2ZW50MSI+CiAgICAgICAgPG9tZ2RjOkJvdW5kcyBoZWlnaHQ9IjM1IiB3aWR0aD0iMzUiIHg9IjkwIiB5PSIxNDAiPjwvb21nZGM6Qm91bmRzPgogICAgICA8L2JwbW5kaTpCUE1OU2hhcGU+CiAgICAgIDxicG1uZGk6QlBNTlNoYXBlIGJwbW5FbGVtZW50PSJlbmRldmVudDEiIGlkPSJCUE1OU2hhcGVfZW5kZXZlbnQxIj4KICAgICAgICA8b21nZGM6Qm91bmRzIGhlaWdodD0iMzUiIHdpZHRoPSIzNSIgeD0iMzkwIiB5PSIxNDAiPjwvb21nZGM6Qm91bmRzPgogICAgICA8L2JwbW5kaTpCUE1OU2hhcGU+CiAgICAgIDxicG1uZGk6QlBNTlNoYXBlIGJwbW5FbGVtZW50PSJ0YXNrQyIgaWQ9IkJQTU5TaGFwZV90YXNrQyI+CiAgICAgICAgPG9tZ2RjOkJvdW5kcyBoZWlnaHQ9IjU1IiB3aWR0aD0iMTA1IiB4PSIyMDAiIHk9IjEzMCI+PC9vbWdkYzpCb3VuZHM+CiAgICAgIDwvYnBtbmRpOkJQTU5TaGFwZT4KICAgICAgPGJwbW5kaTpCUE1ORWRnZSBicG1uRWxlbWVudD0iZmxvdzEiIGlkPSJCUE1ORWRnZV9mbG93MSI+CiAgICAgICAgPG9tZ2RpOndheXBvaW50IHg9IjEyNSIgeT0iMTU3Ij48L29tZ2RpOndheXBvaW50PgogICAgICAgIDxvbWdkaTp3YXlwb2ludCB4PSIyMDAiIHk9IjE1NyI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgPC9icG1uZGk6QlBNTkVkZ2U+CiAgICAgIDxicG1uZGk6QlBNTkVkZ2UgYnBtbkVsZW1lbnQ9ImZsb3cyIiBpZD0iQlBNTkVkZ2VfZmxvdzIiPgogICAgICAgIDxvbWdkaTp3YXlwb2ludCB4PSIzMDUiIHk9IjE1NyI+PC9vbWdkaTp3YXlwb2ludD4KICAgICAgICA8b21nZGk6d2F5cG9pbnQgeD0iMzkwIiB5PSIxNTciPjwvb21nZGk6d2F5cG9pbnQ+CiAgICAgIDwvYnBtbmRpOkJQTU5FZGdlPgogICAgPC9icG1uZGk6QlBNTlBsYW5lPgogIDwvYnBtbmRpOkJQTU5EaWFncmFtPgo8L2RlZmluaXRpb25zPgo=",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "startevent1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "startevent1"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "taskC"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "taskC"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "taskC"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "taskC"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "endevent1"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "endevent1"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

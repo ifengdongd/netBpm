@@ -1,0 +1,175 @@
+{
+  "caseName" : "authored/impedance/single-entry-parallel-2",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "authored/impedance/single-entry-parallel-2",
+      "isEnded" : true,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445187",
+      "PROC_INST_ID_" : "445187",
+      "BUSINESS_KEY_" : "authored/impedance/single-entry-parallel-2",
+      "PROC_DEF_ID_" : "single-entry-parallel-2:1:445186",
+      "START_TIME_" : "2026-10-12 15:13:56.493",
+      "END_TIME_" : "2026-10-12 15:13:56.513",
+      "DURATION_" : "20",
+      "START_ACT_ID_" : "start",
+      "END_ACT_ID_" : "end",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445191",
+      "PROC_DEF_ID_" : "single-entry-parallel-2:1:445186",
+      "PROC_INST_ID_" : "445187",
+      "EXECUTION_ID_" : "445188",
+      "ACT_ID_" : "after",
+      "TASK_ID_" : "445192",
+      "ACT_NAME_" : "之后",
+      "ACT_TYPE_" : "userTask",
+      "ASSIGNEE_" : "u1",
+      "START_TIME_" : "2026-10-12 15:13:56.494",
+      "END_TIME_" : "2026-10-12 15:13:56.506",
+      "DURATION_" : "12",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445194",
+      "PROC_DEF_ID_" : "single-entry-parallel-2:1:445186",
+      "PROC_INST_ID_" : "445187",
+      "EXECUTION_ID_" : "445188",
+      "ACT_ID_" : "end",
+      "ACT_TYPE_" : "endEvent",
+      "START_TIME_" : "2026-10-12 15:13:56.506",
+      "END_TIME_" : "2026-10-12 15:13:56.506",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445190",
+      "PROC_DEF_ID_" : "single-entry-parallel-2:1:445186",
+      "PROC_INST_ID_" : "445187",
+      "EXECUTION_ID_" : "445188",
+      "ACT_ID_" : "single",
+      "ACT_TYPE_" : "parallelGateway",
+      "START_TIME_" : "2026-10-12 15:13:56.493",
+      "END_TIME_" : "2026-10-12 15:13:56.494",
+      "DURATION_" : "1",
+      "TENANT_ID_" : ""
+    }, {
+      "ID_" : "445189",
+      "PROC_DEF_ID_" : "single-entry-parallel-2:1:445186",
+      "PROC_INST_ID_" : "445187",
+      "EXECUTION_ID_" : "445188",
+      "ACT_ID_" : "start",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:13:56.493",
+      "END_TIME_" : "2026-10-12 15:13:56.493",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ {
+      "ID_" : "445192",
+      "PROC_DEF_ID_" : "single-entry-parallel-2:1:445186",
+      "TASK_DEF_KEY_" : "after",
+      "PROC_INST_ID_" : "445187",
+      "EXECUTION_ID_" : "445188",
+      "NAME_" : "之后",
+      "ASSIGNEE_" : "u1",
+      "START_TIME_" : "2026-10-12 15:13:56.494",
+      "END_TIME_" : "2026-10-12 15:13:56.505",
+      "DURATION_" : "11",
+      "PRIORITY_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_VARINST" : [ ],
+    "ACT_HI_IDENTITYLINK" : [ {
+      "ID_" : "445193",
+      "TYPE_" : "participant",
+      "USER_ID_" : "u1",
+      "PROC_INST_ID_" : "445187"
+    } ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "single-entry-parallel-2:1:445186",
+      "REV_" : "1",
+      "CATEGORY_" : "http://netbpm/corpus",
+      "NAME_" : "single-entry-parallel-2",
+      "KEY_" : "single-entry-parallel-2",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445184",
+      "RESOURCE_NAME_" : "single-entry-parallel-2.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445184",
+      "NAME_" : "authored/impedance/single-entry-parallel-2",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:13:56.478",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445185",
+      "REV_" : "1",
+      "NAME_" : "single-entry-parallel-2.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445184",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxkZWZpbml0aW9ucyB4bWxucz0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCINCiAgICAgICAgICAgICB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIg0KICAgICAgICAgICAgIHhtbG5zOmFjdGl2aXRpPSJodHRwOi8vYWN0aXZpdGkub3JnL2JwbW4iDQogICAgICAgICAgICAgdGFyZ2V0TmFtZXNwYWNlPSJodHRwOi8vbmV0YnBtL2NvcnB1cyI+DQogIDxwcm9jZXNzIGlkPSJzaW5nbGUtZW50cnktcGFyYWxsZWwtMiIgbmFtZT0ic2luZ2xlLWVudHJ5LXBhcmFsbGVsLTIiIGlzRXhlY3V0YWJsZT0idHJ1ZSI+DQogIDxzdGFydEV2ZW50IGlkPSJzdGFydCIgLz4NCiAgPHBhcmFsbGVsR2F0ZXdheSBpZD0ic2luZ2xlIiAvPg0KICA8dXNlclRhc2sgaWQ9ImFmdGVyIiBuYW1lPSLkuYvlkI4iIGFjdGl2aXRpOmFzc2lnbmVlPSJ1MSIgLz4NCiAgPGVuZEV2ZW50IGlkPSJlbmQiIC8+DQogIDxzZXF1ZW5jZUZsb3cgaWQ9ImYxIiBzb3VyY2VSZWY9InN0YXJ0IiB0YXJnZXRSZWY9InNpbmdsZSIgLz4NCiAgPHNlcXVlbmNlRmxvdyBpZD0iZjIiIHNvdXJjZVJlZj0ic2luZ2xlIiB0YXJnZXRSZWY9ImFmdGVyIiAvPg0KICA8c2VxdWVuY2VGbG93IGlkPSJmMyIgc291cmNlUmVmPSJhZnRlciIgdGFyZ2V0UmVmPSJlbmQiIC8+DQogIDwvcHJvY2Vzcz4NCjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "start"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "start"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "f1"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "single"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "single"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "f2"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "after"
+  }, {
+    "type" : "TASK_CREATED",
+    "taskDefinitionKey" : "after"
+  }, {
+    "type" : "TASK_ASSIGNED",
+    "taskDefinitionKey" : "after"
+  }, {
+    "type" : "TASK_COMPLETED",
+    "taskDefinitionKey" : "after"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "after"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "f3"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "end"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "end"
+  }, {
+    "type" : "PROCESS_COMPLETED"
+  } ]
+}

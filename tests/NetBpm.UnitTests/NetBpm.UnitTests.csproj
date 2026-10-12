@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.UnitTests</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <!-- .NET 10 SDK 起 dotnet test 只支持 Microsoft.Testing.Platform -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NetBpm.Bpmn.Converter\NetBpm.Bpmn.Converter.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Bpmn.Validation\NetBpm.Bpmn.Validation.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.El\NetBpm.El.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Engine\NetBpm.Engine.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Persistence\NetBpm.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+</Project>

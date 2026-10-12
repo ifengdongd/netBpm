@@ -1,0 +1,74 @@
+namespace NetBpm.Bpmn.Model;
+
+/// <summary>
+/// BPMN 2.0 与 Activiti 扩展的常量。
+/// 命名空间必须保留 <c>http://activiti.org/bpmn</c> —— 这是与 Activiti 定义文件互解析的技术前提（§13）。
+/// </summary>
+public static class BpmnConstants
+{
+    /// <summary>BPMN 2.0 命名空间。</summary>
+    public const string BpmnNamespace = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+
+    /// <summary>Activiti 扩展命名空间（技术上必需保留，见 §13）。</summary>
+    public const string ActivitiNamespace = "http://activiti.org/bpmn";
+
+    /// <summary>Activiti 扩展命名空间前缀。</summary>
+    public const string ActivitiPrefix = "activiti";
+
+    /// <summary>BPMNDI 命名空间。</summary>
+    public const string BpmnDiNamespace = "http://www.omg.org/spec/BPMN/20100524/DI";
+
+    /// <summary>OMG DC 命名空间。</summary>
+    public const string OmgDcNamespace = "http://www.omg.org/spec/DD/20100524/DC";
+
+    /// <summary>OMG DI 命名空间。</summary>
+    public const string OmgDiNamespace = "http://www.omg.org/spec/DD/20100524/DI";
+
+    /// <summary>XSI 命名空间。</summary>
+    public const string XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
+
+    /// <summary>Activiti 属性：办理人。</summary>
+    public const string AttributeAssignee = "assignee";
+
+    /// <summary>Activiti 属性：候选用户。</summary>
+    public const string AttributeCandidateUsers = "candidateUsers";
+
+    /// <summary>Activiti 属性：候选组。</summary>
+    public const string AttributeCandidateGroups = "candidateGroups";
+
+    /// <summary>Activiti 属性：表单 Key。</summary>
+    public const string AttributeFormKey = "formKey";
+
+    /// <summary>Activiti 属性：到期时间。</summary>
+    public const string AttributeDueDate = "dueDate";
+
+    /// <summary>Activiti 属性：优先级。</summary>
+    public const string AttributePriority = "priority";
+
+    /// <summary>Activiti 属性：实现类。</summary>
+    public const string AttributeClass = "class";
+
+    /// <summary>Activiti 属性：委托表达式。</summary>
+    public const string AttributeDelegateExpression = "delegateExpression";
+
+    /// <summary>Activiti 属性：值表达式。</summary>
+    public const string AttributeExpression = "expression";
+
+    /// <summary>Activiti 属性：结果变量名。</summary>
+    public const string AttributeResultVariableName = "resultVariableName";
+
+    /// <summary>Activiti 属性：跳过表达式。</summary>
+    public const string AttributeSkipExpression = "skipExpression";
+
+    /// <summary>Activiti 元素：执行监听器。</summary>
+    public const string ElementExecutionListener = "executionListener";
+
+    /// <summary>Activiti 元素：任务监听器。</summary>
+    public const string ElementTaskListener = "taskListener";
+
+    /// <summary>Activiti 元素：字段注入。</summary>
+    public const string ElementField = "field";
+
+    /// <summary>Activiti 元素：潜在启动者。</summary>
+    public const string ElementPotentialStarter = "potentialStarter";
+}

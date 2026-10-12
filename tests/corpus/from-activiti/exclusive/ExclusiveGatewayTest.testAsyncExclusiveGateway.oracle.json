@@ -1,0 +1,156 @@
+{
+  "caseName" : "from-activiti/exclusive/ExclusiveGatewayTest.testAsyncExclusiveGateway",
+  "api" : {
+    "processInstances" : [ {
+      "businessKey" : "from-activiti/exclusive/ExclusiveGatewayTest.testAsyncExclusiveGateway",
+      "isEnded" : false,
+      "unfinishedActivityIds" : [ ]
+    } ],
+    "tasks" : [ ],
+    "variables" : [ {
+      "name" : "input",
+      "type" : "string",
+      "value" : "1"
+    } ]
+  },
+  "tables" : {
+    "ACT_RU_EXECUTION" : [ {
+      "ID_" : "445222",
+      "REV_" : "1",
+      "PROC_INST_ID_" : "445222",
+      "BUSINESS_KEY_" : "from-activiti/exclusive/ExclusiveGatewayTest.testAsyncExclusiveGateway",
+      "PROC_DEF_ID_" : "asyncExclusive:1:445221",
+      "ROOT_PROC_INST_ID_" : "445222",
+      "IS_ACTIVE_" : "1",
+      "IS_CONCURRENT_" : "0",
+      "IS_SCOPE_" : "1",
+      "IS_EVENT_SCOPE_" : "0",
+      "IS_MI_ROOT_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : "",
+      "START_TIME_" : "2026-10-12 15:13:56.687",
+      "IS_COUNT_ENABLED_" : "0",
+      "EVT_SUBSCR_COUNT_" : "0",
+      "TASK_COUNT_" : "0",
+      "JOB_COUNT_" : "0",
+      "TIMER_JOB_COUNT_" : "0",
+      "SUSP_JOB_COUNT_" : "0",
+      "DEADLETTER_JOB_COUNT_" : "0",
+      "VAR_COUNT_" : "0",
+      "ID_LINK_COUNT_" : "0"
+    }, {
+      "ID_" : "445223",
+      "REV_" : "1",
+      "PROC_INST_ID_" : "445222",
+      "PARENT_ID_" : "445222",
+      "PROC_DEF_ID_" : "asyncExclusive:1:445221",
+      "ROOT_PROC_INST_ID_" : "445222",
+      "ACT_ID_" : "exclusiveGw",
+      "IS_ACTIVE_" : "1",
+      "IS_CONCURRENT_" : "0",
+      "IS_SCOPE_" : "0",
+      "IS_EVENT_SCOPE_" : "0",
+      "IS_MI_ROOT_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : "",
+      "START_TIME_" : "2026-10-12 15:13:56.687",
+      "IS_COUNT_ENABLED_" : "0",
+      "EVT_SUBSCR_COUNT_" : "0",
+      "TASK_COUNT_" : "0",
+      "JOB_COUNT_" : "0",
+      "TIMER_JOB_COUNT_" : "0",
+      "SUSP_JOB_COUNT_" : "0",
+      "DEADLETTER_JOB_COUNT_" : "0",
+      "VAR_COUNT_" : "0",
+      "ID_LINK_COUNT_" : "0"
+    } ],
+    "ACT_RU_TASK" : [ ],
+    "ACT_RU_IDENTITYLINK" : [ ],
+    "ACT_RU_VARIABLE" : [ {
+      "ID_" : "445224",
+      "REV_" : "1",
+      "TYPE_" : "string",
+      "NAME_" : "input",
+      "EXECUTION_ID_" : "445222",
+      "PROC_INST_ID_" : "445222",
+      "TEXT_" : "1"
+    } ],
+    "ACT_HI_PROCINST" : [ {
+      "ID_" : "445222",
+      "PROC_INST_ID_" : "445222",
+      "BUSINESS_KEY_" : "from-activiti/exclusive/ExclusiveGatewayTest.testAsyncExclusiveGateway",
+      "PROC_DEF_ID_" : "asyncExclusive:1:445221",
+      "START_TIME_" : "2026-10-12 15:13:56.687",
+      "START_ACT_ID_" : "theStart",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_ACTINST" : [ {
+      "ID_" : "445225",
+      "PROC_DEF_ID_" : "asyncExclusive:1:445221",
+      "PROC_INST_ID_" : "445222",
+      "EXECUTION_ID_" : "445223",
+      "ACT_ID_" : "theStart",
+      "ACT_TYPE_" : "startEvent",
+      "START_TIME_" : "2026-10-12 15:13:56.687",
+      "END_TIME_" : "2026-10-12 15:13:56.687",
+      "DURATION_" : "0",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_HI_TASKINST" : [ ],
+    "ACT_HI_VARINST" : [ {
+      "ID_" : "445224",
+      "PROC_INST_ID_" : "445222",
+      "EXECUTION_ID_" : "445222",
+      "NAME_" : "input",
+      "VAR_TYPE_" : "string",
+      "REV_" : "0",
+      "TEXT_" : "1",
+      "CREATE_TIME_" : "2026-10-12 15:13:56.687",
+      "LAST_UPDATED_TIME_" : "2026-10-12 15:13:56.687"
+    } ],
+    "ACT_HI_IDENTITYLINK" : [ ],
+    "ACT_RE_PROCDEF" : [ {
+      "ID_" : "asyncExclusive:1:445221",
+      "REV_" : "1",
+      "CATEGORY_" : "Examples",
+      "KEY_" : "asyncExclusive",
+      "VERSION_" : "1",
+      "DEPLOYMENT_ID_" : "445219",
+      "RESOURCE_NAME_" : "ExclusiveGatewayTest.testAsyncExclusiveGateway.bpmn20.xml",
+      "HAS_START_FORM_KEY_" : "0",
+      "HAS_GRAPHICAL_NOTATION_" : "0",
+      "SUSPENSION_STATE_" : "1",
+      "TENANT_ID_" : ""
+    } ],
+    "ACT_RE_DEPLOYMENT" : [ {
+      "ID_" : "445219",
+      "NAME_" : "from-activiti/exclusive/ExclusiveGatewayTest.testAsyncExclusiveGateway",
+      "TENANT_ID_" : "",
+      "DEPLOY_TIME_" : "2026-10-12 15:13:56.670",
+      "VERSION_" : "1"
+    } ],
+    "ACT_GE_BYTEARRAY" : [ {
+      "ID_" : "445220",
+      "REV_" : "1",
+      "NAME_" : "ExclusiveGatewayTest.testAsyncExclusiveGateway.bpmn20.xml",
+      "DEPLOYMENT_ID_" : "445219",
+      "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIGlkPSJkZWZpbml0aW9ucyIKICB4bWxucz0iaHR0cDovL3d3dy5vbWcub3JnL3NwZWMvQlBNTi8yMDEwMDUyNC9NT0RFTCIKICB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIgogIHhtbG5zOmFjdGl2aXRpPSJodHRwOi8vYWN0aXZpdGkub3JnL2JwbW4iCiAgdGFyZ2V0TmFtZXNwYWNlPSJFeGFtcGxlcyI+CgogIDxwcm9jZXNzIGlkPSJhc3luY0V4Y2x1c2l2ZSI+CgogICAgPHN0YXJ0RXZlbnQgaWQ9InRoZVN0YXJ0IiAvPgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzEiIHNvdXJjZVJlZj0idGhlU3RhcnQiIHRhcmdldFJlZj0iZXhjbHVzaXZlR3ciIC8+CgogICAgPGV4Y2x1c2l2ZUdhdGV3YXkgaWQ9ImV4Y2x1c2l2ZUd3IiBuYW1lPSJFeGNsdXNpdmUgR2F0ZXdheSIgZGVmYXVsdD0iZmxvdzMiIGFjdGl2aXRpOmFzeW5jPSJ0cnVlIi8+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MiIgc291cmNlUmVmPSJleGNsdXNpdmVHdyIgdGFyZ2V0UmVmPSJ0aGVUYXNrMSI+CiAgICAgIDxjb25kaXRpb25FeHByZXNzaW9uIHhzaTp0eXBlPSJ0Rm9ybWFsRXhwcmVzc2lvbiI+JHtpbnB1dCA9PSAxfTwvY29uZGl0aW9uRXhwcmVzc2lvbj4KICAgIDwvc2VxdWVuY2VGbG93PgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzMiIHNvdXJjZVJlZj0iZXhjbHVzaXZlR3ciIHRhcmdldFJlZj0idGhlVGFzazIiLz4KICAgIDxzZXF1ZW5jZUZsb3cgaWQ9ImZsb3c0IiBzb3VyY2VSZWY9ImV4Y2x1c2l2ZUd3IiB0YXJnZXRSZWY9InRoZVRhc2szIj4KICAgICAgPGNvbmRpdGlvbkV4cHJlc3Npb24geHNpOnR5cGU9InRGb3JtYWxFeHByZXNzaW9uIj4ke2lucHV0ID09IDN9PC9jb25kaXRpb25FeHByZXNzaW9uPgogICAgPC9zZXF1ZW5jZUZsb3c+CgogICAgPHVzZXJUYXNrIGlkPSJ0aGVUYXNrMSIgbmFtZT0iSW5wdXQgaXMgb25lIiAvPgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzUiIHNvdXJjZVJlZj0idGhlVGFzazEiIHRhcmdldFJlZj0idGhlRW5kIiAvPgoKICAgIDx1c2VyVGFzayBpZD0idGhlVGFzazIiIG5hbWU9IkRlZmF1bHQgaW5wdXQiIC8+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93NiIgc291cmNlUmVmPSJ0aGVUYXNrMiIgdGFyZ2V0UmVmPSJ0aGVFbmQiIC8+CgogICAgPHVzZXJUYXNrIGlkPSJ0aGVUYXNrMyIgbmFtZT0iSW5wdXQgaXMgdGhyZWUiIC8+CiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93NyIgc291cmNlUmVmPSJ0aGVUYXNrMyIgdGFyZ2V0UmVmPSJ0aGVFbmQiIC8+CgogICAgPGVuZEV2ZW50IGlkPSJ0aGVFbmQiIC8+CgogIDwvcHJvY2Vzcz4KCjwvZGVmaW5pdGlvbnM+Cg==",
+      "GENERATED_" : "0"
+    } ]
+  },
+  "events" : [ {
+    "type" : "VARIABLE_CREATED",
+    "variableName" : "input"
+  }, {
+    "type" : "PROCESS_STARTED"
+  }, {
+    "type" : "ACTIVITY_STARTED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "ACTIVITY_COMPLETED",
+    "activityId" : "theStart"
+  }, {
+    "type" : "SEQUENCEFLOW_TAKEN",
+    "flowId" : "flow1"
+  } ]
+}

@@ -1,0 +1,25 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NetBpm.Bpmn.Model/NetBpm.Bpmn.Model.csproj" />
+    <Project Path="src/NetBpm.Bpmn.Converter/NetBpm.Bpmn.Converter.csproj" />
+    <Project Path="src/NetBpm.Bpmn.Validation/NetBpm.Bpmn.Validation.csproj" />
+    <Project Path="src/NetBpm.El/NetBpm.El.csproj" />
+    <Project Path="src/NetBpm.Engine/NetBpm.Engine.csproj" />
+    <Project Path="src/NetBpm.Persistence/NetBpm.Persistence.csproj" />
+    <Project Path="src/NetBpm.Identity/NetBpm.Identity.csproj" />
+    <Project Path="src/NetBpm.Runtime/NetBpm.Runtime.csproj" />
+    <Project Path="src/NetBpm.Rest/NetBpm.Rest.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NetBpm.UnitTests/NetBpm.UnitTests.csproj" />
+    <Project Path="tests/NetBpm.IntegrationTests/NetBpm.IntegrationTests.csproj" />
+    <Project Path="tests/NetBpm.DifferentialTests/NetBpm.DifferentialTests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/NetBpm.DbMigrate/NetBpm.DbMigrate.csproj" />
+    <!-- §9.3：自建语料必须由脚本生成（放在 tests/corpus/generator 便于语料与生成器同处一地） -->
+    <Project Path="tests/corpus/generator/NetBpm.CorpusGenerator.csproj" />
+    <!-- §9.3：现成语料（Activiti 测试资源）由导入器收录，脚本自动生成 -->
+    <Project Path="tests/corpus/importer/NetBpm.CorpusImporter.csproj" />
+  </Folder>
+</Solution>

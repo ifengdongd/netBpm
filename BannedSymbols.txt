@@ -1,0 +1,6 @@
+# 禁止的 API 清单（Microsoft.CodeAnalysis.BannedApiAnalyzers，违规为编译错误）
+#
+# 开发计划 §5.7 / 风险 R4：
+#   Activiti 用 ThreadLocal 承载 CommandContext，.NET 下必须换成 AsyncLocal<T>。
+#   ThreadStatic 在 await 续体之间会丢失或串号，属于正确性问题，直接禁用。
+T:System.ThreadStaticAttribute;
