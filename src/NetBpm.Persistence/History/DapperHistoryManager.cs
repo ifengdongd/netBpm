@@ -152,10 +152,27 @@ public sealed class DapperHistoryManager : IHistoryManager
     }
 
     /// <inheritdoc />
-    public async ValueTask RecordActivityEndAsync(
+    public ValueTask RecordActivityEndAsync(
         IExecutionEntity execution,
         string? deleteReason,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        MarkActivityEndedAsync(execution, deleteReason, ct);
+
+    /// <inheritdoc />
+    public ValueTask RecordActivityEndQuietlyAsync(
+        IExecutionEntity execution,
+        string? deleteReason,
+        CancellationToken ct = default) =>
+        MarkActivityEndedAsync(execution, deleteReason, ct);
+
+    /// <summary>
+    /// 收口历史活动行（两个端口的共同实现 —— 在持久化层它们做的事完全一样，
+    /// 区别只在"是否代表执行离开了活动"，那是事件层（采集器）关心的事）。
+    /// </summary>
+    private async ValueTask MarkActivityEndedAsync(
+        IExecutionEntity execution,
+        string? deleteReason,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(execution);
 
@@ -355,7 +372,12 @@ public sealed class DapperHistoryManager : IHistoryManager
                     executionId = variable.ExecutionId,
                     taskId = variable.TaskId,
                     name = variable.Name,
-                    revision = variable.Revision,
+
+                    // ⚠️ 历史行的 REV_ = Activiti 的 copyAndInsert 里的
+                    // `setRevision(variableInstance.getRevision())` —— 复制的是**运行时实体的内存值**，
+                    // 而创建那一刻内存里是 0（DB 的 REV_=1 是 INSERT 语句写死的，flush 才落库）。
+                    // 因此历史行的 REV_ 恒为 0，与运行行无关（真值比对 2026-10-12：期望 0 / 实际 1）。
+                    revision = 0,
                     type = columns.TypeName,
                     longValue = columns.LongValue,
                     doubleValue = columns.DoubleValue,
@@ -377,14 +399,14 @@ public sealed class DapperHistoryManager : IHistoryManager
 
         using var lease = _sessions.Acquire();
 
-        // 同一行 UPDATE：REV_ 跟随运行行自增，LAST_UPDATED_TIME_ 刷新，CREATE_TIME_ 不动
+        // 同一行 UPDATE：只刷新值列与 LAST_UPDATED_TIME_（CREATE_TIME_ 不动）。
+        // ⚠️ REV_ **不改**：Activiti 的 copyVariableValue 不碰 revision，历史行保持创建时的 0
         await lease.Session.Connection.ExecuteAsync(
             new CommandDefinition(
                 UpdateHistoricVariableInstanceSql,
                 new
                 {
                     id = variable.Id,
-                    revision = variable.Revision,
                     type = columns.TypeName,
                     longValue = columns.LongValue,
                     doubleValue = columns.DoubleValue,
@@ -683,7 +705,6 @@ public sealed class DapperHistoryManager : IHistoryManager
 
     private const string UpdateHistoricVariableInstanceSql = """
         update ACT_HI_VARINST set
-            REV_ = @revision,
             VAR_TYPE_ = @type,
             BYTEARRAY_ID_ = null,
             DOUBLE_ = @doubleValue,

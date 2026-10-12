@@ -227,8 +227,8 @@ public sealed class InMemoryExecutionManager : IExecutionManager
     {
         ArgumentNullException.ThrowIfNull(execution);
 
-        // 与 Dapper 实现一致：先收口该执行上的历史活动行，再删执行
-        await _historyManager.RecordActivityEndAsync(execution, deleteReason, ct).ConfigureAwait(false);
+        // 与 Dapper 实现一致：先收口该执行上的历史活动行，再删执行（清理不发事件）
+        await _historyManager.RecordActivityEndQuietlyAsync(execution, deleteReason, ct).ConfigureAwait(false);
 
         lock (_syncRoot)
         {
@@ -253,7 +253,8 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         foreach (var child in children)
         {
-            await _historyManager.RecordActivityEndAsync(child, deleteReason, ct).ConfigureAwait(false);
+            // 子执行删除：只收口历史行，不发 ACTIVITY_COMPLETED
+            await _historyManager.RecordActivityEndQuietlyAsync(child, deleteReason, ct).ConfigureAwait(false);
 
             lock (_syncRoot)
             {
@@ -296,7 +297,8 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         foreach (var execution in toDelete)
         {
-            await _historyManager.RecordActivityEndAsync(execution, deleteReason, ct).ConfigureAwait(false);
+            // 实例结束的清理：只收口历史行，不发 ACTIVITY_COMPLETED
+            await _historyManager.RecordActivityEndQuietlyAsync(execution, deleteReason, ct).ConfigureAwait(false);
         }
 
         await _historyManager

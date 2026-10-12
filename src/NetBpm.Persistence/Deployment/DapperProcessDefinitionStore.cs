@@ -76,14 +76,16 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         var xmlBytes = Encoding.UTF8.GetBytes(Serialize(bpmnModel));
 
         // 1) 部署
+        // ⚠️ KEY_ / CATEGORY_ 必须为 null：Activiti 的部署默认不带 key（DeploymentBuilder.key 需显式设置）、
+        // category 也不从 targetNamespace 取 —— 真值比对（2026-10-12）里这两列全线差异，皆因我们画蛇添足。
         await connection.ExecuteAsync(
             InsertDeploymentSql,
             new
             {
                 deploymentId,
                 name = deploymentName,
-                category = bpmnModel.TargetNamespace,
-                key,
+                category = (string?)null,
+                key = (string?)null,
                 deployTime,
                 engineVersion,
             },

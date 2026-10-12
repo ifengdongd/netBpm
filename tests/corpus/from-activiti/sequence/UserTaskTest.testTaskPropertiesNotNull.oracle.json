@@ -15,108 +15,108 @@
     "ACT_RU_IDENTITYLINK" : [ ],
     "ACT_RU_VARIABLE" : [ ],
     "ACT_HI_PROCINST" : [ {
-      "ID_" : "446792",
-      "PROC_INST_ID_" : "446792",
+      "ID_" : "589273",
+      "PROC_INST_ID_" : "589273",
       "BUSINESS_KEY_" : "from-activiti/sequence/UserTaskTest.testTaskPropertiesNotNull",
-      "PROC_DEF_ID_" : "oneTaskProcess:1:446791",
-      "START_TIME_" : "2026-10-12 15:14:04.928",
-      "END_TIME_" : "2026-10-12 15:14:04.937",
-      "DURATION_" : "9",
+      "PROC_DEF_ID_" : "oneTaskProcess:1:589272",
+      "START_TIME_" : "2026-10-12 16:27:08.689",
+      "END_TIME_" : "2026-10-12 16:27:08.699",
+      "DURATION_" : "10",
       "START_ACT_ID_" : "start",
       "END_ACT_ID_" : "theEnd",
       "TENANT_ID_" : ""
     } ],
     "ACT_HI_ACTINST" : [ {
-      "ID_" : "446794",
-      "PROC_DEF_ID_" : "oneTaskProcess:1:446791",
-      "PROC_INST_ID_" : "446792",
-      "EXECUTION_ID_" : "446793",
+      "ID_" : "589275",
+      "PROC_DEF_ID_" : "oneTaskProcess:1:589272",
+      "PROC_INST_ID_" : "589273",
+      "EXECUTION_ID_" : "589274",
       "ACT_ID_" : "start",
       "ACT_TYPE_" : "startEvent",
-      "START_TIME_" : "2026-10-12 15:14:04.928",
-      "END_TIME_" : "2026-10-12 15:14:04.928",
+      "START_TIME_" : "2026-10-12 16:27:08.689",
+      "END_TIME_" : "2026-10-12 16:27:08.689",
       "DURATION_" : "0",
       "TENANT_ID_" : ""
     }, {
-      "ID_" : "446803",
-      "PROC_DEF_ID_" : "oneTaskProcess:1:446791",
-      "PROC_INST_ID_" : "446792",
-      "EXECUTION_ID_" : "446793",
+      "ID_" : "589284",
+      "PROC_DEF_ID_" : "oneTaskProcess:1:589272",
+      "PROC_INST_ID_" : "589273",
+      "EXECUTION_ID_" : "589274",
       "ACT_ID_" : "theEnd",
       "ACT_TYPE_" : "endEvent",
-      "START_TIME_" : "2026-10-12 15:14:04.935",
-      "END_TIME_" : "2026-10-12 15:14:04.935",
+      "START_TIME_" : "2026-10-12 16:27:08.697",
+      "END_TIME_" : "2026-10-12 16:27:08.697",
       "DURATION_" : "0",
       "TENANT_ID_" : ""
     }, {
-      "ID_" : "446795",
-      "PROC_DEF_ID_" : "oneTaskProcess:1:446791",
-      "PROC_INST_ID_" : "446792",
-      "EXECUTION_ID_" : "446793",
+      "ID_" : "589276",
+      "PROC_DEF_ID_" : "oneTaskProcess:1:589272",
+      "PROC_INST_ID_" : "589273",
+      "EXECUTION_ID_" : "589274",
       "ACT_ID_" : "theTask",
-      "TASK_ID_" : "446796",
+      "TASK_ID_" : "589277",
       "ACT_NAME_" : "my task",
       "ACT_TYPE_" : "userTask",
       "ASSIGNEE_" : "kermit",
-      "START_TIME_" : "2026-10-12 15:14:04.928",
-      "END_TIME_" : "2026-10-12 15:14:04.935",
-      "DURATION_" : "7",
+      "START_TIME_" : "2026-10-12 16:27:08.689",
+      "END_TIME_" : "2026-10-12 16:27:08.697",
+      "DURATION_" : "8",
       "TENANT_ID_" : ""
     } ],
     "ACT_HI_TASKINST" : [ {
-      "ID_" : "446796",
-      "PROC_DEF_ID_" : "oneTaskProcess:1:446791",
+      "ID_" : "589277",
+      "PROC_DEF_ID_" : "oneTaskProcess:1:589272",
       "TASK_DEF_KEY_" : "theTask",
-      "PROC_INST_ID_" : "446792",
-      "EXECUTION_ID_" : "446793",
+      "PROC_INST_ID_" : "589273",
+      "EXECUTION_ID_" : "589274",
       "NAME_" : "my task",
       "DESCRIPTION_" : "Very important",
       "ASSIGNEE_" : "kermit",
-      "START_TIME_" : "2026-10-12 15:14:04.928",
-      "END_TIME_" : "2026-10-12 15:14:04.934",
-      "DURATION_" : "6",
+      "START_TIME_" : "2026-10-12 16:27:08.689",
+      "END_TIME_" : "2026-10-12 16:27:08.696",
+      "DURATION_" : "7",
       "PRIORITY_" : "0",
       "TENANT_ID_" : ""
     } ],
     "ACT_HI_VARINST" : [ ],
     "ACT_HI_IDENTITYLINK" : [ {
-      "ID_" : "446799",
+      "ID_" : "589280",
       "TYPE_" : "candidate",
       "USER_ID_" : "fozzie",
-      "TASK_ID_" : "446796"
+      "TASK_ID_" : "589277"
     }, {
-      "ID_" : "446801",
+      "ID_" : "589282",
       "TYPE_" : "candidate",
       "USER_ID_" : "gonzo",
-      "TASK_ID_" : "446796"
+      "TASK_ID_" : "589277"
     }, {
-      "ID_" : "446800",
+      "ID_" : "589281",
       "TYPE_" : "participant",
       "USER_ID_" : "fozzie",
-      "PROC_INST_ID_" : "446792"
+      "PROC_INST_ID_" : "589273"
     }, {
-      "ID_" : "446802",
+      "ID_" : "589283",
       "TYPE_" : "participant",
       "USER_ID_" : "gonzo",
-      "PROC_INST_ID_" : "446792"
+      "PROC_INST_ID_" : "589273"
     }, {
-      "ID_" : "446797",
+      "ID_" : "589278",
       "TYPE_" : "participant",
       "USER_ID_" : "kermit",
-      "PROC_INST_ID_" : "446792"
+      "PROC_INST_ID_" : "589273"
     }, {
-      "ID_" : "446798",
+      "ID_" : "589279",
       "GROUP_ID_" : "management",
       "TYPE_" : "candidate",
-      "TASK_ID_" : "446796"
+      "TASK_ID_" : "589277"
     } ],
     "ACT_RE_PROCDEF" : [ {
-      "ID_" : "oneTaskProcess:1:446791",
+      "ID_" : "oneTaskProcess:1:589272",
       "REV_" : "1",
       "CATEGORY_" : "Examples",
       "KEY_" : "oneTaskProcess",
       "VERSION_" : "1",
-      "DEPLOYMENT_ID_" : "446789",
+      "DEPLOYMENT_ID_" : "589270",
       "RESOURCE_NAME_" : "UserTaskTest.testTaskPropertiesNotNull.bpmn20.xml",
       "HAS_START_FORM_KEY_" : "0",
       "HAS_GRAPHICAL_NOTATION_" : "0",
@@ -124,17 +124,17 @@
       "TENANT_ID_" : ""
     } ],
     "ACT_RE_DEPLOYMENT" : [ {
-      "ID_" : "446789",
+      "ID_" : "589270",
       "NAME_" : "from-activiti/sequence/UserTaskTest.testTaskPropertiesNotNull",
       "TENANT_ID_" : "",
-      "DEPLOY_TIME_" : "2026-10-12 15:14:04.918",
+      "DEPLOY_TIME_" : "2026-10-12 16:27:08.680",
       "VERSION_" : "1"
     } ],
     "ACT_GE_BYTEARRAY" : [ {
-      "ID_" : "446790",
+      "ID_" : "589271",
       "REV_" : "1",
       "NAME_" : "UserTaskTest.testTaskPropertiesNotNull.bpmn20.xml",
-      "DEPLOYMENT_ID_" : "446789",
+      "DEPLOYMENT_ID_" : "589270",
       "BYTES_" : "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGRlZmluaXRpb25zIGlkPSJ0YXNrQXNzaWduZWVFeGFtcGxlIgogIHhtbG5zPSJodHRwOi8vd3d3Lm9tZy5vcmcvc3BlYy9CUE1OLzIwMTAwNTI0L01PREVMIgogIHhtbG5zOmFjdGl2aXRpPSJodHRwOi8vYWN0aXZpdGkub3JnL2JwbW4iCiAgdGFyZ2V0TmFtZXNwYWNlPSJFeGFtcGxlcyI+CgogIDxwcm9jZXNzIGlkPSJvbmVUYXNrUHJvY2VzcyI+CgogICAgPHN0YXJ0RXZlbnQgaWQ9InN0YXJ0Ii8+CgogICAgPHNlcXVlbmNlRmxvdyBpZD0iZmxvdzEiIHNvdXJjZVJlZj0ic3RhcnQiIHRhcmdldFJlZj0idGhlVGFzayIgLz4KCiAgICA8dXNlclRhc2sgaWQ9InRoZVRhc2siIG5hbWU9Im15IHRhc2siIGFjdGl2aXRpOmFzc2lnbmVlPSJrZXJtaXQiCiAgICAgICAgICAgICAgYWN0aXZpdGk6Y2FuZGlkYXRlVXNlcnM9ImZvenppZSwgZ29uem8iIGFjdGl2aXRpOmNhbmRpZGF0ZUdyb3Vwcz0ibWFuYWdlbWVudCI+CiAgICAgIDxkb2N1bWVudGF0aW9uPlZlcnkgaW1wb3J0YW50PC9kb2N1bWVudGF0aW9uPgogICAgPC91c2VyVGFzaz4KCiAgICA8c2VxdWVuY2VGbG93IGlkPSJmbG93MiIgc291cmNlUmVmPSJ0aGVUYXNrIiB0YXJnZXRSZWY9InRoZUVuZCIgLz4KCiAgICA8ZW5kRXZlbnQgaWQ9InRoZUVuZCIgLz4KCiAgPC9wcm9jZXNzPgoKPC9kZWZpbml0aW9ucz4K",
       "GENERATED_" : "0"
     } ]

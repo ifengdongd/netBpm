@@ -332,8 +332,9 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
-        // 对应 deleteExecutionAndRelatedData：先收口该执行上的历史活动行，再删执行
-        await _historyManager.RecordActivityEndAsync(execution, deleteReason, ct).ConfigureAwait(false);
+        // 对应 deleteExecutionAndRelatedData：先收口该执行上的历史活动行，再删执行。
+        // 删除清理只收口历史行，不发 ACTIVITY_COMPLETED（与 Activiti 一致：清理不分发事件）
+        await _historyManager.RecordActivityEndQuietlyAsync(execution, deleteReason, ct).ConfigureAwait(false);
 
         await DeleteRecursiveAsync(session, GetCache(session), execution, deleteReason, ct).ConfigureAwait(false);
     }
@@ -553,8 +554,8 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         }
 
         // 对应 deleteProcessInstanceExecutionEntity 里的 deleteChildExecutions：
-        // 每个被删的执行都要先收口自己在 ACT_HI_ACTINST 上未结束的行
-        await _historyManager.RecordActivityEndAsync(execution, deleteReason, ct).ConfigureAwait(false);
+        // 每个被删的执行都要先收口自己在 ACT_HI_ACTINST 上未结束的行（清理不发事件）
+        await _historyManager.RecordActivityEndQuietlyAsync(execution, deleteReason, ct).ConfigureAwait(false);
 
         await DeleteSingleAsync(session, cache, execution, ct).ConfigureAwait(false);
     }

@@ -100,16 +100,21 @@ public sealed class SnapshotComparer
                 var expectedRow = expectedTable.Rows[rowIndex];
                 var actualRow = actualTable.Rows[rowIndex];
 
-                foreach (var (column, expectedValue) in expectedRow)
-                {
-                    if (_ignoredColumns.Contains(column))
-                    {
-                        continue;
-                    }
+                // 🔑 必须**并集**遍历：Java 侧的 JSON 会省略 null 字段，若只遍历预言机行的列，
+                // 被测侧独有的列（如 START_USER_ID_）会被静默跳过 —— 那是单向偷懒，不是一致。
+                // 两边缺席/null 视为相等（absent ≡ null），不会引入噪音。
+                var columns = expectedRow.Keys
+                    .Union(actualRow.Keys, StringComparer.OrdinalIgnoreCase)
+                    .Where(column => !_ignoredColumns.Contains(column))
+                    .OrderBy(column => column, StringComparer.Ordinal);
 
+                foreach (var column in columns)
+                {
                     comparedCells++;
 
+                    var expectedValue = expectedRow.GetValueOrDefault(column);
                     var actualValue = actualRow.GetValueOrDefault(column);
+
                     if (!string.Equals(expectedValue, actualValue, StringComparison.Ordinal))
                     {
                         differences.Add(new Difference(expectedTable.Table, rowIndex, column, expectedValue, actualValue));

@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import NetBpmPropertiesProvider from '../src/designer/propertiesProvider';
+import { parseProcessMeta, upsertDiagram, type DiagramRecord } from '../src/storage';
 import { hasBlockingError, summarize, validateDiagram } from '../src/validation';
 import type { StubEntry, StubGroup } from './propertiesPanelStub';
 
@@ -392,4 +393,59 @@ test('校验：重复 id 会被拦下', () => {
   );
 
   assert.ok(issues.some((issue) => issue.message.includes("'dup' 重复")));
+});
+
+// ─────────────────────────── 流程记录存储（storage.ts）───────────────────────────
+
+test('存储：从 XML 解析 process 的 id 与 name，name 缺省退回 id', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <bpmn:process id="leave_process" name="请假流程" isExecutable="true" />
+</bpmn:definitions>`;
+
+  assert.deepEqual(parseProcessMeta(xml), { processId: 'leave_process', name: '请假流程' });
+
+  const withoutName = '<bpmn:process id=\'solo\' isExecutable="true" />';
+
+  assert.deepEqual(parseProcessMeta(withoutName), { processId: 'solo', name: 'solo' });
+
+  // 无 process 节点：调用方据此判定"不是有效的 BPMN 流程图"
+  assert.equal(parseProcessMeta('<html><body></body></html>').processId, '');
+});
+
+test('存储：按 processId 覆盖更新，新记录排在最前，且不改变原数组', () => {
+  const existing: DiagramRecord[] = [
+    { processId: 'a', name: 'A', xml: '<a/>', updatedAt: '2026-01-01T00:00:00.000Z' },
+    { processId: 'b', name: 'B', xml: '<b/>', updatedAt: '2026-01-02T00:00:00.000Z' },
+  ];
+  const snapshot = JSON.stringify(existing);
+
+  const updated = upsertDiagram(existing, {
+    processId: 'a',
+    name: 'A2',
+    xml: '<a2/>',
+    updatedAt: '2026-01-03T00:00:00.000Z',
+  });
+
+  // 覆盖后 a 只出现一次，且排到了最前
+  assert.deepEqual(
+    updated.map((record) => record.processId),
+    ['a', 'b'],
+  );
+  assert.equal(updated[0].name, 'A2');
+
+  const inserted = upsertDiagram(existing, {
+    processId: 'c',
+    name: 'C',
+    xml: '<c/>',
+    updatedAt: '2026-01-03T00:00:00.000Z',
+  });
+
+  assert.deepEqual(
+    inserted.map((record) => record.processId),
+    ['c', 'a', 'b'],
+  );
+
+  // 原数组未被改动
+  assert.equal(JSON.stringify(existing), snapshot);
 });

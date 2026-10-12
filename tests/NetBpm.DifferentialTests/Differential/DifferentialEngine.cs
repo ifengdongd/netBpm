@@ -82,6 +82,7 @@ public sealed class DifferentialEngine
         // ID 具体值：Activiti 用 UUID，NetBpm 用 ACT_GE_PROPERTY 计数器 ⇒ 必然不同
         "ID_", "PROC_DEF_ID_", "PROC_INST_ID_", "EXECUTION_ID_", "TASK_ID_",
         "DEPLOYMENT_ID_", "BYTEARRAY_ID_", "PARENT_ID_", "SUPER_EXEC_",
+        "ROOT_PROC_INST_ID_",
         // 已登记的有意偏离（§15.10）：ACT_GE_BYTEARRAY.BYTES_
         // Activiti 存**原始 XML 字节**；我们的部署接口拿到的是已解析的模型，存的是重新序列化的 XML
         // （内容保真 —— P8 往返测试保证 DI 坐标与扩展属性零丢失，但不是字节一致）⇒ 列内容不可比

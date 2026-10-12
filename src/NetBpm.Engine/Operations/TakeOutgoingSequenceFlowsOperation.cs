@@ -74,7 +74,10 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
 
     private ValueTask HandleSequenceFlowAsync(CancellationToken ct)
     {
-        var recorded = _services.HistoryManager.RecordActivityEndAsync(_execution, null, ct);
+        // ⚠️ 只收口历史行（源节点那一行，见 §15.4 H4），不发 ACTIVITY_COMPLETED ——
+        // 若当前元素是顺序流，说明行为已经自己发过"离开"事件（如排他网关），
+        // Activiti 在 handleSequenceFlow 里同样只有 recordActivityEnd
+        var recorded = _services.HistoryManager.RecordActivityEndQuietlyAsync(_execution, null, ct);
         _services.Agenda.PlanContinueProcessOperation(_execution);
         return recorded;
     }

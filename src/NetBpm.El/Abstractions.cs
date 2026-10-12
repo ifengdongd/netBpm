@@ -5,6 +5,13 @@ namespace NetBpm.El;
 /// </summary>
 public interface IVariableScope
 {
+    /// <summary>
+    /// 发起人（认证用户）。对应 Activiti 隐式对象 <c>initiator</c>
+    /// （<c>ProcessInitiatorELResolver</c> 返回流程实例的 startUserId，未认证时为 null）。
+    /// <para>仅在流程执行上非空；纯字典作用域（测试用）恒为 null。</para>
+    /// </summary>
+    string? StartUserId => null;
+
     ValueTask<object?> GetVariableAsync(string name, CancellationToken ct = default);
 
     ValueTask<bool> HasVariableAsync(string name, CancellationToken ct = default);

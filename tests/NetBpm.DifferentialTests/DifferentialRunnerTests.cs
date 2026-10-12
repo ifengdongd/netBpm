@@ -187,12 +187,13 @@ public sealed class DifferentialRunnerTests
 
         Assert.Equal(cases.Count, report.Cases.Count);
 
-        // 🔑 这条用例的职责是"跑批并产出报告"，不再断言"没有真值" ——
-        // 2026-10-12 起 tools/Oracle 已能产出 204 个语料的真值（见 §15.10），
-        // 因此这里断言的是：**有真值的语料必须真的参与比对**，且报告产物落盘。
+        // 🔑 这条用例的职责是"跑批并产出报告"。有真值、且我方能跑的语料必须真的参与比对；
+        // 我方跑不动的语料（执行失败）会出现在报告的执行失败清单里，由门禁负责拦截。
+        var oracleFiles = cases.Count(entry => File.Exists(
+            Path.Combine(Path.GetDirectoryName(entry.CaseFile)!, entry.Name + ".oracle.json")));
+
         Assert.Equal(
-            cases.Count(entry => File.Exists(
-                Path.Combine(Path.GetDirectoryName(entry.CaseFile)!, entry.Name + ".oracle.json"))),
+            oracleFiles - report.ExecutionFailures.Count,
             report.Cases.Count(result => result.OraclePresent));
 
         // 报告产物落盘（供人工评审差异清单，§9.4 的后半条要求）

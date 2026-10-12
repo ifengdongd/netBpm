@@ -43,7 +43,9 @@ public interface IExecutionEntity : IDelegateExecution
     DateTime? StartTime { get; set; }
 
     /// <summary>发起人（<c>START_USER_ID_</c>）。</summary>
-    string? StartUserId { get; set; }
+    // new：IVariableScope 现在也声明了只读的 StartUserId（隐式对象 initiator 的取值来源），
+    // 执行实体需要可写（启动时由命令写入），因此在派生接口里显式扩充
+    new string? StartUserId { get; set; }
 
     /// <summary>锁定的首个父作用域（并行 Join 判定用，见 §5.4 之二）。</summary>
     IExecutionEntity? Parent { get; set; }

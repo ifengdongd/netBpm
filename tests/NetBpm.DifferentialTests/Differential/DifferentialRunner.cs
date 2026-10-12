@@ -207,7 +207,9 @@ public sealed class DifferentialRunner
                 definition.Id,
                 // businessKey 两端必须一致：用语料标识（Java 侧同规则）
                 BusinessKeyOf(entry),
-                startUserId: "tester",
+                // ⚠️ startUserId 必须为 null（匿名启动）：Java 预言机没有认证用户
+                // ⇒ ACT_HI_PROCINST.START_USER_ID_ 为 null。两侧都必须是"匿名"，否则该列全线差异。
+                startUserId: null,
                 CorpusVariables.ToClr(entry.Case.Variables),
                 ct)
             .ConfigureAwait(false);

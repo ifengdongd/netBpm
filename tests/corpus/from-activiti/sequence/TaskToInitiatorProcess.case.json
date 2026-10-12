@@ -124,8 +124,5 @@
       "kind": "completeAnyTask"
     }
   ],
-  "resourceName": "TaskToInitiatorProcess.bpmn20.xml",
-  "variables": {
-    "initiator": "1"
-  }
+  "resourceName": "TaskToInitiatorProcess.bpmn20.xml"
 }

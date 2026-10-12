@@ -124,8 +124,5 @@
       "kind": "completeAnyTask"
     }
   ],
-  "resourceName": "InitiatorTest.testInitiator.bpmn20.xml",
-  "variables": {
-    "initiator": "1"
-  }
+  "resourceName": "InitiatorTest.testInitiator.bpmn20.xml"
 }

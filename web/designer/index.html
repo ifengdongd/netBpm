@@ -7,21 +7,56 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <header class="toolbar">
-      <strong>NetBpm 设计器</strong>
-      <button id="btn-new" type="button">新建</button>
-      <button id="btn-import" type="button">导入 XML</button>
-      <button id="btn-export" type="button">导出 XML</button>
-      <button id="btn-deploy" type="button">部署</button>
-      <span id="status" class="status"></span>
-    </header>
-    <main class="canvas-row">
-      <div id="canvas" class="canvas"></div>
-      <aside id="properties" class="properties"></aside>
-    </main>
-    <!-- 即时校验清单（§6.2 第 3 项）：点击可定位到出问题的元素 -->
-    <footer id="issues" class="issues"></footer>
-    <input id="file-input" type="file" accept=".xml,.bpmn,.bpmn20.xml" hidden />
+    <!-- ─────────────── 视图一：流程图列表（默认视图） ─────────────── -->
+    <section id="list-view" class="view">
+      <header class="toolbar">
+        <strong>NetBpm 设计器</strong>
+        <span class="toolbar-divider"></span>
+        <span>流程图列表</span>
+        <button id="btn-new" type="button">新增流程图</button>
+        <button id="btn-import" type="button">导入 XML</button>
+        <span id="list-status" class="status"></span>
+      </header>
+      <main class="list-main">
+        <table class="diagram-table">
+          <thead>
+            <tr>
+              <th>流程名称</th>
+              <th>流程 ID</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="diagram-rows"></tbody>
+        </table>
+        <p id="list-empty" class="list-empty" hidden>
+          还没有流程图。点击「新增流程图」开始设计，或「导入 XML」导入已有的 BPMN 文件。
+        </p>
+      </main>
+    </section>
+
+    <!-- ─────────────── 视图二：流程图编辑器 ─────────────── -->
+    <section id="editor-view" class="view" hidden>
+      <header class="toolbar">
+        <button id="btn-back" type="button">← 返回列表</button>
+        <strong id="editor-title">编辑流程图</strong>
+        <span class="toolbar-divider"></span>
+        <button id="btn-save" type="button">保存</button>
+        <button id="btn-import-editor" type="button">导入 XML</button>
+        <button id="btn-export" type="button">导出 XML</button>
+        <button id="btn-deploy" type="button">部署</button>
+        <span id="status" class="status"></span>
+      </header>
+      <main class="canvas-row">
+        <div id="canvas" class="canvas"></div>
+        <aside id="properties" class="properties"></aside>
+      </main>
+      <!-- 即时校验清单（§6.2 第 3 项）：点击可定位到出问题的元素 -->
+      <footer id="issues" class="issues"></footer>
+    </section>
+
+    <input id="file-input-list" type="file" accept=".xml,.bpmn,.bpmn20.xml" hidden />
+    <input id="file-input-editor" type="file" accept=".xml,.bpmn,.bpmn20.xml" hidden />
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -124,8 +124,5 @@
       "kind": "completeAnyTask"
     }
   ],
-  "resourceName": "task-expression-mapping-process-andenvvars.bpmn20.xml",
-  "variables": {
-    "initiator": "1"
-  }
+  "resourceName": "task-expression-mapping-process-andenvvars.bpmn20.xml"
 }

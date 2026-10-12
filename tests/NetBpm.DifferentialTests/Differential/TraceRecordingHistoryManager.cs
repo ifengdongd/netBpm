@@ -28,9 +28,6 @@ public sealed class TraceRecordingHistoryManager : IHistoryManager
     private readonly List<TraceEvent> _events = [];
     private readonly Lock _syncRoot = new();
 
-    /// <summary>已收口的活动（执行 id + 节点 id）：同一活动实例只应有一次 <c>ACTIVITY_COMPLETED</c>。</summary>
-    private readonly HashSet<string> _completed = new(StringComparer.Ordinal);
-
     public TraceRecordingHistoryManager(IHistoryManager inner)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -59,9 +56,6 @@ public sealed class TraceRecordingHistoryManager : IHistoryManager
         lock (_syncRoot)
         {
             _events.Clear();
-
-            // 去重集合也要清：否则上一个语料的收口记录会让本语料的同类事件被误吞
-            _completed.Clear();
         }
     }
 
@@ -100,37 +94,30 @@ public sealed class TraceRecordingHistoryManager : IHistoryManager
         await _inner.RecordActivityStartAsync(execution, ct).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public async ValueTask RecordActivityEndAsync(
         IExecutionEntity execution,
         string? deleteReason,
         CancellationToken ct = default)
     {
-        // 执行到达顺序流：Activiti 语义是 SEQUENCEFLOW_TAKEN（而不是"某活动完成"）
-        if (execution.CurrentFlowElement is Bpmn.Model.SequenceFlow flow)
+        // 🔑 这是"执行离开活动"的语义（唯一调用点：TakeOutgoingSequenceFlowsOperation
+        // 的节点路径 + 排他网关行为内的 leave）—— 对应 Activiti 的 handleActivityEnd：
+        // recordActivityEnd 与 ACTIVITY_COMPLETED 事件在同一处先后发生。
+        // 根执行没有当前活动（它不参与推进），不产生事件。
+        if (!string.IsNullOrEmpty(execution.CurrentActivityId))
         {
-            Add(new TraceEvent("SEQUENCEFLOW_TAKEN", FlowId: flow.Id));
-        }
-        else if (!string.IsNullOrEmpty(execution.CurrentActivityId))
-        {
-            // 没有当前活动（例如流程实例根执行被收口）⇒ 无可收口的活动，Activiti 也不发事件
-            // 同一活动实例只记一次 ACTIVITY_COMPLETED：实例收口时会为每个未结束的执行再调一次
-            // 本端口（历史行本身幂等，但事件序列不幂等 ⇒ 必须去重，否则出现重复的 COMPLETED）
-            var key = $"{execution.Id}\u001f{execution.CurrentActivityId}";
-            bool first;
-
-            lock (_syncRoot)
-            {
-                first = _completed.Add(key);
-            }
-
-            if (first)
-            {
-                Add(new TraceEvent("ACTIVITY_COMPLETED", execution.CurrentActivityId));
-            }
+            Add(new TraceEvent("ACTIVITY_COMPLETED", execution.CurrentActivityId));
         }
 
         await _inner.RecordActivityEndAsync(execution, deleteReason, ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public ValueTask RecordActivityEndQuietlyAsync(
+        IExecutionEntity execution,
+        string? deleteReason,
+        CancellationToken ct = default) =>
+        _inner.RecordActivityEndQuietlyAsync(execution, deleteReason, ct);
 
     public async ValueTask RecordTaskCreatedAsync(
         TaskEntity task,

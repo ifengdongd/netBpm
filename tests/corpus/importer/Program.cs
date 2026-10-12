@@ -199,6 +199,7 @@ internal static class Program
         {
             expected.Add(Path.Combine(corpusRoot, item.Shape, $"{item.Name}.bpmn20.xml"));
             expected.Add(Path.Combine(corpusRoot, item.Shape, $"{item.Name}.case.json"));
+            expected.Add(Path.Combine(corpusRoot, item.Shape, $"{item.Name}.oracle.json"));
         }
 
         var removed = 0;
@@ -206,7 +207,8 @@ internal static class Program
         foreach (var path in Directory
             .EnumerateFiles(corpusRoot, "*", SearchOption.AllDirectories)
             .Where(path => path.EndsWith(".bpmn20.xml", StringComparison.OrdinalIgnoreCase)
-                || path.EndsWith(".case.json", StringComparison.OrdinalIgnoreCase)))
+                || path.EndsWith(".case.json", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".oracle.json", StringComparison.OrdinalIgnoreCase)))
         {
             if (expected.Contains(path))
             {
@@ -430,6 +432,8 @@ internal static class Program
     {
         "true", "false", "null", "empty", "and", "or", "not", "div", "mod",
         "eq", "ne", "lt", "gt", "le", "ge", "instanceof", "execution",
+        // 发起人变量由引擎在启动时写入（activiti:initiator），不需要也无法播种
+        "initiator",
     };
 
     /// <summary>属性访问 / 方法调用（<c>base.name</c>）：<c>base</c> 不是 <c>execution</c> 就驱动不了。</summary>

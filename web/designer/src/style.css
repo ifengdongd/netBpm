@@ -19,6 +19,20 @@ body {
   flex-direction: column;
 }
 
+/* 列表/编辑器双视图：各自撑满 body 剩余空间（.canvas-row 的 flex:1 依赖这里的父级高度） */
+.view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ⚠️ .view 的 display:flex 与 [hidden] 的 display:none 同优先级，
+   必须显式写回 none，否则切回列表页时编辑器仍占位 */
+.view[hidden] {
+  display: none;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -68,6 +82,71 @@ body {
   color: #aaa;
   background: #f2f2f2;
   cursor: not-allowed;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+}
+
+/* ─────────────── 流程图列表视图 ─────────────── */
+
+.list-main {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px;
+}
+
+.diagram-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 14px;
+}
+
+.diagram-table th,
+.diagram-table td {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.diagram-table th {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.diagram-table td.cell-id {
+  font-family: Consolas, monospace;
+  color: #666;
+}
+
+.diagram-table td button {
+  margin-right: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.diagram-table td button:hover {
+  background: var(--bg);
+}
+
+.diagram-table td button.danger {
+  color: #c0392b;
+}
+
+.diagram-table td button.danger:hover {
+  background: #fdf0ef;
+}
+
+.list-empty {
+  margin-top: 24px;
+  color: #888;
+  font-size: 14px;
 }
 
 /* ─────────────── 即时校验清单（§6.2 第 3 项）─────────────── */

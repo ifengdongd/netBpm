@@ -46,8 +46,36 @@ public interface IHistoryManager
     /// <summary>记录活动开始（<c>ACT_HI_ACTINST</c>，id 为新生成的 id）。</summary>
     ValueTask RecordActivityStartAsync(IExecutionEntity execution, CancellationToken ct = default);
 
-    /// <summary>结束活动（把该执行上未结束的 <c>ACT_HI_ACTINST</c> 行收口）。</summary>
+    /// <summary>
+    /// 节点离开：收口历史活动行（<c>ACT_HI_ACTINST</c>）并产生 <c>ACTIVITY_COMPLETED</c> 语义。
+    /// <para>
+    /// ⚠️ 对应 Activiti 的 <c>TakeOutgoingSequenceFlowsOperation.handleActivityEnd</c> ——
+    /// 在那里 <c>recordActivityEnd</c> 与 <c>ACTIVITY_COMPLETED</c> 事件是<b>同一处先后发生</b>的
+    /// （排他网关的行为内 leave 也是"事件 + 收口"成对出现）。
+    /// 因此本端口是"离开活动"的完整语义；<b>只收口历史行、不代表离开</b>的场景
+    /// （并行网关每次到达、执行删除清理、沿顺序流前进）必须用
+    /// <see cref="RecordActivityEndQuietlyAsync"/>。
+    /// </para>
+    /// </summary>
     ValueTask RecordActivityEndAsync(
+        IExecutionEntity execution,
+        string? deleteReason,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 只收口历史活动行，<b>不产生</b> <c>ACTIVITY_COMPLETED</c> 语义。
+    /// <para>
+    /// 对应 Activiti 里那些<b>只调 <c>recordActivityEnd</c>、不分发事件</b>的位置：
+    /// 并行网关每次到达（源码注释："Is needed to set the endTime for all historic activity joins"）、
+    /// 执行删除的级联清理、沿顺序流前进（此时收口的是源节点那一行，见 §15.4 H4）。
+    /// </para>
+    /// <para>
+    /// 🔑 这是 2026-10-12 真值比对（§15.10 R5）抓到的口径差：此前"收口"与"离开事件"绑在一个端口上，
+    /// 导致并行 Join 的<b>首次到达</b>就发出 <c>ACTIVITY_COMPLETED</c>，而 Activiti 要等最后一个令牌
+    /// 放行 Join 时才有。
+    /// </para>
+    /// </summary>
+    ValueTask RecordActivityEndQuietlyAsync(
         IExecutionEntity execution,
         string? deleteReason,
         CancellationToken ct = default);
@@ -192,5 +220,12 @@ public sealed class NullHistoryManager : IHistoryManager
 
     /// <summary>顺序流不产生任何历史行（§15.4 H4），因此空实现。</summary>
     public ValueTask RecordSequenceFlowTakenAsync(IExecutionEntity execution, CancellationToken ct = default) =>
+        ValueTask.CompletedTask;
+
+    /// <summary>空历史级别：无行可收口。</summary>
+    public ValueTask RecordActivityEndQuietlyAsync(
+        IExecutionEntity execution,
+        string? deleteReason,
+        CancellationToken ct = default) =>
         ValueTask.CompletedTask;
 }

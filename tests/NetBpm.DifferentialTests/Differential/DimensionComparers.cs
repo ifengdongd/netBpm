@@ -250,7 +250,15 @@ public static class RowOrdering
         ];
     }
 
-    /// <summary>规范串：按列名 ordinal 升序拼 <c>列名=值</c>。</summary>
+    /// <summary>
+    /// 规范串：按列名 ordinal 升序拼 <c>列名=值</c>。
+    /// <para>
+    /// 🔑 <b>值为 null 的列不参与</b>（2026-10-12 真值比对抓到的口径差）：Java 侧的 JSON 会**省略**
+    /// null 字段 ⇒ 它的排序键里根本没有这个列；C# 侧从 Dapper 拿到的行带 null 值。若把 null 拼成
+    /// <c>COL=</c>，同一批行在两侧会得到不同的键集，排出的顺序不同（身份关系行的乱序就是这么来的）。
+    /// 两侧统一为"null/缺席 ⇒ 不参与"，键就逐字一致了。
+    /// </para>
+    /// </summary>
     public static string CanonicalKey(
         IReadOnlyDictionary<string, string?> row,
         IReadOnlySet<string> ignoredColumns)
@@ -264,7 +272,14 @@ public static class RowOrdering
             .Where(column => !ignoredColumns.Contains(column))
             .OrderBy(column => column, StringComparer.Ordinal))
         {
-            builder.Append(column).Append('=').Append(row[column] ?? string.Empty).Append('\u001f');
+            var value = row[column];
+
+            if (value is null)
+            {
+                continue;
+            }
+
+            builder.Append(column).Append('=').Append(value).Append('\u001f');
         }
 
         return builder.ToString();

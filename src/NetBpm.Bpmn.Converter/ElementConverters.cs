@@ -12,6 +12,9 @@ public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
 
     protected override void ConvertXmlToElement(XmlReader reader, StartEvent element, Process process)
     {
+        // 发起人变量名（activiti:initiator）—— 实例启动时引擎把认证用户写进该变量
+        element.Initiator = Attr(reader, "initiator", BpmnConstants.ActivitiNamespace);
+
         // 子集内不支持任何事件定义（见 §1.3 第 3 条），出现即由校验层报错。
         ReadChildren(reader, element, _ => { });
     }
@@ -20,6 +23,7 @@ public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
     {
         writer.WriteStartElement("startEvent", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
+        WriteActivitiAttribute(writer, "initiator", element.Initiator);
         writer.WriteEndElement();
     }
 }
@@ -147,8 +151,85 @@ public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
         FillCsv(element.CandidateUsers, Attr(reader, BpmnConstants.AttributeCandidateUsers, BpmnConstants.ActivitiNamespace));
         FillCsv(element.CandidateGroups, Attr(reader, BpmnConstants.AttributeCandidateGroups, BpmnConstants.ActivitiNamespace));
 
-        // extensionElements（任务监听器 / 字段注入）由基类的 ReadChildren 集中处理
-        ReadChildren(reader, element, _ => { });
+        // extensionElements（任务监听器 / 字段注入）由基类的 ReadChildren 集中处理；
+        // 办理关系还有 BPMN 标准写法（<humanPerformer> / <potentialOwner>，见下）
+        ReadChildren(reader, element, child =>
+        {
+            switch (child.LocalName)
+            {
+                case "humanPerformer":
+                    {
+                        // 对应 UserTaskXMLConverter.HumanPerformerParser：
+                        // <humanPerformer><resourceAssignmentExpression><formalExpression>fozzie</formalExpression>
+                        var expression = ReadFormalExpression(child);
+
+                        if (!string.IsNullOrEmpty(expression))
+                        {
+                            element.Assignee = expression;
+                        }
+
+                        break;
+                    }
+
+                case "potentialOwner":
+                    {
+                        // 对应 PotentialOwnerParser：按逗号拆，user(x) ⇒ 候选用户，
+                        // group(y) 与**裸名** ⇒ 候选组（Activiti 把无法识别的都归候选组）
+                        var expression = ReadFormalExpression(child);
+
+                        if (string.IsNullOrEmpty(expression))
+                        {
+                            break;
+                        }
+
+                        foreach (var assignment in expression.Split(','))
+                        {
+                            var value = assignment.Trim();
+
+                            if (value.Length == 0)
+                            {
+                                continue;
+                            }
+
+                            if (value.StartsWith("user(", StringComparison.Ordinal) && value.EndsWith(')'))
+                            {
+                                element.CandidateUsers.Add(value[5..^1].Trim());
+                            }
+                            else if (value.StartsWith("group(", StringComparison.Ordinal) && value.EndsWith(')'))
+                            {
+                                element.CandidateGroups.Add(value[6..^1].Trim());
+                            }
+                            else
+                            {
+                                element.CandidateGroups.Add(value);
+                            }
+                        }
+
+                        break;
+                    }
+            }
+        });
+    }
+
+    /// <summary>
+    /// 读 <c>resourceAssignmentExpression/formalExpression</c> 的文本。
+    /// 对应 Activiti 的 <c>XMLStreamReaderUtil.moveDown</c> 两跳。
+    /// </summary>
+    private static string? ReadFormalExpression(XmlReader reader)
+    {
+        if (!reader.ReadToDescendant("resourceAssignmentExpression"))
+        {
+            return null;
+        }
+
+        if (!reader.ReadToDescendant("formalExpression"))
+        {
+            return null;
+        }
+
+        var text = reader.ReadElementContentAsString();
+
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
     }
 
     protected override void ConvertElementToXml(XmlWriter writer, UserTask element)

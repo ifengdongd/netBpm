@@ -46,7 +46,7 @@ public final class Contract {
             "LAST_UPDATED_TIME_", "LOCK_TIME_", "DEPLOY_TIME_", "DURATION_",
             "ENGINE_VERSION_",
             "ID_", "PROC_DEF_ID_", "PROC_INST_ID_", "EXECUTION_ID_", "TASK_ID_",
-            "DEPLOYMENT_ID_", "BYTEARRAY_ID_", "PARENT_ID_", "SUPER_EXEC_",
+            "DEPLOYMENT_ID_", "BYTEARRAY_ID_", "PARENT_ID_", "SUPER_EXEC_", "ROOT_PROC_INST_ID_",
             // 已登记的有意偏离：Activiti 存原始 XML 字节，NetBpm 存重新序列化的 XML（内容保真但非字节一致）
             "BYTES_");
 

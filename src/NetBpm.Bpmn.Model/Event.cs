@@ -16,6 +16,16 @@ public class StartEvent : Event
 
     /// <summary>是否有多个事件定义。</summary>
     public bool HasMultipleEventDefinitions { get; set; }
+
+    /// <summary>
+    /// 发起人变量名（<c>activiti:initiator</c>）。
+    /// <para>
+    /// 实例启动时，引擎把<b>发起人（认证用户）</b>写进这个名字的流程变量 —— 这是 Activiti 的标准用法，
+    /// 后续节点可以用 <c>${initiator}</c> 引用它（例如 <c>humanPerformer</c> 的办理人表达式）。
+    /// 认证用户为 null 时变量仍会被创建（null 类型），与 Activiti 一致。
+    /// </para>
+    /// </summary>
+    public string? Initiator { get; set; }
 }
 
 /// <summary>

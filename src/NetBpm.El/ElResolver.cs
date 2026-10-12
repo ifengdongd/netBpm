@@ -46,6 +46,12 @@ internal static class ElResolver
             return context.Scope;
         }
 
+        // 隐式对象 initiator：流程实例的发起人（ProcessInitiatorELResolver ⇒ startUserId，可能为 null）
+        if (string.Equals(name, "initiator", StringComparison.Ordinal))
+        {
+            return context.Scope.StartUserId;
+        }
+
         if (await context.Scope.HasVariableAsync(name, ct).ConfigureAwait(false))
         {
             return await context.Scope.GetVariableAsync(name, ct).ConfigureAwait(false);

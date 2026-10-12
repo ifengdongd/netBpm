@@ -961,15 +961,23 @@ Activiti 9 默认使用 **`DbIdGenerator`**（`ProcessEngineConfigurationImpl.in
 | D2 | 维度③一致率只有 27% | ① **`SEQUENCEFLOW_TAKEN` 整段缺失**：`ContinueProcessOperation` 走顺序流时根本没有历史调用。新增 `IHistoryManager.RecordSequenceFlowTakenAsync` 端口并在**改写 `CurrentFlowElement` 之前**调用（端口靠"当前元素是顺序流"取流 id）；② **变量事件应早于 `PROCESS_STARTED`**；③ 实例收口时为已无当前活动的执行又发了一条 `ACTIVITY_COMPLETED`（采集器去重 + 空活动不记录）；④ `PROCESS_*`/`TASK_*` 事件不填 `activityId`（Activiti 的这些事件类型不带该字段）⇒ 27% → 83% |
 | D3 | `ACT_GE_BYTEARRAY.BYTES_` 204 处差异 | Activiti 存**原始 XML 字节**，我们的部署接口拿到的是已解析的模型，存的是重新序列化的 XML（内容保真但非字节一致）⇒ 登记为**有意偏离**并进忽略列。彻底修法：让部署接口接收原始字节（未做） |
 
-**C. 当前剩余差异（888 条）—— 按"下一步该干什么"排序**
+**C. 第二轮修复（同日）：888 条 → 81 条，门禁达标**
 
-| # | 差异 | 样本 | 判断 |
-|---|---|---|---|
-| R1 | `ACT_HI_TASKINST.ASSIGNEE_` 为空（期望 `fozzie`/`user1`/`kermit`） | `ParallelTest.testParallel` | **真实缺陷**：历史任务行创建时没写办理人（Activiti 创建即写）。28 处 |
-| R2 | `ACT_HI_IDENTITYLINK.TYPE_='participant'` / `GROUP_ID_` 为空（期望 `candidate` + `group1`） | `basic-parallel-gateway-groups` | **真实缺陷**：候选组没进历史身份关系（只记了 participant）。80 处 |
-| R3 | `ACT_HI_VARINST.REV_` 期望 0、实际 1 | `all-false-uses-default-2` | **真实缺陷**：历史变量行的 REV_ 语义与运行行不同（Activiti 从 0 起）。34 处 |
-| R4 | `ACT_HI_TASKINST.DESCRIPTION_`/`NAME_`/`FORM_KEY_`、`ACT_RE_PROCDEF.DESCRIPTION_`/`HAS_START_FORM_KEY_` | 多个 | 多为 `<documentation>`/起始表单 Key 我们按 §1.2/§1.3 **有意不采集** ⇒ 需逐条确认后登记 |
-| R5 | ③ 中并行 Join 场景的事件顺序（`TASK_COMPLETED` 位置） | `nested-parallel-then-exclusive-2` | 待分析：Join 放行与任务完成事件的先后 |
+第一轮跑批后的 888 条差异，按根因修复（**全部回写代码**，不是台账消化）：
+
+| # | 差异 | 根因与处置 |
+|---|---|---|
+| R1 | 历史任务行 `ASSIGNEE_` 为空（期望 fozzie/user1/kermit） | **不是**"创建时没写办理人"，而是这些语料用 **BPMN 标准的 `<humanPerformer>`** 分配办理人（不是 `activiti:assignee`），我们的转换器不认识 ⇒ 实现 `humanPerformer`（assignee）与 `potentialOwner`（`user(x)`/`group(y)`/裸名 ⇒ 候选）解析 |
+| R2 | 身份关系行乱序（TYPE_/GROUP_ID_ 错位） | **规范排序键的 null 表达不一致**：Java 的 JSON 省略 null 字段（键里没有该列），C# 拼成 `COL=`。两侧统一为"null ⇒ 不参与键"（`RowOrdering.CanonicalKey`） |
+| R3 | `ACT_HI_VARINST.REV_` 期望 0、实际 1 | 历史行的 REV_ 是 Activiti `copyAndInsert` 复制的**运行时内存值**（创建时为 0，DB 的 1 是 INSERT 写死的），且更新时不碰 ⇒ 历史行 REV_ 恒 0（改 INSERT 为 0、UPDATE 去掉 REV_） |
+| R4 | 部署表 `KEY_`/`CATEGORY_`（394 处） | 我们画蛇添足：Activiti 的部署默认**没有** key/category ⇒ 都写 null |
+| R5 | 并行 Join 的事件顺序 | **"收口历史行"与"离开事件"被绑在一个端口上**。Activiti 里二者只在少数点成对（TakeOutgoing.handleActivityEnd、排他网关行为内 leave），并行网关每次到达、执行删除清理**只收口不发事件** ⇒ 新增 `RecordActivityEndQuietlyAsync`，`RecordActivityEndAsync` 收敛为"离开"语义（唯一调用点：节点路径） |
+| R6 | 比对器**列并集** | 原实现只遍历预言机行的列 ⇒ 被测侧独有的列（`START_USER_ID_`）被静默跳过；改为两侧列并集（absent ≡ null） |
+| R7 | `${initiator}`（7 个语料跑不动） | 实现 `activiti:initiator`（启动时把认证用户写进该变量）+ 隐式对象 `initiator`（`IVariableScope.StartUserId` ⇒ `ProcessInitiatorELResolver`）；对拍两侧统一为**匿名启动**（预言机无认证用户 ⇒ START_USER_ID_ 为 null） |
+| R8 | 维度②单元格翻倍 | R6 的连带：被测侧的 null 列开始参与比对 ⇒ 一致率的分母更诚实 |
+
+**修复后（2026-10-12 第二轮）**：① 99.68% / ② 99.51% / ③ 99.97% / **整体 99.59% —— §9.4 门禁达标**；
+差异 81 条**全部登记进台账**（`tests/corpus/known-issues.json`），待结论 0 条。
 
 **D. 复现方式（一条命令链）**
 

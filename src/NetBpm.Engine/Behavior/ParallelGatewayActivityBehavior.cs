@@ -58,9 +58,11 @@ public sealed class ParallelGatewayActivityBehavior : GatewayActivityBehavior
         // ③ 期望值 = 入流条数
         var numberOfExecutionsToJoin = parallelGateway.IncomingFlows.Count;
 
-        // 需要为所有历史 activity join 设置 endTime
+        // ⚠️ 只收口历史行、**不发** ACTIVITY_COMPLETED：Activiti 在这里的调用
+        // （"Is needed to set the endTime for all historic activity joins"）不分发事件 ——
+        // Join 完成的事件由最后一个令牌放行时的 TakeOutgoing 发出（§15.10 R5）
         await Services.HistoryManager
-            .RecordActivityEndAsync(execution.AsEntity(), null, ct)
+            .RecordActivityEndQuietlyAsync(execution.AsEntity(), null, ct)
             .ConfigureAwait(false);
 
         // ④ 全部到齐 → Fork

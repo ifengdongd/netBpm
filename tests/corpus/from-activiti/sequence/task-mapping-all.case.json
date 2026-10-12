@@ -124,8 +124,5 @@
       "kind": "completeAnyTask"
     }
   ],
-  "resourceName": "task-mapping-all.bpmn20.xml",
-  "variables": {
-    "initiator": "1"
-  }
+  "resourceName": "task-mapping-all.bpmn20.xml"
 }

@@ -71,6 +71,15 @@ public sealed class StartProcessInstanceCommand : ICommand<string>
         //   VARIABLE_CREATED × N → PROCESS_STARTED → SEQUENCEFLOW_TAKEN → ACTIVITY_STARTED …
         // 而本实现原本是"先 PROCESS_STARTED 再写变量"，整条事件序列因此错位一位，
         // 在维度③上造成 2461 条假差异（占总差异的 82%）。顺序即契约。
+        //
+        // 发起人变量（activiti:initiator）在最前面：对应 Activiti 的 StartProcessInstanceCmd ——
+        // 实例一创建就把认证用户写进该变量（认证用户为 null 时变量仍会创建，null 类型），
+        // 随后 ${initiator} 才能在 humanPerformer 等表达式里引用。
+        if (initialFlowElement is StartEvent { Initiator: { Length: > 0 } initiatorVariableName })
+        {
+            await processInstance.SetVariableAsync(initiatorVariableName, _startUserId, ct).ConfigureAwait(false);
+        }
+
         if (_variables is { Count: > 0 })
         {
             await processInstance.SetVariablesAsync(new Dictionary<string, object?>(_variables, StringComparer.Ordinal), ct)

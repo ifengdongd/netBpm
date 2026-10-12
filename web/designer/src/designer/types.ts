@@ -63,6 +63,8 @@ export interface SelectionService {
 
 export interface CanvasService {
   scrollToElement(element: unknown): void;
+  /** 容器尺寸变化后重算画布（从 hidden 视图切回编辑器时必须调用）。 */
+  resized(): void;
 }
 
 /** properties-panel 服务（注册属性组的入口）。 */

@@ -63,6 +63,16 @@ internal sealed class RecordingHistoryManager : IHistoryManager
         return ValueTask.CompletedTask;
     }
 
+    /// <inheritdoc />
+    public ValueTask RecordActivityEndQuietlyAsync(
+        IExecutionEntity execution,
+        string? deleteReason,
+        CancellationToken ct = default)
+    {
+        _calls.Add($"ActivityEndQuiet:{execution.CurrentActivityId}");
+        return ValueTask.CompletedTask;
+    }
+
     public ValueTask RecordTaskCreatedAsync(
         TaskEntity task,
         IExecutionEntity execution,

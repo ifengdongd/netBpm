@@ -122,8 +122,11 @@ public sealed class MySqlVariableAndHistoryTests
     }
 
     [Fact]
-    public async Task VariableUpdate_ShouldBumpHistoricRevision()
+    public async Task VariableUpdate_ShouldKeepHistoricRevisionAtZero()
     {
+        // 🔑 2026-10-12 真值比对的修正（§15.10 R3）：历史变量行的 REV_ 是 **Activiti 的
+        // copyAndInsert 复制的运行时内存值** —— 创建那一刻是 0（DB 的 REV_=1 是 INSERT 写死的），
+        // 且 copyVariableValue 更新时不碰 revision ⇒ 历史行 REV_ 恒为 0，与运行行无关。
         Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
 
         var harness = new DatabaseEngineHarness();
@@ -153,7 +156,7 @@ public sealed class MySqlVariableAndHistoryTests
         Assert.Equal("approved", RowValues.Text(row, "NAME_"));
         Assert.Equal("boolean", RowValues.Text(row, "VAR_TYPE_"));
         Assert.Equal(1L, RowValues.Long(row, "LONG_"));
-        Assert.Equal(2, RowValues.Int(row, "REV_"));   // 创建(1) + 更新(2)
+        Assert.Equal(0, RowValues.Int(row, "REV_"));   // 创建即 0，更新也不变（对应 copyVariableValue 不碰 revision）
         Assert.NotNull(RowValues.Time(row, "CREATE_TIME_"));
         Assert.NotNull(RowValues.Time(row, "LAST_UPDATED_TIME_"));
     }
@@ -298,7 +301,7 @@ public sealed class MySqlVariableAndHistoryTests
         Assert.Equal("boolean", RowValues.Text(row, "VAR_TYPE_"));
         Assert.Equal(0L, RowValues.Long(row, "LONG_"));
         Assert.True(RowValues.IsNull(row, "TASK_ID_"));
-        Assert.True(RowValues.Int(row, "REV_") >= 1);
+        Assert.Equal(0, RowValues.Int(row, "REV_"));   // 历史行 REV_ 恒为 0（见 VariableUpdate_ShouldKeepHistoricRevisionAtZero）
         Assert.NotNull(RowValues.Time(row, "CREATE_TIME_"));
         Assert.NotNull(RowValues.Time(row, "LAST_UPDATED_TIME_"));
     }
