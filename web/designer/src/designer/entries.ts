@@ -236,23 +236,46 @@ export function defaultFlowEntry(
     return null;
   }
 
-  return selectEntry(
-    {
-      id: 'defaultFlow',
-      property: 'default',
-      element,
-      label,
-      description: '当所有出流的条件都不成立时走这条流（后端校验要求排他网关要么有默认流、要么至少一条无条件出流）',
-      options: [
-        { label: '（无默认流）', value: '' },
-        ...outgoing.map((flow) => ({
-          label: `${flow.id ?? '(未命名)'}${flow.name ? ` · ${flow.name}` : ''}`,
-          value: flow.id ?? '',
-        })),
-      ],
+  /** 读取 default：导入后是 SequenceFlow 引用对象，取其 id；防御历史数据里的字符串形式。 */
+  const readDefaultFlowId = (target: DiagramElement): string => {
+    const value = businessObject(target).default as ModdleElement | string | undefined;
+
+    if (value === undefined || value === null) {
+      return '';
+    }
+
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    return typeof value.id === 'string' ? value.id : '';
+  };
+
+  // 不能复用 selectEntry：`default` 在 BPMN 描述符里是 **引用属性（isReference）**，
+  // 写入字符串 id 会让 moddle 序列化成 default="undefined"（保存后默认流直接失效，
+  // 见 2026-10 排查）。写入必须是出流的 businessObject 对象，清空才写 undefined。
+  return {
+    id: 'defaultFlow',
+    component: DebouncedSelectEntry,
+    element,
+    label,
+    description: '当所有出流的条件都不成立时走这条流（后端校验要求排他网关要么有默认流、要么至少一条无条件出流）',
+    isEdited: isSelectEntryEdited,
+    getOptions: () => [
+      { label: '（无默认流）', value: '' },
+      ...outgoing.map((flow) => ({
+        label: `${flow.id ?? '(未命名)'}${flow.name ? ` · ${flow.name}` : ''}`,
+        value: flow.id ?? '',
+      })),
+    ],
+    getValue: readDefaultFlowId,
+    setValue: (value: unknown) => {
+      const id = normalizeText(value);
+      const selected = id === undefined ? undefined : outgoing.find((flow) => flow.id === id);
+
+      context.modeling.updateProperties(element, { default: selected });
     },
-    context,
-  );
+  };
 }
 
 /** 顺序流的条件表达式（子元素，需要 moddle.create）。 */

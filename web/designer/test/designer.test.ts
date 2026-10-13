@@ -11,6 +11,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { BpmnModdle } from 'bpmn-moddle';
+
+import activitiModdle from '../src/activiti-moddle.json';
 import NetBpmPropertiesProvider from '../src/designer/propertiesProvider';
 import { parseProcessMeta, upsertDiagram, type DiagramRecord } from '../src/storage';
 import { hasBlockingError, summarize, validateDiagram } from '../src/validation';
@@ -163,7 +166,9 @@ test('服务任务：类名/表达式/代理的表达式三个字段平铺（对
   assert.equal(classEntry.getValue?.(element), 'NetBpm.Demo.Notify');
 });
 
-test('默认流下拉：选项来自形状级出流连线，取值是出流 id', () => {
+test('默认流下拉：选项来自形状级出流连线；写入必须是引用对象（回归）', () => {
+  // 回归：default 是 BPMN 描述符里的引用属性（isReference），曾按字符串 id 写入，
+  // saveXML 会输出 default="undefined" —— 保存后默认流直接失效。
   const harness = createHarness();
   const toConnection = (id: string, name?: string): never =>
     ({
@@ -171,11 +176,12 @@ test('默认流下拉：选项来自形状级出流连线，取值是出流 id',
       type: 'bpmn:SequenceFlow',
       businessObject: { $type: 'bpmn:SequenceFlow', id, ...(name ? { name } : {}) },
     }) as never;
+  const flowBo = { $type: 'bpmn:SequenceFlow', id: 'f2', name: '同意' };
   const element: never = {
     id: 'approve',
     type: 'bpmn:UserTask',
     businessObject: { $type: 'bpmn:UserTask', id: 'approve', name: '审批' },
-    outgoing: [toConnection('f2', '同意'), toConnection('f3')],
+    outgoing: [{ id: 'f2', type: 'bpmn:SequenceFlow', businessObject: flowBo }, toConnection('f3')],
   } as never;
 
   const group = groupById(groupsOf(harness, element), 'netbpm-user-task');
@@ -183,8 +189,16 @@ test('默认流下拉：选项来自形状级出流连线，取值是出流 id',
 
   assert.deepEqual(defaultFlow.getOptions?.(element).map((option) => option.value), ['', 'f2', 'f3']);
 
+  // 读取：导入后是引用对象，取其 id；历史字符串形式也要能读
+  (element as unknown as { businessObject: Record<string, unknown> }).businessObject.default = flowBo;
+  assert.equal(defaultFlow.getValue?.(element), 'f2');
+
+  (element as unknown as { businessObject: Record<string, unknown> }).businessObject.default = 'f3';
+  assert.equal(defaultFlow.getValue?.(element), 'f3');
+
+  // 写入：必须是出流的 businessObject 对象（moddle 引用序列化只认对象）
   defaultFlow.setValue?.('f2');
-  assert.deepEqual(harness.updates.at(-1)?.properties, { default: 'f2' });
+  assert.deepEqual(harness.updates.at(-1)?.properties, { default: flowBo });
 
   defaultFlow.setValue?.('');
   assert.deepEqual(harness.updates.at(-1)?.properties, { default: undefined });
@@ -479,6 +493,28 @@ test('校验：包含网关缺默认流且全条件时拦下；事件网关一�
   assert.ok(hasBlockingError(eventIssues));
 });
 
+test('校验：排他网关默认流以引用对象形式读取（回归）', () => {
+  // 回归：导入后 default 是 SequenceFlow 引用对象而非字符串，
+  // 曾因 typeof === 'string' 判断读不到，把「有默认流」误报成「没有默认流」。
+  const issues = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:ExclusiveGateway', id: 'gw', default: { $type: 'bpmn:SequenceFlow', id: 'f2' } },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'gw' }, targetRef: { id: 'end' }, conditionExpression: { body: '${a}' } },
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'gw' }, targetRef: { id: 'end' }, conditionExpression: { body: '${b}' } },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(!issues.some((issue) => issue.elementId === 'gw' && issue.message.includes('默认流')));
+});
+
 test('校验：条件未写成 ${...} 只告警，不阻断部署', () => {
   const issues = validateDiagram(
     registryOf([
@@ -577,4 +613,105 @@ test('存储：按 processId 覆盖更新，新记录排在最前，且不改变
 
   // 原数组未被改动
   assert.equal(JSON.stringify(existing), snapshot);
+});
+
+// ─────────────────────────── moddle 往返（保存/重开回归）───────────────────────────
+
+test('XML 往返：表单属性与监听器保存后重新载入仍出现在 extensionElements.values（回归）', async () => {
+  // 回归：activiti-moddle.json 曾在 ExtensionElements 上声明具名属性（formProperty 等），
+  // 导致导入时元素落到具名属性而非 values，属性面板（readItems 只读 values）
+  // 保存后重新打开显示为空。修复后导入必须统一落入 values。
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:activiti="http://activiti.org/bpmn"
+                  id="Definitions_1" targetNamespace="http://netbpm/bpmn">
+  <bpmn:process id="p1" isExecutable="true">
+    <bpmn:startEvent id="start" />
+    <bpmn:userTask id="approve" name="审批">
+      <bpmn:extensionElements>
+        <activiti:executionListener event="start" class="A" />
+        <activiti:taskListener event="create" class="B" />
+        <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true">
+          <activiti:value id="approved" name="同意" />
+          <activiti:value id="rejected" name="驳回" />
+        </activiti:formProperty>
+        <activiti:formProperty id="remark" name="备注" type="string" expression="\${remark}" variable="remark" />
+      </bpmn:extensionElements>
+    </bpmn:userTask>
+    <bpmn:endEvent id="end" />
+  </bpmn:process>
+</bpmn:definitions>`;
+
+  const moddle = new BpmnModdle({ activiti: activitiModdle as never });
+
+  // 导入：所有 activiti:* 子元素都必须落入 values（属性面板 readItems 的读取位置）
+  const { rootElement } = await moddle.fromXML(xml);
+  const process = rootElement.rootElements.find((element) => element.$type === 'bpmn:Process')!;
+  const userTask = process.flowElements.find((element) => element.$type === 'bpmn:UserTask')!;
+  const values = userTask.extensionElements?.values ?? [];
+
+  assert.deepEqual(
+    values.map((value) => value.$type),
+    ['activiti:ExecutionListener', 'activiti:TaskListener', 'activiti:FormProperty', 'activiti:FormProperty'],
+  );
+
+  const enumProperty = values[2];
+
+  assert.equal(enumProperty.id, 'approvalResult');
+  assert.equal(enumProperty.type, 'enum');
+  assert.equal(enumProperty.required, true);
+  assert.deepEqual(
+    (enumProperty.value ?? []).map((option) => [option.id, option.name]),
+    [['approved', '同意'], ['rejected', '驳回']],
+  );
+
+  // 导出：序列化不得丢失 activiti:* 扩展
+  const { xml: exported } = await moddle.toXML(rootElement, { format: true });
+
+  assert.ok(exported.includes('activiti:formProperty'));
+  assert.ok(exported.includes('activiti:executionListener'));
+  assert.ok(exported.includes('activiti:taskListener'));
+  assert.ok(exported.includes('activiti:value'));
+
+  // 再导入（保存 → 重新打开）：数据仍可读
+  const { rootElement: reparsed } = await moddle.fromXML(exported);
+  const reparsedProcess = reparsed.rootElements.find((element) => element.$type === 'bpmn:Process')!;
+  const reparsedTask = reparsedProcess.flowElements.find((element) => element.$type === 'bpmn:UserTask')!;
+
+  assert.equal((reparsedTask.extensionElements?.values ?? []).length, 4);
+});
+
+test('XML 往返：排他网关默认流以引用对象读写（回归）', async () => {
+  // 回归：default 是 isReference 属性 —— 导入后是 SequenceFlow 对象；
+  // 面板曾按字符串写入导致 saveXML 输出 default="undefined"，保存后默认流失效。
+  const moddle = new BpmnModdle({});
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  id="Definitions_1" targetNamespace="http://netbpm/bpmn">
+  <bpmn:process id="p1" isExecutable="true">
+    <bpmn:startEvent id="start" />
+    <bpmn:exclusiveGateway id="gw" default="f2" />
+    <bpmn:userTask id="t1" />
+    <bpmn:userTask id="t2" />
+    <bpmn:endEvent id="end" />
+    <bpmn:sequenceFlow id="f1" sourceRef="gw" targetRef="t1" />
+    <bpmn:sequenceFlow id="f2" sourceRef="gw" targetRef="t2" />
+  </bpmn:process>
+</bpmn:definitions>`;
+
+  const { rootElement } = await moddle.fromXML(xml);
+  const process = rootElement.rootElements.find((element) => element.$type === 'bpmn:Process')!;
+  const gateway = process.flowElements.find((element) => element.id === 'gw')!;
+
+  // 导入后引用被解析成 SequenceFlow 对象
+  assert.equal(gateway.default.$type, 'bpmn:SequenceFlow');
+  assert.equal(gateway.default.id, 'f2');
+
+  // 面板的正确写法（写入引用对象）→ 序列化保留 default="f1"
+  const flow1 = process.flowElements.find((element) => element.id === 'f1')!;
+  gateway.default = flow1;
+
+  const { xml: exported } = await moddle.toXML(rootElement, { format: true });
+  assert.ok(exported.includes('default="f1"'));
 });

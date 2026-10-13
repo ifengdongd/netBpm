@@ -167,7 +167,13 @@ function validateGateways(
     const id = node.id ?? '';
     const outgoing = outgoingByNode.get(id) ?? [];
     const incoming = incomingByNode.get(id) ?? [];
-    const defaultFlow = typeof node.default === 'string' ? node.default : undefined;
+    // default 是引用属性：导入后是 SequenceFlow 对象（取 id），防御历史数据里的字符串形式
+    const defaultFlow =
+      typeof node.default === 'string'
+        ? node.default
+        : typeof (node.default as { id?: unknown } | undefined)?.id === 'string'
+          ? String((node.default as { id: string }).id)
+          : undefined;
 
     if (node.$type === 'bpmn:ExclusiveGateway') {
       // 规则 2：无默认流时不能所有出流都带条件（否则可能出现一条都选不中）
