@@ -7,56 +7,289 @@
                   xmlns:activiti="http://activiti.org/bpmn"
                   id="Definitions_Leave"
                   targetNamespace="http://netbpm/bpmn">
+  <!--
+    请假审批流程（NetBpm 子集示例）。
+
+    流转规则（与 samples/NetBpm.Demo.LeaveApproval 的审批 Demo 配套）：
+      1. 发起后「提交请假申请」→「组长审批」；
+      2. 组长审批的审批选项来自表单属性 approvalResult（enum）== 1 通过 / 2 拒绝 / 3 驳回修改，
+         其 variable="result" 即把选择结果映射为流程变量 result；
+         同环节另有 comment（string）收集审批说明，variable="comment"；
+      3. result == 2 →「拒绝结束」服务任务（leave.RefuseComplete）；
+         result == 3 →「申请人修改」，改完回到组长审批（默认流，兜底）；
+         result == 1 → 继续判断 days（请假天数）：
+              days <= 3 → 直接「审批通过」（leave.ApproveComplete）；
+              days  > 3 →「经理审批」，其审批选项与审批说明同样来自 approvalResult / comment；
+                          经理 result == 1 →「审批通过」；== 2 →「拒绝结束」；
+                          默认（驳回修改）→「申请人修改」。
+
+    流程变量（BaseModel，全部为扁平变量，见 Demo 的 Workflow/BaseModel.cs）：
+      发起时写入：businessId / businessDeptId / applyUser / applyTime / applyDeptId
+      审批时写入：result / comment
+      ⚠️ assignee 用 ${applyUser}（申请人）而不是某个 Demo 内部变量名 —— 变量名是流程契约的一部分。
+
+    ⚠️ 三条排他网关都设置了 default 流：本子集「排他网关每条出流都带条件且无默认流」会被
+       校验规则 exclusive-gateway-has-selectable-flow 拒部署（条件全假时选不出流）。
+       按 Activiti 语义，默认流上的条件会被忽略，因此这里不给默认流写条件。
+  -->
   <bpmn:process id="leave_process" name="请假流程" isExecutable="true">
     <bpmn:startEvent id="start" name="发起请假">
       <bpmn:outgoing>flow_start_apply</bpmn:outgoing>
     </bpmn:startEvent>
-    <bpmn:userTask id="task_apply" name="提交请假申请" activiti:assignee="${starter}" activiti:formKey="leave-apply">
+    <bpmn:userTask id="task_apply" name="提交请假申请" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
+        <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
+      </bpmn:extensionElements>
       <bpmn:incoming>flow_start_apply</bpmn:incoming>
-      <bpmn:outgoing>flow_apply_approve</bpmn:outgoing>
+      <bpmn:outgoing>flow_apply_leader</bpmn:outgoing>
     </bpmn:userTask>
-    <bpmn:userTask id="task_approve" name="组长审批" activiti:candidateGroups="leaders" activiti:formKey="leave-approve">
-      <bpmn:incoming>flow_apply_approve</bpmn:incoming>
+    <bpmn:userTask id="task_leader_approve" name="组长审批" activiti:candidateGroups="leaders" activiti:formKey="leave-approve">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
+          <activiti:value id="1" name="通过" />
+          <activiti:value id="2" name="拒绝" />
+          <activiti:value id="3" name="驳回修改" />
+        </activiti:formProperty>
+        <activiti:formProperty id="comment" name="审批说明" type="string" variable="comment" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_apply_leader</bpmn:incoming>
+      <bpmn:incoming>flow_modify_leader</bpmn:incoming>
+      <bpmn:outgoing>flow_leader_gw</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="gw_leader" name="组长审批结果" default="flow_leader_modify">
+      <bpmn:incoming>flow_leader_gw</bpmn:incoming>
+      <bpmn:outgoing>flow_leader_pass</bpmn:outgoing>
+      <bpmn:outgoing>flow_leader_refuse</bpmn:outgoing>
+      <bpmn:outgoing>flow_leader_modify</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="task_apply_modify" name="申请人修改" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
+        <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_leader_modify</bpmn:incoming>
+      <bpmn:incoming>flow_manager_modify</bpmn:incoming>
+      <bpmn:outgoing>flow_modify_leader</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="gw_days" name="请假天数判断" default="flow_days_within3">
+      <bpmn:incoming>flow_leader_pass</bpmn:incoming>
+      <bpmn:outgoing>flow_days_over3</bpmn:outgoing>
+      <bpmn:outgoing>flow_days_within3</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="task_manager_approve" name="经理审批" activiti:candidateGroups="managers" activiti:formKey="leave-approve">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
+          <activiti:value id="1" name="通过" />
+          <activiti:value id="2" name="拒绝" />
+          <activiti:value id="3" name="驳回修改" />
+        </activiti:formProperty>
+        <activiti:formProperty id="comment" name="审批说明" type="string" variable="comment" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_days_over3</bpmn:incoming>
+      <bpmn:outgoing>flow_manager_gw</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="gw_manager" name="经理审批结果" default="flow_manager_modify">
+      <bpmn:incoming>flow_manager_gw</bpmn:incoming>
+      <bpmn:outgoing>flow_manager_pass</bpmn:outgoing>
+      <bpmn:outgoing>flow_manager_refuse</bpmn:outgoing>
+      <bpmn:outgoing>flow_manager_modify</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="task_approve_complete" name="审批通过" activiti:delegateExpression="leave.ApproveComplete">
+      <bpmn:incoming>flow_days_within3</bpmn:incoming>
+      <bpmn:incoming>flow_manager_pass</bpmn:incoming>
       <bpmn:outgoing>flow_approve_end</bpmn:outgoing>
-    </bpmn:userTask>
-    <bpmn:endEvent id="end" name="审批结束">
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="task_refuse" name="拒绝结束" activiti:delegateExpression="leave.RefuseComplete">
+      <bpmn:incoming>flow_leader_refuse</bpmn:incoming>
+      <bpmn:incoming>flow_manager_refuse</bpmn:incoming>
+      <bpmn:outgoing>flow_refuse_end</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end_approved" name="审批通过结束">
       <bpmn:incoming>flow_approve_end</bpmn:incoming>
     </bpmn:endEvent>
+    <bpmn:endEvent id="end_refused" name="审批拒绝结束">
+      <bpmn:incoming>flow_refuse_end</bpmn:incoming>
+    </bpmn:endEvent>
     <bpmn:sequenceFlow id="flow_start_apply" sourceRef="start" targetRef="task_apply" />
-    <bpmn:sequenceFlow id="flow_apply_approve" sourceRef="task_apply" targetRef="task_approve" />
-    <bpmn:sequenceFlow id="flow_approve_end" sourceRef="task_approve" targetRef="end" />
+    <bpmn:sequenceFlow id="flow_apply_leader" sourceRef="task_apply" targetRef="task_leader_approve" />
+    <bpmn:sequenceFlow id="flow_leader_gw" sourceRef="task_leader_approve" targetRef="gw_leader" />
+    <bpmn:sequenceFlow id="flow_leader_pass" sourceRef="gw_leader" targetRef="gw_days" name="通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 1}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_leader_refuse" sourceRef="gw_leader" targetRef="task_refuse" name="拒绝">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 2}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_leader_modify" sourceRef="gw_leader" targetRef="task_apply_modify" name="驳回修改" />
+    <bpmn:sequenceFlow id="flow_modify_leader" sourceRef="task_apply_modify" targetRef="task_leader_approve" name="修改后重提" />
+    <bpmn:sequenceFlow id="flow_days_over3" sourceRef="gw_days" targetRef="task_manager_approve" name="超过3天">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${days &gt; 3}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_days_within3" sourceRef="gw_days" targetRef="task_approve_complete" name="3天及以内" />
+    <bpmn:sequenceFlow id="flow_manager_gw" sourceRef="task_manager_approve" targetRef="gw_manager" />
+    <bpmn:sequenceFlow id="flow_manager_pass" sourceRef="gw_manager" targetRef="task_approve_complete" name="通过">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 1}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_manager_refuse" sourceRef="gw_manager" targetRef="task_refuse" name="拒绝">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 2}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_manager_modify" sourceRef="gw_manager" targetRef="task_apply_modify" name="驳回修改" />
+    <bpmn:sequenceFlow id="flow_approve_end" sourceRef="task_approve_complete" targetRef="end_approved" />
+    <bpmn:sequenceFlow id="flow_refuse_end" sourceRef="task_refuse" targetRef="end_refused" />
   </bpmn:process>
   <bpmndi:BPMNDiagram id="BPMNDiagram_Leave">
     <bpmndi:BPMNPlane id="BPMNPlane_Leave" bpmnElement="leave_process">
       <bpmndi:BPMNShape id="start_di" bpmnElement="start">
-        <dc:Bounds x="160" y="180" width="36" height="36" />
+        <dc:Bounds x="80" y="182" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="151" y="223" width="55" height="14" />
+          <dc:Bounds x="68" y="225" width="60" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="task_apply_di" bpmnElement="task_apply">
-        <dc:Bounds x="260" y="158" width="100" height="80" />
+        <dc:Bounds x="160" y="160" width="100" height="80" />
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="task_approve_di" bpmnElement="task_approve">
-        <dc:Bounds x="430" y="158" width="100" height="80" />
+      <bpmndi:BPMNShape id="task_leader_approve_di" bpmnElement="task_leader_approve">
+        <dc:Bounds x="320" y="160" width="100" height="80" />
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="end_di" bpmnElement="end">
-        <dc:Bounds x="600" y="180" width="36" height="36" />
+      <bpmndi:BPMNShape id="gw_leader_di" bpmnElement="gw_leader">
+        <dc:Bounds x="480" y="180" width="40" height="40" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="589" y="223" width="55" height="14" />
+          <dc:Bounds x="460" y="225" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="task_apply_modify_di" bpmnElement="task_apply_modify">
+        <dc:Bounds x="320" y="320" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="gw_days_di" bpmnElement="gw_days">
+        <dc:Bounds x="620" y="180" width="40" height="40" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="600" y="225" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="task_manager_approve_di" bpmnElement="task_manager_approve">
+        <dc:Bounds x="740" y="160" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="gw_manager_di" bpmnElement="gw_manager">
+        <dc:Bounds x="900" y="180" width="40" height="40" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="880" y="225" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="task_approve_complete_di" bpmnElement="task_approve_complete">
+        <dc:Bounds x="1000" y="160" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="task_refuse_di" bpmnElement="task_refuse">
+        <dc:Bounds x="1000" y="20" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_approved_di" bpmnElement="end_approved">
+        <dc:Bounds x="1160" y="182" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1136" y="225" width="84" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_refused_di" bpmnElement="end_refused">
+        <dc:Bounds x="1160" y="42" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1136" y="85" width="84" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="flow_start_apply_di" bpmnElement="flow_start_apply">
-        <di:waypoint x="196" y="198" />
-        <di:waypoint x="260" y="198" />
+        <di:waypoint x="116" y="200" />
+        <di:waypoint x="160" y="200" />
       </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="flow_apply_approve_di" bpmnElement="flow_apply_approve">
-        <di:waypoint x="360" y="198" />
-        <di:waypoint x="430" y="198" />
+      <bpmndi:BPMNEdge id="flow_apply_leader_di" bpmnElement="flow_apply_leader">
+        <di:waypoint x="260" y="200" />
+        <di:waypoint x="320" y="200" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_leader_gw_di" bpmnElement="flow_leader_gw">
+        <di:waypoint x="420" y="200" />
+        <di:waypoint x="480" y="200" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_leader_pass_di" bpmnElement="flow_leader_pass">
+        <di:waypoint x="520" y="200" />
+        <di:waypoint x="620" y="200" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="556" y="182" width="28" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_leader_refuse_di" bpmnElement="flow_leader_refuse">
+        <di:waypoint x="500" y="180" />
+        <di:waypoint x="500" y="60" />
+        <di:waypoint x="1000" y="60" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="740" y="42" width="28" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_leader_modify_di" bpmnElement="flow_leader_modify">
+        <di:waypoint x="500" y="220" />
+        <di:waypoint x="500" y="300" />
+        <di:waypoint x="370" y="300" />
+        <di:waypoint x="370" y="320" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="430" y="282" width="56" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_modify_leader_di" bpmnElement="flow_modify_leader">
+        <di:waypoint x="320" y="360" />
+        <di:waypoint x="280" y="360" />
+        <di:waypoint x="280" y="180" />
+        <di:waypoint x="320" y="180" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="238" y="262" width="70" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_days_over3_di" bpmnElement="flow_days_over3">
+        <di:waypoint x="660" y="200" />
+        <di:waypoint x="740" y="200" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="672" y="182" width="56" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_days_within3_di" bpmnElement="flow_days_within3">
+        <di:waypoint x="640" y="220" />
+        <di:waypoint x="640" y="300" />
+        <di:waypoint x="1050" y="300" />
+        <di:waypoint x="1050" y="240" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="724" y="282" width="62" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_manager_gw_di" bpmnElement="flow_manager_gw">
+        <di:waypoint x="840" y="200" />
+        <di:waypoint x="900" y="200" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_manager_pass_di" bpmnElement="flow_manager_pass">
+        <di:waypoint x="940" y="200" />
+        <di:waypoint x="1000" y="200" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="946" y="182" width="28" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_manager_refuse_di" bpmnElement="flow_manager_refuse">
+        <di:waypoint x="920" y="180" />
+        <di:waypoint x="920" y="140" />
+        <di:waypoint x="1050" y="140" />
+        <di:waypoint x="1050" y="100" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="962" y="122" width="28" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_manager_modify_di" bpmnElement="flow_manager_modify">
+        <di:waypoint x="900" y="220" />
+        <di:waypoint x="900" y="440" />
+        <di:waypoint x="370" y="440" />
+        <di:waypoint x="370" y="400" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="616" y="422" width="56" height="14" />
+        </bpmndi:BPMNLabel>
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="flow_approve_end_di" bpmnElement="flow_approve_end">
-        <di:waypoint x="530" y="198" />
-        <di:waypoint x="600" y="198" />
+        <di:waypoint x="1100" y="200" />
+        <di:waypoint x="1160" y="200" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="flow_refuse_end_di" bpmnElement="flow_refuse_end">
+        <di:waypoint x="1100" y="60" />
+        <di:waypoint x="1160" y="60" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>

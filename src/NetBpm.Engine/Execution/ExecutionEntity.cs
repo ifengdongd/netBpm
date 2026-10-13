@@ -192,6 +192,14 @@ public class ExecutionEntity : IExecutionEntity
             {
                 await VariableInstanceManager.UpdateAsync(existing, value, ct).ConfigureAwait(false);
             }
+            else
+            {
+                // 内存宿主（无数据管理器）：变量的唯一真身就是执行对象上这个实例
+                // （见 IVariableInstanceManager 的类注释）。
+                // 这里必须就地改值 —— 少了这一步，第二次写同名变量会被静默丢弃，
+                // 网关仍读到上一次的旧值。
+                existing.Value = value;
+            }
 
             return;
         }

@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 请假审批 Demo</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #dfe3e8;
+    --text: #1f2329;
+    --muted: #7a828c;
+    --accent: #1a6cf5;
+    --ok: #128a4b;
+    --warn: #c2410c;
+    --danger: #c62828;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: #333a44; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; margin-bottom: 16px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  button.ghost { background: #eceff3; color: #333a44; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  input, select, textarea {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 9px; font: inherit; background: #fff; color: var(--text);
+  }
+  textarea { width: 100%; resize: vertical; min-height: 56px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  code, pre { font-family: "Cascadia Mono", Consolas, monospace; }
+  pre {
+    background: #0f172a; color: #d7e0ea; padding: 12px; border-radius: 6px;
+    overflow: auto; max-height: 320px; font-size: 12px; margin: 0;
+  }
+  .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 999px;
+    font-size: 12px; background: #eceff3; color: #333a44;
+  }
+  .pill.ok { background: #e5f5ec; color: var(--ok); }
+  .pill.no { background: #fdeaea; color: var(--danger); }
+  .pill.run { background: #e8f0fe; color: var(--accent); }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li {
+    padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px;
+    margin-bottom: 8px; cursor: pointer;
+  }
+  .list li:hover { border-color: var(--accent); }
+  .list li.active { border-color: var(--accent); background: #f2f7ff; }
+  .list .t { display: flex; justify-content: space-between; gap: 8px; }
+  .list .m { color: var(--muted); font-size: 12px; }
+  .task { border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .task h3 { margin: 0 0 4px; font-size: 14px; }
+  .task .meta { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 13px; margin-bottom: 5px; }
+  .field .hint { color: var(--muted); font-size: 12px; font-weight: normal; }
+  .opts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .opts label {
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px;
+    cursor: pointer; display: flex; gap: 6px; align-items: center; margin: 0;
+  }
+  .opts label:has(input:checked) { border-color: var(--accent); background: #f2f7ff; }
+  .empty { color: var(--muted); font-size: 13px; }
+  .legend { font-size: 12px; color: var(--muted); }
+  .legend code { color: #333a44; }
+  .toast {
+    position: fixed; right: 20px; bottom: 20px; max-width: 420px;
+    background: #fff3f3; border: 1px solid #f3c6c6; color: #8a1f1f;
+    padding: 10px 14px; border-radius: 6px; display: none; white-space: pre-wrap;
+  }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  .kv td:first-child { color: var(--muted); width: 150px; }
+
+  /* 审批历史：一条竖线串起走过的环节，正停着的那个环节高亮 */
+  .timeline { list-style: none; margin: 0; padding: 0; }
+  .timeline li {
+    position: relative; padding: 0 0 16px 24px;
+    border-left: 2px solid var(--border); margin-left: 1px;
+  }
+  .timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .timeline li::before {
+    content: ''; position: absolute; left: -8px; top: 4px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; border: 2px solid var(--border);
+  }
+  .timeline li.done::before { background: var(--ok); border-color: var(--ok); }
+  .timeline li.now { border-left-color: var(--accent); }
+  .timeline li.now::before {
+    background: var(--accent); border-color: var(--accent);
+    box-shadow: 0 0 0 4px #e8f0fe;
+  }
+  .timeline .head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .timeline .when { color: var(--muted); font-size: 12px; }
+  .timeline .say {
+    margin-top: 5px; padding: 6px 9px; border-radius: 6px;
+    background: #f7f8fa; font-size: 13px;
+  }
+  .history-table { margin-top: 4px; }
+  .history-table code { font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>请假审批 Demo</h1>
+<div class="sub">
+  NetBpm 引擎 · 流程定义 <code>leave_process</code> ·
+  <b>审批选项来自流程定义里的 <code>activiti:formProperty</code>，前端不写死任何选项</b>
+</div>
+
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>发起请假</h2>
+      <div class="field">
+        <label for="applicant">申请人（落到变量 <code>applyUser</code>）</label>
+        <input id="applicant" list="people" value="alice" />
+        <datalist id="people">
+          <option value="alice"></option>
+          <option value="bob"></option>
+        </datalist>
+      </div>
+      <div class="field">
+        <label for="businessKey">
+          业务 Id（<code>businessId</code>）
+          <span class="hint">必须是正整数（业务表里 <code>business_id</code> 是 bigint）；留空自动发号</span>
+        </label>
+        <input id="businessKey" inputmode="numeric" placeholder="留空自动生成" />
+      </div>
+      <div class="field">
+        <label for="businessDeptId">业务部门（<code>businessDeptId</code>）</label>
+        <input id="businessDeptId" value="D-SALES" />
+      </div>
+      <div class="field">
+        <label for="applyDeptId">申请部门（<code>applyDeptId</code>）</label>
+        <input id="applyDeptId" value="D-SALES" />
+      </div>
+      <div class="field">
+        <label for="paraDict">
+          流程参数 ParaDict（可选，JSON）
+          <span class="hint">会写进流程参数表，并按 key 展开成流程变量</span>
+        </label>
+        <textarea id="paraDict" rows="2" placeholder='{"city":"SH"}'></textarea>
+      </div>
+      <div class="row">
+        <button id="btnStart">发起请假</button>
+        <button class="ghost" id="btnRefresh">刷新列表</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>请假单</h2>
+      <ul class="list" id="instances"><li class="empty">暂无</li></ul>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel" id="instancePanel">
+      <h2>流程实例</h2>
+      <div class="empty" id="instanceEmpty">左侧发起一笔请假，或点列表里的一笔查看。</div>
+      <div id="instanceBody" style="display:none"></div>
+    </div>
+
+    <div class="panel" id="historyPanel">
+      <h2>审批历史</h2>
+      <div class="empty" id="historyEmpty">点开一笔请假单后，这里显示它走过的环节与每条审批记录。</div>
+      <div id="historyBody" style="display:none"></div>
+    </div>
+
+    <div class="panel">
+      <h2>待办中心（按候选人查待办）</h2>
+      <div class="row">
+        <select id="asUser">
+          <option value="leader1">leader1（leaders 组 · 组长）</option>
+          <option value="manager1">manager1（managers 组 · 经理）</option>
+          <option value="alice">alice（无组 · 申请人）</option>
+        </select>
+        <button class="ghost" id="btnFindTasks">查询待办</button>
+      </div>
+      <div id="taskList" style="margin-top:12px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>业务数据（落点与内容）</h2>
+      <div class="row" style="margin-bottom:8px">
+        <button class="ghost" id="btnBusiness">刷新业务数据</button>
+        <span class="legend" id="businessPath"></span>
+      </div>
+      <details>
+        <summary>查看业务数据内容（JSON 文件 / 四张业务表）</summary>
+        <pre id="businessJson" style="margin-top:8px">（点击「刷新业务数据」加载）</pre>
+      </details>
+    </div>
+
+    <div class="panel">
+      <h2>流转规则（来自 leave-process.bpmn20.xml）</h2>
+      <div class="legend">
+        <div>· 组长审批 <code>approvalResult</code>（<code>variable="result"</code>）：</div>
+        <div style="padding-left:14px">
+          <code>${result == 2}</code> → 拒绝结束（<code>leave.RefuseComplete</code>）<br />
+          <code>${result == 3}</code> → 申请人修改（网关默认流，改完回到组长审批）<br />
+          <code>${result == 1}</code> → 继续判断 <code>days</code>：
+          <code>${days &gt; 3}</code> ? 经理审批 : 直接审批通过
+        </div>
+        <div>· 经理审批同上；<code>${result == 1}</code> → 审批通过（<code>leave.ApproveComplete</code>）</div>
+      </div>
+      <details style="margin-top:10px">
+        <summary>查看流程定义 XML</summary>
+        <pre id="definitionXml" style="margin-top:8px">（展开后加载）</pre>
+      </details>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let currentInstanceId = null;
+
+const $ = (id) => document.getElementById(id);
+
+function toast(message) {
+  const box = $('toast');
+  box.textContent = message;
+  box.style.display = 'block';
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { box.style.display = 'none'; }, 6000);
+}
+
+async function api(path, options) {
+  const response = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options));
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+
+  if (!response.ok) {
+    const detail = body && body.errors && body.errors.length ? '\n· ' + body.errors.join('\n· ') : '';
+    throw new Error((body && body.message ? body.message : response.status + ' ' + response.statusText) + detail);
+  }
+
+  return body;
+}
+
+function fmtTime(value) {
+  if (!value) return '—';
+  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+}
+
+/**
+ * 审批结果展示。中文名由后端随 BaseModel 一起下发（resultName），
+ * 前端不再维护一份 1/2/3 的映射 —— 选项的唯一来源始终是流程定义。
+ */
+function renderApprovalResult(value, name) {
+  if (value === null || value === undefined) return '—';
+  return name ? `${escapeHtml(name)}（result = ${value}）` : `result = ${value}`;
+}
+
+// ── 请假单列表 ─────────────────────────────────────────────
+async function loadInstances() {
+  const list = $('instances');
+  const items = await api('/api/leave/instances');
+
+  if (!items.length) {
+    list.innerHTML = '<li class="empty">暂无</li>';
+    return;
+  }
+
+  list.innerHTML = items.map((item) => {
+    const cls = item.status === 'Approved' ? 'ok' : item.status === 'Refused' ? 'no' : 'run';
+    const label = item.status === 'Approved' ? '通过' : item.status === 'Refused' ? '拒绝' : '进行中';
+    return `<li data-id="${item.processInstanceId}" class="${item.processInstanceId === currentInstanceId ? 'active' : ''}">
+      <div class="t"><b>${escapeHtml(item.applicant)}</b><span class="pill ${cls}">${label}</span></div>
+      <div class="m">${item.days ? item.days + ' 天' : '未填天数'} · ${escapeHtml(item.reason || '—')}</div>
+      <div class="m">${fmtTime(item.startedAt)}</div>
+    </li>`;
+  }).join('');
+
+  list.querySelectorAll('li[data-id]').forEach((node) => {
+    node.onclick = () => openInstance(node.dataset.id);
+  });
+}
+
+async function startInstance() {
+  const applicant = $('applicant').value.trim();
+  if (!applicant) { toast('请填写申请人'); return; }
+
+  const paraText = $('paraDict').value.trim();
+  let paraDict = null;
+  if (paraText) {
+    try { paraDict = JSON.parse(paraText); } catch { toast('流程参数不是合法 JSON'); return; }
+  }
+
+  try {
+    // 这四个入参会展开成 BaseModel 的前五个字段（result / comment 等审批时才产生）
+    const body = {
+      applicant,
+      businessKey: $('businessKey').value.trim() || null,
+      businessDeptId: $('businessDeptId').value.trim() || null,
+      applyDeptId: $('applyDeptId').value.trim() || null,
+    };
+    if (paraDict) body.paraDict = paraDict;
+
+    const view = await api('/api/leave/instances', { method: 'POST', body: JSON.stringify(body) });
+    currentInstanceId = view.processInstanceId;
+    renderInstance(view);
+    await loadHistory(view.processInstanceId);
+    await loadInstances();
+    await loadBusiness();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function openInstance(processInstanceId) {
+  try {
+    const view = await api('/api/leave/instances/' + encodeURIComponent(processInstanceId));
+    currentInstanceId = view.processInstanceId;
+    renderInstance(view);
+    await loadHistory(view.processInstanceId);
+    await loadInstances();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+// ── 实例详情 + 动态表单 ────────────────────────────────────
+function renderInstance(view) {
+  $('instanceEmpty').style.display = 'none';
+  const body = $('instanceBody');
+  body.style.display = 'block';
+
+  const variables = Object.entries(view.variables || {})
+    .map(([name, value]) => `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(String(value))}</td></tr>`)
+    .join('') || '<tr><td colspan="2" class="empty">（无）</td></tr>';
+
+  const status = view.running
+    ? '<span class="pill run">进行中</span>'
+    : (view.result && view.result.outcome === 'Approved'
+        ? '<span class="pill ok">审批通过</span>'
+        : '<span class="pill no">审批拒绝</span>');
+
+  let tasksHtml = '';
+  if (view.running && view.tasks.length) {
+    tasksHtml = view.tasks.map(renderTaskCard).join('');
+  } else if (view.running) {
+    tasksHtml = '<div class="empty">当前没有待办（可能正在推进）。</div>';
+  } else {
+    tasksHtml = '<div class="empty">流程已结束。</div>';
+  }
+
+  const base = `
+    <h2 style="margin-top:16px">业务基础模型（BaseModel）</h2>
+    <table class="kv">
+      <tr><td>业务 Id（<code>businessId</code>）</td><td>${escapeHtml(view.base?.businessId || '—')}</td></tr>
+      <tr><td>业务部门（<code>businessDeptId</code>）</td><td>${escapeHtml(view.base?.businessDeptId || '—')}</td></tr>
+      <tr><td>审批结果（<code>result</code>）</td><td>${renderApprovalResult(view.base?.result, view.base?.resultName)}</td></tr>
+      <tr><td>审批说明（<code>comment</code>）</td><td>${escapeHtml(view.base?.comment || '—')}</td></tr>
+      <tr><td>申请人（<code>applyUser</code>）</td><td>${escapeHtml(view.base?.applyUser || '—')}</td></tr>
+      <tr><td>申请时间（<code>applyTime</code>）</td><td>${fmtTime(view.base?.applyTime)}</td></tr>
+      <tr><td>申请部门（<code>applyDeptId</code>）</td><td>${escapeHtml(view.base?.applyDeptId || '—')}</td></tr>
+    </table>`;
+
+  const parameters = `
+    <h2 style="margin-top:16px">流程参数表（ParaDict）</h2>
+    <table class="kv">${Object.entries(view.parameters || {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, value]) => `<tr><td><code>${escapeHtml(name)}</code></td><td>${
+        value === null ? '<span class="empty">（空）</span>' : escapeHtml(String(value))
+      }</td></tr>`)
+      .join('') || '<tr><td colspan="2" class="empty">（无）</td></tr>'}</table>`;
+
+  const result = view.result
+    ? `<h2 style="margin-top:16px">审批结论（业务数据）</h2>
+       <table class="kv">
+         <tr><td>结论</td><td>${escapeHtml(view.result.outcome)} · ${escapeHtml(view.result.activityName)}</td></tr>
+         <tr><td>审批结果</td><td>${renderApprovalResult(view.result.base?.result, view.result.base?.resultName)}</td></tr>
+         <tr><td>审批说明</td><td>${escapeHtml(view.result.base?.comment || '—')}</td></tr>
+         <tr><td>落库节点</td><td><code>${escapeHtml(view.result.activityId)}</code></td></tr>
+         <tr><td>天数 / 事由</td><td>${view.result.days} 天 / ${escapeHtml(view.result.reason || '—')}</td></tr>
+         <tr><td>写入时间</td><td>${fmtTime(view.result.completedAt)}</td></tr>
+       </table>`
+    : '';
+
+  body.innerHTML = `
+    <table class="kv">
+      <tr><td>流程实例</td><td><code>${escapeHtml(view.processInstanceId)}</code> ${status}</td></tr>
+      <tr><td>发起时间</td><td>${fmtTime(view.startedAt)}</td></tr>
+      <tr><td>业务主键</td><td>${escapeHtml(view.businessKey || '—')}</td></tr>
+    </table>
+
+    <h2 style="margin-top:16px">流程变量</h2>
+    <table class="kv">${variables}</table>
+
+    ${base}
+    ${parameters}
+
+    <h2 style="margin-top:16px">当前待办</h2>
+    ${tasksHtml}
+    ${result}
+  `;
+
+  body.querySelectorAll('[data-submit]').forEach((button) => {
+    button.onclick = () => submitTask(button.dataset.submit);
+  });
+}
+
+/**
+ * 渲染任务卡片。表单字段完全由后端下发的 form 数组驱动 ——
+ * 包括 approvalResult 的候选值，前端只是照着画。
+ */
+function renderTaskCard(task) {
+  const who = task.assignee
+    ? `办理人：<code>${escapeHtml(task.assignee)}</code>`
+    : (task.candidateGroups.length
+        ? `候选组：${task.candidateGroups.map((g) => `<code>${escapeHtml(g)}</code>`).join(' ')}`
+        : (task.candidateUsers.length
+            ? `候选用户：${task.candidateUsers.map((u) => `<code>${escapeHtml(u)}</code>`).join(' ')}`
+            : '无人办理'));
+
+  const fields = task.form.length
+    ? task.form.map(renderField).join('')
+    : '<div class="empty">该任务没有配置表单属性。</div>';
+
+  // 参数更新入口：审批人一般不用填（表单字段会自己进参数表），
+  // 这是「流程走到一半要补参数」的预留通道，比如指定 city / backupUser
+  const paramUpdate = `
+    <div class="field">
+      <label>
+        附加流程参数（可选，JSON）
+        <span class="hint">有值就按 key 更新；没提到的键保持原样</span>
+      </label>
+      <textarea data-params rows="2" placeholder='{"city":"SH"}'></textarea>
+    </div>`;
+
+  return `<div class="task">
+    <h3>${escapeHtml(task.name || task.definitionKey || task.taskId)}</h3>
+    <div class="meta">${who} · 表单标识 <code>${escapeHtml(task.formKey || '—')}</code></div>
+    ${fields}
+    ${paramUpdate}
+    <button data-submit="${escapeHtml(task.taskId)}">提交</button>
+  </div>`;
+}
+
+function renderField(property) {
+  const key = property.id;
+  const required = property.required ? ' <span style="color:#c62828">*</span>' : '';
+  const target = property.variable || property.id;
+  const hint = `<span class="hint">（字段 <code>${escapeHtml(key)}</code> → 变量 <code>${escapeHtml(target)}</code>）</span>`;
+  const label = `<label>${escapeHtml(property.name || key)}${required} ${hint}</label>`;
+
+  if (property.type === 'enum' && property.options.length) {
+    // 审批选项就是这里：直接来自流程定义的 activiti:value
+    const options = property.options.map((option, index) => `
+      <label>
+        <input type="radio" name="${escapeHtml(key)}" value="${escapeHtml(option.id)}"
+               ${index === 0 ? 'checked' : ''} />
+        <span>${escapeHtml(option.name || option.id)}</span>
+      </label>`).join('');
+
+    return `<div class="field">${label}<div class="opts">${options}</div></div>`;
+  }
+
+  if (['long', 'integer', 'int', 'short', 'double', 'float', 'number'].includes((property.type || '').toLowerCase())) {
+    return `<div class="field">${label}<input type="number" name="${escapeHtml(key)}" step="any"
+              value="${escapeHtml(property.default || '')}" /></div>`;
+  }
+
+  if ((property.type || '').toLowerCase() === 'boolean') {
+    return `<div class="field">${label}<select name="${escapeHtml(key)}">
+      <option value="true">是</option><option value="false">否</option></select></div>`;
+  }
+
+  if ((property.type || '').toLowerCase() === 'date') {
+    return `<div class="field">${label}<input type="date" name="${escapeHtml(key)}" /></div>`;
+  }
+
+  return `<div class="field">${label}<textarea name="${escapeHtml(key)}">${escapeHtml(property.default || '')}</textarea></div>`;
+}
+
+async function submitTask(taskId) {
+  const card = document.querySelector(`[data-submit="${taskId}"]`).closest('.task');
+  const values = {};
+
+  card.querySelectorAll('[name]').forEach((input) => {
+    if (input.type === 'radio' && !input.checked) return;
+    if (input.type === 'number') {
+      values[input.name] = input.value === '' ? null : Number(input.value);
+    } else if (input.tagName === 'SELECT' && input.name) {
+      values[input.name] = input.value === 'true';
+    } else {
+      values[input.name] = input.value;
+    }
+  });
+
+  const paramText = (card.querySelector('[data-params]')?.value || '').trim();
+  let paraDict = null;
+  if (paramText) {
+    try { paraDict = JSON.parse(paramText); } catch { toast('附加流程参数不是合法 JSON'); return; }
+  }
+
+  const body = { values };
+  if (paraDict) body.paraDict = paraDict;
+
+  try {
+    const view = await api('/api/leave/tasks/' + encodeURIComponent(taskId) + '/submit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    renderInstance(view);
+    await loadHistory(view.processInstanceId);
+    await loadInstances();
+    await loadBusiness();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+// ── 审批历史 ───────────────────────────────────────────────
+/**
+ * 拉取审批历史。后端一次给全：环节序列（steps）+ 审批记录（approvals）+ 审批结论（result），
+ * 所以这里不需要自己做任何拼接。
+ */
+async function loadHistory(processInstanceId) {
+  const empty = $('historyEmpty');
+  const body = $('historyBody');
+
+  if (!processInstanceId) {
+    empty.style.display = '';
+    body.style.display = 'none';
+    return;
+  }
+
+  try {
+    const history = await api(
+      '/api/leave/instances/' + encodeURIComponent(processInstanceId) + '/history');
+    renderHistory(history);
+  } catch (error) {
+    empty.textContent = '读取审批历史失败。';
+    empty.style.display = '';
+    body.style.display = 'none';
+    toast(error.message);
+  }
+}
+
+function renderHistory(history) {
+  $('historyEmpty').style.display = 'none';
+  const body = $('historyBody');
+  body.style.display = 'block';
+
+  // 环节从哪来：引擎历史表权威（含自动节点与连线），内存宿主没有 ACT_HI_*，只能由业务审批记录合成
+  const source = history.stepsSource === 'EngineHistory'
+    ? '引擎历史表 <code>ACT_HI_ACTINST</code>（权威，含自动节点）'
+    : '业务审批记录 + 当前待办合成（内存宿主没有 <code>ACT_HI_*</code>）';
+
+  const steps = history.steps.length
+    ? history.steps.map(renderStep).join('')
+    : '<li class="empty" style="border:0;padding-left:0">（无环节记录）</li>';
+
+  const approvals = history.approvals.length
+    ? `<table class="history-table">
+        <thead><tr>
+          <th>环节</th><th>办理人</th><th>审批结果</th><th>审批说明</th>
+          <th>提交值</th><th>流转到</th><th>提交时间</th>
+        </tr></thead>
+        <tbody>${history.approvals.map(renderApprovalRow).join('')}</tbody>
+      </table>`
+    : '<div class="empty">还没有提交过任何审批。</div>';
+
+  body.innerHTML = `
+    <table class="kv">
+      <tr><td>环节来源</td><td>${source} <span class="pill">${escapeHtml(history.stepsSource)}</span></td></tr>
+      <tr><td>发起时间</td><td>${fmtTime(history.startedAt)}</td></tr>
+      <tr><td>结束时间</td><td>${history.running
+        ? '<span class="pill run">进行中</span>' : fmtTime(history.endedAt)}</td></tr>
+      <tr><td>历时</td><td>${fmtDuration(history.durationInMilliseconds, history.running)}</td></tr>
+      <tr><td>业务主键</td><td>${escapeHtml(history.businessKey || '—')}</td></tr>
+    </table>
+
+    <h2 style="margin-top:16px">环节流转</h2>
+    <ul class="timeline">${steps}</ul>
+
+    <h2 style="margin-top:16px">审批记录（${history.approvals.length} 条）</h2>
+    ${approvals}
+  `;
+}
+
+/** 渲染时间线上的一个环节。最后一条若 <code>endedAt</code> 为空即「正停在这里」。 */
+function renderStep(step) {
+  const who = step.assignee
+    ? `办理人 <code>${escapeHtml(step.assignee)}</code>`
+    : (step.isActive ? '等待办理' : '未指定办理人');
+
+  // 审批结果的中文名由后端按流程定义下发，前端不维护 1/2/3 的映射
+  const decision = step.decision
+    ? `<span class="pill">${escapeHtml(step.decisionName || '决策')} · ${escapeHtml(step.decision)}</span>`
+    : '';
+
+  const comment = step.comment
+    ? `<div class="say">审批说明：${escapeHtml(step.comment)}</div>`
+    : '';
+
+  return `<li class="${step.isActive ? 'now' : 'done'}">
+    <div class="head">
+      <b>${escapeHtml(step.activityName || step.activityId)}</b>
+      ${step.isActive ? '<span class="pill run">进行中</span>' : '<span class="pill ok">已结束</span>'}
+      ${decision}
+    </div>
+    <div class="when">
+      <code>${escapeHtml(step.activityId)}</code>${
+        step.activityType ? ' · ' + escapeHtml(step.activityType) : ''} · ${who}</div>
+    <div class="when">进入 ${fmtTime(step.startedAt)} → ${
+      step.isActive ? '停留中' : fmtTime(step.endedAt)}</div>
+    ${comment}
+  </li>`;
+}
+
+function renderApprovalRow(approval) {
+  const values = Object.entries(approval.values || {})
+    .map(([name, value]) => `<code>${escapeHtml(name)}</code> = ${
+      value === null ? '<span class="empty">（空）</span>' : escapeHtml(value)}`)
+    .join('<br />') || '—';
+
+  // 这次提交把流程送到了哪儿：还有下一步就列出来，没有就说明流程在这次提交里结束了
+  const next = (approval.nextSteps || []).length
+    ? approval.nextSteps.map((step) => escapeHtml(step.activityName || step.activityId)).join('、')
+    : (approval.outcome
+        ? `<span class="pill ok">结束 · ${escapeHtml(approval.outcome)}</span>`
+        : '结束');
+
+  return `<tr>
+    <td>${escapeHtml(approval.activityName || approval.activityId || '—')}<br />
+        <span class="legend"><code>${escapeHtml(approval.taskId)}</code></span></td>
+    <td>${escapeHtml(approval.assignee || '—')}</td>
+    <td>${approval.decision
+      ? escapeHtml(approval.decisionName
+          ? `${approval.decisionName} · ${approval.decision}`
+          : approval.decision)
+      : '<span class="empty">—</span>'}</td>
+    <td>${escapeHtml(approval.comment || '—')}</td>
+    <td>${values}</td>
+    <td>${next}</td>
+    <td>${fmtTime(approval.submittedAt)}</td>
+  </tr>`;
+}
+
+function fmtDuration(ms, running) {
+  if (running || ms === null || ms === undefined) return '<span class="pill run">进行中</span>';
+  if (ms < 1000) return `${ms} 毫秒`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} 秒`;
+  return `${Math.round(ms / 60000)} 分钟`;
+}
+
+// ── 待办中心 / 业务数据 / 流程定义 ──────────────────────────
+async function findTasks() {
+  const user = $('asUser').value;
+  const box = $('taskList');
+
+  try {
+    const tasks = await api('/api/leave/tasks?candidateUser=' + encodeURIComponent(user));
+
+    if (!tasks.length) {
+      box.innerHTML = '<div class="empty">该用户当前没有待办。</div>';
+      return;
+    }
+
+    box.innerHTML = tasks.map((task) => `<div class="task">
+      <h3>${escapeHtml(task.name || task.definitionKey)}</h3>
+      <div class="meta">实例 <code>${escapeHtml(task.processInstanceId)}</code> · 创建 ${fmtTime(task.createTime)}</div>
+      <button class="ghost" data-open="${escapeHtml(task.processInstanceId)}">打开该流程实例</button>
+    </div>`).join('');
+
+    box.querySelectorAll('[data-open]').forEach((node) => {
+      node.onclick = () => openInstance(node.dataset.open);
+    });
+  } catch (error) {
+    box.innerHTML = '';
+    toast(error.message);
+  }
+}
+
+async function loadBusiness() {
+  try {
+    const business = await api('/api/leave/business');
+
+    // location 由后端给（JSON 实现报文件路径，MySQL 实现报连接串 + 库名）——
+    // 页面不假设业务数据存在哪儿，换个 Leave:Store 也照样显示
+    $('businessPath').textContent = '落点：' + business.location;
+    $('businessJson').textContent = JSON.stringify(business, null, 2);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+let definitionLoaded = false;
+async function loadDefinition() {
+  if (definitionLoaded) return;
+  definitionLoaded = true;
+
+  try {
+    const definition = await api('/api/leave/process-definition');
+    $('definitionXml').textContent = definition.xml;
+  } catch (error) {
+    $('definitionXml').textContent = error.message;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+$('btnStart').onclick = startInstance;
+$('btnRefresh').onclick = loadInstances;
+$('btnFindTasks').onclick = findTasks;
+$('btnBusiness').onclick = loadBusiness;
+document.querySelectorAll('details').forEach((node) => {
+  node.addEventListener('toggle', () => { if (node.open) loadDefinition(); });
+});
+
+loadInstances();
+loadBusiness();
+</script>
+</body>
+</html>

@@ -14,6 +14,8 @@
     <ProjectReference Include="..\..\src\NetBpm.El\NetBpm.El.csproj" />
     <ProjectReference Include="..\..\src\NetBpm.Engine\NetBpm.Engine.csproj" />
     <ProjectReference Include="..\..\src\NetBpm.Persistence\NetBpm.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Workflow\NetBpm.Workflow.csproj" />
   </ItemGroup>
 
   <ItemGroup>
