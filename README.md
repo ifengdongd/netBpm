@@ -61,16 +61,19 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - 所有元素 id 非空且**全局唯一**（区分大小写）。
 - 顺序流的 `sourceRef` / `targetRef` 必须能解析到流程节点，否则部署失败。
 
-### 执行监听器 / 任务监听器 / 事件监听器（重要）
+### 执行监听器 / 任务监听器 / 事件监听器 / 表单属性（重要）
 
-- XML 可解析、设计器可配置，但**当前引擎执行未实现，部署期会被直接拒绝**：
+- **执行 / 任务监听器与服务任务字段注入**：XML 可解析、设计器可配置，但引擎执行未实现，
+  为避免运行期静默跳过，**部署期会被直接拒绝**：
   - `activiti:executionListener`（配置于流程、用户任务、服务任务、顺序流）
   - `activiti:taskListener`（仅用户任务，事件 `create` / `assignment` / `complete` / `delete`）
   - `activiti:field`（服务任务字段注入）
-  - `activiti:eventListener`（后端不识别，设计器仅给警告）
-  - `activiti:formProperty`（表单属性，后端不识别，设计器仅给警告）
+- `activiti:eventListener`（流程级事件监听器）：后端不识别（静默忽略），设计器仅给警告。
 - 设计器中执行监听器事件下拉为 `start` / `end` / `take`（顺序流默认 `take`，其余默认 `start`），配置方式支持 `activiti:class` / `activiti:expression` / `activiti:delegateExpression`。
-- **在监听器放行之前，请勿在正式流程中使用**；设计器会给出「部署前请确认后端校验已放开」的警告。
+- **`activiti:formProperty`（表单属性）引擎只透传不执行**：解析 / 落库往返保真（设计器「保存 → 重开」回显不丢、部署不被拒）；
+  审批应用层（`NetBpm.Workflow`）以它为**表单契约** —— 枚举选项（`activiti:value`）随实例视图一起下发给前端、
+  提交值按 `variable` 映射成流程变量供网关取道。设计器会给出「引擎不做表单属性执行」的提醒性警告。
+- **在监听器放行之前，请勿在正式流程中使用执行 / 任务监听器**。
 
 ### 线（顺序流 / SequenceFlow）
 
@@ -124,16 +127,21 @@ NetBpm/
 │   ├── NetBpm.Runtime/           # 运行时服务（部署 / 启动 / 任务 / 历史）
 │   ├── NetBpm.Persistence/       # Dapper 数据访问 + ID 区块分配 + 迁移
 │   ├── NetBpm.Identity/          # 身份与办理人解析
-│   └── NetBpm.Rest/              # ASP.NET Core Minimal API 宿主
+│   ├── NetBpm.Rest/              # ASP.NET Core Minimal API 宿主
+│   └── NetBpm.Workflow/          # 审批流应用层：发起/环节/提交/历史 + Hosting 公共类
 ├── tests/
 │   ├── NetBpm.UnitTests/         # 单元测试
 │   ├── NetBpm.IntegrationTests/  # 集成测试（真实 MySQL / Testcontainers）
 │   ├── NetBpm.DifferentialTests/ # 差分对拍（与 Java 预言机逐维比对）
 │   └── corpus/                   # 自建语料与生成器（脚本生成，禁手改）
+├── samples/
+│   └── NetBpm.Demo.LeaveApproval/ # 请假审批 Demo（公共应用层 + 通用端点的完整接入示例）
 ├── web/designer/                 # 流程设计器（bpmn-js 18 + Vite 6 + TS）
 ├── db/
-│   ├── mysql/                    # 0001_create_schema.sql / 0002_init_data.sql
-│   └── sqlserver/
+│   ├── mysql/                    # 0001 引擎表 / 0002 初始数据 / 0003 流程实例业务表 / 0004 请假单表
+│   └── sqlserver/                # 同上（两套方言同步维护）
+├── docs/
+│   └── process-design-guide.md   # 流程设计操作指引（以请假流程为例）
 ├── tools/
 │   ├── NetBpm.DbMigrate/         # 建库 / 迁移 / 校验 / 清库命令行工具
 │   └── Oracle/                   # Java 预言机（产生对拍真值）
@@ -210,6 +218,71 @@ npm run build    # 类型检查 + 构建
 npm test         # 设计器单元测试
 ```
 
+### 运行请假审批 Demo
+
+`samples/NetBpm.Demo.LeaveApproval` 是「审批流公共能力」的完整接入示例：演示页在根路径，
+启动即自动部署 `web/designer/examples/leave-process.bpmn20.xml`，端到端脚本可反复跑。
+
+```bash
+# 默认 MySQL 宿主（appsettings.Development.json；内存引擎 + JSON 业务数据见 appsettings.json）
+dotnet run --project samples/NetBpm.Demo.LeaveApproval --urls http://localhost:5090
+
+# 端到端测试（可反复跑，每轮使用新的业务单号）
+node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
+```
+
+Demo 的 HTTP 接口（发起 / 实例 / 历史 / 待办 / 提交 / 业务数据核对）见
+`docs/process-design-guide.md` §9.1。
+
+### 在自己的宿主接入审批流（公共类）
+
+流程相关功能已封装为 `NetBpm.Workflow` 的公共类，宿主五步接入：
+
+```csharp
+builder.Services.AddNetBpm(builder.Configuration);                  // ① 引擎
+builder.Services.AddNetBpmWorkflow<MyWorkflowDataStore>();          // ② 应用层 + 业务数据端口（IWorkflowDataStore）
+builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly); // ③ 服务任务委托（类上标 [ServiceTaskName]）
+
+app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions // ④ 通用流程 HTTP 端点
+{
+    ProcessKey = _ => "my_process",
+    // TransformStartRequest / DecorateInstanceView / DecorateInstanceSummary / ErrorResponseFactory
+    // 是业务定制点：单号生成、DTO 摊平、错误响应形状
+});
+
+await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOptions // ⑤ 启动即部署
+{
+    ResourcePath = "processes/my-process.bpmn20.xml",
+    DeploymentName = "我的流程",
+    VerifyAsync = async (sp, engine, definitionId, logger, ct) =>
+    {
+        await ApprovalResultFormGuard.VerifyAsync(engine, definitionId, logger, ct);   // 可选自检钩子
+        await ServiceTaskDelegateGuard.VerifyAsync(sp, engine, definitionId, logger, ct);
+    },
+}, app.Logger);
+```
+
+核心类型一览：
+
+| 公共类 | 职责 |
+|---|---|
+| `IWorkflowService` / `WorkflowService` | 发起申请 / 获取环节信息 / 提交审批 / 审批历史四件事的应用层门面 |
+| `WorkflowEndpoints` + `WorkflowEndpointOptions` | 通用流程 HTTP 端点（路由约定统一，业务语义经选项注入） |
+| `WorkflowProcessBootstrapper` + `WorkflowDeployOptions` | 启动即部署 BPMN 资源 + 部署期自检钩子 |
+| `WorkflowRuntimeContext` / `WorkflowNodeRegistry` | 部署后运行期上下文：流程定义 id + 环节名 ↔ 环节 id 对照表（随 ② 自动注册） |
+| `IWorkflowDataStore` | 应用层与宿主之间唯一的缝：实例登记 / 审批结论 / 流程参数 / 审批记录 / 当前待办 |
+
+服务任务委托里写结论只需一句话：
+
+```csharp
+[ServiceTaskName("my.ApproveComplete")]
+public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
+{
+    public ValueTask ExecuteAsync(IDelegateExecution execution, CancellationToken ct = default) =>
+        _workflow.CompleteAsync(execution, WorkflowOutcomes.Approved, ct);
+}
+```
+
 ---
 
 ## REST API
@@ -255,6 +328,7 @@ npm test         # 设计器单元测试
 
 ## 相关文档
 
+- 流程设计操作指引（以请假流程为例，含表达式写法、部署红线、应用层封装）：`docs/process-design-guide.md`
 - 开发计划：`doc/NetBpm-子集流程引擎-开发计划.md`（同目录另有 HTML 版）
 
 ---

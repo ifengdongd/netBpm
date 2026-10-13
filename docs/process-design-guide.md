@@ -760,6 +760,40 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 > 前端不必硬编码任何映射：审批选项与其中文名始终来自流程定义（`activiti:formProperty` 的
 > `activiti:value`），环节序列的中文名也随视图一起下发。改流程不用改前端。
 
+### 7.4 HTTP 面与启动部署已封装成公共类（Hosting）
+
+上面 `AddNetBpmWorkflow` 接的是**应用层**；往下一层——「HTTP 端点长什么样、流程定义何时部署、
+环节名对照表谁来装」——也已收进 `src/NetBpm.Workflow/Hosting/`，Demo 的
+`LeaveEndpoints` / `LeaveProcessBootstrapper` 只是它们的**业务钩子**：
+
+| 公共类 | 职责 | Demo 里对应什么 |
+| --- | --- | --- |
+| `WorkflowEndpoints` + `WorkflowEndpointOptions` | 通用流程 HTTP 端点（发起 / 实例列表与详情 / 历史 / 待办 / 提交 / 流程定义），路由约定统一；业务语义经选项注入 | `LeaveEndpoints` 里只剩单号生成（`TransformStartRequest`）、视图摊平（两个 Decorator）与错误形状（`ErrorResponseFactory`） |
+| `WorkflowProcessBootstrapper` + `WorkflowDeployOptions` | 启动即部署 BPMN 资源：找文件 → 部署 → 自检钩子 → 填充运行期上下文 | `LeaveProcessBootstrapper` 只剩两个常量与两条守卫（`ApprovalResultFormGuard` / `ServiceTaskDelegateGuard` 塞进 `VerifyAsync`） |
+| `WorkflowRuntimeContext` | 部署后才有值的单例：流程定义 id + 环节名 → id 对照表（`AddNetBpmWorkflow` 自动注册） | `MySqlWorkflowDataStore` 构造注入它做「环节名 ↔ 环节 id」换算 |
+| `WorkflowNodeRegistry` | 对照表本体：从已部署定义现取，同名环节留空降级 | 同上（`Nodes.FindId(...)`） |
+
+接入一个新宿主的完整动作（Demo 的 `Program.cs` 就是逐条照抄）：
+
+```csharp
+builder.Services.AddNetBpm(builder.Configuration);                  // ① 引擎
+builder.Services.AddNetBpmWorkflow<MyDataStore>();                  // ② 应用层 + 业务数据端口
+builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly); // ③ 服务任务委托
+
+app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions   // ④ 通用端点 + 业务钩子
+{
+    ProcessKey = _ => "my_process",
+});
+
+await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOptions // ⑤ 启动即部署
+{
+    ResourcePath = "processes/my-process.bpmn20.xml",
+}, app.Logger);
+```
+
+> ⚠️ ⑤ 必须在 `app.Run()` 之前：`WorkflowRuntimeContext` 要在**接受请求之前**装好
+> 「流程定义 id + 环节名对照表」，落库与读库两头都要用它。
+
 ---
 
 ## 8. 改流程后的自查清单
@@ -837,6 +871,9 @@ node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 | `src/NetBpm.Workflow/Form/WorkflowFormMapper.cs` | 表单契约下发 + 表单值 → 流程变量映射 |
 | `src/NetBpm.Workflow/Internal/WorkflowHistoryBuilder.cs` | 历史组装（引擎历史 / 业务审批记录）+ 审批记录认领 |
 | `src/NetBpm.Workflow/Diagnostics/` | 部署期自检：委托可解析性、审批表单约定 |
+| `src/NetBpm.Workflow/Hosting/WorkflowEndpoints.cs` | 通用流程 HTTP 端点（业务语义经 `WorkflowEndpointOptions` 注入） |
+| `src/NetBpm.Workflow/Hosting/WorkflowProcessBootstrapper.cs` | 启动即部署 BPMN 资源 + 自检钩子 + 填充运行期上下文 |
+| `src/NetBpm.Workflow/Hosting/WorkflowRuntimeContext.cs` | 部署后运行期上下文（流程定义 id + 环节名 → id 对照表） |
 | `src/NetBpm.Identity/IdentityContracts.cs` | 身份模块端口（`FindUserIdsByGroupAsync` 是候选组展开的入口） |
 | `db/mysql/0003_create_process_instance_tables.sql` | 三张业务表（`instances` / `instance_current_task` / `deal_history`）的建表脚本 |
 | `db/mysql/0004_create_leave_bill.sql` | 请假单表（`days` / `reason` 真列 + `ext_params` JSON 列） |
