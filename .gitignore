@@ -27,9 +27,15 @@ web/designer/.tmp/
 # Container / OCR artifacts
 *.log
 
+# 演示工程运行时产物：请假审批 Demo 把业务数据落成 JSON（见 LeaveBusinessStore）
+samples/NetBpm.Demo.LeaveApproval/data/
+
 # Local credentials (never commit)
 # Gitee 私人令牌，供 credential.helper=store 读取：git config --local credential.helper "store --file .gittoken"
 .gittoken
 *.gittoken
 .git-credentials
 git-credentials
+
+# AI 工具本地工作区数据（不提交）
+.workbuddy/
