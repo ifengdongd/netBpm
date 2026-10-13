@@ -1,4 +1,5 @@
 using NetBpm.Persistence;
+using NetBpm.Rest;
 using NetBpm.Rest.Endpoints;
 using NetBpm.Runtime;
 
@@ -10,7 +11,14 @@ builder.Services.AddOpenApi();
 // 组合根：模型 / 转换 / 校验 / 表达式 / 引擎 / 持久化 / 身份
 builder.Services.AddNetBpm(builder.Configuration);
 
+// 全局异常处理：未处理异常（如数据库不可达）返回带信息的 JSON 错误体，
+// 而非纯文本 "Internal Server Error"（前端部署列表的「加载失败」提示来源）。
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails(); // 无参 UseExceptionHandler() 的注册前置条件
+
 var app = builder.Build();
+
+app.UseExceptionHandler();
 
 app.MapOpenApi();
 

@@ -14,28 +14,47 @@
  *  - **不暴露**：documentation、potentialStarter、process 级 candidateStarter*、自定义
  *    extensionElements、事件定义 —— 模型或转换器不支持，暴露就是"填了也白填"（风险 R5）。
  */
-import { Group } from '@bpmn-io/properties-panel';
-
 import {
   checkboxEntry,
   conditionEntry,
   defaultFlowEntry,
-  normalizeText,
   noteEntry,
-  selectEntryRaw,
   textAreaEntry,
   textEntry,
   unsupportedCapabilities,
   validateElementId,
   validatePriority,
   type EntryContext,
+  type SelectOption,
 } from './entries';
+import {
+  eventListenersGroup,
+  formPropertiesGroup,
+  listenersGroup,
+} from './listEditors';
 
 import {
   businessObject,
   type DiagramElement,
   type PropertiesPanelService,
 } from './types';
+
+/**
+ * 属性组的形状（⚠️ 必须是**普通对象**）：
+ * bpmn-js-properties-panel 拿到 groups 后用自带的 Group 组件渲染每一个，
+ * `@bpmn-io/properties-panel` 导出的 `Group` 是 Preact 组件——在 provider 里
+ * 把它当工厂函数调用会在渲染上下文之外执行 hooks 而抛错，面板因此整体空白。
+ */
+interface NetBpmGroup {
+  id: string;
+  label: string;
+  entries: unknown[];
+  shouldOpen?: boolean;
+}
+
+function group(id: string, label: string, entries: unknown[]): NetBpmGroup {
+  return { id, label, entries };
+}
 
 /** 子集元素（§1.2）。其它类型（子流程/边界事件/泳道…）不属白名单，面板不渲染。 */
 const SUBSET_TYPES = new Set([
@@ -47,17 +66,26 @@ const SUBSET_TYPES = new Set([
   'bpmn:ScriptTask',
   'bpmn:ExclusiveGateway',
   'bpmn:ParallelGateway',
+  'bpmn:InclusiveGateway',
+  'bpmn:EventBasedGateway',
   'bpmn:SequenceFlow',
 ]);
 
-/** 服务任务的三种实现方式；顺序即后端 `ImplementationType` 的取值优先级。 */
-const IMPLEMENTATION_KEYS = ['class', 'delegateExpression', 'expression'] as const;
+// ─────────────────────────── 监听器事件选项 ───────────────────────────
 
-const IMPLEMENTATION_LABELS: Record<(typeof IMPLEMENTATION_KEYS)[number], string> = {
-  class: 'Java 类名（activiti:class）',
-  delegateExpression: '委托表达式（activiti:delegateExpression）',
-  expression: '值表达式（activiti:expression）',
-};
+// ⚠️ 对齐 Activiti 原版设计器：执行监听器的 Event 下拉统一提供 start / end / take
+const EXECUTION_EVENT_CHOICES: SelectOption[] = [
+  { label: 'start（进入时）', value: 'start' },
+  { label: 'end（离开时）', value: 'end' },
+  { label: 'take（流经时）', value: 'take' },
+];
+
+const TASK_EVENT_CHOICES: SelectOption[] = [
+  { label: 'create（创建时）', value: 'create' },
+  { label: 'assignment（被指派时）', value: 'assignment' },
+  { label: 'complete（完成时）', value: 'complete' },
+  { label: 'delete（删除时）', value: 'delete' },
+];
 
 export default class NetBpmPropertiesProvider {
   static $inject = ['propertiesPanel', 'modeling', 'moddle', 'translate'];
@@ -97,7 +125,16 @@ function buildGroups(
   const type = businessObject(element).$type as string;
 
   if (type === 'bpmn:Process') {
-    return [processGroup(element, context, t)];
+    return [
+      processGroup(element, context, t),
+      listenersGroup('netbpm-process-exec-listeners', t('执行监听器'), element, context, t, {
+        typeName: 'activiti:ExecutionListener',
+        eventChoices: EXECUTION_EVENT_CHOICES,
+        addDefaults: { event: 'start' },
+        emptyHint: t('尚未配置执行监听器（activiti:executionListener）。'),
+      }),
+      eventListenersGroup(element, context, t),
+    ];
   }
 
   if (!SUBSET_TYPES.has(type)) {
@@ -109,18 +146,51 @@ function buildGroups(
   switch (type) {
     case 'bpmn:UserTask':
       groups.push(userTaskGroup(element, context, t));
+      groups.push(
+        listenersGroup('netbpm-user-task-exec-listeners', t('执行监听器'), element, context, t, {
+          typeName: 'activiti:ExecutionListener',
+          eventChoices: EXECUTION_EVENT_CHOICES,
+          addDefaults: { event: 'start' },
+          emptyHint: t('尚未配置执行监听器（activiti:executionListener）。'),
+        }),
+        listenersGroup('netbpm-user-task-task-listeners', t('任务监听器'), element, context, t, {
+          typeName: 'activiti:TaskListener',
+          eventChoices: TASK_EVENT_CHOICES,
+          addDefaults: { event: 'create' },
+          emptyHint: t('尚未配置任务监听器（activiti:taskListener）。'),
+        }),
+        formPropertiesGroup(element, context, t),
+      );
       break;
     case 'bpmn:ServiceTask':
       groups.push(serviceTaskGroup(element, context, t));
+      groups.push(
+        listenersGroup('netbpm-service-task-exec-listeners', t('执行监听器'), element, context, t, {
+          typeName: 'activiti:ExecutionListener',
+          eventChoices: EXECUTION_EVENT_CHOICES,
+          addDefaults: { event: 'start' },
+          emptyHint: t('尚未配置执行监听器（activiti:executionListener）。'),
+        }),
+      );
       break;
     case 'bpmn:ScriptTask':
       groups.push(scriptTaskGroup(element, context, t));
       break;
     case 'bpmn:SequenceFlow':
       groups.push(sequenceFlowGroup(element, context, t));
+      groups.push(
+        listenersGroup('netbpm-sequence-flow-exec-listeners', t('执行监听器'), element, context, t, {
+          typeName: 'activiti:ExecutionListener',
+          eventChoices: EXECUTION_EVENT_CHOICES,
+          addDefaults: { event: 'take' },
+          emptyHint: t('尚未配置执行监听器（activiti:executionListener，事件为 take）。'),
+        }),
+      );
       break;
     case 'bpmn:ExclusiveGateway':
     case 'bpmn:ParallelGateway':
+    case 'bpmn:InclusiveGateway':
+    case 'bpmn:EventBasedGateway':
       groups.push(gatewayGroup(element, context, t));
       break;
     default:
@@ -143,29 +213,25 @@ function processGroup(
   context: EntryContext,
   t: (text: string) => string,
 ): unknown {
-  return Group({
-    id: 'netbpm-process',
-    label: t('流程'),
-    entries: [
-      textEntry(
-        {
-          id: 'processId',
-          property: 'id',
-          element,
-          label: t('流程 ID'),
-          description: t('流程定义 id 形如 {key}:{version}:{id}，其中的 key 就是它'),
-          validate: validateElementId,
-        },
-        context,
-      ),
-      textEntry({ id: 'processName', property: 'name', element, label: t('流程名称') }, context),
-      noteEntry(
+  return group('netbpm-process', t('流程'), [
+    textEntry(
+      {
+        id: 'processId',
+        property: 'id',
         element,
-        t('是否可执行'),
-        t('固定为 true：后端导出时恒写 isExecutable="true"（见开发计划 §15 勘误），因此这里只读。'),
-      ),
-    ],
-  });
+        label: t('流程 ID'),
+        description: t('流程定义 id 形如 {key}:{version}:{id}，其中的 key 就是它'),
+        validate: validateElementId,
+      },
+      context,
+    ),
+    textEntry({ id: 'processName', property: 'name', element, label: t('流程名称') }, context),
+    noteEntry(
+      element,
+      t('是否可执行'),
+      t('固定为 true：后端导出时恒写 isExecutable="true"（见开发计划 §15 勘误），因此这里只读。'),
+    ),
+  ]);
 }
 
 function commonGroup(
@@ -173,17 +239,13 @@ function commonGroup(
   context: EntryContext,
   t: (text: string) => string,
 ): unknown {
-  return Group({
-    id: 'netbpm-common',
-    label: t('基本'),
-    entries: [
-      textEntry(
-        { id: 'elementId', property: 'id', element, label: t('id'), validate: validateElementId },
-        context,
-      ),
-      textEntry({ id: 'elementName', property: 'name', element, label: t('名称') }, context),
-    ],
-  });
+  return group('netbpm-common', t('基本'), [
+    textEntry(
+      { id: 'elementId', property: 'id', element, label: t('id'), validate: validateElementId },
+      context,
+    ),
+    textEntry({ id: 'elementName', property: 'name', element, label: t('名称') }, context),
+  ]);
 }
 
 function userTaskGroup(
@@ -197,8 +259,8 @@ function userTaskGroup(
         id: 'assignee',
         property: 'assignee',
         element,
-        label: t('办理人'),
-        description: t('留空也可以部署（Activiti 允许无人办理的任务），但这样只能按流程实例查待办'),
+        label: t('办理人（审批人）'),
+        description: t('任务派遣：直接指派办理人，支持表达式如 ${starter}；留空也可部署，但只能按流程实例查待办'),
       },
       context,
     ),
@@ -230,8 +292,8 @@ function userTaskGroup(
         id: 'formKey',
         property: 'formKey',
         element,
-        label: t('表单 Key'),
-        description: t('本子集只透传，不做渲染'),
+        label: t('表单标识（formKey）'),
+        description: t('任务关联的表单标识，如 leave-approve；后端只透传，不做渲染'),
       },
       context,
     ),
@@ -248,11 +310,7 @@ function userTaskGroup(
     defaultFlowEntry(element, t('默认流'), context),
   ];
 
-  return Group({
-    id: 'netbpm-user-task',
-    label: t('用户任务'),
-    entries: entries.filter((entry) => entry !== null),
-  });
+  return group('netbpm-user-task', t('用户任务'), entries.filter((entry) => entry !== null));
 }
 
 function serviceTaskGroup(
@@ -260,22 +318,41 @@ function serviceTaskGroup(
   context: EntryContext,
   t: (text: string) => string,
 ): unknown {
-  const current = currentImplementation(element);
-  const entries = [implementationSelectEntry(element, context, t)];
-
-  if (current === undefined) {
-    entries.push(
-      noteEntry(
+  // ⚠️ 对齐 Activiti 原版设计器：三个实现字段直接平铺（类名 / 表达式 / 代理的表达式），
+  // 不再做"实现方式"下拉。三项并存时后端按 class > delegateExpression > expression
+  // 静默取第一个，即时校验会给警告（见 validation.ts 规则 8）。
+  return group('netbpm-service-task', t('服务任务'), [
+    textEntry(
+      {
+        id: 'impl-class',
+        property: 'class',
         element,
-        t('实现方式取值'),
-        t('尚未选择实现方式。服务任务必须指定 class / delegateExpression / expression 之一，否则后端校验会拒绝部署。'),
-      ),
-    );
-  } else {
-    entries.push(textEntry({ id: `implementation-${current}`, property: current, element, label: t('取值') }, context));
-  }
-
-  entries.push(
+        label: t('类名'),
+        // ⚠️ 不放示例占位值：避免"看起来已经填了 javaDelegate 类名"的错觉
+        description: t('activiti:class，实现类的全限定名，如 com.example.MyJavaDelegate'),
+      },
+      context,
+    ),
+    textEntry(
+      {
+        id: 'impl-expression',
+        property: 'expression',
+        element,
+        label: t('表达式'),
+        placeholder: '${someBean.method(execution)}',
+      },
+      context,
+    ),
+    textEntry(
+      {
+        id: 'impl-delegateExpression',
+        property: 'delegateExpression',
+        element,
+        label: t('代理的表达式'),
+        placeholder: '${someDelegateBean}',
+      },
+      context,
+    ),
     textEntry(
       {
         id: 'resultVariableName',
@@ -287,13 +364,7 @@ function serviceTaskGroup(
       context,
     ),
     defaultFlowEntry(element, t('默认流'), context) ?? noteEntry(element, t('默认流'), t('该任务还没有出流；请先连线。')),
-  );
-
-  return Group({
-    id: 'netbpm-service-task',
-    label: t('服务任务'),
-    entries,
-  });
+  ]);
 }
 
 function scriptTaskGroup(
@@ -301,10 +372,7 @@ function scriptTaskGroup(
   context: EntryContext,
   t: (text: string) => string,
 ): unknown {
-  return Group({
-    id: 'netbpm-script-task',
-    label: t('脚本任务'),
-    entries: [
+  return group('netbpm-script-task', t('脚本任务'), [
       textEntry(
         { id: 'scriptFormat', property: 'scriptFormat', element, label: t('脚本格式'), placeholder: 'javascript' },
         context,
@@ -332,8 +400,7 @@ function scriptTaskGroup(
         },
         context,
       ),
-    ],
-  });
+  ]);
 }
 
 function sequenceFlowGroup(
@@ -341,11 +408,7 @@ function sequenceFlowGroup(
   context: EntryContext,
   t: (text: string) => string,
 ): unknown {
-  return Group({
-    id: 'netbpm-sequence-flow',
-    label: t('顺序流'),
-    entries: [conditionEntry(element, context)],
-  });
+  return group('netbpm-sequence-flow', t('顺序流'), [conditionEntry(element, context)]);
 }
 
 function gatewayGroup(
@@ -353,30 +416,35 @@ function gatewayGroup(
   context: EntryContext,
   t: (text: string) => string,
 ): unknown {
-  if (businessObject(element).$type === 'bpmn:ParallelGateway') {
-    return Group({
-      id: 'netbpm-parallel-gateway',
-      label: t('并行网关'),
-      entries: [
-        noteEntry(
-          element,
-          t('默认流'),
-          t('并行网关不支持默认流：出口不做条件判定，全部分支并行推进（后端校验会拒绝设置了默认流的并行网关）。'),
-        ),
-      ],
-    });
+  const type = businessObject(element).$type;
+
+  if (type === 'bpmn:ParallelGateway') {
+    return group('netbpm-parallel-gateway', t('并行网关'), [
+      noteEntry(
+        element,
+        t('默认流'),
+        t('并行网关不支持默认流：出口不做条件判定，全部分支并行推进（后端校验会拒绝设置了默认流的并行网关）。'),
+      ),
+    ]);
+  }
+
+  if (type === 'bpmn:EventBasedGateway') {
+    return group('netbpm-event-gateway', t('事件网关'), [
+      noteEntry(
+        element,
+        t('后续节点'),
+        t('事件网关的每条出流只能指向中间捕获事件（定时/消息/信号），本子集未实现，部署会被拒绝；请改用单一网关或包含网关。'),
+      ),
+    ]);
   }
 
   const defaultFlow = defaultFlowEntry(element, t('默认流'), context);
+  const isInclusive = type === 'bpmn:InclusiveGateway';
 
-  return Group({
-    id: 'netbpm-exclusive-gateway',
-    label: t('排他网关'),
-    entries: [
-      defaultFlow ??
-        noteEntry(element, t('默认流'), t('该网关还没有出流；请先连线再选择默认流（无默认流时至少要有一条无条件出流）。')),
-    ],
-  });
+  return group(isInclusive ? 'netbpm-inclusive-gateway' : 'netbpm-exclusive-gateway', isInclusive ? t('包含网关') : t('单一网关'), [
+    defaultFlow ??
+      noteEntry(element, t('默认流'), t('该网关还没有出流；请先连线再选择默认流（无默认流时至少要有一条无条件出流）。')),
+  ]);
 }
 
 /** 子集不支持的能力：只提示，不提供编辑入口。 */
@@ -387,76 +455,17 @@ function unsupportedGroup(element: DiagramElement, t: (text: string) => string):
     return null;
   }
 
-  return Group({
-    id: 'netbpm-unsupported',
-    label: t('子集不支持'),
-    entries: capabilities.map((capability) =>
+  return group(
+    'netbpm-unsupported',
+    t('子集不支持'),
+    capabilities.map((capability) =>
       noteEntry(
         element,
         `${t('不支持')}：${capability}`,
         t('本子集未实现该能力，后端会显式拒绝部署（校验规则「不支持的能力」）。请移除后再部署。'),
       ),
     ),
-  });
-}
-
-// ─────────────────────────── 小工具 ───────────────────────────
-
-/** 服务任务当前生效的实现方式（取值优先级与后端一致：class &gt; delegateExpression &gt; expression）。 */
-function currentImplementation(element: DiagramElement): (typeof IMPLEMENTATION_KEYS)[number] | undefined {
-  const bo = businessObject(element);
-
-  for (const key of IMPLEMENTATION_KEYS) {
-    const value = bo[key];
-
-    if (value !== undefined && value !== null && String(value).length > 0) {
-      return key;
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * 「实现方式」下拉：选中一项时**清空**另外两项。
- *
- * 后端对三项并存不做拦截（按优先级静默取第一个），这里强制互斥，
- * 避免出现「都填了、但只有 class 生效」的错觉。
- */
-function implementationSelectEntry(
-  element: DiagramElement,
-  context: EntryContext,
-  t: (text: string) => string,
-): unknown {
-  return selectEntryRaw(
-    {
-      id: 'implementationType',
-      element,
-      label: t('实现方式'),
-      choices: [
-        { label: t('（未选择）'), value: '' },
-        ...IMPLEMENTATION_KEYS.map((key) => ({ label: t(IMPLEMENTATION_LABELS[key]), value: key })),
-      ],
-      getValue: (target) => currentImplementation(target) ?? '',
-      setValue: (target, value) => {
-        const properties: Record<string, unknown> = {};
-
-        for (const key of IMPLEMENTATION_KEYS) {
-          // 选中的一项保留原值（空值 ⇒ undefined）；未选中的显式置 undefined
-          // ⇒ XML 里不写出该属性（避免 activiti:expression="" 这种空属性）
-          properties[key] = key === value ? normalizeText(readValue(target, key)) : undefined;
-        }
-
-        context.modeling.updateProperties(target, properties);
-      },
-    },
-    context,
   );
 }
 
-/** 切换实现方式时保留已填的取值，用户不必重打一遍。 */
-function readValue(element: DiagramElement, property: string): string {
-  const value = businessObject(element)[property];
-
-  return value === undefined || value === null ? '' : String(value);
-}
+// ─────────────────────────── 小工具 ───────────────────────────

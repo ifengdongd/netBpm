@@ -53,8 +53,47 @@
       "properties": [
         { "name": "executionListener", "type": "ExecutionListener", "isMany": true },
         { "name": "taskListener", "type": "TaskListener", "isMany": true },
+        { "name": "eventListener", "type": "EventListener", "isMany": true },
+        { "name": "formProperty", "type": "FormProperty", "isMany": true },
         { "name": "field", "type": "Field", "isMany": true },
         { "name": "potentialStarter", "type": "PotentialStarter" }
+      ]
+    },
+    {
+      "name": "EventListener",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "events", "isAttr": true, "type": "String" },
+        { "name": "entityType", "isAttr": true, "type": "String" },
+        { "name": "class", "isAttr": true, "type": "String" },
+        { "name": "expression", "isAttr": true, "type": "String" },
+        { "name": "delegateExpression", "isAttr": true, "type": "String" },
+        { "name": "throwOnFailure", "isAttr": true, "type": "Boolean" }
+      ]
+    },
+    {
+      "name": "FormProperty",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "id", "isAttr": true, "type": "String" },
+        { "name": "name", "isAttr": true, "type": "String" },
+        { "name": "type", "isAttr": true, "type": "String" },
+        { "name": "readable", "isAttr": true, "type": "Boolean", "default": true },
+        { "name": "writable", "isAttr": true, "type": "Boolean", "default": true },
+        { "name": "required", "isAttr": true, "type": "Boolean" },
+        { "name": "variable", "isAttr": true, "type": "String" },
+        { "name": "expression", "isAttr": true, "type": "String" },
+        { "name": "default", "isAttr": true, "type": "String" },
+        { "name": "datePattern", "isAttr": true, "type": "String" },
+        { "name": "value", "type": "Value", "isMany": true }
+      ]
+    },
+    {
+      "name": "Value",
+      "superClass": ["Element"],
+      "properties": [
+        { "name": "id", "isAttr": true, "type": "String" },
+        { "name": "name", "isAttr": true, "type": "String" }
       ]
     },
     {

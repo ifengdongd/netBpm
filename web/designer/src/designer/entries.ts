@@ -19,8 +19,66 @@ import {
   isTextAreaEntryEdited,
   isTextFieldEntryEdited,
 } from '@bpmn-io/properties-panel';
+import { h } from 'preact';
 
 import { businessObject, type DiagramElement, type ModelingService, type ModdleService, type ModdleElement, type PropertyEntry } from './types';
+
+/**
+ * 自实现的短防抖，替代面板的 `debounceInput` 服务。
+ *
+ * ⚠️ 为什么不用 `useService('debounceInput')`：该服务的 debounce 链
+ * （useMemo(debounceFn(callback)) + minDash.debounce）在本项目依赖组合下
+ * **不会触发提交** —— 输入框能显示输入的值，但模型从不更新，保存后重开字段全空
+ * （2026-10 排查结论：input 事件已到达 handleLocalInput、setLocalValue 生效，
+ *  但 debouncedCallback 的定时器从未触发）。这里自己用 setTimeout 实现，
+ *  行为可预期：停止输入 200ms 后提交一次。
+ */
+export function localDebounce<A>(fn: (value: A) => void, delay = 200): (value: A) => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  return (value: A): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+
+    timer = setTimeout(() => {
+      timer = undefined;
+      fn(value);
+    }, delay);
+  };
+}
+
+/**
+ * 给条目组件注入 debounce。
+ *
+ * ⚠️ `TextFieldEntry` / `TextAreaEntry` 等从 **props.debounce** 取防抖函数，
+ * 而面板渲染条目时只透传 `{...entry, element}` —— 条目对象必须自带 debounce。
+ * 官方 provider 的做法是在组件里 `useService('debounceInput')` 后再构造条目；
+ * 这里改用自实现的 localDebounce（原因见上），包装组件在渲染树内完成注入。
+ *
+ * ⚠️⚠️ **不要在条目工厂里现场调用 `withDebounceInput(...)`**：面板每次重绘都会重建全部
+ * 条目，若每次都产生新的组件函数引用，Preact 会认为"组件类型变了"而卸载重挂输入框
+ * —— 焦点随即丢失，每输入一段就失焦，表现为"属性改不了"。
+ * 必须用下面四个**模块级常量**（引用稳定），条目工厂只复用它们。
+ */
+function withDebounceInput(Component: unknown): (props: Record<string, unknown>) => unknown {
+  /** preact 的 h 泛型较窄，这里统一按松散签名调用。 */
+  const render = h as (component: unknown, props: Record<string, unknown>) => unknown;
+
+  function DebouncedEntry(props: Record<string, unknown>): unknown {
+    return render(Component, { ...props, debounce: debouncer });
+  }
+
+  return DebouncedEntry;
+}
+
+/** 与 debounceInput 服务同形：debounce(fn) ⇒ 防抖后的 fn。模块级引用稳定。 */
+const debouncer = <A,>(fn: (value: A) => void): ((value: A) => void) => localDebounce(fn);
+
+const DebouncedTextFieldEntry = withDebounceInput(TextFieldEntry);
+const DebouncedTextAreaEntry = withDebounceInput(TextAreaEntry);
+const DebouncedCheckboxEntry = withDebounceInput(CheckboxEntry);
+const DebouncedSelectEntry = withDebounceInput(SelectEntry);
 
 export interface EntryContext {
   modeling: ModelingService;
@@ -66,7 +124,7 @@ export function readBoolean(element: DiagramElement, property: string): boolean 
 export function textEntry(options: BaseOptions, context: EntryContext): PropertyEntry {
   return {
     id: options.id,
-    component: TextFieldEntry,
+    component: DebouncedTextFieldEntry,
     element: options.element,
     label: options.label,
     description: options.description,
@@ -74,8 +132,10 @@ export function textEntry(options: BaseOptions, context: EntryContext): Property
     isEdited: isTextFieldEntryEdited,
     validate: options.validate,
     getValue: (element: DiagramElement) => readText(element, options.property),
-    setValue: (element: DiagramElement, value: unknown) =>
-      context.modeling.updateProperties(element, { [options.property]: normalizeText(value) }),
+    // ⚠️ 面板调用 setValue(value, validationError)，**不传 element**；
+    // element 用闭包里的 options.element（选中变化时 buildGroups 会重建条目，闭包恒为当前元素）。
+    setValue: (value: unknown) =>
+      context.modeling.updateProperties(options.element, { [options.property]: normalizeText(value) }),
   };
 }
 
@@ -86,7 +146,7 @@ export function textAreaEntry(
 ): PropertyEntry {
   return {
     id: options.id,
-    component: TextAreaEntry,
+    component: DebouncedTextAreaEntry,
     element: options.element,
     label: options.label,
     description: options.description,
@@ -94,8 +154,8 @@ export function textAreaEntry(
     isEdited: isTextAreaEntryEdited,
     validate: options.validate,
     getValue: (element: DiagramElement) => readText(element, options.property),
-    setValue: (element: DiagramElement, value: unknown) =>
-      context.modeling.updateProperties(element, { [options.property]: normalizeText(value) }),
+    setValue: (value: unknown) =>
+      context.modeling.updateProperties(options.element, { [options.property]: normalizeText(value) }),
   };
 }
 
@@ -108,15 +168,15 @@ export function checkboxEntry(
 
   return {
     id: options.id,
-    component: CheckboxEntry,
+    component: DebouncedCheckboxEntry,
     element: options.element,
     label: options.label,
     description: options.description,
     isEdited: isCheckboxEntryEdited,
     getValue: (element: DiagramElement) => readBoolean(element, options.property),
     // 取消勾选 ⇒ undefined（删除属性），避免写出 autoStoreVariables="false"
-    setValue: (element: DiagramElement, value: unknown) =>
-      context.modeling.updateProperties(element, {
+    setValue: (value: unknown) =>
+      context.modeling.updateProperties(options.element, {
         [options.property]: value === true ? trueValue : undefined,
       }),
   };
@@ -138,19 +198,19 @@ export function selectEntry(
 ): PropertyEntry {
   return {
     id: options.id,
-    component: SelectEntry,
+    component: DebouncedSelectEntry,
     element: options.element,
     label: options.label,
     description: options.description,
     isEdited: isSelectEntryEdited,
-    options: options.options,
-    emptyValue: options.emptyValue ?? '',
+    // ⚠️ 面板这个版本的 SelectEntry 通过 getOptions(element) 取选项，不接受静态 options
+    getOptions: () => options.options,
     getValue: (element: DiagramElement) => readText(element, options.property) ?? '',
-    setValue: (element: DiagramElement, value: unknown) => {
+    setValue: (value: unknown) => {
       const text = normalizeText(value);
       const fallback = options.emptyValue === '' ? undefined : options.emptyValue;
 
-      context.modeling.updateProperties(element, {
+      context.modeling.updateProperties(options.element, {
         [options.property]: text === undefined ? fallback : text,
       });
     },
@@ -166,7 +226,11 @@ export function defaultFlowEntry(
   label: string,
   context: EntryContext,
 ): PropertyEntry | null {
-  const outgoing = businessObject(element).outgoing ?? [];
+  // ⚠️ 用形状级连线（element.outgoing）：导入的 XML 不一定带显式 <bpmn:outgoing>
+  // 子元素，businessObject.outgoing 只有画布内新画的连线才会被 bpmn-js 维护。
+  const outgoing = (element.outgoing ?? [])
+    .map((connection) => connection.businessObject)
+    .filter((flow) => flow.$type === 'bpmn:SequenceFlow');
 
   if (outgoing.length === 0) {
     return null;
@@ -198,7 +262,7 @@ export function conditionEntry(
 ): PropertyEntry {
   return {
     id: 'conditionExpression',
-    component: TextAreaEntry,
+    component: DebouncedTextAreaEntry,
     element,
     label: '条件表达式',
     description:
@@ -208,10 +272,10 @@ export function conditionEntry(
     isEdited: isTextAreaEntryEdited,
     validate: validateConditionExpression,
     getValue: (target: DiagramElement) => readCondition(target),
-    setValue: (target: DiagramElement, value: unknown) => {
+    setValue: (value: unknown) => {
       const text = normalizeText(value);
 
-      context.modeling.updateProperties(target, {
+      context.modeling.updateProperties(element, {
         conditionExpression:
           text === undefined
             ? undefined
@@ -238,7 +302,7 @@ function readCondition(element: DiagramElement): string | undefined {
 export function noteEntry(element: DiagramElement, label: string, text: string): PropertyEntry {
   return {
     id: `note-${element.id}-${label}`,
-    component: TextAreaEntry,
+    component: DebouncedTextAreaEntry,
     element,
     label,
     disabled: true,
@@ -259,7 +323,7 @@ export function selectEntryRaw(
     description?: string;
     choices: SelectOption[];
     getValue: (element: DiagramElement) => string;
-    setValue: (element: DiagramElement, value: string) => void;
+    setValue: (value: string) => void;
   },
   context: EntryContext,
 ): PropertyEntry {
@@ -267,16 +331,16 @@ export function selectEntryRaw(
 
   return {
     id: options.id,
-    component: SelectEntry,
+    component: DebouncedSelectEntry,
     element: options.element,
     label: options.label,
     description: options.description,
     isEdited: isSelectEntryEdited,
-    options: options.choices,
-    emptyValue: '',
+    // ⚠️ 同 selectEntry：这个版本的 SelectEntry 通过 getOptions(element) 取选项
+    getOptions: () => options.choices,
     getValue: (element: DiagramElement) => options.getValue(element),
-    setValue: (element: DiagramElement, value: unknown) =>
-      options.setValue(element, value === undefined || value === null ? '' : String(value)),
+    setValue: (value: unknown) =>
+      options.setValue(value === undefined || value === null ? '' : String(value)),
   };
 }
 
@@ -336,14 +400,8 @@ export function unsupportedCapabilities(element: DiagramElement): string[] {
   const found: string[] = [];
   const extensions = bo.extensionElements?.values ?? [];
 
-  if (bo.$type === 'bpmn:UserTask' && extensions.some((value) => value.$type === 'activiti:TaskListener')) {
-    found.push('任务监听器（activiti:taskListener）');
-  }
-
-  if (extensions.some((value) => value.$type === 'activiti:ExecutionListener')) {
-    found.push('执行监听器（activiti:executionListener）');
-  }
-
+  // ⚠️ 执行/任务/事件监听器与表单属性已支持（见 listEditors.ts），不再列为"不支持"；
+  // 字段注入与事件定义仍属子集外能力。
   if (bo.$type === 'bpmn:ServiceTask' && extensions.some((value) => value.$type === 'activiti:Field')) {
     found.push('字段注入（activiti:field）');
   }

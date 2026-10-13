@@ -20,6 +20,7 @@ public static class DesignerEndpoints
         var group = endpoints.MapGroup("/api/designer").WithTags("designer");
 
         group.MapPost("/deploy", DeployAsync).Accepts<string>("text/xml").Produces<DeployResponse>();
+        group.MapGet("/definitions", FindDefinitionsAsync).Produces<IReadOnlyList<ProcessDefinitionResponse>>();
         group.MapGet("/definition/{processDefinitionId}/xml", GetDefinitionXmlAsync).Produces<string>();
 
         return group;
@@ -63,6 +64,23 @@ public static class DesignerEndpoints
         {
             return Results.BadRequest(new ErrorResponse(ex.Message));
         }
+    }
+
+    private static async Task<IResult> FindDefinitionsAsync(
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        var definitions = await engine.FindProcessDefinitionsAsync(ct).ConfigureAwait(false);
+
+        return Results.Ok(definitions.Select(definition => new ProcessDefinitionResponse(
+            definition.Id,
+            definition.Key,
+            definition.Name,
+            definition.Version,
+            definition.DeploymentId,
+            // 子集未实现多租户：落库时 TENANT_ID_ 恒为 ''（见 DapperProcessDefinitionStore）
+            string.Empty,
+            definition.DeployTime)));
     }
 
     private static async Task<IResult> GetDefinitionXmlAsync(

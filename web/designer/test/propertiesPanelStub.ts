@@ -19,6 +19,11 @@ export const isTextAreaEntryEdited = (): boolean => true;
 export const isSelectEntryEdited = (): boolean => true;
 export const isCheckboxEntryEdited = (): boolean => true;
 
+/** bpmn-js-properties-panel 的 useService 替身：测试里不会真的渲染，返回占位服务即可。 */
+export function useService(): () => undefined {
+  return () => undefined;
+}
+
 export interface StubGroup {
   id: string;
   label: string;

@@ -30,6 +30,9 @@ export interface DiagramElement {
   id: string;
   type: string;
   businessObject: ModdleElement;
+  /** 形状级连线（diagram-js 维护，导入与手画都可靠）；仅图形元素有。 */
+  outgoing?: DiagramElement[];
+  incoming?: DiagramElement[];
 }
 
 /** properties-panel 的条目定义（`component` + 组件的 props）。 */
@@ -40,9 +43,10 @@ export interface PropertyEntry {
   [key: string]: unknown;
 }
 
-/** bpmn-js `modeling` 服务（只用 updateProperties）。 */
+/** bpmn-js `modeling` 服务（updateProperties 改 BPMN 属性；updateModdleProperties 改扩展元素）。 */
 export interface ModelingService {
   updateProperties(element: unknown, properties: Record<string, unknown>): void;
+  updateModdleProperties(element: unknown, moddleElement: unknown, properties: Record<string, unknown>): void;
 }
 
 /** bpmn-js `moddle` 服务（用于创建 conditionExpression 这类子元素）。 */
@@ -59,12 +63,21 @@ export interface ElementRegistryService {
 /** bpmn-js `selection` / `canvas` 服务（点击校验问题后定位元素）。 */
 export interface SelectionService {
   select(element: unknown): void;
+  /** 当前选中的元素（图标工具栏的剪切/复制/删除依赖它）。 */
+  get(): DiagramElement[];
 }
 
 export interface CanvasService {
   scrollToElement(element: unknown): void;
   /** 容器尺寸变化后重算画布（从 hidden 视图切回编辑器时必须调用）。 */
   resized(): void;
+  /** 无参读取当前缩放；传数字设置缩放；传 'fit-viewport' 适应画布。 */
+  zoom(newZoom?: number | string, center?: { x: number; y: number } | 'auto'): unknown;
+}
+
+/** diagram-js `editorActions` 服务（undo/redo/copy/paste/cut/removeSelection/stepZoom）。 */
+export interface EditorActionsService {
+  trigger(action: string, context?: Record<string, unknown>): unknown;
 }
 
 /** properties-panel 服务（注册属性组的入口）。 */

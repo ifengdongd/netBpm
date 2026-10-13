@@ -25,6 +25,9 @@
 --  ⚠️ 裁掉 ACT_HI_DETAIL 的前提是历史级别取 AUDIT（Activiti 默认级别，
 --     只记活动/任务/变量实例，不记变量更新明细）。若需要变量变更流水，需补回该表。
 --
+--  ➕ 脚本末尾用扩展属性 MS_Description 为 13 张表补充了中文注释（SQL Server 无表级 COMMENT）。
+--     纯元数据，不改变列/索引/外键结构，也不参与 §9.2 的行快照对拍。
+--
 --  执行顺序：0001_create_schema.sql → 0002_init_data.sql
 -- ============================================================================
 
@@ -374,5 +377,61 @@ alter table ACT_RU_VARIABLE
     add constraint ACT_FK_VAR_BYTEARRAY
     foreign key (BYTEARRAY_ID_)
     references ACT_GE_BYTEARRAY (ID_);
+
+-- ─────────────────────────── 表注释（扩展属性 MS_Description）───────────────────────────
+--  SQL Server 无 MySQL 式的表级 COMMENT，用扩展属性 MS_Description 承载同一套中文说明。
+--  纯元数据，不改变列/索引/外键结构，也不参与 §9.2 的行快照对拍。
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'通用属性表：存放 schema 版本、schema 历史与 ID 区块游标等全局键值对',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_GE_PROPERTY';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'二进制数据表：存放部署的流程定义资源（BPMN XML）等字节内容',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_GE_BYTEARRAY';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'部署信息表：每次流程部署产生一条记录',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_RE_DEPLOYMENT';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义表：部署解析后的流程定义（KEY_ + VERSION_ + TENANT_ID_ 唯一）',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_RE_PROCDEF';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时执行实例表：执行树，引擎唯一的运行态（流程实例 / 并发分支 / 作用域）',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_RU_EXECUTION';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时任务表：当前待办的用户任务',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_RU_TASK';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时身份关联表：任务的用户 / 组关联（办理人、候选人与候选组）',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_RU_IDENTITYLINK';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时变量表：流程实例、执行与任务级变量',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_RU_VARIABLE';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史流程实例表：记录已启动过的流程实例',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_HI_PROCINST';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史活动实例表：流程图着色数据源',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_HI_ACTINST';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史任务实例表：记录已产生过的用户任务',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_HI_TASKINST';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史变量实例表：变量在流程结束时的最终值',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_HI_VARINST';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史身份关联表：历史任务的用户 / 组关联',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'ACT_HI_IDENTITYLINK';
 
 go

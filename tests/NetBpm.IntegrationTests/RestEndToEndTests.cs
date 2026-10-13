@@ -156,6 +156,36 @@ public sealed class RestEndToEndTests : IClassFixture<RestEngineFactory>
         Assert.Contains("/health", paths);
     }
 
+    [Fact]
+    public async Task DesignerDefinitions_AfterDeploy_ShouldListDefinitionWithDeployTime()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        using (var session = MySqlTestDatabase.CreateSessionFactory().Create())
+        {
+            MySqlTestDatabase.Reset(session);
+        }
+
+        using var client = _factory.CreateClient();
+
+        var processDefinitionId = await DeployAsync(client);
+
+        using var response = await client.GetAsync(new Uri("/api/designer/definitions", UriKind.Relative), Ct);
+
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.IsSuccessStatusCode, $"部署列表失败：{response.StatusCode} {body}");
+
+        var definitions = JsonDocument.Parse(body).RootElement.EnumerateArray().ToList();
+
+        var deployed = definitions.Single(definition =>
+            definition.GetProperty("processDefinitionId").GetString() == processDefinitionId);
+
+        Assert.Equal("leave-approval", deployed.GetProperty("key").GetString());
+        Assert.Equal("请假申请", deployed.GetProperty("name").GetString());
+        Assert.Equal(1, deployed.GetProperty("version").GetInt32());
+        Assert.Equal(JsonValueKind.String, deployed.GetProperty("deployTime").ValueKind);
+    }
+
     // ─────────────────────────── HTTP 辅助 ───────────────────────────
 
     private static async Task<string> DeployAsync(HttpClient client)

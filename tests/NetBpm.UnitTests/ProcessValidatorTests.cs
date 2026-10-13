@@ -64,6 +64,61 @@ public sealed class ProcessValidatorTests
     }
 
     [Fact]
+    public void InclusiveGatewayProcess_ShouldPass()
+    {
+        var process = Parse(TestEngine.InclusiveGatewayProcess());
+
+        Assert.Empty(Validator.Validate(process));
+    }
+
+    [Fact]
+    public void InclusiveGatewayWithoutDefaultFlowAndUnconditionalFlow_ShouldBeReported()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         targetNamespace="http://netbpm/test">
+              <process id="p3" isExecutable="true">
+                <startEvent id="start" />
+                <inclusiveGateway id="inclGw" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="inclGw" />
+                <sequenceFlow id="f2" sourceRef="inclGw" targetRef="end">
+                  <conditionExpression xsi:type="tFormalExpression">${a}</conditionExpression>
+                </sequenceFlow>
+              </process>
+            </definitions>
+            """;
+
+        var errors = Validator.Validate(Parse(xml));
+
+        Assert.Contains(errors, error => error.ElementId == "inclGw" && error.Rule == "inclusive-gateway");
+    }
+
+    [Fact]
+    public void EventGateway_ShouldBeRejectedInsteadOfSilentlyIgnored()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         targetNamespace="http://netbpm/test">
+              <process id="p4" isExecutable="true">
+                <startEvent id="start" />
+                <eventBasedGateway id="evtGw" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="evtGw" />
+                <sequenceFlow id="f2" sourceRef="evtGw" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var errors = Validator.Validate(Parse(xml));
+
+        Assert.Contains(errors, error => error.ElementId == "evtGw" && error.Rule == "event-gateway-unsupported");
+    }
+
+    [Fact]
     public void ServiceTaskWithoutImplementation_ShouldBeReported()
     {
         const string xml = """

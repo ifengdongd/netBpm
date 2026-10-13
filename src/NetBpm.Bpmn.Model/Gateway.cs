@@ -21,3 +21,20 @@ public class ExclusiveGateway : Gateway;
 /// 行为实现见 <c>ParallelGatewayActivityBehavior</c>（开发计划 §5.4 之二）。
 /// </summary>
 public class ParallelGateway : Gateway;
+
+/// <summary>
+/// 包含网关（<c>inclusiveGateway</c>）。或语义：
+/// Fork 取「全部条件为真」的出流（无匹配走默认流）；Join 等待所有「仍可到达本网关」的分支。
+/// 行为实现见 <c>InclusiveGatewayActivityBehavior</c>。
+/// </summary>
+public class InclusiveGateway : Gateway;
+
+/// <summary>
+/// 事件网关（<c>eventBasedGateway</c>）。
+/// <para>
+/// ⚠️ 本子集<b>未实现</b>：它的每条出流必须指向中间捕获事件（定时/消息/信号），而中间事件不在支持范围内。
+/// 转换器可解析（保证往返不丢元素），但校验规则 <c>event-gateway-unsupported</c> 会显式拒绝部署 ——
+/// 与"宁可报错也不要静默行为不一致"的项目原则一致。
+/// </para>
+/// </summary>
+public class EventGateway : Gateway;

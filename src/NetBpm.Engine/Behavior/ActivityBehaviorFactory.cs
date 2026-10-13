@@ -37,6 +37,7 @@ public sealed class ActivityBehaviorFactory : IActivityBehaviorFactory
             // 网关
             ExclusiveGateway => new ExclusiveGatewayActivityBehavior(services),
             ParallelGateway => new ParallelGatewayActivityBehavior(services),
+            InclusiveGateway => new InclusiveGatewayActivityBehavior(services),
 
             // 任务
             UserTask => new UserTaskActivityBehavior(services),

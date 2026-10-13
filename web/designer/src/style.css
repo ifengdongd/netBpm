@@ -16,7 +16,76 @@ body {
 
 body {
   display: flex;
+  flex-direction: row;
+}
+
+/* ─────────────── 左侧菜单（流程管理） ─────────────── */
+
+.sidebar {
+  flex: 0 0 160px;
+  display: flex;
   flex-direction: column;
+  background: #373d41;
+  color: #fff;
+  user-select: none;
+}
+
+.sidebar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-caret {
+  font-size: 11px;
+  color: #9aa0a6;
+}
+
+.sidebar-menu {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  display: block;
+  padding: 11px 16px;
+  color: #d4d7da;
+  font-size: 14px;
+  text-decoration: none;
+  border-left: 3px solid transparent;
+}
+
+.menu-item:hover {
+  background: #2f3337;
+  color: #fff;
+}
+
+.menu-item.active {
+  background: #2f3337;
+  color: #fff;
+  border-left-color: #1e9fff;
+}
+
+/* 右侧主区：撑满剩余空间（.view 的 flex:1 依赖这里的父级高度） */
+.main-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar button.primary {
+  background: #1e9fff;
+  border-color: #1e9fff;
+  color: #fff;
+}
+
+.toolbar button.primary:hover {
+  background: #0d8de8;
 }
 
 /* 列表/编辑器双视图：各自撑满 body 剩余空间（.canvas-row 的 flex:1 依赖这里的父级高度） */
@@ -31,6 +100,54 @@ body {
    必须显式写回 none，否则切回列表页时编辑器仍占位 */
 .view[hidden] {
   display: none;
+}
+
+/* ─────────────── Activiti 风格图标工具栏 ─────────────── */
+
+.icon-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #f8f9fb;
+}
+
+.icon-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: #444;
+}
+
+.icon-toolbar button:hover {
+  border-color: var(--border);
+  background: #fff;
+  color: #1976d2;
+}
+
+.icon-toolbar button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
 }
 
 .toolbar {
@@ -71,8 +188,27 @@ body {
   min-width: 0;
 }
 
+/* 画布/设置栏的可拖拽分隔条 */
+.panel-resizer {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.panel-resizer:hover,
+body.resizing .panel-resizer {
+  background: #b8ccf0;
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .properties {
   width: 320px;
+  min-width: 280px;
   border-left: 1px solid var(--border);
   overflow: auto;
   background: #fff;
@@ -147,6 +283,127 @@ body {
   margin-top: 24px;
   color: #888;
   font-size: 14px;
+}
+
+/* ─────────────── 列表编辑器（监听器/表单属性） ─────────────── */
+
+.nb-list-editor {
+  padding: 4px 12px 10px;
+  font-size: 13px;
+}
+
+.nb-empty {
+  margin: 2px 0 8px;
+  color: #888;
+}
+
+.nb-item {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: #fafafa;
+}
+
+.nb-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.nb-item-stack {
+  display: block;
+}
+
+.nb-item-index {
+  flex: 0 0 auto;
+  color: #999;
+  min-width: 18px;
+}
+
+.nb-list-editor input[type='text'],
+.nb-list-editor select {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.nb-event,
+.nb-impl-type,
+.nb-entity-type,
+.nb-form-type {
+  flex: 1 1 auto;
+}
+
+.nb-impl-value {
+  flex: 1 1 100%;
+}
+
+.nb-enum-values {
+  margin: 4px 0 8px 24px;
+  padding-left: 8px;
+  border-left: 2px solid #e0e4ea;
+}
+
+.nb-enum-title {
+  color: #666;
+  margin: 2px 0 4px;
+}
+
+.nb-enum-id {
+  flex: 0 0 70px !important;
+}
+
+.nb-enum-name {
+  flex: 1 1 auto !important;
+}
+
+.nb-form-id {
+  flex: 1 1 auto;
+}
+
+.nb-form-name {
+  flex: 1 1 auto;
+}
+
+.nb-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 12px 0 0;
+  color: #444;
+}
+
+.nb-check-row {
+  display: flex;
+  gap: 4px;
+}
+
+.nb-add,
+.nb-remove {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.nb-add:hover {
+  background: var(--bg);
+}
+
+.nb-remove {
+  flex: 0 0 auto;
+  color: #c0392b;
+  border-color: #e5b4b0;
+}
+
+.nb-remove:hover {
+  background: #fdf0ef;
 }
 
 /* ─────────────── 即时校验清单（§6.2 第 3 项）─────────────── */

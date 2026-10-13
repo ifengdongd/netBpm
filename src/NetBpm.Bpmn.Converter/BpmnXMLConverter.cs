@@ -42,6 +42,8 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         Register(new SequenceFlowXmlConverter());
         Register(new ExclusiveGatewayXmlConverter());
         Register(new ParallelGatewayXmlConverter());
+        Register(new InclusiveGatewayXmlConverter());
+        Register(new EventGatewayXmlConverter());
         Register(new UserTaskXmlConverter());
         Register(new ServiceTaskXmlConverter());
         Register(new ManualTaskXmlConverter());

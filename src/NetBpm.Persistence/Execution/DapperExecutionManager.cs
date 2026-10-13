@@ -257,6 +257,38 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
     }
 
     /// <inheritdoc />
+    public async ValueTask<IList<IExecutionEntity>> FindActiveChildExecutionsByProcessInstanceIdAsync(
+        string processInstanceId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var cache = GetCache(session);
+
+        await FlushAsync(session, ct).ConfigureAwait(false);
+
+        var states = await QueryStatesAsync(
+            session,
+            SelectChildExecutionsOfProcessInstanceSql,
+            new { processInstanceId },
+            ct).ConfigureAwait(false);
+
+        var result = new List<IExecutionEntity>();
+
+        foreach (var state in states)
+        {
+            if (state.IsActive && !string.Equals(state.Id, processInstanceId, StringComparison.Ordinal))
+            {
+                result.Add(Materialize(cache, state));
+            }
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async ValueTask<int> CountActiveChildExecutionsForProcessInstanceAsync(
         string processInstanceId,
         CancellationToken ct = default)

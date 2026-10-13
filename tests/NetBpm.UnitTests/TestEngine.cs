@@ -153,6 +153,44 @@ internal sealed class TestEngine
         </definitions>
         """;
 
+    /// <summary>
+    /// 构建包含网关流程（Fork 两条条件分支 + 一条默认分支 → Join → End）。
+    /// <para>
+    /// 关键差异用例：<c>a=true, b=false</c> 时只有一条分支产生令牌，
+    /// Join 必须<b>不等待</b>从未激活的分支（并行网关在这里会死等）。
+    /// </para>
+    /// <para>默认分支存在的意义：校验规则要求包含网关「有默认流或至少一条无条件出流」。</para>
+    /// </summary>
+    public static string InclusiveGatewayProcess() => """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                     targetNamespace="http://netbpm/test">
+          <process id="inclusive" name="包含网关" isExecutable="true">
+            <startEvent id="start" />
+            <inclusiveGateway id="inclFork" default="flowDefault" />
+            <serviceTask id="branchA" activiti:delegateExpression="branchA" />
+            <serviceTask id="branchB" activiti:delegateExpression="branchB" />
+            <serviceTask id="noBranch" activiti:delegateExpression="noBranch" />
+            <inclusiveGateway id="inclJoin" />
+            <endEvent id="end" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="inclFork" />
+            <sequenceFlow id="flowA" sourceRef="inclFork" targetRef="branchA">
+              <conditionExpression xsi:type="tFormalExpression">${a}</conditionExpression>
+            </sequenceFlow>
+            <sequenceFlow id="flowB" sourceRef="inclFork" targetRef="branchB">
+              <conditionExpression xsi:type="tFormalExpression">${b}</conditionExpression>
+            </sequenceFlow>
+            <sequenceFlow id="flowDefault" sourceRef="inclFork" targetRef="noBranch" />
+            <sequenceFlow id="f2" sourceRef="branchA" targetRef="inclJoin" />
+            <sequenceFlow id="f3" sourceRef="branchB" targetRef="inclJoin" />
+            <sequenceFlow id="f5" sourceRef="noBranch" targetRef="inclJoin" />
+            <sequenceFlow id="f4" sourceRef="inclJoin" targetRef="end" />
+          </process>
+        </definitions>
+        """;
+
     /// <summary>构建并行网关流程（Fork → 两条服务任务 → Join → End）。</summary>
     public static string ParallelGatewayProcess() => """
         <?xml version="1.0" encoding="UTF-8"?>

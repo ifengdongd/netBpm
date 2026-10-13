@@ -204,6 +204,25 @@ public sealed class InMemoryExecutionManager : IExecutionManager
     }
 
     /// <inheritdoc />
+    public ValueTask<IList<IExecutionEntity>> FindActiveChildExecutionsByProcessInstanceIdAsync(
+        string processInstanceId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        lock (_syncRoot)
+        {
+            var result = _executions.Values
+                .Where(execution => execution.IsActive
+                    && !string.Equals(execution.Id, processInstanceId, StringComparison.Ordinal)
+                    && string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
+                .ToList();
+
+            return ValueTask.FromResult<IList<IExecutionEntity>>(result);
+        }
+    }
+
+    /// <inheritdoc />
     public ValueTask<int> CountChildExecutionsForExecutionAsync(
         string parentExecutionId,
         CancellationToken ct = default)

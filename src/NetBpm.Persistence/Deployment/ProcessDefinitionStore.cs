@@ -24,6 +24,24 @@ public sealed record ProcessDefinition(
 }
 
 /// <summary>
+/// 已部署流程定义的列表视图（含部署时间）。
+/// <para>对应 <c>ACT_RE_PROCDEF</c> join <c>ACT_RE_DEPLOYMENT</c> 的一行。</para>
+/// </summary>
+/// <param name="Id">流程定义 id。</param>
+/// <param name="Key">流程 key。</param>
+/// <param name="Name">流程名。</param>
+/// <param name="Version">版本号。</param>
+/// <param name="DeploymentId">部署 id。</param>
+/// <param name="DeployTime">部署时间（UTC）。</param>
+public sealed record DeployedProcessDefinition(
+    string Id,
+    string Key,
+    string? Name,
+    int Version,
+    string DeploymentId,
+    DateTime? DeployTime);
+
+/// <summary>
 /// 流程定义仓储（部署 / 回显）。
 /// <para>Activiti 侧对应 <c>ACT_RE_DEPLOYMENT</c> + <c>ACT_GE_BYTEARRAY</c> + <c>ACT_RE_PROCDEF</c>。</para>
 /// </summary>
@@ -36,6 +54,9 @@ public interface IProcessDefinitionStore
         CancellationToken ct = default);
 
     ValueTask<ProcessDefinition?> FindByIdAsync(string processDefinitionId, CancellationToken ct = default);
+
+    /// <summary>查全部已部署的流程定义（每个部署一行，按部署时间倒序）。</summary>
+    ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(CancellationToken ct = default);
 
     ValueTask<BpmnModel?> GetBpmnModelAsync(string processDefinitionId, CancellationToken ct = default);
 
@@ -54,6 +75,7 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
     private readonly Dictionary<string, ProcessDefinition> _definitions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, BpmnModel> _models = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _resources = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTime> _deployTimes = new(StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
 
     public InMemoryProcessDefinitionStore(IIdGenerator idGenerator, IBpmnXmlConverter xmlConverter)
@@ -105,6 +127,7 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
             _definitions[definitionId] = definition;
             _models[definitionId] = bpmnModel;
             _resources[definitionId] = Serialize(bpmnModel);
+            _deployTimes[deploymentId] = DateTime.UtcNow;
 
             return ValueTask.FromResult(definition);
         }
@@ -118,6 +141,26 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
         lock (_syncRoot)
         {
             return ValueTask.FromResult(_definitions.GetValueOrDefault(processDefinitionId));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(CancellationToken ct = default)
+    {
+        lock (_syncRoot)
+        {
+            var result = _definitions.Values
+                .Select(definition => new DeployedProcessDefinition(
+                    definition.Id,
+                    definition.Key,
+                    definition.Name,
+                    definition.Version,
+                    definition.DeploymentId,
+                    _deployTimes.GetValueOrDefault(definition.DeploymentId)))
+                .OrderByDescending(definition => definition.DeployTime ?? DateTime.MinValue)
+                .ToList();
+
+            return ValueTask.FromResult<IReadOnlyList<DeployedProcessDefinition>>(result);
         }
     }
 

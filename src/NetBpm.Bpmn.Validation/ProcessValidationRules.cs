@@ -129,6 +129,75 @@ public sealed class UniqueElementIdRule : IProcessValidationRule
 }
 
 /// <summary>
+/// 规则 5b：包含网关必须至少有一条入流与一条出流，且「默认流或无条件出流」至少满足其一。
+/// <para>
+/// Fork 语义与排他网关同构（条件全假时无流可走），但 Join 期望值依赖入流数，因此入流为 0 也要拦。
+/// </para>
+/// </summary>
+public sealed class InclusiveGatewayRule : IProcessValidationRule
+{
+    public string Name => "inclusive-gateway";
+
+    public IEnumerable<ValidationError> Validate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        foreach (var gateway in process.FindFlowElementsOfType<InclusiveGateway>())
+        {
+            if (gateway.IncomingFlows.Count == 0 || gateway.OutgoingFlows.Count == 0)
+            {
+                yield return new ValidationError(
+                    Name,
+                    gateway.Id,
+                    nameof(InclusiveGateway),
+                    $"包含网关必须有至少一条入流与一条出流（当前入流 {gateway.IncomingFlows.Count} 条、" +
+                    $"出流 {gateway.OutgoingFlows.Count} 条）。");
+            }
+
+            if (gateway.DefaultFlow is not null)
+            {
+                continue;
+            }
+
+            var hasUnconditionalFlow = gateway.OutgoingFlows
+                .Any(flow => string.IsNullOrEmpty(flow.ConditionExpression));
+
+            if (!hasUnconditionalFlow)
+            {
+                yield return new ValidationError(
+                    Name,
+                    gateway.Id,
+                    nameof(InclusiveGateway),
+                    "包含网关的每条出流都带条件且未设置默认流，条件全为假时无法选出流。");
+            }
+        }
+    }
+}
+
+/// <summary>
+/// 规则 5c：事件网关不被支持（需要中间捕获事件：定时/消息/信号）。
+/// <para>在<b>部署期</b>显式报错，而不是等到运行期才发现引擎没有对应行为。</para>
+/// </summary>
+public sealed class EventGatewayUnsupportedRule : IProcessValidationRule
+{
+    public string Name => "event-gateway-unsupported";
+
+    public IEnumerable<ValidationError> Validate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        foreach (var gateway in process.FindFlowElementsOfType<EventGateway>())
+        {
+            yield return new ValidationError(
+                Name,
+                gateway.Id,
+                nameof(EventGateway),
+                "事件网关的后续必须是中间捕获事件（定时/消息/信号），本子集未实现；请改用单一网关或包含网关。");
+        }
+    }
+}
+
+/// <summary>
 /// 规则 5：并行网关的入流 / 出流条数必须与结构匹配（≥1），否则 Join 永不满足或 Fork 无意义。
 /// </summary>
 public sealed class ParallelGatewayFlowCountRule : IProcessValidationRule

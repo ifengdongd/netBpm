@@ -16,6 +16,9 @@
 --     CJK 基本区在 BMP 内，业务可用；若要支持 emoji / 扩展汉字，需改为 utf8mb4，
 --     但那属于有意偏离，应在差异清单中登记（§9.4）。
 --
+--  ➕ 各表的 COMMENT 为本仓库新增的中文说明，属纯元数据：不改变列/索引/外键结构，
+--     也不参与 §9.2 的行快照对拍，与上游 Activiti 的兼容性不受影响。
+--
 --  执行顺序：0001_create_schema.sql → 0002_init_data.sql
 -- ============================================================================
 
@@ -26,7 +29,7 @@ create table ACT_GE_PROPERTY (
     VALUE_ varchar(300),
     REV_ integer,
     primary key (NAME_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='通用属性表：存放 schema 版本、schema 历史与 ID 区块游标等全局键值对';
 
 create table ACT_GE_BYTEARRAY (
     ID_ varchar(64),
@@ -36,7 +39,7 @@ create table ACT_GE_BYTEARRAY (
     BYTES_ LONGBLOB,
     GENERATED_ TINYINT,
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='二进制数据表：存放部署的流程定义资源（BPMN XML）等字节内容';
 
 create table ACT_RE_DEPLOYMENT (
     ID_ varchar(64),
@@ -49,7 +52,7 @@ create table ACT_RE_DEPLOYMENT (
     VERSION_ integer default 1,
     PROJECT_RELEASE_VERSION_ varchar(255),
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='部署信息表：每次流程部署产生一条记录';
 
 create table ACT_RE_PROCDEF (
     ID_ varchar(64) not null,
@@ -69,7 +72,7 @@ create table ACT_RE_PROCDEF (
     ENGINE_VERSION_ varchar(255),
     APP_VERSION_ integer,
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='流程定义表：部署解析后的流程定义（KEY_ + VERSION_ + TENANT_ID_ 唯一）';
 
 -- 执行树：引擎唯一的运行态（开发计划 §5.1）
 create table ACT_RU_EXECUTION (
@@ -105,7 +108,7 @@ create table ACT_RU_EXECUTION (
     ID_LINK_COUNT_ integer,
     APP_VERSION_ integer,
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时执行实例表：执行树，引擎唯一的运行态（流程实例 / 并发分支 / 作用域）';
 
 create table ACT_RU_TASK (
     ID_ varchar(64),
@@ -131,7 +134,7 @@ create table ACT_RU_TASK (
     CLAIM_TIME_ datetime(3),
     APP_VERSION_ integer,
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时任务表：当前待办的用户任务';
 
 create table ACT_RU_IDENTITYLINK (
     ID_ varchar(64),
@@ -144,7 +147,7 @@ create table ACT_RU_IDENTITYLINK (
     PROC_DEF_ID_ varchar(64),
     DETAILS_ LONGBLOB,
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时身份关联表：任务的用户 / 组关联（办理人、候选人与候选组）';
 
 create table ACT_RU_VARIABLE (
     ID_ varchar(64) not null,
@@ -160,7 +163,7 @@ create table ACT_RU_VARIABLE (
     TEXT_ varchar(4000),
     TEXT2_ varchar(4000),
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时变量表：流程实例、执行与任务级变量';
 
 -- ─────────────────────────── 历史表（5 张）───────────────────────────
 
@@ -181,7 +184,7 @@ create table ACT_HI_PROCINST (
     NAME_ varchar(255),
     primary key (ID_),
     unique (PROC_INST_ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='历史流程实例表：记录已启动过的流程实例';
 
 -- 流程图着色数据源（开发计划 §6.2 第 5 项 / §7.2）
 create table ACT_HI_ACTINST (
@@ -201,7 +204,7 @@ create table ACT_HI_ACTINST (
     DELETE_REASON_ varchar(4000),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='历史活动实例表：流程图着色数据源';
 
 create table ACT_HI_TASKINST (
     ID_ varchar(64) not null,
@@ -225,7 +228,7 @@ create table ACT_HI_TASKINST (
     CATEGORY_ varchar(255),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='历史任务实例表：记录已产生过的用户任务';
 
 create table ACT_HI_VARINST (
     ID_ varchar(64) not null,
@@ -243,7 +246,7 @@ create table ACT_HI_VARINST (
     CREATE_TIME_ datetime(3),
     LAST_UPDATED_TIME_ datetime(3),
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='历史变量实例表：变量在流程结束时的最终值';
 
 create table ACT_HI_IDENTITYLINK (
     ID_ varchar(64),
@@ -254,7 +257,7 @@ create table ACT_HI_IDENTITYLINK (
     PROC_INST_ID_ varchar(64),
     DETAILS_ LONGBLOB,
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='历史身份关联表：历史任务的用户 / 组关联';
 
 -- ─────────────────────────── 索引 ───────────────────────────
 

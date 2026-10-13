@@ -17,6 +17,25 @@ public sealed record DeployResponse(
     string DeploymentId,
     string ResourceName);
 
+/// <summary>
+/// 已部署流程定义 DTO（流程部署列表）。租户子集未实现，恒为 <c>""</c>。
+/// </summary>
+/// <param name="ProcessDefinitionId">流程定义 id。</param>
+/// <param name="Key">流程 key。</param>
+/// <param name="Name">流程名。</param>
+/// <param name="Version">版本号。</param>
+/// <param name="DeploymentId">部署 id。</param>
+/// <param name="TenantId">租户 id（子集恒为空串）。</param>
+/// <param name="DeployTime">部署时间（UTC）。</param>
+public sealed record ProcessDefinitionResponse(
+    string ProcessDefinitionId,
+    string Key,
+    string? Name,
+    int Version,
+    string DeploymentId,
+    string TenantId,
+    DateTime? DeployTime);
+
 /// <summary>启动流程实例的请求。</summary>
 /// <param name="ProcessDefinitionId">流程定义 id。</param>
 /// <param name="BusinessKey">业务主键。</param>

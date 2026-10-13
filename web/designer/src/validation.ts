@@ -21,8 +21,10 @@ const NODE_LABELS: Record<string, string> = {
   'bpmn:ServiceTask': '服务任务',
   'bpmn:ManualTask': '手工任务',
   'bpmn:ScriptTask': '脚本任务',
-  'bpmn:ExclusiveGateway': '排他网关',
+  'bpmn:ExclusiveGateway': '单一网关',
   'bpmn:ParallelGateway': '并行网关',
+  'bpmn:InclusiveGateway': '包含网关',
+  'bpmn:EventBasedGateway': '事件网关',
 };
 
 /** 提示语里可出现的全部元素名（含顺序流与流程本身）。 */
@@ -71,6 +73,25 @@ function validateProcess(process: ModdleElement): DraftIssue[] {
   const flowElements = (process.flowElements ?? []).filter((element) => element.$type !== 'bpmn:SequenceFlow');
   const sequenceFlows = (process.flowElements ?? []).filter((element) => element.$type === 'bpmn:SequenceFlow');
 
+  // ⚠️ 连通性从顺序流的 sourceRef/targetRef 解析：导入的 XML 未必带显式
+  // <bpmn:outgoing>/<bpmn:incoming> 子元素（businessObject.outgoing 只有画布内
+  // 新连线才会被 bpmn-js 维护），这里与后端"解析 XML 后重连"的语义保持一致。
+  const outgoingByNode = new Map<string, ModdleElement[]>();
+  const incomingByNode = new Map<string, ModdleElement[]>();
+
+  for (const flow of sequenceFlows) {
+    const sourceId = (flow.sourceRef as ModdleElement | undefined)?.id;
+    const targetId = (flow.targetRef as ModdleElement | undefined)?.id;
+
+    if (sourceId !== undefined) {
+      outgoingByNode.set(sourceId, [...(outgoingByNode.get(sourceId) ?? []), flow]);
+    }
+
+    if (targetId !== undefined) {
+      incomingByNode.set(targetId, [...(incomingByNode.get(targetId) ?? []), flow]);
+    }
+  }
+
   // 规则 4：id 非空且唯一（顺序流也参与，因为 id 是全局唯一的）
   const seen = new Map<string, number>();
 
@@ -113,8 +134,8 @@ function validateProcess(process: ModdleElement): DraftIssue[] {
       continue;
     }
 
-    const outgoing = node.outgoing ?? [];
-    const incoming = node.incoming ?? [];
+    const outgoing = outgoingByNode.get(id) ?? [];
+    const incoming = incomingByNode.get(id) ?? [];
 
     // 规则 1：除结束事件外必须有出流
     if (type !== 'bpmn:EndEvent' && outgoing.length === 0) {
@@ -127,7 +148,7 @@ function validateProcess(process: ModdleElement): DraftIssue[] {
     }
   }
 
-  issues.push(...validateGateways(flowElements));
+  issues.push(...validateGateways(flowElements, outgoingByNode, incomingByNode));
   issues.push(...validateTasks(flowElements));
   issues.push(...validateSequenceFlows(sequenceFlows));
   issues.push(...validateUnsupportedCapabilities(flowElements, process));
@@ -135,12 +156,17 @@ function validateProcess(process: ModdleElement): DraftIssue[] {
   return issues;
 }
 
-function validateGateways(flowElements: ModdleElement[]): DraftIssue[] {
+function validateGateways(
+  flowElements: ModdleElement[],
+  outgoingByNode: Map<string, ModdleElement[]>,
+  incomingByNode: Map<string, ModdleElement[]>,
+): DraftIssue[] {
   const issues: DraftIssue[] = [];
 
   for (const node of flowElements) {
     const id = node.id ?? '';
-    const outgoing = node.outgoing ?? [];
+    const outgoing = outgoingByNode.get(id) ?? [];
+    const incoming = incomingByNode.get(id) ?? [];
     const defaultFlow = typeof node.default === 'string' ? node.default : undefined;
 
     if (node.$type === 'bpmn:ExclusiveGateway') {
@@ -150,7 +176,19 @@ function validateGateways(flowElements: ModdleElement[]): DraftIssue[] {
 
       if (defaultFlow === undefined && allConditional) {
         issues.push(
-          error(id, '排他网关没有默认流，且所有出流都带条件：条件全不成立时流程会卡住。请指定默认流或留一条无条件出流。'),
+          error(id, '单一网关没有默认流，且所有出流都带条件：条件全不成立时流程会卡住。请指定默认流或留一条无条件出流。'),
+        );
+      }
+    }
+
+    if (node.$type === 'bpmn:InclusiveGateway') {
+      // 包含网关：fork 取「所有条件为真的出流」，条件全假时同样会卡住
+      const allConditional =
+        outgoing.length > 0 && outgoing.every((flow) => hasCondition(flow));
+
+      if (defaultFlow === undefined && allConditional) {
+        issues.push(
+          error(id, '包含网关没有默认流，且所有出流都带条件：条件全不成立时流程会卡住。请指定默认流或留一条无条件出流。'),
         );
       }
     }
@@ -161,13 +199,21 @@ function validateGateways(flowElements: ModdleElement[]): DraftIssue[] {
         issues.push(error(id, '并行网关没有出流。'));
       }
 
-      if ((node.incoming ?? []).length === 0) {
+      if (incoming.length === 0) {
         issues.push(error(id, '并行网关没有入流。'));
       }
 
       if (defaultFlow !== undefined) {
         issues.push(error(id, '并行网关不支持默认流。'));
       }
+    }
+
+    if (node.$type === 'bpmn:EventBasedGateway') {
+      // 事件网关的每条出流只能指向「中间捕获事件」（定时/消息/信号），本子集未实现 ——
+      // 与后端校验保持一致：显式报错，而不是部署后才在运行期炸。
+      issues.push(
+        error(id, '事件网关的后续必须是中间捕获事件（定时/消息/信号），本子集未实现，部署会被拒绝；请改用单一/包含网关。'),
+      );
     }
   }
 
@@ -249,12 +295,23 @@ function validateUnsupportedCapabilities(
     const extensions = element.extensionElements?.values ?? [];
 
     for (const extension of extensions) {
+      // ⚠️ 监听器已在设计器开放编辑（listEditors.ts）：这里降级为**警告**。
+      // 后端引擎尚未实现监听器执行时，校验规则仍会拒绝部署 —— 以「后端报错」为准，
+      // 面板只提醒用户注意。等后端放开规则后，这条警告可移除。
       if (extension.$type === 'activiti:TaskListener') {
-        issues.push(error(id, `${label(element)} 带有任务监听器（activiti:taskListener），本子集未实现，部署会被拒绝。`));
+        issues.push(warning(id, `${label(element)} 带有任务监听器（activiti:taskListener）：后端引擎尚未实现监听器执行，部署前请确认后端校验已放开。`));
       }
 
       if (extension.$type === 'activiti:ExecutionListener') {
-        issues.push(error(id, `${label(element)} 带有执行监听器（activiti:executionListener），本子集未实现，部署会被拒绝。`));
+        issues.push(warning(id, `${label(element)} 带有执行监听器（activiti:executionListener）：后端引擎尚未实现监听器执行，部署前请确认后端校验已放开。`));
+      }
+
+      if (extension.$type === 'activiti:EventListener') {
+        issues.push(warning(id, `${label(element)} 带有事件监听器（activiti:eventListener）：后端引擎尚未实现监听器执行，部署前请确认后端校验已放开。`));
+      }
+
+      if (extension.$type === 'activiti:FormProperty') {
+        issues.push(warning(id, `${label(element)} 带有表单属性（activiti:formProperty）：后端引擎尚未实现表单属性执行，部署前请确认后端校验已放开。`));
       }
 
       if (extension.$type === 'activiti:Field') {

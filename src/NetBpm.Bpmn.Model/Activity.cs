@@ -51,6 +51,12 @@ public class UserTask : Task
 
     /// <summary>任务监听器（<c>activiti:taskListener</c>，可选能力）。</summary>
     public IList<TaskListener> TaskListeners { get; } = [];
+
+    /// <summary>
+    /// 表单属性（<c>activiti:formProperty</c>）—— 只透传，不执行（同 <see cref="FormKey"/>）。
+    /// <para>模型必须承载它，否则解析时被静默丢弃、落库重序列化后永久丢失。</para>
+    /// </summary>
+    public IList<FormProperty> FormProperties { get; } = [];
 }
 
 /// <summary>服务任务实现方式（对应 <c>activiti:class</c> / <c>delegateExpression</c> / <c>expression</c>）。</summary>

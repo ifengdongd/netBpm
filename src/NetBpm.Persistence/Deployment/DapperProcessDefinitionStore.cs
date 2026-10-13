@@ -152,6 +152,39 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
     }
 
     /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(
+                SelectAllSql,
+                transaction: session.Transaction,
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var result = new List<DeployedProcessDefinition>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            DateTime? deployTime = row.TryGetValue("DEPLOY_TIME_", out var time) && time is not DBNull
+                ? DateTime.SpecifyKind(Convert.ToDateTime(time, System.Globalization.CultureInfo.InvariantCulture), DateTimeKind.Utc)
+                : null;
+
+            result.Add(new DeployedProcessDefinition(
+                Text(row, "ID_")!,
+                Text(row, "KEY_")!,
+                Text(row, "NAME_"),
+                Number(row, "VERSION_"),
+                Text(row, "DEPLOYMENT_ID_")!,
+                deployTime));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async ValueTask<string?> GetResourceXmlAsync(
         string processDefinitionId,
         CancellationToken ct = default)
@@ -238,6 +271,13 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
     private const string SelectByIdSql = """
         select ID_, KEY_, NAME_, VERSION_, DEPLOYMENT_ID_, RESOURCE_NAME_
         from ACT_RE_PROCDEF where ID_ = @processDefinitionId
+        """;
+
+    private const string SelectAllSql = """
+        select P.ID_, P.KEY_, P.NAME_, P.VERSION_, P.DEPLOYMENT_ID_, D.DEPLOY_TIME_
+        from ACT_RE_PROCDEF P
+        inner join ACT_RE_DEPLOYMENT D on D.ID_ = P.DEPLOYMENT_ID_
+        order by D.DEPLOY_TIME_ desc, P.KEY_, P.VERSION_ desc
         """;
 
     private const string SelectResourceSql = """

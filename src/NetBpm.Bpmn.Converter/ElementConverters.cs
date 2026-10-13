@@ -90,6 +90,49 @@ public sealed class ParallelGatewayXmlConverter : BaseBpmnXmlConverter<ParallelG
     }
 }
 
+/// <summary>包含网关（<c>inclusiveGateway</c>）转换器。对应 Activiti 的 <c>InclusiveGatewayXMLConverter</c>。</summary>
+public sealed class InclusiveGatewayXmlConverter : BaseBpmnXmlConverter<InclusiveGateway>
+{
+    public override string ElementName => "inclusiveGateway";
+
+    protected override InclusiveGateway CreateElement() => new();
+
+    protected override void ConvertXmlToElement(XmlReader reader, InclusiveGateway element, Process process)
+    {
+        element.DefaultFlow = Attr(reader, "default");
+        ReadChildren(reader, element, _ => { });
+    }
+
+    protected override void ConvertElementToXml(XmlWriter writer, InclusiveGateway element)
+    {
+        writer.WriteStartElement("inclusiveGateway", BpmnConstants.BpmnNamespace);
+        WriteFlowElementAttributes(writer, element);
+        WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        writer.WriteEndElement();
+    }
+}
+
+/// <summary>
+/// 事件网关（<c>eventBasedGateway</c>）转换器。对应 Activiti 的 <c>EventGatewayXMLConverter</c>。
+/// <para>只做往返解析；执行不被支持（见 <see cref="InclusiveGateway"/> 同级的模型注释与校验规则）。</para>
+/// </summary>
+public sealed class EventGatewayXmlConverter : BaseBpmnXmlConverter<EventGateway>
+{
+    public override string ElementName => "eventBasedGateway";
+
+    protected override EventGateway CreateElement() => new();
+
+    protected override void ConvertXmlToElement(XmlReader reader, EventGateway element, Process process) =>
+        ReadChildren(reader, element, _ => { });
+
+    protected override void ConvertElementToXml(XmlWriter writer, EventGateway element)
+    {
+        writer.WriteStartElement("eventBasedGateway", BpmnConstants.BpmnNamespace);
+        WriteFlowElementAttributes(writer, element);
+        writer.WriteEndElement();
+    }
+}
+
 /// <summary>顺序流（<c>sequenceFlow</c>）转换器。对应 Activiti 的 <c>SequenceFlowXMLConverter</c>。</summary>
 public sealed class SequenceFlowXmlConverter : BaseBpmnXmlConverter<SequenceFlow>
 {

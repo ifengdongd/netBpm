@@ -103,6 +103,10 @@ public sealed class ProcessEngine : IProcessEngine
         _definitionStore.GetResourceXmlAsync(processDefinitionId, ct);
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindProcessDefinitionsAsync(CancellationToken ct = default) =>
+        _commandExecutor.ExecuteAsync(new FindProcessDefinitionsCommand(_definitionStore), ct);
+
+    /// <inheritdoc />
     public ValueTask<BpmnModel?> GetBpmnModelAsync(string processDefinitionId, CancellationToken ct = default) =>
         _definitionStore.GetBpmnModelAsync(processDefinitionId, ct);
 

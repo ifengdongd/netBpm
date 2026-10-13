@@ -69,6 +69,12 @@ public static class BpmnConstants
     /// <summary>Activiti 元素：字段注入。</summary>
     public const string ElementField = "field";
 
+    /// <summary>Activiti 元素：表单属性。</summary>
+    public const string ElementFormProperty = "formProperty";
+
+    /// <summary>Activiti 元素：表单属性枚举选项。</summary>
+    public const string ElementFormPropertyValue = "value";
+
     /// <summary>Activiti 元素：潜在启动者。</summary>
     public const string ElementPotentialStarter = "potentialStarter";
 }

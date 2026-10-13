@@ -71,9 +71,11 @@ export default class NetBpmPaletteProvider {
       'create.manual-task': this.createShape('bpmn:ManualTask', 'bpmn-icon-manual-task', '手工任务'),
       'create.script-task': this.createShape('bpmn:ScriptTask', 'bpmn-icon-script-task', '脚本任务'),
 
-      // ── 网关 ──────────────────────────────────────────────
-      'create.exclusive-gateway': this.createShape('bpmn:ExclusiveGateway', 'bpmn-icon-gateway-xor', '排他网关'),
+      // ── 网关（与 Activiti 原版一致的四类）──────────────────
+      'create.exclusive-gateway': this.createShape('bpmn:ExclusiveGateway', 'bpmn-icon-gateway-xor', '单一网关'),
       'create.parallel-gateway': this.createShape('bpmn:ParallelGateway', 'bpmn-icon-gateway-parallel', '并行网关'),
+      'create.inclusive-gateway': this.createShape('bpmn:InclusiveGateway', 'bpmn-icon-gateway-or', '包含网关'),
+      'create.event-based-gateway': this.createShape('bpmn:EventBasedGateway', 'bpmn-icon-gateway-eventbased', '事件网关'),
 
       // ── 连线 ──────────────────────────────────────────────
       'global-connect-tool': {

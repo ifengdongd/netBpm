@@ -1,12 +1,14 @@
 /**
  * NetBpm 流程设计器入口（开发计划 §6）。
  *
- * 与后端的契约只有两个（§6.3）：
+ * 与后端的契约（§6.3 + 部署列表）：
  *   POST /api/designer/deploy                提交 BPMN XML → 后端解析 + 校验 + 落库
  *   GET  /api/designer/definition/{id}/xml   回显 BPMN XML
+ *   GET  /api/designer/definitions           已部署流程定义列表（部署列表数据源）
  * 设计器不直接操作数据库；流程图草稿列表存 localStorage（见 storage.ts）。
  *
- * 页面结构：默认显示「流程图列表」，从列表进入「编辑器」（新增/编辑共用）。
+ * 页面结构（参考流程管理布局）：左侧「流程管理」菜单（流程模型列表 / 流程部署列表），
+ * 右侧主区三个视图：模型列表、部署列表、编辑器（新增/编辑共用）。
  *
  * P8 覆盖的 §6.2 四项：①activiti-moddle.json 描述符 ②调色板裁剪 ③属性面板（白名单）
  * ④即时校验（本地镜像后端规则，部署前拦截）。
@@ -20,13 +22,16 @@ import { renderIssues } from './issues';
 import { hasBlockingError, summarize, validateDiagram, type DraftIssue } from './validation';
 import {
   deleteDiagram,
+  findByModelId,
   parseProcessMeta,
   readDiagrams,
   saveDiagramXml,
+  setDiagramVersion,
   type DiagramRecord,
 } from './storage';
 import type {
   CanvasService,
+  EditorActionsService,
   ElementRegistryService,
   SelectionService,
 } from './designer/types';
@@ -67,15 +72,20 @@ function randomProcessId(): string {
 
 // ─────────────────────────── DOM 引用 ───────────────────────────
 
-const listView = document.querySelector<HTMLElement>('#list-view');
+const modelListView = document.querySelector<HTMLElement>('#model-list-view');
+const deployListView = document.querySelector<HTMLElement>('#deploy-list-view');
 const editorView = document.querySelector<HTMLElement>('#editor-view');
+const navModels = document.querySelector<HTMLAnchorElement>('#nav-models');
+const navDeployments = document.querySelector<HTMLAnchorElement>('#nav-deployments');
 const listStatusElement = document.querySelector<HTMLSpanElement>('#list-status');
 const listEmptyElement = document.querySelector<HTMLElement>('#list-empty');
 const diagramRowsElement = document.querySelector<HTMLTableSectionElement>('#diagram-rows');
+const deployRowsElement = document.querySelector<HTMLTableSectionElement>('#deploy-rows');
+const deployStatusElement = document.querySelector<HTMLSpanElement>('#deploy-status');
+const deployEmptyElement = document.querySelector<HTMLElement>('#deploy-empty');
 const editorTitleElement = document.querySelector<HTMLElement>('#editor-title');
 const statusElement = document.querySelector<HTMLSpanElement>('#status');
 const issuesElement = document.querySelector<HTMLElement>('#issues');
-const deployButton = document.querySelector<HTMLButtonElement>('#btn-deploy');
 const fileInputList = document.querySelector<HTMLInputElement>('#file-input-list');
 const fileInputEditor = document.querySelector<HTMLInputElement>('#file-input-editor');
 
@@ -86,6 +96,7 @@ interface ModelerServices {
   registry: ElementRegistryService;
   selection: SelectionService;
   canvas: CanvasService;
+  editorActions: EditorActionsService;
 }
 
 let services: ModelerServices | null = null;
@@ -103,10 +114,16 @@ function ensureModeler(): ModelerServices {
     additionalModules: [
       // 属性面板宿主（只装宿主，**不装**官方默认属性组 —— 属性组由 NetBpmPropertiesProvider 全量接管）
       BpmnPropertiesPanelModule,
-      // 整体替换默认调色板：只保留子集元素 + 连线工具（§6.2 第 2 项）
-      { paletteProvider: ['type', NetBpmPaletteProvider] },
-      // 属性面板（§6.2 第 3 项）
-      { netBpmPropertiesProvider: ['type', NetBpmPropertiesProvider] },
+      {
+        // ⚠️ diagram-js 的 DI 是惰性实例化：injector.init() 只实例化各模块 __init__
+        // 列表里的服务。没有 __init__，这两个 provider 永远不会被构造（构造函数里的
+        // registerProvider 就不会执行），面板会一直空白。
+        __init__: ['paletteProvider', 'netBpmPropertiesProvider'],
+        // 整体替换默认调色板：只保留子集元素 + 连线工具（§6.2 第 2 项）
+        paletteProvider: ['type', NetBpmPaletteProvider],
+        // 属性面板（§6.2 第 3 项）
+        netBpmPropertiesProvider: ['type', NetBpmPropertiesProvider],
+      },
     ],
     moddleExtensions: {
       // 没有这个描述符，bpmn-js 往返会丢掉 activiti:* 扩展属性（§6.2 第 1 项 / 风险 R5）
@@ -119,6 +136,7 @@ function ensureModeler(): ModelerServices {
     registry: modeler.get<ElementRegistryService>('elementRegistry'),
     selection: modeler.get<SelectionService>('selection'),
     canvas: modeler.get<CanvasService>('canvas'),
+    editorActions: modeler.get<EditorActionsService>('editorActions'),
   };
 
   // 导入完成与每次编辑后重跑校验（commandStack.changed 覆盖属性面板的写入）
@@ -130,14 +148,24 @@ function ensureModeler(): ModelerServices {
 
 // ─────────────────────────── 视图切换 ───────────────────────────
 
-function showView(view: 'list' | 'editor'): void {
-  if (listView !== null) {
-    listView.hidden = view !== 'list';
+type MenuView = 'models' | 'deployments';
+
+function showView(view: MenuView | 'editor'): void {
+  if (modelListView !== null) {
+    modelListView.hidden = view !== 'models';
+  }
+
+  if (deployListView !== null) {
+    deployListView.hidden = view !== 'deployments';
   }
 
   if (editorView !== null) {
     editorView.hidden = view !== 'editor';
   }
+
+  // 左侧菜单高亮：编辑器从模型列表进入，保持「流程模型列表」高亮
+  navModels?.classList.toggle('active', view === 'models' || view === 'editor');
+  navDeployments?.classList.toggle('active', view === 'deployments');
 
   // 画布在 hidden 容器里初始化时尺寸为 0，显示后需要重算
   if (view === 'editor') {
@@ -185,6 +213,9 @@ function renderList(): void {
     const timeCell = document.createElement('td');
     timeCell.textContent = formatTime(record.updatedAt);
 
+    const versionCell = document.createElement('td');
+    versionCell.textContent = record.version > 0 ? String(record.version) : '—';
+
     const actionCell = document.createElement('td');
 
     const editButton = document.createElement('button');
@@ -209,10 +240,107 @@ function renderList(): void {
       }
     });
 
-    actionCell.append(editButton, exportButton, deleteButton);
-    row.append(nameCell, idCell, timeCell, actionCell);
+    const deployButton = document.createElement('button');
+    deployButton.type = 'button';
+    deployButton.textContent = '部署';
+    deployButton.addEventListener('click', () => void deployRecord(record, deployButton));
+
+    actionCell.append(editButton, exportButton, deployButton, deleteButton);
+    row.append(nameCell, idCell, timeCell, versionCell, actionCell);
     diagramRowsElement.append(row);
   }
+}
+
+// ─────────────────────────── 部署列表视图 ───────────────────────────
+
+function setDeployStatus(message: string, isError = false): void {
+  if (deployStatusElement !== null) {
+    deployStatusElement.textContent = message;
+    deployStatusElement.style.color = isError ? '#c0392b' : '#555';
+  }
+}
+
+/** GET /api/designer/definitions 的行结构（见 Contracts.cs 的 ProcessDefinitionResponse）。 */
+interface DeployedDefinition {
+  processDefinitionId: string;
+  key: string;
+  name: string | null;
+  version: number;
+  deploymentId: string;
+  tenantId: string;
+  deployTime: string | null;
+}
+
+async function renderDeployList(): Promise<void> {
+  if (deployRowsElement === null) {
+    return;
+  }
+
+  setDeployStatus('正在加载…');
+
+  let definitions: DeployedDefinition[] = [];
+
+  try {
+    const response = await fetch('/api/designer/definitions');
+
+    // 先读原始文本：后端异常时可能返回空/非 JSON 响应体，
+    // 直接 response.json() 会抛「Unexpected end of JSON input」且丢失状态码信息。
+    const text = await response.text();
+
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        if (parsed.message) {
+          detail = parsed.message;
+        }
+      } catch {
+        // 非 JSON 错误体：保留 statusText
+      }
+      // 通用 Internal Server Error 通常意味着后端未启动（Vite 代理失败）
+      // 或后端异常未返回 JSON 错误体，给出可操作的排查方向。
+      const hint =
+        detail === 'Internal Server Error' || detail === ''
+          ? '（无法从后端获取错误详情：请确认 NetBpm.Rest 已在 http://localhost:5080 启动，且数据库可连接）'
+          : '';
+      setDeployStatus(`加载失败：${detail}${hint}`, true);
+      return;
+    }
+
+    // 空响应体（如 204）一律当作空列表，避免 JSON 解析异常
+    definitions = text.length > 0 ? (JSON.parse(text) as DeployedDefinition[]) : [];
+  } catch (error) {
+    setDeployStatus(`加载失败：${(error as Error).message}`, true);
+    return;
+  }
+
+  deployRowsElement.replaceChildren();
+
+  if (deployEmptyElement !== null) {
+    deployEmptyElement.hidden = definitions.length > 0;
+  }
+
+  for (const definition of definitions) {
+    const row = document.createElement('tr');
+
+    const nameCell = document.createElement('td');
+    nameCell.textContent = definition.name ?? definition.key;
+
+    const keyCell = document.createElement('td');
+    keyCell.textContent = definition.key;
+    keyCell.className = 'cell-id';
+
+    const timeCell = document.createElement('td');
+    timeCell.textContent = definition.deployTime !== null ? formatTime(definition.deployTime) : '—';
+
+    const versionCell = document.createElement('td');
+    versionCell.textContent = String(definition.version);
+
+    row.append(nameCell, keyCell, timeCell, versionCell);
+    deployRowsElement.append(row);
+  }
+
+  setDeployStatus(`共 ${definitions.length} 条部署记录`);
 }
 
 // ─────────────────────────── 编辑器视图 ───────────────────────────
@@ -236,14 +364,7 @@ function refreshValidation(): DraftIssue[] {
     renderIssues(issuesElement, issues, focusElement);
   }
 
-  const blocked = hasBlockingError(issues);
-
-  if (deployButton !== null) {
-    deployButton.disabled = blocked;
-    deployButton.title = blocked ? '存在校验错误，先修复再部署' : '';
-  }
-
-  setStatus(summarize(issues), blocked);
+  setStatus(summarize(issues), hasBlockingError(issues));
 
   return issues;
 }
@@ -276,6 +397,7 @@ async function loadDiagram(xml: string, source: string): Promise<void> {
     setStatus(`已载入：${source}`);
     refreshValidation();
   } catch (error) {
+    console.error('[netbpm] 载入失败堆栈：', error);
     setStatus(`载入失败：${(error as Error).message}`, true);
   }
 }
@@ -298,13 +420,30 @@ function downloadXml(xml: string, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-/** 进入编辑器：新建（传 emptyDiagram(randomProcessId())）或编辑已有记录。 */
-function openEditor(xml: string): void {
-  showView('editor');
-  void loadDiagram(xml, '编辑器');
+/** 把当前打开的流程图同步到 URL（?modelId=），使刷新/重新加载仍能回到同一流程图。 */
+function syncModelIdToUrl(modelId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set('modelId', modelId);
+  url.searchParams.delete('processDefinitionId');
+  window.history.replaceState(null, '', url);
 }
 
+/** 清空 URL 里的 modelId（返回列表时调用）。 */
+function clearModelIdUrl(): void {
+  const url = new URL(window.location.href);
+  url.search = '';
+  window.history.replaceState(null, '', url);
+}
+
+/** 新建流程图：先落一份草稿（生成 modelId），再进入编辑器。 */
+function openNewEditor(): void {
+  const record = saveDiagramXml(emptyDiagram(randomProcessId()));
+  openRecord(record);
+}
+
+/** 打开已有草稿进入编辑器，并把 modelId 写进 URL。 */
 function openRecord(record: DiagramRecord): void {
+  syncModelIdToUrl(record.modelId);
   showView('editor');
   void loadDiagram(record.xml, record.name);
 }
@@ -331,20 +470,12 @@ async function save(): Promise<void> {
   }
 }
 
-async function deploy(): Promise<void> {
-  // 部署前再校验一次：即使按钮被脚本触发也不放行
-  const issues = refreshValidation();
-
-  if (hasBlockingError(issues)) {
-    setStatus('部署已阻止：请先修复校验错误（见下方清单）。', true);
-    issuesElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    return;
-  }
-
-  setStatus('正在部署…');
-
+/**
+ * 把一段 BPMN XML 提交到后端部署（§6.3 的 POST /api/designer/deploy）。
+ * 后端做权威校验，这里只负责上报结果。
+ */
+async function deployXml(xml: string): Promise<{ ok: boolean; message: string; version: number }> {
   try {
-    const xml = await exportXml();
     const response = await fetch('/api/designer/deploy', {
       method: 'POST',
       headers: { 'Content-Type': 'text/xml' },
@@ -354,13 +485,56 @@ async function deploy(): Promise<void> {
     const payload = await response.json();
 
     if (!response.ok) {
-      setStatus(`部署被拒绝：${payload.message ?? response.statusText}`, true);
+      return { ok: false, message: `部署被拒绝：${payload.message ?? response.statusText}`, version: 0 };
+    }
+
+    return {
+      ok: true,
+      message: `部署成功：${payload.processDefinitionId}（v${payload.version}）`,
+      version: Number(payload.version) || 0,
+    };
+  } catch (error) {
+    return { ok: false, message: `部署失败：${(error as Error).message}`, version: 0 };
+  }
+}
+
+/** 把 XML 临时导入（隐藏的）模型器，复用同一套本地校验规则跑一遍。 */
+async function validateXmlString(xml: string): Promise<DraftIssue[]> {
+  await ensureModeler().modeler.importXML(xml);
+
+  return validateDiagram(ensureModeler().registry);
+}
+
+/**
+ * 列表操作列的「部署」：先本地校验拦截，再提交后端。
+ * 校验/部署状态都写到列表状态栏，避免进入编辑器。
+ */
+async function deployRecord(record: DiagramRecord, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+
+  try {
+    setListStatus('正在校验…');
+
+    const issues = await validateXmlString(record.xml);
+
+    if (hasBlockingError(issues)) {
+      setListStatus(`部署已阻止：${summarize(issues)}`, true);
       return;
     }
 
-    setStatus(`部署成功：${payload.processDefinitionId}（v${payload.version}）`);
-  } catch (error) {
-    setStatus(`部署失败：${(error as Error).message}`, true);
+    setListStatus('正在部署…');
+
+    const result = await deployXml(record.xml);
+
+    if (result.ok && result.version > 0) {
+      // 部署成功：用后端返回的版本号更新草稿，列表里版本列自动递增
+      setDiagramVersion(record.processId, result.version);
+      renderList();
+    }
+
+    setListStatus(result.message, !result.ok);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -386,10 +560,84 @@ async function loadDefinitionFromQuery(): Promise<boolean> {
   return true;
 }
 
+// ─────────────────────────── 画布/设置栏拖拽分隔条 ───────────────────────────
+
+const PROPERTIES_WIDTH_KEY = 'netbpm.designer.propertiesWidth';
+const PROPERTIES_DEFAULT_WIDTH = 320;
+const PROPERTIES_MIN_WIDTH = 280;
+
+const panelResizer = document.querySelector<HTMLDivElement>('#panel-resizer');
+const propertiesPanel = document.querySelector<HTMLElement>('#properties');
+
+function applyPropertiesWidth(width: number): void {
+  if (propertiesPanel !== null) {
+    propertiesPanel.style.width = `${Math.round(width)}px`;
+  }
+
+  // 容器尺寸变了，bpmn-js 画布需要重算视口
+  services?.canvas.resized();
+}
+
+function initPanelResizer(): void {
+  if (panelResizer === null || propertiesPanel === null) {
+    return;
+  }
+
+  const saved = Number(localStorage.getItem(PROPERTIES_WIDTH_KEY));
+
+  if (Number.isFinite(saved) && saved >= PROPERTIES_MIN_WIDTH) {
+    applyPropertiesWidth(saved);
+  }
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  panelResizer.addEventListener('pointerdown', (event) => {
+    dragging = true;
+    startX = event.clientX;
+    startWidth = propertiesPanel.getBoundingClientRect().width;
+    panelResizer.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizing');
+  });
+
+  panelResizer.addEventListener('pointermove', (event) => {
+    if (!dragging) {
+      return;
+    }
+
+    const width = Math.min(
+      Math.max(startWidth + (startX - event.clientX), PROPERTIES_MIN_WIDTH),
+      window.innerWidth * 0.7,
+    );
+
+    applyPropertiesWidth(width);
+  });
+
+  const stopDragging = (): void => {
+    if (!dragging) {
+      return;
+    }
+
+    dragging = false;
+    document.body.classList.remove('resizing');
+    localStorage.setItem(PROPERTIES_WIDTH_KEY, propertiesPanel.getBoundingClientRect().width.toString());
+  };
+
+  panelResizer.addEventListener('pointerup', stopDragging);
+  panelResizer.addEventListener('pointercancel', stopDragging);
+
+  // 双击恢复默认宽度
+  panelResizer.addEventListener('dblclick', () => {
+    localStorage.removeItem(PROPERTIES_WIDTH_KEY);
+    applyPropertiesWidth(PROPERTIES_DEFAULT_WIDTH);
+  });
+}
+
 // ─────────────────────────── 事件绑定 ───────────────────────────
 
 // 列表：新增 / 导入
-document.querySelector('#btn-new')?.addEventListener('click', () => openEditor(emptyDiagram(randomProcessId())));
+document.querySelector('#btn-new')?.addEventListener('click', () => openNewEditor());
 
 document.querySelector('#btn-import')?.addEventListener('click', () => fileInputList?.click());
 
@@ -414,15 +662,12 @@ fileInputList?.addEventListener('change', () => {
   });
 });
 
-// 编辑器：返回 / 保存 / 导入 / 导出 / 部署
+// 编辑器：返回
 document.querySelector('#btn-back')?.addEventListener('click', () => {
+  clearModelIdUrl();
   renderList();
-  showView('list');
+  showView('models');
 });
-
-document.querySelector('#btn-save')?.addEventListener('click', () => void save());
-
-document.querySelector('#btn-import-editor')?.addEventListener('click', () => fileInputEditor?.click());
 
 fileInputEditor?.addEventListener('change', () => {
   const file = fileInputEditor.files?.[0];
@@ -439,7 +684,24 @@ fileInputEditor?.addEventListener('change', () => {
     });
 });
 
-document.querySelector('#btn-export')?.addEventListener('click', () => {
+// ─────────────────────────── 图标工具栏 ───────────────────────────
+
+/** 图标按钮统一绑定：services 未就绪时（画布尚未初始化）点击不生效。 */
+function bindIcon(id: string, handler: (services: ModelerServices) => void): void {
+  document.querySelector(`#${id}`)?.addEventListener('click', () => {
+    if (services === null) {
+      return;
+    }
+
+    handler(services);
+  });
+}
+
+bindIcon('it-save', () => void save());
+
+bindIcon('it-import', () => fileInputEditor?.click());
+
+bindIcon('it-export', () => {
   void exportXml().then((xml) => {
     const meta = parseProcessMeta(xml);
 
@@ -448,16 +710,62 @@ document.querySelector('#btn-export')?.addEventListener('click', () => {
   });
 });
 
-deployButton?.addEventListener('click', () => void deploy());
+bindIcon('it-cut', ({ editorActions }) => editorActions.trigger('cut'));
+bindIcon('it-copy', ({ editorActions }) => editorActions.trigger('copy'));
+bindIcon('it-paste', ({ editorActions }) => editorActions.trigger('paste'));
+bindIcon('it-delete', ({ editorActions }) => editorActions.trigger('removeSelection'));
+bindIcon('it-undo', ({ editorActions }) => editorActions.trigger('undo'));
+bindIcon('it-redo', ({ editorActions }) => editorActions.trigger('redo'));
+bindIcon('it-zoom-in', ({ editorActions }) => editorActions.trigger('stepZoom', { value: 1 }));
+bindIcon('it-zoom-out', ({ editorActions }) => editorActions.trigger('stepZoom', { value: -1 }));
+bindIcon('it-zoom-fit', ({ canvas }) => canvas.zoom('fit-viewport', 'auto'));
+
+// 左侧菜单：模型列表 / 部署列表
+navModels?.addEventListener('click', (event) => {
+  event.preventDefault();
+  renderList();
+  showView('models');
+});
+
+navDeployments?.addEventListener('click', (event) => {
+  event.preventDefault();
+  void renderDeployList();
+  showView('deployments');
+});
+
+// 部署列表：刷新
+document.querySelector('#btn-refresh-deployments')?.addEventListener('click', () => void renderDeployList());
 
 // ─────────────────────────── 启动 ───────────────────────────
 
-void loadDefinitionFromQuery().then((loaded) => {
-  if (loaded) {
+async function boot(): Promise<void> {
+  // 1) ?modelId= 直接打开草稿（刷新/分享链接都能回到同一流程图，对齐 Activiti 的 modeler.html?modelId=）
+  const params = new URLSearchParams(window.location.search);
+  const modelId = params.get('modelId');
+
+  if (modelId !== null) {
+    const record = findByModelId(modelId);
+
+    if (record !== undefined) {
+      openRecord(record);
+      return;
+    }
+
+    // modelId 失效（草稿已删除）→ 回退到模型列表
+    clearModelIdUrl();
+  }
+
+  // 2) ?processDefinitionId= 回显已部署定义
+  const echoed = await loadDefinitionFromQuery();
+  if (echoed) {
     return;
   }
 
-  // 默认显示流程图列表，不再直接进入画布
+  // 3) 默认显示流程模型列表
   renderList();
-  showView('list');
-});
+  showView('models');
+}
+
+void boot();
+
+initPanelResizer();

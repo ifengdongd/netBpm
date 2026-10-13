@@ -9,6 +9,8 @@
  */
 
 export interface DiagramRecord {
+  /** 设计器侧唯一 id（UUID），对应 Activiti 的 modelId；用于 ?modelId= 直接打开。 */
+  modelId: string;
   /** BPMN process 的 id，列表内的唯一键（同 id 保存即覆盖更新）。 */
   processId: string;
   /** 流程名称（取 process 的 name，没有则退回 id）。 */
@@ -17,6 +19,11 @@ export interface DiagramRecord {
   xml: string;
   /** 最近保存时间（ISO 字符串）。 */
   updatedAt: string;
+  /**
+   * 已部署版本号；每次「部署」成功由后端返回的版本号覆盖更新。
+   * 0 表示尚未部署过。
+   */
+  version: number;
 }
 
 const STORAGE_KEY = 'netbpm.designer.diagrams.v1';
@@ -60,19 +67,43 @@ export function upsertDiagram(records: DiagramRecord[], record: DiagramRecord): 
   return next;
 }
 
+/** 生成设计器侧的 modelId（UUID，兜底用时间戳+随机数）。 */
+function newModelId(): string {
+  const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+
+  if (cryptoObj?.randomUUID !== undefined) {
+    return cryptoObj.randomUUID();
+  }
+
+  return `m_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /** 保存（新增或更新）一条流程记录并写入存储，返回保存后的记录。 */
 export function saveDiagramXml(xml: string, storage: StorageLike | undefined = defaultStorage()): DiagramRecord {
   const meta = parseProcessMeta(xml);
+  const processId = meta.processId.length > 0 ? meta.processId : `process_${Date.now().toString(36)}`;
+  const name = meta.name.length > 0 ? meta.name : '未命名流程';
+
+  // 同 processId 覆盖更新时，保留原 modelId 与 version，使 ?modelId= 链接在反复保存后依然有效
+  const existing = readDiagrams(storage).find((record) => record.processId === processId);
+
   const record: DiagramRecord = {
-    processId: meta.processId.length > 0 ? meta.processId : `process_${Date.now().toString(36)}`,
-    name: meta.name.length > 0 ? meta.name : '未命名流程',
+    modelId: existing?.modelId ?? newModelId(),
+    processId,
+    name,
     xml,
     updatedAt: new Date().toISOString(),
+    version: existing?.version ?? 0,
   };
 
   writeDiagrams(upsertDiagram(readDiagrams(storage), record), storage);
 
   return record;
+}
+
+/** 按 modelId 查找草稿（用于 ?modelId= 直接打开）。 */
+export function findByModelId(modelId: string, storage: StorageLike | undefined = defaultStorage()): DiagramRecord | undefined {
+  return readDiagrams(storage).find((record) => record.modelId === modelId);
 }
 
 export function readDiagrams(storage: StorageLike | undefined = defaultStorage()): DiagramRecord[] {
@@ -99,4 +130,21 @@ export function deleteDiagram(processId: string, storage: StorageLike | undefine
     readDiagrams(storage).filter((record) => record.processId !== processId),
     storage,
   );
+}
+
+/** 部署成功后用后端返回的版本号覆盖更新草稿的 version（不改动 XML/名称）。 */
+export function setDiagramVersion(
+  processId: string,
+  version: number,
+  storage: StorageLike | undefined = defaultStorage(),
+): void {
+  const records = readDiagrams(storage);
+  const index = records.findIndex((record) => record.processId === processId);
+
+  if (index < 0) {
+    return;
+  }
+
+  records[index] = { ...records[index], version };
+  writeDiagrams(records, storage);
 }

@@ -19,6 +19,8 @@ public sealed class ProcessValidator : IProcessValidator
             new NoOrphanNodeRule(),
             new UniqueElementIdRule(),
             new ParallelGatewayFlowCountRule(),
+            new InclusiveGatewayRule(),
+            new EventGatewayUnsupportedRule(),
             new StartAndEndEventRule(),
             new SequenceFlowReferenceRule(),
             new RequiredAttributesRule(),

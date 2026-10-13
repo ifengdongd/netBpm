@@ -146,22 +146,23 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         return text;
     }
 
-    /// <summary>解析 <c>extensionElements</c>（执行监听器 / 任务监听器 / 字段注入）。</summary>
+    /// <summary>解析 <c>extensionElements</c>（执行监听器 / 任务监听器 / 字段注入 / 表单属性）。</summary>
     protected static void ReadExtensionElements(XmlReader reader, BaseElement element)
     {
         if (element is UserTask userTask)
         {
-            ReadExtensionElementsInto(reader, element, userTask.TaskListeners);
+            ReadExtensionElementsInto(reader, element, userTask.TaskListeners, userTask.FormProperties);
             return;
         }
 
-        ReadExtensionElementsInto(reader, element, taskListeners: null);
+        ReadExtensionElementsInto(reader, element, taskListeners: null, formProperties: null);
     }
 
     private static void ReadExtensionElementsInto(
         XmlReader reader,
         BaseElement element,
-        IList<TaskListener>? taskListeners)
+        IList<TaskListener>? taskListeners,
+        IList<FormProperty>? formProperties)
     {
         ReadChildren(reader, child =>
         {
@@ -179,7 +180,53 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
             {
                 serviceTask.Fields.Add(ReadField(child));
             }
+            else if (name == BpmnConstants.ElementFormProperty && formProperties is not null)
+            {
+                formProperties.Add(ReadFormProperty(child));
+            }
         });
+    }
+
+    private static FormProperty ReadFormProperty(XmlReader reader)
+    {
+        var property = new FormProperty
+        {
+            Id = Attr(reader, "id"),
+            Name = Attr(reader, "name"),
+            Type = Attr(reader, "type"),
+            Expression = Attr(reader, BpmnConstants.AttributeExpression),
+            Variable = Attr(reader, "variable"),
+            Default = Attr(reader, "default"),
+            DatePattern = Attr(reader, "datePattern"),
+            Required = OptionalBool(reader, "required"),
+            Readable = OptionalBool(reader, "readable"),
+            Writable = OptionalBool(reader, "writable"),
+        };
+
+        if (!reader.IsEmptyElement)
+        {
+            // 枚举选项 <activiti:value id name />
+            ReadChildren(reader, child =>
+            {
+                if (child.LocalName == BpmnConstants.ElementFormPropertyValue)
+                {
+                    property.Values.Add(new FormPropertyValue
+                    {
+                        Id = Attr(child, "id"),
+                        Name = Attr(child, "name"),
+                    });
+                }
+            });
+        }
+
+        return property;
+    }
+
+    private static bool? OptionalBool(XmlReader reader, string attributeName)
+    {
+        var raw = Attr(reader, attributeName);
+
+        return bool.TryParse(raw, out var value) ? value : null;
     }
 
     private static ExecutionListener ReadListener(ExecutionListener listener, XmlReader reader)
@@ -253,11 +300,14 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         var hasTaskListeners = taskListeners is { Count: > 0 };
         var fields = (element as ServiceTask)?.Fields;
         var hasFields = fields is { Count: > 0 };
+        var formProperties = (element as UserTask)?.FormProperties;
+        var hasFormProperties = formProperties is { Count: > 0 };
 
         if (element.ExtensionElements.Count == 0
             && element.ExecutionListeners.Count == 0
             && !hasTaskListeners
-            && !hasFields)
+            && !hasFields
+            && !hasFormProperties)
         {
             return;
         }
@@ -285,7 +335,49 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
             }
         }
 
+        if (hasFormProperties)
+        {
+            foreach (var property in formProperties!)
+            {
+                WriteFormProperty(writer, property);
+            }
+        }
+
         writer.WriteEndElement();
+    }
+
+    private static void WriteFormProperty(XmlWriter writer, FormProperty property)
+    {
+        writer.WriteStartElement(BpmnConstants.ActivitiPrefix, BpmnConstants.ElementFormProperty, BpmnConstants.ActivitiNamespace);
+        WriteAttributeIfPresent(writer, "id", property.Id);
+        WriteAttributeIfPresent(writer, "name", property.Name);
+        WriteAttributeIfPresent(writer, "type", property.Type);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeExpression, property.Expression);
+        WriteAttributeIfPresent(writer, "variable", property.Variable);
+        WriteAttributeIfPresent(writer, "default", property.Default);
+        WriteAttributeIfPresent(writer, "datePattern", property.DatePattern);
+        WriteBoolAttributeIfPresent(writer, "required", property.Required);
+        WriteBoolAttributeIfPresent(writer, "readable", property.Readable);
+        WriteBoolAttributeIfPresent(writer, "writable", property.Writable);
+
+        foreach (var value in property.Values)
+        {
+            writer.WriteStartElement(BpmnConstants.ActivitiPrefix, BpmnConstants.ElementFormPropertyValue, BpmnConstants.ActivitiNamespace);
+            WriteAttributeIfPresent(writer, "id", value.Id);
+            WriteAttributeIfPresent(writer, "name", value.Name);
+            writer.WriteEndElement();
+        }
+
+        writer.WriteEndElement();
+    }
+
+    /// <summary>写入布尔属性（true/false）；值为 null（XML 未写出该属性）时跳过。</summary>
+    private static void WriteBoolAttributeIfPresent(XmlWriter writer, string name, bool? value)
+    {
+        if (value is not null)
+        {
+            writer.WriteAttributeString(name, value.Value ? "true" : "false");
+        }
     }
 
     private static void WriteField(XmlWriter writer, FieldExtension field)

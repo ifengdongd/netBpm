@@ -14,6 +14,8 @@ public sealed class EngineCommandTests
     private static readonly string[] OnlyApproved = ["approved"];
     private static readonly string[] OnlyRejected = ["rejected"];
     private static readonly string[] BothBranches = ["branchA", "branchB"];
+    private static readonly string[] OnlyBranchA = ["branchA"];
+    private static readonly string[] OnlyBranchB = ["branchB"];
     private static readonly string[] OnlyUnconditional = ["unconditional"];
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -142,6 +144,51 @@ public sealed class EngineCommandTests
         Assert.Equal(BothBranches, executed);
 
         // Join 完成后流程实例收口
+        Assert.Equal(0, engine.ExecutionManager.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task InclusiveGateway_WhenBothConditionsTrue_ShouldForkBothAndJoinThem()
+    {
+        var engine = TestEngine.Create();
+
+        await engine.StartProcessAsync(
+            TestEngine.InclusiveGatewayProcess(),
+            new Dictionary<string, object?> { ["a"] = true, ["b"] = true });
+
+        // 两个条件都为真 ⇒ 两条分支都要走（与并行网关相同的"分叉"结果）
+        var executed = engine.ExecutedDelegates.OrderBy(name => name, StringComparer.Ordinal);
+
+        Assert.Equal(BothBranches, executed);
+        Assert.Equal(0, engine.ExecutionManager.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task InclusiveGateway_WhenOnlyOneBranchActive_ShouldNotWaitForTheInactiveBranch()
+    {
+        // 🔑 包含网关与并行网关的**本质区别**：没被条件选中的分支不产生令牌，
+        // Join 不能等它 —— 否则流程永远卡住（Activiti 用"可达性"判定来解决）。
+        var engine = TestEngine.Create();
+
+        await engine.StartProcessAsync(
+            TestEngine.InclusiveGatewayProcess(),
+            new Dictionary<string, object?> { ["a"] = true, ["b"] = false });
+
+        Assert.Equal(OnlyBranchA, engine.ExecutedDelegates);
+        Assert.Equal(0, engine.ExecutionManager.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task InclusiveGateway_JoinOnOnlyTraversedBranch_ShouldStillComplete()
+    {
+        // 只有 b 分支为真（另一条从不激活）—— 同样必须能收口
+        var engine = TestEngine.Create();
+
+        await engine.StartProcessAsync(
+            TestEngine.InclusiveGatewayProcess(),
+            new Dictionary<string, object?> { ["a"] = false, ["b"] = true });
+
+        Assert.Equal(OnlyBranchB, engine.ExecutedDelegates);
         Assert.Equal(0, engine.ExecutionManager.ExecutionCount);
     }
 }

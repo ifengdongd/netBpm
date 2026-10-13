@@ -33,6 +33,9 @@ public interface IProcessEngine
     /// <summary>取流程定义的 BPMN XML（设计器回显契约，见 §6.3）。</summary>
     ValueTask<string?> GetProcessDefinitionXmlAsync(string processDefinitionId, CancellationToken ct = default);
 
+    /// <summary>查全部已部署的流程定义（流程部署列表数据源，按部署时间倒序）。</summary>
+    ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindProcessDefinitionsAsync(CancellationToken ct = default);
+
     /// <summary>取流程模型（校验 / 查询用）。</summary>
     ValueTask<BpmnModel?> GetBpmnModelAsync(string processDefinitionId, CancellationToken ct = default);
 

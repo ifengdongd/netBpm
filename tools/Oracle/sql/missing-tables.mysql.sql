@@ -9,6 +9,7 @@
 --
 -- ⚠️ DDL 逐字取自 Activiti 9.0.0 自带的
 --    org/activiti/db/create/activiti.mysql.create.engine.sql（只把 create table 改成 if not exists）。
+--    唯一附加改动是各表的 COMMENT（中文说明），属纯元数据。
 create table if not exists ACT_RE_MODEL (
     ID_ varchar(64) not null,
     REV_ integer,
@@ -24,7 +25,7 @@ create table if not exists ACT_RE_MODEL (
     EDITOR_SOURCE_EXTRA_VALUE_ID_ varchar(64),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='流程模型表（设计器模型）：本子集未使用，仅为 Activiti 预言机补表';
 
 create table if not exists ACT_RU_JOB (
     ID_ varchar(64) NOT NULL,
@@ -45,7 +46,7 @@ create table if not exists ACT_RU_JOB (
     HANDLER_CFG_ varchar(4000),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时作业表：异步 / 定时作业（本子集未使用）';
 
 create table if not exists ACT_RU_TIMER_JOB (
     ID_ varchar(64) NOT NULL,
@@ -66,7 +67,7 @@ create table if not exists ACT_RU_TIMER_JOB (
     HANDLER_CFG_ varchar(4000),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时定时器作业表（本子集未使用）';
 
 create table if not exists ACT_RU_SUSPENDED_JOB (
     ID_ varchar(64) NOT NULL,
@@ -85,7 +86,7 @@ create table if not exists ACT_RU_SUSPENDED_JOB (
     HANDLER_CFG_ varchar(4000),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时挂起作业表（本子集未使用）';
 
 create table if not exists ACT_RU_DEADLETTER_JOB (
     ID_ varchar(64) NOT NULL,
@@ -103,7 +104,7 @@ create table if not exists ACT_RU_DEADLETTER_JOB (
     HANDLER_CFG_ varchar(4000),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时死信作业表：重试耗尽的作业（本子集未使用）';
 
 create table if not exists ACT_RU_EVENT_SUBSCR (
     ID_ varchar(64) not null,
@@ -118,7 +119,7 @@ create table if not exists ACT_RU_EVENT_SUBSCR (
     PROC_DEF_ID_ varchar(64),
     TENANT_ID_ varchar(255) default '',
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时事件订阅表（本子集未使用）';
 
 create table if not exists ACT_EVT_LOG (
     LOG_NR_ bigint auto_increment,
@@ -134,7 +135,7 @@ create table if not exists ACT_EVT_LOG (
     LOCK_TIME_ timestamp(3) null,
     IS_PROCESSED_ tinyint default 0,
     primary key (LOG_NR_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='事件日志表（本子集未使用）';
 
 create table if not exists ACT_PROCDEF_INFO (
 	ID_ varchar(64) not null,
@@ -142,7 +143,7 @@ create table if not exists ACT_PROCDEF_INFO (
     REV_ integer,
     INFO_JSON_ID_ varchar(64),
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='流程定义扩展信息表（本子集未使用）';
 
 create table if not exists ACT_RU_INTEGRATION (
     ID_ varchar(64) not null,
@@ -152,4 +153,4 @@ create table if not exists ACT_RU_INTEGRATION (
     FLOW_NODE_ID_ varchar(64),
     CREATED_DATE_ timestamp(3),
     primary key (ID_)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时集成表：外部系统集成上下文（本子集未使用）';

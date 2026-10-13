@@ -54,6 +54,86 @@ public sealed class BpmnXmlConverterTests
     }
 
     [Fact]
+    public void ConvertToBpmnModel_ShouldParseInclusiveGateway()
+    {
+        var process = Parse(TestEngine.InclusiveGatewayProcess()).GetMainProcess()!;
+
+        var fork = Assert.IsType<InclusiveGateway>(process.GetFlowElement("inclFork"));
+        Assert.Single(fork.IncomingFlows);
+        Assert.Equal(3, fork.OutgoingFlows.Count);
+        Assert.Equal("flowDefault", fork.DefaultFlow);
+
+        var join = Assert.IsType<InclusiveGateway>(process.GetFlowElement("inclJoin"));
+        Assert.Equal(3, join.IncomingFlows.Count);
+        Assert.Single(join.OutgoingFlows);
+
+        // 条件表达式照常读入
+        var conditional = Assert.IsType<SequenceFlow>(process.GetFlowElement("flowA"));
+        Assert.Equal("${a}", conditional.ConditionExpression);
+    }
+
+    [Fact]
+    public void ConvertToBpmnModel_ShouldParseEventBasedGateway()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         targetNamespace="http://netbpm/test">
+              <process id="evt" isExecutable="true">
+                <startEvent id="start" />
+                <eventBasedGateway id="evtGw" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="evtGw" />
+                <sequenceFlow id="f2" sourceRef="evtGw" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml).GetMainProcess()!;
+
+        var gateway = Assert.IsType<EventGateway>(process.GetFlowElement("evtGw"));
+        Assert.Single(gateway.OutgoingFlows);
+    }
+
+    [Fact]
+    public void ConvertToXml_ShouldRoundTripInclusiveGatewayDefaultFlow()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         targetNamespace="http://netbpm/test">
+              <process id="incl" isExecutable="true">
+                <startEvent id="start" />
+                <inclusiveGateway id="inclGw" default="flowDefault" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="inclGw" />
+                <sequenceFlow id="flowConditional" sourceRef="inclGw" targetRef="end">
+                  <conditionExpression xsi:type="tFormalExpression">${a}</conditionExpression>
+                </sequenceFlow>
+                <sequenceFlow id="flowDefault" sourceRef="inclGw" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var model = Parse(xml);
+
+        using var buffer = new MemoryStream();
+        new BpmnXmlConverter().ConvertToXml(model, buffer);
+
+        var converted = Encoding.UTF8.GetString(buffer.ToArray());
+
+        Assert.Contains("inclusiveGateway", converted, StringComparison.Ordinal);
+        Assert.Contains("default=\"flowDefault\"", converted, StringComparison.Ordinal);
+
+        // 再解析一次：默认流必须还在（往返零丢失）
+        var roundTripped = Parse(converted).GetMainProcess()!;
+        var gateway = Assert.IsType<InclusiveGateway>(roundTripped.GetFlowElement("inclGw"));
+
+        Assert.Equal("flowDefault", gateway.DefaultFlow);
+    }
+
+    [Fact]
     public void ConvertToBpmnModel_ShouldReadGraphicalInformation()
     {
         const string xml = """
@@ -108,6 +188,71 @@ public sealed class BpmnXmlConverterTests
         Assert.Equal("${approved}", Assert.IsType<SequenceFlow>(process.GetFlowElement("flowApproved")).ConditionExpression);
         Assert.Equal("flowDefault", Assert.IsType<ExclusiveGateway>(process.GetFlowElement("gw")).DefaultFlow);
         Assert.Equal(2, process.FindFlowElementsOfType<ServiceTask>().Count());
+    }
+
+    [Fact]
+    public void FormProperty_ShouldRoundTripWithoutLoss()
+    {
+        // 回归：表单属性（activiti:formProperty）保存后重新加载为空 ——
+        // 模型此前不承载 formProperty，解析时被静默丢弃，落库重序列化后永久丢失。
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="form" isExecutable="true">
+                <startEvent id="start" />
+                <userTask id="approve" name="审批" activiti:formKey="approvalForm">
+                  <extensionElements>
+                    <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" readable="true" writable="true">
+                      <activiti:value id="approved" name="同意" />
+                      <activiti:value id="rejected" name="驳回" />
+                    </activiti:formProperty>
+                    <activiti:formProperty id="remark" name="备注" type="string" expression="${remark}" variable="remark" />
+                  </extensionElements>
+                </userTask>
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="approve" />
+                <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml).GetMainProcess()!;
+        var userTask = Assert.IsType<UserTask>(process.GetFlowElement("approve"));
+
+        Assert.Equal(2, userTask.FormProperties.Count);
+
+        var enumProperty = userTask.FormProperties[0];
+        Assert.Equal("approvalResult", enumProperty.Id);
+        Assert.Equal("审批结果", enumProperty.Name);
+        Assert.Equal("enum", enumProperty.Type);
+        Assert.True(enumProperty.Required);
+        Assert.True(enumProperty.Readable);
+        Assert.True(enumProperty.Writable);
+        Assert.Equal(2, enumProperty.Values.Count);
+        Assert.Equal(("approved", "同意"), (enumProperty.Values[0].Id, enumProperty.Values[0].Name));
+        Assert.Equal(("rejected", "驳回"), (enumProperty.Values[1].Id, enumProperty.Values[1].Name));
+
+        var stringProperty = userTask.FormProperties[1];
+        Assert.Equal("remark", stringProperty.Id);
+        Assert.Equal("${remark}", stringProperty.Expression);
+        Assert.Equal("remark", stringProperty.Variable);
+        Assert.Null(stringProperty.Required);
+
+        // 落库走「模型 → 重新序列化」，所以序列化后的 XML 必须仍带全部表单属性
+        using var buffer = new MemoryStream();
+        new BpmnXmlConverter().ConvertToXml(Parse(xml), buffer);
+        var converted = Encoding.UTF8.GetString(buffer.ToArray());
+
+        Assert.Contains("activiti:formProperty", converted, StringComparison.Ordinal);
+        Assert.Contains("activiti:value", converted, StringComparison.Ordinal);
+
+        var roundTripped = Assert.IsType<UserTask>(Parse(converted).GetMainProcess()!.GetFlowElement("approve"));
+        Assert.Equal(2, roundTripped.FormProperties.Count);
+        Assert.Equal("approvalResult", roundTripped.FormProperties[0].Id);
+        Assert.Equal(2, roundTripped.FormProperties[0].Values.Count);
+        Assert.Equal("remark", roundTripped.FormProperties[1].Id);
     }
 
     [Fact]

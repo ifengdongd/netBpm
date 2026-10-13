@@ -106,7 +106,11 @@ test('顺序流：只渲染条件表达式（不放行子集不支持的属性�
     businessObject: { $type: 'bpmn:SequenceFlow', id: 'f1' },
   });
 
-  assert.deepEqual(groups.map((group) => group.id), ['netbpm-common', 'netbpm-sequence-flow']);
+  assert.deepEqual(groups.map((group) => group.id), [
+    'netbpm-common',
+    'netbpm-sequence-flow',
+    'netbpm-sequence-flow-exec-listeners',
+  ]);
   assert.deepEqual(groupById(groups, 'netbpm-sequence-flow').entries.map((entry) => entry.id), ['conditionExpression']);
 });
 
@@ -128,64 +132,61 @@ test('文本属性：写入时去掉首尾空白，空值清除属性', () => {
 
   assert.equal(assignee.getValue?.(element), 'kermit');
 
-  assignee.setValue?.(element, '  gonzo  ');
+  assignee.setValue?.('  gonzo  ');
   assert.deepEqual(harness.updates.at(-1)?.properties, { assignee: 'gonzo' });
 
   // 清空 ⇒ undefined（不是空字符串）：否则 XML 会写出 activiti:assignee=""
-  assignee.setValue?.(element, '   ');
+  assignee.setValue?.('   ');
   assert.deepEqual(harness.updates.at(-1)?.properties, { assignee: undefined });
 
-  assignee.setValue?.(element, undefined);
+  assignee.setValue?.(undefined);
   assert.deepEqual(harness.updates.at(-1)?.properties, { assignee: undefined });
 });
 
-test('服务任务：三项实现方式互斥，切换时清空其余两项', () => {
+test('服务任务：类名/表达式/代理的表达式三个字段平铺（对齐 Activiti 原版）', () => {
   const harness = createHarness();
   const element = {
     id: 'notify',
     type: 'bpmn:ServiceTask',
     businessObject: { $type: 'bpmn:ServiceTask', id: 'notify', class: 'NetBpm.Demo.Notify' },
   };
-  const group = groupById(groupsOf(harness, element), 'netbpm-service-task');
-  const select = entryById(group, 'implementationType');
-
-  // 当前实现方式 = class（与后端 ImplementationType 的优先级一致）
-  assert.equal(select.getValue?.(element), 'class');
-
-  // 切换到 delegateExpression：class 被清除，新项尚未填写 ⇒ 三项都不写
-  select.setValue?.(element, 'delegateExpression');
-  assert.deepEqual(harness.updates.at(-1)?.properties, {
-    class: undefined,
-    delegateExpression: undefined,
-    expression: undefined,
-  });
-
-  // 切换回 class：保留原值
-  select.setValue?.(element, 'class');
-  assert.deepEqual(harness.updates.at(-1)?.properties, { class: 'NetBpm.Demo.Notify', delegateExpression: undefined, expression: undefined });
-});
-
-test('服务任务：未选择实现方式时给出提示条目', () => {
-  const harness = createHarness();
-  const element = { id: 'notify', type: 'bpmn:ServiceTask', businessObject: { $type: 'bpmn:ServiceTask', id: 'notify' } };
 
   const entries = groupById(groupsOf(harness, element), 'netbpm-service-task').entries.map((entry) => entry.id);
 
-  assert.ok(entries.includes('note-notify-实现方式取值'), `实际条目：${entries.join(', ')}`);
+  assert.deepEqual(
+    entries,
+    ['impl-class', 'impl-expression', 'impl-delegateExpression', 'resultVariableName', 'note-notify-默认流'],
+  );
+
+  // 类名条目读写 class 属性
+  const classEntry = entryById(groupById(groupsOf(harness, element), 'netbpm-service-task'), 'impl-class');
+  assert.equal(classEntry.getValue?.(element), 'NetBpm.Demo.Notify');
 });
 
-test('默认流下拉：选项来自出流，取值是出流 id', () => {
+test('默认流下拉：选项来自形状级出流连线，取值是出流 id', () => {
   const harness = createHarness();
-  const element = userTask({ outgoing: [{ id: 'f2', name: '同意' }, { id: 'f3' }] });
+  const toConnection = (id: string, name?: string): never =>
+    ({
+      id,
+      type: 'bpmn:SequenceFlow',
+      businessObject: { $type: 'bpmn:SequenceFlow', id, ...(name ? { name } : {}) },
+    }) as never;
+  const element: never = {
+    id: 'approve',
+    type: 'bpmn:UserTask',
+    businessObject: { $type: 'bpmn:UserTask', id: 'approve', name: '审批' },
+    outgoing: [toConnection('f2', '同意'), toConnection('f3')],
+  } as never;
+
   const group = groupById(groupsOf(harness, element), 'netbpm-user-task');
   const defaultFlow = entryById(group, 'defaultFlow');
 
-  assert.deepEqual(defaultFlow.options?.map((option) => option.value), ['', 'f2', 'f3']);
+  assert.deepEqual(defaultFlow.getOptions?.(element).map((option) => option.value), ['', 'f2', 'f3']);
 
-  defaultFlow.setValue?.(element, 'f2');
+  defaultFlow.setValue?.('f2');
   assert.deepEqual(harness.updates.at(-1)?.properties, { default: 'f2' });
 
-  defaultFlow.setValue?.(element, '');
+  defaultFlow.setValue?.('');
   assert.deepEqual(harness.updates.at(-1)?.properties, { default: undefined });
 });
 
@@ -200,13 +201,39 @@ test('条件表达式：写入 moddle 子元素，留空则删除', () => {
 
   assert.equal(condition.getValue?.(element), '${approved}');
 
-  condition.setValue?.(element, '${amount > 100}');
+  condition.setValue?.('${amount > 100}');
   assert.deepEqual(harness.updates.at(-1)?.properties, {
     conditionExpression: { $type: 'bpmn:FormalExpression', body: '${amount > 100}' },
   });
 
-  condition.setValue?.(element, '');
+  condition.setValue?.('');
   assert.deepEqual(harness.updates.at(-1)?.properties, { conditionExpression: undefined });
+});
+
+test('包含网关：提供默认流下拉；事件网关只给说明', () => {
+  const harness = createHarness();
+  const inclusive = {
+    id: 'inclGw',
+    type: 'bpmn:InclusiveGateway',
+    businessObject: { $type: 'bpmn:InclusiveGateway', id: 'inclGw' },
+    outgoing: [
+      { id: 'flowA', type: 'bpmn:SequenceFlow', businessObject: { $type: 'bpmn:SequenceFlow', id: 'flowA' } },
+    ],
+  };
+
+  const inclusiveGroup = groupById(groupsOf(harness, inclusive), 'netbpm-inclusive-gateway');
+  assert.ok(inclusiveGroup.entries.some((entry) => entry.id === 'defaultFlow'));
+
+  const eventGroup = groupById(
+    groupsOf(harness, {
+      id: 'evtGw',
+      type: 'bpmn:EventBasedGateway',
+      businessObject: { $type: 'bpmn:EventBasedGateway', id: 'evtGw' },
+    }),
+    'netbpm-event-gateway',
+  );
+
+  assert.ok(eventGroup.entries.every((entry) => entry.id.startsWith('note-')));
 });
 
 test('并行网关：不提供默认流，只给出说明', () => {
@@ -217,17 +244,62 @@ test('并行网关：不提供默认流，只给出说明', () => {
   assert.ok(group.entries[0].id.startsWith('note-'));
 });
 
-test('不支持的能力：出现监听器/事件定义时额外渲染提示组', () => {
+test('不支持的能力：只有事件定义/字段注入才渲染提示组（监听器已支持）', () => {
   const harness = createHarness();
-  const element = userTask({
-    extensionElements: { values: [{ $type: 'activiti:TaskListener', event: 'create' }] },
-    eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition' }],
+
+  // 任务监听器已开放编辑（listEditors.ts），不再提示"不支持"
+  const withListener = userTask({ extensionElements: { values: [{ $type: 'activiti:TaskListener', event: 'create' }] } });
+  assert.ok(!groupsOf(harness, withListener).some((group) => group.id === 'netbpm-unsupported'));
+
+  // 事件定义仍然是子集外能力
+  const withEventDefinition = userTask({ eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition' }] });
+  const group = groupById(groupsOf(harness, withEventDefinition), 'netbpm-unsupported');
+
+  assert.equal(group.entries.length, 1);
+  assert.ok(group.entries.every((entry) => entry.id.startsWith('note-')));
+});
+
+// ─────────────────────────── 监听器 / 表单属性编辑组 ───────────────────────────
+
+test('流程：提供执行监听器与事件监听器编辑组', () => {
+  const harness = createHarness();
+  const groups = groupsOf(harness, {
+    id: 'process_1',
+    type: 'bpmn:Process',
+    businessObject: { $type: 'bpmn:Process', id: 'process_1' },
   });
 
-  const group = groupById(groupsOf(harness, element), 'netbpm-unsupported');
+  assert.deepEqual(
+    groups.map((group) => group.id),
+    ['netbpm-process', 'netbpm-process-exec-listeners', 'netbpm-event-listeners'],
+  );
+});
 
-  assert.equal(group.entries.length, 2);
-  assert.ok(group.entries.every((entry) => entry.id.startsWith('note-')));
+test('用户任务：提供执行/任务监听器与表单属性编辑组', () => {
+  const harness = createHarness();
+  const groupIds = groupsOf(harness, userTask()).map((group) => group.id);
+
+  assert.deepEqual(groupIds, [
+    'netbpm-common',
+    'netbpm-user-task',
+    'netbpm-user-task-exec-listeners',
+    'netbpm-user-task-task-listeners',
+    'netbpm-form-properties',
+  ]);
+});
+
+test('顺序流：执行监听器组的事件只有 take', () => {
+  const harness = createHarness();
+  const groups = groupsOf(harness, {
+    id: 'f1',
+    type: 'bpmn:SequenceFlow',
+    businessObject: { $type: 'bpmn:SequenceFlow', id: 'f1' },
+  });
+
+  assert.deepEqual(
+    groups.map((group) => group.id),
+    ['netbpm-common', 'netbpm-sequence-flow', 'netbpm-sequence-flow-exec-listeners'],
+  );
 });
 
 // ─────────────────────────── 即时校验（镜像后端规则）───────────────────────────
@@ -255,8 +327,10 @@ test('校验：无人办理的用户任务只告警（Activiti 允许，后端�
         $type: 'bpmn:Process',
         id: 'p1',
         flowElements: [
-          { $type: 'bpmn:StartEvent', id: 'start', outgoing: [{ id: 'f1' }] },
-          { $type: 'bpmn:UserTask', id: 'approve', incoming: [{ id: 'f1' }], outgoing: [] },
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:UserTask', id: 'approve' },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'approve' } },
         ],
       },
     ]),
@@ -273,7 +347,7 @@ test('校验：无人办理的用户任务只告警（Activiti 允许，后端�
         $type: 'bpmn:Process',
         id: 'p1',
         flowElements: [
-          { $type: 'bpmn:UserTask', id: 'approve', candidateGroups: 'managers', outgoing: [{ id: 'f1' }] },
+          { $type: 'bpmn:UserTask', id: 'approve', candidateGroups: 'managers' },
         ],
       },
     ]),
@@ -311,16 +385,15 @@ test('校验：并行网关不得有默认流，排他网关不得"全条件且�
         $type: 'bpmn:Process',
         id: 'p1',
         flowElements: [
-          { $type: 'bpmn:ParallelGateway', id: 'fork', default: 'f1', incoming: [{ id: 'f0' }], outgoing: [{ id: 'f1' }] },
+          { $type: 'bpmn:ParallelGateway', id: 'fork', default: 'f1' },
           {
             $type: 'bpmn:ExclusiveGateway',
             id: 'gw',
-            incoming: [{ id: 'f1' }],
-            outgoing: [
-              { id: 'f2', conditionExpression: { body: '${a}' } },
-              { id: 'f3', conditionExpression: { body: '${b}' } },
-            ],
           },
+          { $type: 'bpmn:SequenceFlow', id: 'f0', sourceRef: { id: 'start' }, targetRef: { id: 'fork' } },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'fork' }, targetRef: { id: 'gw' } },
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'gw' }, targetRef: { id: 'a' }, conditionExpression: { body: '${a}' } },
+          { $type: 'bpmn:SequenceFlow', id: 'f3', sourceRef: { id: 'gw' }, targetRef: { id: 'b' }, conditionExpression: { body: '${b}' } },
         ],
       },
     ]),
@@ -330,7 +403,7 @@ test('校验：并行网关不得有默认流，排他网关不得"全条件且�
   assert.ok(issues.some((issue) => issue.elementId === 'gw' && issue.message.includes('默认流')));
 });
 
-test('校验：不支持的能力与事件定义都会拦下部署', () => {
+test('校验：监听器只告警（后端裁决），事件定义与字段注入仍拦下部署', () => {
   const issues = validateDiagram(
     registryOf([
       {
@@ -341,7 +414,13 @@ test('校验：不支持的能力与事件定义都会拦下部署', () => {
             $type: 'bpmn:ServiceTask',
             id: 'svc',
             class: 'A',
-            extensionElements: { values: [{ $type: 'activiti:Field', name: 'url' }] },
+            extensionElements: {
+              values: [
+                { $type: 'activiti:ExecutionListener', event: 'start', class: 'A' },
+                { $type: 'activiti:FormProperty', id: 'approvalResult' },
+                { $type: 'activiti:Field', name: 'url' },
+              ],
+            },
           },
           { $type: 'bpmn:StartEvent', id: 'start', eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition' }] },
         ],
@@ -349,9 +428,55 @@ test('校验：不支持的能力与事件定义都会拦下部署', () => {
     ]),
   );
 
-  assert.ok(issues.some((issue) => issue.message.includes('字段注入')));
-  assert.ok(issues.some((issue) => issue.message.includes('事件定义')));
+  // 监听器/表单属性 → 警告，不阻断
+  const warnings = issues.filter((issue) => issue.severity === 'warning');
+  assert.ok(warnings.some((issue) => issue.message.includes('执行监听器')));
+  assert.ok(warnings.some((issue) => issue.message.includes('表单属性')));
+
+  // 字段注入 / 事件定义 → 错误，阻断
+  assert.ok(issues.some((issue) => issue.severity === 'error' && issue.message.includes('字段注入')));
+  assert.ok(issues.some((issue) => issue.severity === 'error' && issue.message.includes('事件定义')));
   assert.ok(hasBlockingError(issues));
+});
+
+test('校验：包含网关缺默认流且全条件时拦下；事件网关一并拦下', () => {
+  const inclusiveIssues = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:InclusiveGateway', id: 'inclGw' },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'inclGw' } },
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'inclGw' }, targetRef: { id: 'end' }, conditionExpression: { body: '${a}' } },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(inclusiveIssues.some((issue) => issue.elementId === 'inclGw' && issue.message.includes('包含网关')));
+  assert.ok(hasBlockingError(inclusiveIssues));
+
+  const eventIssues = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:EventBasedGateway', id: 'evtGw' },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'evtGw' } },
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'evtGw' }, targetRef: { id: 'end' } },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(eventIssues.some((issue) => issue.elementId === 'evtGw' && issue.message.includes('中间捕获事件')));
+  assert.ok(hasBlockingError(eventIssues));
 });
 
 test('校验：条件未写成 ${...} 只告警，不阻断部署', () => {
@@ -415,16 +540,18 @@ test('存储：从 XML 解析 process 的 id 与 name，name 缺省退回 id', (
 
 test('存储：按 processId 覆盖更新，新记录排在最前，且不改变原数组', () => {
   const existing: DiagramRecord[] = [
-    { processId: 'a', name: 'A', xml: '<a/>', updatedAt: '2026-01-01T00:00:00.000Z' },
-    { processId: 'b', name: 'B', xml: '<b/>', updatedAt: '2026-01-02T00:00:00.000Z' },
+    { modelId: 'm-a', processId: 'a', name: 'A', xml: '<a/>', updatedAt: '2026-01-01T00:00:00.000Z', version: 1 },
+    { modelId: 'm-b', processId: 'b', name: 'B', xml: '<b/>', updatedAt: '2026-01-02T00:00:00.000Z', version: 1 },
   ];
   const snapshot = JSON.stringify(existing);
 
   const updated = upsertDiagram(existing, {
+    modelId: 'm-a',
     processId: 'a',
     name: 'A2',
     xml: '<a2/>',
     updatedAt: '2026-01-03T00:00:00.000Z',
+    version: 2,
   });
 
   // 覆盖后 a 只出现一次，且排到了最前
@@ -435,10 +562,12 @@ test('存储：按 processId 覆盖更新，新记录排在最前，且不改变
   assert.equal(updated[0].name, 'A2');
 
   const inserted = upsertDiagram(existing, {
+    modelId: 'm-c',
     processId: 'c',
     name: 'C',
     xml: '<c/>',
     updatedAt: '2026-01-03T00:00:00.000Z',
+    version: 1,
   });
 
   assert.deepEqual(

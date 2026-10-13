@@ -43,6 +43,15 @@ public interface IExecutionManager
         CancellationToken ct = default);
 
     /// <summary>
+    /// 查流程实例下「处于活动状态」的子执行（不含流程实例执行自身）。
+    /// 包含网关 Join 的判定基础：逐个判断「该执行是否还能到达网关」（对应
+    /// Activiti 的 <c>findChildExecutionsByProcessInstanceId</c> + <c>isActive</c> 过滤）。
+    /// </summary>
+    ValueTask<IList<IExecutionEntity>> FindActiveChildExecutionsByProcessInstanceIdAsync(
+        string processInstanceId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// 统计某执行的子执行数。对应 Activiti 的 <c>getNumberOfActiveChildExecutionsForExecution</c>。
     /// <para>⚠️ 注意：Activiti 的实现是「按父执行 id 查全部子执行并计数」，并<b>不</b>过滤 <c>IS_ACTIVE_</c>，
     /// 本方法保持该行为以确保两端一致。</para>
