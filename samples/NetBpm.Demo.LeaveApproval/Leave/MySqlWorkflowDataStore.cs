@@ -68,7 +68,7 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
     private static long _sequence;
 
     private readonly IDbConnectionFactory _connections;
-    private readonly LeaveRuntime _runtime;
+    private readonly WorkflowRuntimeContext _runtime;
     private readonly ILogger<MySqlWorkflowDataStore> _logger;
     private readonly string _connectionString;
     private readonly long _tenantId;
@@ -81,7 +81,7 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
     /// <param name="logger">日志。</param>
     public MySqlWorkflowDataStore(
         IDbConnectionFactory connections,
-        LeaveRuntime runtime,
+        WorkflowRuntimeContext runtime,
         IConfiguration configuration,
         ILogger<MySqlWorkflowDataStore> logger)
     {

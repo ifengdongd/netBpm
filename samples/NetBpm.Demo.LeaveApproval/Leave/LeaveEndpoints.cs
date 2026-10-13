@@ -1,5 +1,3 @@
-using NetBpm.Engine;
-using NetBpm.Runtime;
 using NetBpm.Workflow;
 
 namespace NetBpm.Demo.LeaveApproval.Leave;
@@ -9,9 +7,11 @@ namespace NetBpm.Demo.LeaveApproval.Leave;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 🔑 <b>这一层只做三件事</b>：绑定请求、把应用层的视图摊成 Demo 自己的 DTO、把异常翻成状态码。
-/// 真正干活的是 <see cref="IWorkflowService"/>（发起 / 环节信息 / 提交 / 历史四件事都在它里面），
-/// 所以换成 gRPC、消息队列、控制台调用时，业务代码一行都不用改。
+/// 🔑 流程相关端点（发起 / 实例列表与详情 / 历史 / 待办 / 提交 / 流程定义）全部来自公共的
+/// <see cref="WorkflowEndpoints"/>，本类只注入请假业务的三件事：
+/// <b>业务单号生成与校验</b>（<see cref="LeaveBusinessKey"/>，经 <c>TransformStartRequest</c>）、
+/// <b>视图摊平</b>（天数 / 事由从流程参数摊成列）、<b>错误响应形状</b>（<see cref="LeaveErrorResponse"/>）。
+/// 端点下面只剩业务数据核对入口与 DTO 映射；换成 gRPC、消息队列、控制台调用时，业务代码一行都不用改。
 /// </para>
 /// <para>设计要点：<b>前端不写死任何审批选项</b>。实例视图会把当前待办连同它的表单定义
 /// （含 <c>approvalResult</c> 的候选值）一次返回，前端照着渲染；提交时回传所选值即可。</para>
@@ -22,176 +22,43 @@ public static class LeaveEndpoints
     {
         var group = endpoints.MapGroup("/api/leave").WithTags("leave");
 
-        group.MapPost("/instances", StartAsync).Produces<InstanceView>();
-        group.MapGet("/instances", FindInstancesAsync).Produces<IReadOnlyList<InstanceSummary>>();
-        group.MapGet("/instances/{processInstanceId}", GetInstanceAsync).Produces<InstanceView>();
-        group.MapGet("/instances/{processInstanceId}/history", GetHistoryAsync).Produces<WorkflowHistoryView>();
+        // 流程通用的七个端点：发起 / 实例列表 / 实例详情 / 历史 / 待办 / 提交 / 流程定义。
+        // 路由与既有 Demo、e2e 测试保持一致（挂在 /api/leave 前缀下）。
+        group.MapWorkflowEndpoints(string.Empty, new WorkflowEndpointOptions
+        {
+            ProcessKey = _ => LeaveProcessBootstrapper.ProcessKey,
 
-        group.MapGet("/tasks", FindTasksAsync).Produces<IReadOnlyList<WorkflowTaskView>>();
-        group.MapPost("/tasks/{taskId}/submit", SubmitTaskAsync).Produces<InstanceView>();
+            // 发起前生成 / 校验业务单号：请假单号必须是正整数（业务表里 business_id 是 bigint）。
+            // 校验不过抛 WorkflowValidationException → 统一映射成 400 连同明细。
+            TransformStartRequest = (_, request) =>
+            {
+                var businessKey = string.IsNullOrWhiteSpace(request.BusinessKey)
+                    ? LeaveBusinessKey.Next()
+                    : request.BusinessKey.Trim();
 
-        group.MapGet("/business", GetBusinessAsync).Produces<LeaveBusinessDocument>();
-        group.MapGet("/process-definition", GetProcessDefinitionAsync);
+                if (!LeaveBusinessKey.IsValid(businessKey))
+                {
+                    throw new WorkflowValidationException(
+                        $"businessKey 必须是正整数（业务表里 business_id 是 bigint），当前为 '{request.BusinessKey}'。");
+                }
+
+                return request with { BusinessKey = businessKey };
+            },
+
+            DecorateInstanceView = (_, view) => ToInstanceView(view),
+            DecorateInstanceSummary = (_, summary) => ToInstanceSummary(summary),
+            ErrorResponseFactory = (message, errors) => new LeaveErrorResponse(message, errors),
+        });
+
+        // 业务数据核对入口（请假业务自有，与流程引擎无关）：
+        // 落点自述 + 全部业务数据，方便打开核对。只依赖 ILeaveBusinessInspector，
+        // 所以 Leave:Store 在 JSON / MySql 之间切换时这里一行都不用改
+        // （键名由实现方给：JSON 实现给区块名，MySQL 实现给表名）。
+        group.MapGet("/business", GetBusinessAsync);
 
         return group;
     }
 
-    // ─────────────────────────── 流程实例 ───────────────────────────
-
-    /// <summary>发起请假：建流程实例，返回首个待办（「提交请假申请」）及其表单。</summary>
-    /// <remarks>
-    /// <c>businessKey</c> 是请假单号，<b>必须是正整数</b>（业务表里 <c>business_id</c> 是 <c>bigint</c>）；
-    /// 留空则由 Demo 发一个（真实系统里这是业务单号生成器的活，见 <see cref="LeaveBusinessKey"/>）。
-    /// </remarks>
-    private static async Task<IResult> StartAsync(
-        StartWorkflowRequest? request,
-        IWorkflowService workflow,
-        CancellationToken ct)
-    {
-        if (request is null)
-        {
-            return Results.BadRequest(new LeaveErrorResponse("applicant 不能为空。"));
-        }
-
-        var businessKey = string.IsNullOrWhiteSpace(request.BusinessKey)
-            ? LeaveBusinessKey.Next()
-            : request.BusinessKey.Trim();
-
-        if (!LeaveBusinessKey.IsValid(businessKey))
-        {
-            return Results.BadRequest(new LeaveErrorResponse(
-                $"businessKey 必须是正整数（业务表里 business_id 是 bigint），当前为 '{request.BusinessKey}'。"));
-        }
-
-        try
-        {
-            var view = await workflow
-                .StartAsync(LeaveProcessBootstrapper.ProcessKey, request with { BusinessKey = businessKey }, ct)
-                .ConfigureAwait(false);
-
-            return Results.Ok(ToInstanceView(view));
-        }
-        catch (WorkflowValidationException exception)
-        {
-            return Invalid(exception);
-        }
-        catch (EngineException exception)
-        {
-            return Results.BadRequest(new LeaveErrorResponse(exception.Message));
-        }
-    }
-
-    /// <summary>请假单列表（业务登记 + 审批结论，用于演示页左侧列表）。</summary>
-    private static async Task<IResult> FindInstancesAsync(
-        IWorkflowService workflow,
-        CancellationToken ct)
-    {
-        var summaries = await workflow.FindInstancesAsync(ct).ConfigureAwait(false);
-
-        return Results.Ok(summaries.Select(ToInstanceSummary).ToArray());
-    }
-
-    /// <summary>流程实例详情：变量 + 当前待办（含表单定义）+ 审批结论 + 流程参数。</summary>
-    private static async Task<IResult> GetInstanceAsync(
-        string processInstanceId,
-        IWorkflowService workflow,
-        CancellationToken ct)
-    {
-        var view = await workflow.FindInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
-
-        return view is null
-            ? Results.NotFound(new LeaveErrorResponse($"流程实例 '{processInstanceId}' 不存在。"))
-            : Results.Ok(ToInstanceView(view));
-    }
-
-    /// <summary>审批历史记录：环节序列 + 审批记录（谁在什么时候批了什么）。</summary>
-    private static async Task<IResult> GetHistoryAsync(
-        string processInstanceId,
-        IWorkflowService workflow,
-        CancellationToken ct)
-    {
-        var history = await workflow.FindHistoryAsync(processInstanceId, ct).ConfigureAwait(false);
-
-        return history is null
-            ? Results.NotFound(new LeaveErrorResponse($"流程实例 '{processInstanceId}' 不存在。"))
-            : Results.Ok(history);
-    }
-
-    // ─────────────────────────── 任务 ───────────────────────────
-
-    /// <summary>按候选人 / 办理人 / 流程实例查待办（演示页的「待办中心」）。</summary>
-    private static async Task<IResult> FindTasksAsync(
-        string? candidateUser,
-        string? assignee,
-        string? processInstanceId,
-        IWorkflowService workflow,
-        CancellationToken ct)
-    {
-        try
-        {
-            var tasks = await workflow
-                .FindTasksAsync(new TaskQuery(assignee, candidateUser, processInstanceId), ct)
-                .ConfigureAwait(false);
-
-            return Results.Ok(tasks);
-        }
-        catch (WorkflowValidationException exception)
-        {
-            return Invalid(exception);
-        }
-        catch (EngineException exception)
-        {
-            return Results.BadRequest(new LeaveErrorResponse(exception.Message));
-        }
-    }
-
-    /// <summary>
-    /// 提交任务表单：<c>values</c> 的键必须是流程定义里的 <c>formProperty/@id</c>。
-    /// <para>
-    /// 以「组长审批」为例，前端回传 <c>{"values":{"approvalResult":"2"}}</c>，
-    /// 该属性 <c>variable="result"</c> ⇒ 流程变量 <c>result = "2"</c>，
-    /// 随后排他网关按 <c>${result == 2}</c> 把流程送往「拒绝结束」。
-    /// </para>
-    /// <para>
-    /// 想顺带补参数就传 <c>paraDict</c>（<b>有值就按 key 更新</b>）；想记下办理人（按候选组审批时
-    /// 任务上还没有 assignee）就传 <c>operator</c>。
-    /// </para>
-    /// </summary>
-    private static async Task<IResult> SubmitTaskAsync(
-        string taskId,
-        SubmitWorkflowTaskRequest? request,
-        IWorkflowService workflow,
-        CancellationToken ct)
-    {
-        try
-        {
-            var view = await workflow.SubmitAsync(taskId, request, ct).ConfigureAwait(false);
-
-            return view is null ? Results.NoContent() : Results.Ok(ToInstanceView(view));
-        }
-        catch (WorkflowNotFoundException exception)
-        {
-            return Results.NotFound(new LeaveErrorResponse(exception.Message));
-        }
-        catch (WorkflowValidationException exception)
-        {
-            return Invalid(exception);
-        }
-        catch (EngineException exception)
-        {
-            return Results.BadRequest(new LeaveErrorResponse(exception.Message));
-        }
-    }
-
-    // ─────────────────────────── 业务数据 / 流程定义 ───────────────────────────
-
-    /// <summary>
-    /// 业务数据核对入口：<b>落点自述 + 全部业务数据</b>，方便打开核对。
-    /// </summary>
-    /// <remarks>
-    /// 只依赖 <see cref="ILeaveBusinessInspector"/>，所以 <c>Leave:Store</c> 在 JSON / MySql
-    /// 之间切换时这里一行都不用改（键名由实现方给：JSON 实现给区块名，MySQL 实现给表名）。
-    /// </remarks>
     private static async Task<IResult> GetBusinessAsync(
         ILeaveBusinessInspector inspector,
         CancellationToken ct)
@@ -205,26 +72,6 @@ public static class LeaveEndpoints
         };
 
         return Results.Ok(payload);
-    }
-
-    /// <summary>当前生效的流程定义（含 BPMN XML，便于对照表单属性）。</summary>
-    private static async Task<IResult> GetProcessDefinitionAsync(
-        IProcessEngine engine,
-        IWorkflowService workflow,
-        CancellationToken ct)
-    {
-        var definitionId = await workflow
-            .ResolveDefinitionIdAsync(LeaveProcessBootstrapper.ProcessKey, ct)
-            .ConfigureAwait(false);
-
-        if (definitionId is null)
-        {
-            return Results.NotFound(new LeaveErrorResponse("流程定义尚未部署。"));
-        }
-
-        var xml = await engine.GetProcessDefinitionXmlAsync(definitionId, ct).ConfigureAwait(false);
-
-        return Results.Ok(new { processDefinitionId = definitionId, xml });
     }
 
     // ─────────────────────────── DTO 映射 ───────────────────────────
@@ -252,10 +99,4 @@ public static class LeaveEndpoints
         StartedAt: summary.StartedAt,
         Status: summary.Status,
         Outcome: summary.Result?.ActivityName);
-
-    /// <summary>输入不合法 → 400，并把字段级明细一起回给前端。</summary>
-    private static IResult Invalid(WorkflowValidationException exception) =>
-        Results.BadRequest(new LeaveErrorResponse(
-            exception.Message,
-            exception.Errors.Count == 0 ? null : exception.Errors));
 }

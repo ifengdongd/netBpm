@@ -1,0 +1,250 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using NetBpm.Engine;
+using NetBpm.Runtime;
+
+namespace NetBpm.Workflow;
+
+/// <summary>
+/// 审批流程的通用 HTTP 端点：<b>流程发起、实例列表 / 详情、审批历史、待办查询、审批提交、流程定义查看</b>。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 🔑 这一层只做三件事：绑定请求、把应用层的视图交给业务加工（<see cref="WorkflowEndpointOptions"/>
+/// 里的 Decorator）、把异常翻成状态码 —— 真正干活的是 <see cref="IWorkflowService"/>。
+/// 任何宿主（Demo、正式系统）挂一组路由就能得到完整的审批流 HTTP 面；业务语义
+/// （业务单号生成、DTO 摊平、错误响应形状）全部经 <see cref="WorkflowEndpointOptions"/> 注入。
+/// </para>
+/// <para>
+/// 设计要点：<b>前端不写死任何审批选项</b>。实例视图与待办视图都带表单定义
+/// （含 <c>approvalResult</c> 这类候选值），前端照着渲染，提交时回传所选值。
+/// </para>
+/// <para>路由与状态码约定：</para>
+/// <list type="table">
+///   <item><description><c>POST /instances</c>：发起 → 200（视图）/ 400；</description></item>
+///   <item><description><c>GET /instances</c>：业务登记列表 → 200；</description></item>
+///   <item><description><c>GET /instances/{id}</c> 与 <c>.../history</c>：查不到 → 404；</description></item>
+///   <item><description><c>GET /tasks</c>：待办中心（候选人 / 办理人 / 实例任一条件）→ 200 / 400；</description></item>
+///   <item><description><c>POST /tasks/{id}/submit</c>：审批提交 → 200 / 204（无实例）/ 404 / 400；</description></item>
+///   <item><description><c>GET /process-definition</c>：当前生效定义（含 BPMN XML）→ 200 / 404。</description></item>
+/// </list>
+/// </para>
+/// </remarks>
+public static class WorkflowEndpoints
+{
+    /// <summary>
+    /// 把通用流程端点映射到 <paramref name="pattern"/> 路由组下。宿主决定挂在哪个前缀
+    /// （如 <c>/api/leave</c> 或 <c>/api/workflow</c>），路由约定保持一致。
+    /// </summary>
+    public static IEndpointConventionBuilder MapWorkflowEndpoints(
+        this IEndpointRouteBuilder endpoints,
+        string pattern,
+        WorkflowEndpointOptions options)
+    {
+        var group = endpoints.MapGroup(pattern).WithTags("workflow");
+
+        group.MapPost("/instances", (HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
+            StartAsync(http, workflow, options, ct)).Produces<object>();
+        group.MapGet("/instances", (HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
+            FindInstancesAsync(http, workflow, options, ct));
+        group.MapGet("/instances/{processInstanceId}", (string processInstanceId, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
+            GetInstanceAsync(processInstanceId, http, workflow, options, ct)).Produces<object>();
+        group.MapGet("/instances/{processInstanceId}/history", (string processInstanceId, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
+            GetHistoryAsync(processInstanceId, http, workflow, options, ct)).Produces<WorkflowHistoryView>();
+
+        group.MapGet("/tasks", (string? candidateUser, string? assignee, string? processInstanceId, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
+            FindTasksAsync(candidateUser, assignee, processInstanceId, http, workflow, options, ct));
+        group.MapPost("/tasks/{taskId}/submit", (string taskId, SubmitWorkflowTaskRequest? request, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
+            SubmitTaskAsync(taskId, request, http, workflow, options, ct)).Produces<object>();
+
+        group.MapGet("/process-definition", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
+            GetProcessDefinitionAsync(http, engine, workflow, options, ct));
+
+        return group;
+    }
+
+    // ─────────────────────────── 流程实例 ───────────────────────────
+
+    /// <summary>发起流程：建流程实例，返回首个待办及其表单。业务加工由 options 决定（如生成单号）。</summary>
+    private static async Task<IResult> StartAsync(
+        HttpContext http,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var request = await http.Request.ReadFromJsonAsync<StartWorkflowRequest>(ct).ConfigureAwait(false);
+
+        if (request is null)
+        {
+            return Results.BadRequest(options.Error("applicant 不能为空。"));
+        }
+
+        try
+        {
+            if (options.TransformStartRequest is not null)
+            {
+                request = options.TransformStartRequest(http.RequestServices, request);
+            }
+
+            var view = await workflow
+                .StartAsync(options.ProcessKey(http.RequestServices), request, ct)
+                .ConfigureAwait(false);
+
+            return Results.Ok(Decorate(http.RequestServices, options.DecorateInstanceView, view));
+        }
+        catch (WorkflowValidationException exception)
+        {
+            return Invalid(exception, options);
+        }
+        catch (EngineException exception)
+        {
+            return Results.BadRequest(options.Error(exception.Message));
+        }
+    }
+
+    /// <summary>业务登记列表（新的在前），列表页用。</summary>
+    private static async Task<IResult> FindInstancesAsync(
+        HttpContext http,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var summaries = await workflow.FindInstancesAsync(ct).ConfigureAwait(false);
+
+        return Results.Ok(summaries
+            .Select(summary => Decorate(http.RequestServices, options.DecorateInstanceSummary, summary))
+            .ToArray());
+    }
+
+    /// <summary>流程实例详情：变量 + 当前待办（含表单定义）+ 审批结论 + 流程参数。</summary>
+    private static async Task<IResult> GetInstanceAsync(
+        string processInstanceId,
+        HttpContext http,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var view = await workflow.FindInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        return view is null
+            ? Results.NotFound(options.Error($"流程实例 '{processInstanceId}' 不存在。"))
+            : Results.Ok(Decorate(http.RequestServices, options.DecorateInstanceView, view));
+    }
+
+    /// <summary>审批历史记录：环节序列 + 审批记录（谁在什么时候批了什么）。</summary>
+    private static async Task<IResult> GetHistoryAsync(
+        string processInstanceId,
+        HttpContext http,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var history = await workflow.FindHistoryAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        return history is null
+            ? Results.NotFound(options.Error($"流程实例 '{processInstanceId}' 不存在。"))
+            : Results.Ok(history);
+    }
+
+    // ─────────────────────────── 任务 ───────────────────────────
+
+    /// <summary>按候选人 / 办理人 / 流程实例查待办（「待办中心」）。</summary>
+    private static async Task<IResult> FindTasksAsync(
+        string? candidateUser,
+        string? assignee,
+        string? processInstanceId,
+        HttpContext http,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        try
+        {
+            var tasks = await workflow
+                .FindTasksAsync(new TaskQuery(assignee, candidateUser, processInstanceId), ct)
+                .ConfigureAwait(false);
+
+            return Results.Ok(tasks);
+        }
+        catch (WorkflowValidationException exception)
+        {
+            return Invalid(exception, options);
+        }
+        catch (EngineException exception)
+        {
+            return Results.BadRequest(options.Error(exception.Message));
+        }
+    }
+
+    /// <summary>
+    /// 提交任务表单：<c>values</c> 的键必须是流程定义里的 <c>formProperty/@id</c>，
+    /// 属性上的 <c>variable</c> 决定它落到哪个流程变量，随后网关按变量取道。
+    /// 顺带补参数传 <c>paraDict</c>（有值就按 key 更新）；按候选组审批时
+    /// 记下办理人传 <c>operator</c>。
+    /// </summary>
+    private static async Task<IResult> SubmitTaskAsync(
+        string taskId,
+        SubmitWorkflowTaskRequest? request,
+        HttpContext http,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        try
+        {
+            var view = await workflow.SubmitAsync(taskId, request, ct).ConfigureAwait(false);
+
+            return view is null
+                ? Results.NoContent()
+                : Results.Ok(Decorate(http.RequestServices, options.DecorateInstanceView, view));
+        }
+        catch (WorkflowNotFoundException exception)
+        {
+            return Results.NotFound(options.Error(exception.Message));
+        }
+        catch (WorkflowValidationException exception)
+        {
+            return Invalid(exception, options);
+        }
+        catch (EngineException exception)
+        {
+            return Results.BadRequest(options.Error(exception.Message));
+        }
+    }
+
+    // ─────────────────────────── 流程定义 ───────────────────────────
+
+    /// <summary>当前生效的流程定义（含 BPMN XML，便于对照表单属性）。</summary>
+    private static async Task<IResult> GetProcessDefinitionAsync(
+        HttpContext http,
+        IProcessEngine engine,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var definitionId = await workflow
+            .ResolveDefinitionIdAsync(options.ProcessKey(http.RequestServices), ct)
+            .ConfigureAwait(false);
+
+        if (definitionId is null)
+        {
+            return Results.NotFound(options.Error("流程定义尚未部署。"));
+        }
+
+        var xml = await engine.GetProcessDefinitionXmlAsync(definitionId, ct).ConfigureAwait(false);
+
+        return Results.Ok(new { processDefinitionId = definitionId, xml });
+    }
+
+    // ─────────────────────────── 工具 ───────────────────────────
+
+    private static object? Decorate<TView>(
+        IServiceProvider services,
+        Func<IServiceProvider, TView, object?>? decorator,
+        TView view) => decorator is null ? view : decorator(services, view);
+
+    /// <summary>输入不合法 → 400，并把字段级明细一起回给前端。</summary>
+    private static IResult Invalid(WorkflowValidationException exception, WorkflowEndpointOptions options) =>
+        Results.BadRequest(options.Error(exception.Message, exception.Errors));
+}

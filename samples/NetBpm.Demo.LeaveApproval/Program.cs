@@ -21,9 +21,8 @@ builder.Services.AddNetBpm(builder.Configuration);
 // 身份模块换成演示实现，否则「按候选人查待办」永远查不到候选组任务
 builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUserGroupManager>());
 
-// 运行期上下文：部署流程定义之后才有值（流程定义 id、环节名 → 环节 id 映射）。
-// 落库实现要用它做「环节名 ↔ 环节 id」换算，所以两种存储都注册，省得按配置分支。
-builder.Services.AddSingleton<LeaveRuntime>();
+// 运行期上下文（流程定义 id、环节名 → 环节 id 映射）由 AddNetBpmWorkflow 一并注册，
+// 部署流程定义之后由 WorkflowProcessBootstrapper 填充（见下方启动部署）。
 
 // 应用层：发起 / 环节信息 / 提交 / 审批历史四件事都由它提供，业务数据端口按类型注册。
 // 两种实现的形状完全一致（都实现 IWorkflowDataStore + ILeaveBusinessInspector），

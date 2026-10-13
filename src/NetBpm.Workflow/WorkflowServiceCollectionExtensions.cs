@@ -31,6 +31,10 @@ public static class WorkflowServiceCollectionExtensions
         services.TryAddSingleton<IWorkflowDataStore>(provider => provider.GetRequiredService<TDataStore>());
         services.TryAddSingleton<IWorkflowService, WorkflowService>();
 
+        // 运行期上下文（流程定义 id + 环节名 → id 映射）：由 WorkflowProcessBootstrapper 在部署后填充。
+        // 业务数据存储落库要用它做「环节名 ↔ 环节 id」换算，所以随应用层一起注册。
+        services.TryAddSingleton<WorkflowRuntimeContext>();
+
         return services;
     }
 
@@ -49,6 +53,7 @@ public static class WorkflowServiceCollectionExtensions
 
         services.TryAddSingleton(storeFactory);
         services.TryAddSingleton<IWorkflowService, WorkflowService>();
+        services.TryAddSingleton<WorkflowRuntimeContext>();
 
         return services;
     }
