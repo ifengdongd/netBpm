@@ -352,20 +352,31 @@ public interface IServiceTaskDelegate
 | 写/改流程变量   | `await execution.SetVariableAsync("x", value, ct)`                          |
 | 当前节点 / 实例 | `execution.CurrentFlowElement as ServiceTask`、`execution.ProcessInstanceId` |
 
-Demo 的 `leave.ApproveComplete` / `leave.RefuseComplete` 就是两个委托，落 JSON 业务数据。
+Demo 的 `leave.ApproveComplete` / `leave.RefuseComplete` 就是两个委托，各只剩一句话
+（落盘那套 —— 读变量、还原 `BaseModel`、取参数快照、写结论 —— 都收进了应用层的 `CompleteAsync`）。
 
 **`delegateExpression` 取值怎么被解析成对象？** 顺序是：
 
 1. 按名字取 keyed 服务：`GetKeyedService<object>("leave.ApproveComplete")`；
 2. 回退到已注册的 `IServiceTaskDelegate`，用**类型全名或短名**匹配。
 
-`leave.ApproveComplete` 不是任何类型的名字，所以**必须按 keyed 注册**（Demo 在 `Program.cs` 里用 `AddKeyedSingleton<object>`）：
+`leave.ApproveComplete` 不是任何类型的名字，所以要让它能被解析。**不要逐个手写 keyed 注册**，
+名字写在类上、由程序集扫描登记即可：
 
 ```csharp
-builder.Services.AddKeyedSingleton<object>(
-    "leave.ApproveComplete",
-    (provider, _) => new ApproveCompleteDelegate(provider.GetRequiredService<LeaveBusinessStore>()));
+[ServiceTaskName("leave.ApproveComplete")]
+public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
+{
+    public ValueTask ExecuteAsync(IDelegateExecution execution, CancellationToken ct = default) =>
+        _workflow.CompleteAsync(execution, WorkflowOutcomes.Approved, ct);
+}
+
+// 组合根只需一行（见 NetBpm.Runtime/ServiceTaskDelegateRegistrationExtensions.cs）
+builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly);
 ```
+
+> 类型全名 / 短名也会被登记成别名，所以 `delegateExpression` 直接写类名同样能解析。
+> 部署期 `ServiceTaskDelegateGuard` 会把「名字写错 / 忘了注册」在启动时拦下来，而不是等流程跑到那儿。
 
 > 同一个委托被两条线汇入是允许的（`task_approve_complete` 有两条入流），引擎不会执行两次 —— 每次只有一条路径能走到它。
 
@@ -660,21 +671,37 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUser
 ### 7.1 怎么接上
 
 ```csharp
-// 业务数据端口按类型注册：Demo 落 JSON 文件，换真库只改这一处
-builder.Services.AddNetBpmWorkflow<LeaveBusinessStore>();
+// 业务数据端口按类型注册：Demo 默认落 JSON 文件，也可以换成真库的 MySQL 实现
+builder.Services.AddNetBpmWorkflow<LeaveBusinessStore>();       // Leave:Store = Json
+builder.Services.AddNetBpmWorkflow<MySqlWorkflowDataStore>();   // Leave:Store = MySql
 ```
 
-`IWorkflowDataStore` 是应用层与宿主之间**唯一的缝**，它要四块数据：
+两种实现形状完全一致（都实现 `IWorkflowDataStore`），所以**换存储只动这一处** ——
+端点、演示页、服务任务委托都不用改。
 
-| 数据 | 装什么 | 什么时候写 |
-| ------------ | ----------------------------------------- | ----------------------------- |
-| 实例登记 | 业务单据本身（`BaseModel` 那 7 个字段） | 发起时写，审批时补 `result` / `comment` |
-| 审批结论 | 流程走完后产生的业务结论 + **参数快照** | 结束那一步写一次 |
-| 流程参数表 | `days` / `city` 这类参数，**按 key 覆盖** | 发起时写，审批中可补 |
-| 审批记录 | 谁在哪个环节提交了什么、流转到哪儿 | 每次提交追加一条 |
+> ⚠️ 引擎与业务数据要**一起切**：内存宿主的流程实例 id 每次启动都从 1 重新开始，
+> 而真库里的 `instances` 是累积的 —— 混用会让新实例把同 id 的旧记录覆盖掉（`Program.cs` 会就此告警）。
+
+`IWorkflowDataStore` 是应用层与宿主之间**唯一的缝**，它要五块数据：
+
+| 数据 | 装什么 | 什么时候写 | Demo 落哪儿 |
+| ------------- | ----------------------------------------- | ----------------------------- | ------------------------ |
+| 实例登记 | 业务单据本身（`BaseModel` 那 7 个字段） | 发起时写，审批时补 `result` / `comment` | `instances` |
+| 审批结论 | 流程走完后产生的业务结论 + **参数快照** | 结束那一步写一次 | `instances.status_id` + 流水合成 |
+| 流程参数表 | `days` / `city` 这类参数，**按 key 覆盖** | 发起时写，审批中可补 | `leave_bill`（真列 + `ext_params`） |
+| 审批记录 | 谁在哪个环节提交了什么、流转到哪儿 | 每次提交追加一条 | `deal_history` |
+| 当前待办 | 流程此刻停在哪个环节、**这一步该谁办** | 每前进一步**整体替换**一次 | `instance_current_task` |
 
 > 流程参数表**不是** `ACT_RU_VARIABLE`。后者是引擎运行期变量，流程一结束就清空；
 > 参数表是业务侧留痕，流程结束后仍要能查到 —— 这也是为什么结论里必须带一份参数快照。
+
+> **「该谁办」分两层，别混**：候选用户 / 候选组是**流程定义里写的**（引擎行数据），
+> `Approvers` 是**解析后的具体人**（任务已指派就是那个人，否则把候选组成员展开）。
+> 展开要查身份模块，只有应用层做得了 —— 所以端口收的是解析结果，存储层拿不到身份信息。
+> 候选组展开**可能是空集**（权限体系不给成员），那表示"审批人未知"，不是错误，照常落库。
+
+「当前待办」为什么是**整体替换**而不是增删：流程每前进一步，上一组待办就作废了，
+让调用方逐条 diff 既啰嗦又容易漏（走到结束时要删干净 —— 那是传空集的情形）。
 
 服务任务委托因此可以只剩一句话（结论由应用层落盘，委托不必知道业务表长什么样）：
 
@@ -689,17 +716,22 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 }
 ```
 
-### 7.2 两处不能调换的顺序
+### 7.2 三处不能调换的顺序
 
 `SubmitAsync` 里的动作顺序是固定的：
 
-**校验 → 写参数表 → 写业务登记 → 完成引擎任务 → 记审批记录 → 回视图**
+**校验 → 写业务登记 → 写参数表 → 完成引擎任务 → 替换当前待办 → 记审批记录 → 回视图**
 
-其中有两处前后关系写反了症状很隐蔽：
+其中有三处前后关系写反了症状很隐蔽：
 
 1. **先落业务数据、再推进流程**。任务提交可能让流程直接走到结束，运行态行随即被删除 ——
    之后再想补写就晚了（`ProcessInstanceId` 在引擎侧已经查不到）。
-2. **参数先于结论落盘**。服务任务写结论时要读参数快照；参数后写，结论里那份就是空的。
+2. **实例登记先于参数表**。业务库里的参数往往是**业务单表的列**（如请假单的 `days`），
+   而业务单要靠登记里的业务键才能定位 —— 反过来的话，第一次落参数时根本不知道该更新哪一行。
+3. **参数先于结论落盘**。服务任务写结论时要读参数快照；参数后写，结论里那份就是空的。
+
+「替换当前待办」和「记审批记录」都放在**推进之后**：只有推进完才知道流程停到了哪儿
+（`NextSteps` 就是那时候查的），而待办为空正好表示"实例已结束"。
 
 ### 7.3 审批历史为什么有两个来源
 
@@ -710,9 +742,20 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | `EngineHistory` | 取自引擎历史表 `ACT_HI_ACTINST`，权威，含自动节点与连线 | 数据库宿主且 `EnableHistory = true` |
 | `BusinessApprovals` | 由**业务审批记录 + 当前待办**合成 | 内存宿主（根本没有 `ACT_HI_*` 表）等场景 |
 
-两条路都会把 `Decision` / `DecisionName` / `Comment` 按 `taskId` 从业务审批记录里关联回来 ——
-**引擎不认识审批意见**，它只知道"谁在哪一步提交过"。合成路径里每个环节的进入时刻取上一环节的结束时刻，
-所以时间线是单调的，前端可以直接照画。
+两条路都会把 `Decision` / `DecisionName` / `Comment` 从业务审批记录里关联回来 ——
+**引擎不认识审批意见**，它只知道"谁在哪一步提交过"。关联方式有两档，按可靠性排序：
+
+1. **按任务 id** —— 最准，但要求宿主的审批记录存了引擎任务 id
+   （JSON 文件那种"想存什么就存什么"的宿主有）；
+2. **按环节名 + 先后顺序认领** —— 兜底。真实业务表常常只记环节名（如 `deal_history.task_node`），
+   这时把引擎历史与审批记录各自按时间排好，同一环节被走过多次（驳回后重提）就第 N 次配第 N 条，
+   用"认领过就不再复用"的贪心配对，而不是 `FirstOrDefault`。
+
+合成路径（`BusinessApprovals`）里每个环节的进入时刻取上一环节的结束时刻，所以时间线是单调的，
+前端可以直接照画。
+
+> ⚠️ 业务表**没有**任务 id 列时，`WorkflowApprovalRecord.TaskId` 是空串 ——
+> 视图消费方不要拿它当主键用。
 
 > 前端不必硬编码任何映射：审批选项与其中文名始终来自流程定义（`activiti:formProperty` 的
 > `activiti:value`），环节序列的中文名也随视图一起下发。改流程不用改前端。
@@ -744,8 +787,13 @@ dotnet run --project samples/NetBpm.Demo.LeaveApproval --urls http://localhost:5
 node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 ```
 
-> 跑之前先删 `samples/NetBpm.Demo.LeaveApproval/data/leave-business.json` ——  
-> 内存宿主每次启动流程实例 id 都从 1 开始，旧记录会被同 id 的新实例覆盖。
+> **可以反复跑**：脚本每轮取一段**新的业务单号**（见脚本里的 `RUN`），断言只认本轮的号，
+> 库里留着上一轮的行不会干扰。
+>
+> ⚠️ 唯一的例外是 `Leave:Store = Json` **且**引擎是内存宿主时：流程实例 id 每次启动都从 1 重新开始，
+> 而 JSON 是持久化的，同 id 的旧审批记录会混进来 —— 那种组合下先删
+> `samples/NetBpm.Demo.LeaveApproval/data/leave-business.json`。默认的 `appsettings.Development.json`
+> 是 MySQL 宿主，不受影响。
 
 ---
 
@@ -761,8 +809,19 @@ node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 | `GET`  | `/api/leave/instances/{id}/history`     | **审批历史**：环节序列（含 `isActive` 标记）+ 审批记录 + 结论                    |
 | `GET`  | `/api/leave/tasks?candidateUser=`       | 按候选人 / 办理人查待办，可加 `processInstanceId`                       |
 | `POST` | `/api/leave/tasks/{taskId}/submit`      | 提交审批：`{"values":{"approvalResult":"2"},"paraDict":{…},"operator":"leader1"}` |
-| `GET`  | `/api/leave/business`                   | 业务数据 JSON（文件路径 + 实例 / 结论 / 参数 / 审批记录四块内容）                    |
+| `GET`  | `/api/leave/business`                   | **业务数据落点 + 内容**：`store` / `location` + 全部业务数据（见下）            |
 | `GET`  | `/api/leave/process-definition`         | 当前生效的流程定义（含 BPMN XML）                                      |
+
+> ⚠️ `businessKey` 是请假单号，**必须是正整数** —— 业务表里 `instances.business_id` /
+> `leave_bill.business_id` 都是 `bigint`，带前缀的字符串（`LV-2026-0001`）落到真表就写不进去。
+> 留空则由 Demo 发一个（真实系统里这是业务单号生成器的活，见 `LeaveBusinessKey`）。
+
+`GET /api/leave/business` 的响应是「落点自述 + 全部业务数据」，`store` 字段告诉调用方看的是哪一套：
+
+| `store` | 快照键 | 说明 |
+| ------- | --------------------------------------------------------- | ----------------------------- |
+| `Json` | `instances` / `results` / `parameters` / `approvals` / `currentTasks` | 五个区块与 JSON 文件的属性一一对应 |
+| `MySql` | `instances` / `instance_current_task` / `deal_history` / `leave_bill` | 四张业务表直接 dump，断言的就是库里的行 |
 
 > `operator` 是「办理人」的显式记账：按候选组审批的任务本身没有 `assignee`，
 > 不带它的话审批历史里就只剩一个 `null`，事后无法回答"这一步到底是谁批的"。
@@ -773,17 +832,25 @@ node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 | ------------------------------------------------------------ | --------------------------------- |
 | `web/designer/examples/leave-process.bpmn20.xml` | **流程定义的唯一来源**（设计器改的就是它） |
 | `src/NetBpm.Workflow/IWorkflowService.cs` | 应用层门面：四项能力的契约与职责边界 |
-| `src/NetBpm.Workflow/WorkflowService.cs` | 四项能力的实现（含 `SubmitAsync` 的固定顺序） |
-| `src/NetBpm.Workflow/Data/IWorkflowDataStore.cs` | 业务数据端口（四块数据）+ 四个记录类型 |
+| `src/NetBpm.Workflow/WorkflowService.cs` | 四项能力的实现（含 `SubmitAsync` 的固定顺序、候选组展开） |
+| `src/NetBpm.Workflow/Data/IWorkflowDataStore.cs` | 业务数据端口（五块数据）+ 五个记录类型 |
 | `src/NetBpm.Workflow/Form/WorkflowFormMapper.cs` | 表单契约下发 + 表单值 → 流程变量映射 |
-| `src/NetBpm.Workflow/Internal/WorkflowHistoryBuilder.cs` | 历史合成（业务审批记录 + 当前待办 → 环节序列） |
+| `src/NetBpm.Workflow/Internal/WorkflowHistoryBuilder.cs` | 历史组装（引擎历史 / 业务审批记录）+ 审批记录认领 |
 | `src/NetBpm.Workflow/Diagnostics/` | 部署期自检：委托可解析性、审批表单约定 |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveBusinessStore.cs` | 业务数据端口的 JSON 实现（Demo 特有） |
+| `src/NetBpm.Identity/IdentityContracts.cs` | 身份模块端口（`FindUserIdsByGroupAsync` 是候选组展开的入口） |
+| `db/mysql/0003_create_process_instance_tables.sql` | 三张业务表（`instances` / `instance_current_task` / `deal_history`）的建表脚本 |
+| `db/mysql/0004_create_leave_bill.sql` | 请假单表（`days` / `reason` 真列 + `ext_params` JSON 列） |
+| `samples/NetBpm.Demo.LeaveApproval/Leave/MySqlWorkflowDataStore.cs` | 业务数据端口的 **MySQL 实现**（四张业务表的映射样版） |
+| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveBusinessStore.cs` | 业务数据端口的 JSON 实现（零依赖、可打开核对） |
+| `samples/NetBpm.Demo.LeaveApproval/Leave/ILeaveBusinessInspector.cs` | 「数据落在哪儿、长什么样」的只读口子（两种实现都实现它） |
+| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveRuntime.cs` | 部署之后才有值的运行时上下文（流程定义 id + 环节名 → 环节 id 映射） |
+| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveBusinessKey.cs` | 业务单号校验与发号（业务表里是 `bigint`） |
 | `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveDelegates.cs` | 两个服务任务委托（只声明结论名） |
 | `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveEndpoints.cs` | HTTP 适配层：绑定请求、摊平 DTO、翻状态码 |
-| `samples/NetBpm.Demo.LeaveApproval/Program.cs` | 组合根：`AddNetBpmWorkflow` + 委托扫描注册 + 身份模块替换 |
+| `samples/NetBpm.Demo.LeaveApproval/Program.cs` | 组合根：`AddNetBpmWorkflow` + 委托扫描注册 + 身份模块替换 + 存储切换 |
+| `samples/NetBpm.Demo.LeaveApproval/appsettings.Development.json` | 本地开发：引擎与业务数据**一起**切到 MySQL（库 `netbpm_demo`） |
 | `samples/NetBpm.Demo.LeaveApproval/wwwroot/index.html` | 演示页（审批历史面板消费 `/history`） |
-| `samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs` | 端到端验证脚本（172 项断言，覆盖四条路径 + 历史） |
+| `samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs` | 端到端验证脚本（207 项断言，覆盖四条路径 + 历史 + 落库核对） |
 
 ### 9.3 相关源码（想深挖时看这里）
 

@@ -779,7 +779,7 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
                apply_time            as ApplyTime,
                workflow_type_id      as WorkflowTypeId,
                workflow_version      as WorkflowVersion,
-               `describe`            as Describe,
+               `describe`            as `Describe`,
                apply_emp_id          as ApplyEmpId,
                apply_dept_id         as ApplyDeptId,
                business_id           as BusinessId,

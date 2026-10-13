@@ -1,10 +1,12 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
+using NetBpm.Identity;
 using NetBpm.Runtime;
 using NetBpm.Workflow;
 
@@ -54,7 +56,8 @@ public sealed class WorkflowServiceTests
                 <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
               </extensionElements>
             </userTask>
-            <userTask id="task_approve" name="组长审批" activiti:candidateGroups="leaders">
+            <userTask id="task_approve" name="组长审批" activiti:candidateGroups="leaders"
+                      activiti:formKey="unit-approve">
               <extensionElements>
                 <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
                   <activiti:value id="1" name="通过" />
@@ -168,6 +171,68 @@ public sealed class WorkflowServiceTests
         var blank = await Assert.ThrowsAsync<WorkflowValidationException>(
             async () => await workflow.StartAsync(ProcessKey, new StartWorkflowRequest("   ")));
         Assert.Contains("applicant", blank.Message, StringComparison.Ordinal);
+    }
+
+    // ───────────────────────── 当前待办（流程到达下一环节时找出审批人）─────────────────────────
+
+    [Fact]
+    public async Task Start_ShouldRegisterCurrentTaskOfTheFirstActivity()
+    {
+        using var provider = BuildProvider(out var store);
+        await DeployAsync(provider);
+
+        var view = await StartAsync(provider, "alice", "BIZ-1", days: 2, reason: "年假");
+
+        // 发起后流程就停在第一个环节上：「停在哪儿、该谁办」要立刻能查到
+        var current = Assert.Single(store.CurrentTasksOf(view.ProcessInstanceId));
+        Assert.Equal("task_apply", current.ActivityId);
+        Assert.Equal("提交申请", current.ActivityName);
+        Assert.Equal(view.Tasks[0].TaskId, current.TaskId);
+        Assert.Equal("alice", current.Approvers.Single());
+    }
+
+    [Fact]
+    public async Task Submit_ShouldReplaceCurrentTasksAndExpandCandidateGroups()
+    {
+        using var provider = BuildProvider(out var store, new TestUserGroupManager());
+        await DeployAsync(provider);
+
+        var workflow = GetWorkflow(provider);
+        var view = await StartAsync(provider, "alice", "BIZ-1", days: 2, reason: "年假");
+
+        view = await SubmitAsync(workflow, view, (LeaveKeys.Days, 2), (LeaveKeys.Reason, "年假"));
+
+        // 上一个环节的待办被<b>整体替换</b>掉：现在只剩组长审批，而不是两条并存
+        var current = Assert.Single(store.CurrentTasksOf(view.ProcessInstanceId));
+        Assert.Equal("task_approve", current.ActivityId);
+        Assert.Equal("unit-approve", current.FormKey);
+
+        // 组长审批挂在候选组上（任务本身没有 assignee）——
+        // 「该找谁办」由应用层借身份模块把候选组展开出来，存储层拿不到身份信息
+        Assert.Equal(["leaders"], current.CandidateGroups);
+        Assert.Equal(["leader1", "leader2"], current.Approvers);
+    }
+
+    [Fact]
+    public async Task Submit_ShouldClearCurrentTasksWhenTheInstanceEnds()
+    {
+        using var provider = BuildProvider(out var store, new TestUserGroupManager());
+        await DeployAsync(provider);
+
+        var workflow = GetWorkflow(provider);
+        var view = await StartAsync(provider, "alice", "BIZ-1", days: 2, reason: "年假");
+        view = await SubmitAsync(workflow, view, (LeaveKeys.Days, 2), (LeaveKeys.Reason, "年假"));
+
+        var task = Assert.Single(view.Tasks);
+        view = await workflow.SubmitAsync(
+            task.TaskId,
+            new SubmitWorkflowTaskRequest(Values: Json(("approvalResult", "1"))))
+            ?? throw new InvalidOperationException("提交后应当返回实例视图。");
+
+        Assert.False(view.Running);
+
+        // 走到结束 ⇒ 待办整体清空（传空集是端口的正常用法，不是异常）
+        Assert.Empty(store.CurrentTasksOf(view.ProcessInstanceId));
     }
 
     // ───────────────────────── 提交流程审批 ─────────────────────────
@@ -524,7 +589,7 @@ public sealed class WorkflowServiceTests
         internal const string Reason = "reason";
     }
 
-    private static ServiceProvider BuildProvider(out FakeWorkflowDataStore store)
+    private static ServiceProvider BuildProvider(out FakeWorkflowDataStore store, IUserGroupManager? users = null)
     {
         var dataStore = new FakeWorkflowDataStore();
         store = dataStore;
@@ -534,6 +599,12 @@ public sealed class WorkflowServiceTests
         // 引擎（内存宿主）+ 假日志（引擎的拦截器要一个 ILogger<T>）
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddNetBpm(options => options.UseInMemoryExecutionTree = true);
+
+        // 身份模块：默认那份是空实现（候选组展开成空集），要测「按组找人」就换成假的
+        if (users is not null)
+        {
+            services.Replace(ServiceDescriptor.Singleton(users));
+        }
 
         // 应用层：数据端口换成内存实现
         services.AddSingleton<IWorkflowDataStore>(dataStore);
@@ -654,6 +725,42 @@ public sealed class WorkflowServiceTests
             _workflow.CompleteAsync(execution, WorkflowOutcomes.Refused, ct);
     }
 
+    /// <summary>
+    /// 身份模块的测试替身：把用户归到组里。
+    /// </summary>
+    /// <remarks>
+    /// 默认真实注册的是 <see cref="EmptyUserGroupManager"/>（组里查不到人），
+    /// 那么「按候选组审批的任务该谁办」永远展开成空集 ——
+    /// 想测这条路径就得给一份有成员的实现。
+    /// </remarks>
+    private sealed class TestUserGroupManager : IUserGroupManager
+    {
+        private static readonly Dictionary<string, string[]> Members = new(StringComparer.Ordinal)
+        {
+            ["leaders"] = ["leader1", "leader2"],
+            ["managers"] = ["manager1"],
+        };
+
+        public ValueTask<IReadOnlyCollection<string>> FindGroupIdsByUserAsync(
+            string userId,
+            CancellationToken ct = default) =>
+            ValueTask.FromResult<IReadOnlyCollection<string>>(
+                [.. Members.Where(pair => pair.Value.Contains(userId, StringComparer.Ordinal)).Select(pair => pair.Key)]);
+
+        public ValueTask<UserGroup?> FindGroupByIdAsync(string groupId, CancellationToken ct = default) =>
+            ValueTask.FromResult(
+                Members.ContainsKey(groupId) ? new UserGroup(groupId, groupId) : null);
+
+        public ValueTask<string?> FindUserIdAsync(string userId, CancellationToken ct = default) =>
+            ValueTask.FromResult<string?>(userId);
+
+        public ValueTask<IReadOnlyCollection<string>> FindUserIdsByGroupAsync(
+            string groupId,
+            CancellationToken ct = default) =>
+            ValueTask.FromResult<IReadOnlyCollection<string>>(
+                Members.TryGetValue(groupId, out var users) ? users : []);
+    }
+
     /// <summary>内存版业务数据端口（Demo 那份落 JSON，这份只放在字典里）。</summary>
     private sealed class FakeWorkflowDataStore : IWorkflowDataStore
     {
@@ -662,8 +769,15 @@ public sealed class WorkflowServiceTests
         private readonly Dictionary<string, Dictionary<string, string?>> _parameters = new(StringComparer.Ordinal);
         private readonly List<WorkflowApprovalRecord> _approvals = [];
 
+        /// <summary>当前待办：实例 × 它此刻的待办全集（没有条目 = 没有待办）。</summary>
+        private readonly Dictionary<string, IReadOnlyList<WorkflowCurrentTaskRecord>> _currentTasks = new(StringComparer.Ordinal);
+
         /// <summary>已写入的审批记录（按提交先后）。</summary>
         internal List<WorkflowApprovalRecord> Approvals => _approvals;
+
+        /// <summary>某实例此刻登记的待办（没有则空表）。</summary>
+        internal IReadOnlyList<WorkflowCurrentTaskRecord> CurrentTasksOf(string processInstanceId) =>
+            _currentTasks.TryGetValue(processInstanceId, out var tasks) ? tasks : [];
 
         public ValueTask<WorkflowInstanceRecord?> FindInstanceAsync(
             string processInstanceId,
@@ -737,6 +851,37 @@ public sealed class WorkflowServiceTests
         public ValueTask SaveApprovalAsync(WorkflowApprovalRecord record, CancellationToken ct = default)
         {
             _approvals.Add(record);
+
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<WorkflowCurrentTaskRecord>> FindCurrentTasksAsync(
+            string processInstanceId,
+            CancellationToken ct = default) =>
+            ValueTask.FromResult<IReadOnlyList<WorkflowCurrentTaskRecord>>(
+                _currentTasks.TryGetValue(processInstanceId, out var tasks) ? tasks : []);
+
+        /// <summary>
+        /// 整体替换 —— 与真实实现同一语义：传空列表就是「实例已结束，没有待办」。
+        /// <para>
+        /// 这里刻意<b>不</b>做成「增删」，因为端口就是这么定的（见
+        /// <see cref="IWorkflowDataStore.ReplaceCurrentTasksAsync"/> 的 remarks）：
+        /// 让调用方逐条 diff 既啰嗦又容易漏。
+        /// </para>
+        /// </summary>
+        public ValueTask ReplaceCurrentTasksAsync(
+            string processInstanceId,
+            IReadOnlyList<WorkflowCurrentTaskRecord> tasks,
+            CancellationToken ct = default)
+        {
+            if (tasks.Count == 0)
+            {
+                _currentTasks.Remove(processInstanceId);
+            }
+            else
+            {
+                _currentTasks[processInstanceId] = tasks;
+            }
 
             return ValueTask.CompletedTask;
         }

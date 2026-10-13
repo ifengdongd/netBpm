@@ -637,10 +637,17 @@ async function run() {
     check('dump 了四张业务表', tables.filter((name) => Array.isArray(inspector.body[name])), tables);
 
     // instances：实例登记（发起时建行，每推进一步刷 current_step / assign_emp）
-    const rows = inspector.body.instances.filter((row) => tracked.includes(String(row.businessId)));
-    check('instances：8 张请假单各一行', rows.length, 8);
-    check('instances：申请人与部门都在表里',
-      rows.every((row) => row.applyEmpId === 'alice' && row.applyDeptId === 'D-SALES'), true);
+    // 「本轮的号」= BIZ 里所有场景单 + 留空自动发的那一张；用号段过滤，
+    // 这样连着跑也不会捡到上一轮的行（库里留着历史数据是正常的）
+    const ours = new Set([...Object.values(BIZ), generated.variables.businessId]);
+    const rows = inspector.body.instances.filter((row) => ours.has(String(row.businessId)));
+
+    check('instances：本轮的 8 张请假单各一行',
+      rows.filter((row) => tracked.includes(String(row.businessId))).length, 8);
+    check('instances：申请人与部门都落进了表里',
+      rows.every((row) => row.applyDeptId === 'D-SALES'
+        // [0] 的探针单是 probe-a 发起的，其余都是 alice
+        && row.applyEmpId === (String(row.businessId) === BIZ.probe ? 'probe-a' : 'alice')), true);
 
     const rowOf = (key) => rows.find((row) => String(row.businessId) === key);
     check('instances：business_id 是数字（bigint 列）', /^\d+$/.test(String(rowOf(BIZ.A)?.businessId)), true);
@@ -658,9 +665,13 @@ async function run() {
 
     // deal_history：每次提交追加一条（驳回后重提不覆盖，历史全留住）
     const deals = inspector.body.deal_history
-      .filter((row) => tracked.includes(String(row.businessId)));
+      .filter((row) => ours.has(String(row.businessId)));
 
-    const dealsOf = (key) => deals.filter((row) => String(row.businessId) === key);
+    const dealsOf = (key) => deals
+      .filter((row) => String(row.businessId) === key)
+      // 快照按 deal_history_id 倒序（方便一眼看到最新一条），
+      // 但断言要说的是「流水先后」—— 这里翻回升序
+      .sort((a, b) => a.dealHistoryId - b.dealHistoryId);
 
     check('deal_history：A（申请 + 组长审批）两条', dealsOf(BIZ.A).length, 2);
     check('deal_history：B（申请 + 组长 + 经理）三条', dealsOf(BIZ.B).length, 3);
@@ -691,7 +702,7 @@ async function run() {
     check('instance_current_task：form_key 与实例一起落', currentOf(BIZ.F)[0]?.formKey, 'leave-approve');
 
     // leave_bill：days / reason 是真列，其余参数进 ext_params
-    const bills = inspector.body.leave_bill.filter((row) => tracked.includes(String(row.businessId)));
+    const bills = inspector.body.leave_bill.filter((row) => ours.has(String(row.businessId)));
     const billOf = (key) => bills.find((row) => String(row.businessId) === key);
 
     check('leave_bill：days / reason 落成真列',
@@ -706,6 +717,10 @@ async function run() {
       ['result', 'comment'].filter((name) => name in JSON.parse(billOf(BIZ.A)?.extParams ?? '{}')), []);
 
     // ── 宿主差异：MySQL 业务表没有的那两列 ──
+    check('MySQL 宿主：deal_history 没有任务 id 列 ⇒ 审批记录的 taskId 是空串',
+      hA.approvals.map((a) => a.taskId), ['', '']);
+    check('MySQL 宿主：即便如此，环节序列照样认领得回审批记录（按环节名 + 先后顺序）',
+      [userSteps(hA)[1].decision, userSteps(hA)[1].comment], ['1', '同意，注意交接']);
     check('MySQL 宿主：deal_history 没有表单快照列 ⇒ values 只还原得出 result / comment',
       hA.approvals[0].values, {});
     check('MySQL 宿主：环节序列来自引擎历史（ACT_HI_ACTINST）', hA.stepsSource, 'EngineHistory');
