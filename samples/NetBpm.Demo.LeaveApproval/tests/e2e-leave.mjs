@@ -618,8 +618,8 @@ async function run() {
     page.body.includes("+ '/history'"), true);
   check('页面消费后端下发的环节来源与下一步',
     [page.body.includes('stepsSource'), page.body.includes('nextSteps')], [true, true]);
-  check('打开实例、发起、提交三处都会刷新历史',
-    (page.body.match(/await loadHistory\(/g) ?? []).length, 3);
+  check('打开实例、发起、提交、实例管理四处都会刷新历史',
+    (page.body.match(/await loadHistory\(/g) ?? []).length, 4);
 
   // ───────────────────────── 11. 落库核对（按落点分支）─────────────────────────
 
@@ -773,6 +773,63 @@ async function run() {
   check('事件监听器 TASK_COMPLETED +2（申请 + 组长各提交一次）', deltaOf('taskCompleted'), 2);
   check('未订阅的事件不通知（TASK_CREATED 不在 events 清单）', deltaOf('taskCreated'), 0);
   check('实例正常结束（监听器没有干扰流转）', viewL.running, false);
+
+  // ───────────────────────── 13. 改派（转办）─────────────────────────
+
+  console.log('\n[13] 改派：待办办理人直接换人，业务侧当前审批人同步刷新');
+
+  let viewR = await start('alice', String(RUN + 16), { paraDict: { days: 2, reason: '改派验证' } });
+  viewR = await submit(viewR, 'task_apply', { days: 2, reason: '改派验证' });
+  const leaderTaskR = taskOf(viewR, "task_leader_approve");
+
+  const reassignResp = await post(
+    `/api/leave/tasks/${leaderTaskR.taskId}/assignee`,
+    { userId: 'manager1', reason: '组长休假，转办给经理' });
+  check('改派返回 200（返回实例视图）', reassignResp.status, 200);
+
+  const asManager = await get('/api/leave/tasks?assignee=manager1');
+  check('manager1 按 assignee 查到改派来的待办',
+    asManager.body.some((t) => t.processInstanceId === viewR.processInstanceId), true);
+
+  const summaryR = (await get("/api/leave/instances")).body.find((i) => i.businessKey === String(RUN + 16));
+  check('列表的当前审批人已更新为 manager1', summaryR.approvers, ['manager1']);
+  check('列表带当前环节名', summaryR.currentStep, '组长审批');
+
+  viewR = await submit(viewR, 'task_leader_approve', { approvalResult: '1' }, undefined, { operator: 'manager1' });
+  check('改派后 manager1 能提交（days=2 直接通过）', viewR.running, false);
+
+  // ───────────────────────── 14. 流程跳转 ─────────────────────────
+
+  console.log('\n[14] 跳转：经理审批中跳回组长 / 跳到结束事件强制办结');
+
+  let viewJ = await startAndApply('alice', 5, '跳转验证', String(RUN + 17));
+  // days=5 仍先经过组长（组长必经），通过后才到经理
+  viewJ = await submit(viewJ, 'task_leader_approve', { approvalResult: '1' });
+  check('已停在经理审批', stops(viewJ), ['task_manager_approve']);
+
+  const jumpBack = await post(
+    `/api/leave/instances/${viewJ.processInstanceId}/jump`,
+    { targetActivityId: 'task_leader_approve', reason: '经理外出，回退重审' });
+  check('跳转返回 200', jumpBack.status, 200);
+  check('跳转后停在组长审批', stops(jumpBack.body), ['task_leader_approve']);
+  check('跳转保留流程变量（days=5）', Number(jumpBack.body.variables.days), 5);
+
+  const bizJ = await get(`/api/leave/instances/${viewJ.processInstanceId}`);
+  check('业务侧当前待办已切换到组长环节', bizJ.body.tasks.map((t) => t.definitionKey), ['task_leader_approve']);
+
+  const rowJ = (await get("/api/leave/instances")).body.find((i) => i.businessKey === String(RUN + 17));
+  check('列表显示当前环节 = 组长审批', rowJ.currentStep, '组长审批');
+
+  const jumpEnd = await post(
+    `/api/leave/instances/${viewJ.processInstanceId}/jump`,
+    { targetActivityId: 'end_refused', reason: '申请人撤单，强制办结' });
+  check('跳到结束事件返回 200', jumpEnd.status, 200);
+  check('实例已办结', jumpEnd.body.running, false);
+  check('业务侧没有残留待办', (jumpEnd.body.tasks ?? []).length, 0);
+  check('跳转办结落了业务结论（Closed，与审批结论分开取值）', jumpEnd.body.result?.outcome, 'Closed');
+
+  const rowEnd = (await get("/api/leave/instances")).body.find((i) => i.businessKey === String(RUN + 17));
+  check('列表不再显示该实例为进行中', rowEnd.status, 'Closed');
 // ───────────────────────── 汇总 ─────────────────────────
 
   console.log(`\n${'─'.repeat(64)}`);

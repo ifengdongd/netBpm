@@ -16,6 +16,12 @@ public static class WorkflowOutcomes
     /// <summary>流程被拒绝（终态）。</summary>
     public const string Refused = "Refused";
 
+    /// <summary>
+    /// 流程跳转强制办结（<see cref="IWorkflowService.JumpToNodeAsync"/> 跳到结束事件、
+    /// 没有经过服务任务时由应用层补记的结论 —— 业务上「人工干预办结」与审批结论分开）。
+    /// </summary>
+    public const string Closed = "Closed";
+
     /// <summary>实例尚未结束时的状态字样（仅用于列表展示，不是结论）。</summary>
     public const string Running = "Running";
 }

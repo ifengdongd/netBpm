@@ -78,4 +78,22 @@ public interface IProcessEngine
 
     /// <summary>认领 / 取消认领任务（P7）。<paramref name="userId"/> 为 <see langword="null"/> 即取消认领。</summary>
     ValueTask ClaimTaskAsync(string taskId, string? userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 改派任务（转办）：把待办的办理人直接改为指定用户（管理动作，不校验是否已被认领）。
+    /// <paramref name="assignee"/> 为 <see langword="null"/> 表示退回未分配。
+    /// </summary>
+    ValueTask SetAssigneeAsync(string taskId, string? assignee, CancellationToken ct = default);
+
+    /// <summary>
+    /// 流程实例跳转：把运行中的实例从当前等待节点搬到指定节点并继续推进（到下一个等待点）。
+    /// </summary>
+    /// <param name="processInstanceId">流程实例 id。</param>
+    /// <param name="targetActivityId">目标节点 id（节点 / 网关 / 结束事件）。</param>
+    /// <param name="reason">跳转原因（写进被删任务与活动的历史）。</param>
+    ValueTask MoveActivityToAsync(
+        string processInstanceId,
+        string targetActivityId,
+        string? reason = null,
+        CancellationToken ct = default);
 }

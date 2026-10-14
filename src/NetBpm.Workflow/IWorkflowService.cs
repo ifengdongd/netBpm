@@ -1,4 +1,4 @@
-using NetBpm.Engine.Execution;
+﻿using NetBpm.Engine.Execution;
 using NetBpm.Runtime;
 
 namespace NetBpm.Workflow;
@@ -91,6 +91,45 @@ public interface IWorkflowService
     /// <param name="ct">取消标记。</param>
     ValueTask<IReadOnlyList<WorkflowInstanceSummary>> FindInstancesAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// <b>改派待办</b>（转办）：把当前环节的审批人直接改为指定用户（管理动作）。
+    /// </summary>
+    /// <remarks>不产生审批记录 —— 转办不是审批结论；受影响的只有当前待办的审批人与业务侧登记。</remarks>
+    /// <param name="taskId">待办任务 id。</param>
+    /// <param name="userId">新审批人（域账号 / 用户 id）；<see langword="null"/> 表示退回未分配（候选人/组重新可见）。</param>
+    /// <param name="reason">改派原因（审计用，随任务历史记录）。</param>
+    /// <param name="ct">取消标记。</param>
+    /// <returns>改派后的实例视图（当前待办的审批人已更新）。</returns>
+    /// <exception cref="WorkflowNotFoundException">任务不存在（可能已完成）。</exception>
+    /// <exception cref="WorkflowValidationException">任务不属于任何流程实例。</exception>
+    ValueTask<WorkflowInstanceView?> ReassignTaskAsync(
+        string taskId,
+        string? userId,
+        string? reason = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// <b>流程跳转</b>：把未结束的实例从当前环节搬到指定环节并继续推进（到下一个等待点）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 用于纠错与流程干预：审批人误操作、环节卡死需要回退/前跳。目标可以是任意节点、网关或结束事件
+    /// （跳到结束事件即强制办结）。变量随执行保留；被跳过环节的待办按「跳转原因」从引擎与历史中收口。
+    /// </para>
+    /// <para>不产生审批记录 —— 跳转是管理动作；实例必须只停在一处等待（并行分支拒绝）。</para>
+    /// </remarks>
+    /// <param name="processInstanceId">流程实例 id。</param>
+    /// <param name="targetActivityId">目标节点 id（如 <c>task_manager_approve</c> / <c>endEvent_1</c>）。</param>
+    /// <param name="reason">跳转原因（审计用）。</param>
+    /// <param name="ct">取消标记。</param>
+    /// <returns>跳转后的实例视图（停在目标环节的下一个等待点；跳到结束则实例已办结）。</returns>
+    /// <exception cref="WorkflowNotFoundException">实例未登记。</exception>
+    /// <exception cref="Engine.Engine.EngineException">实例已结束、目标节点不存在、并行分支等待、已停在目标节点。</exception>
+    ValueTask<WorkflowInstanceView?> JumpToNodeAsync(
+        string processInstanceId,
+        string targetActivityId,
+        string? reason = null,
+        CancellationToken ct = default);
     /// <summary>
     /// 流程结束时的业务回调：把「走到了这个服务任务」翻译成一条业务结论落盘。
     /// </summary>

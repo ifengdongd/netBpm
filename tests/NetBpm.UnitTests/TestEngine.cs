@@ -24,13 +24,15 @@ internal sealed class TestEngine
         IEngineServices services,
         InMemoryExecutionManager executionManager,
         InMemoryTaskManager taskManager,
-        TestDelegateResolver delegateResolver)
+        TestDelegateResolver delegateResolver,
+        TestDefinitionResolver definitionResolver)
     {
         CommandExecutor = commandExecutor;
         Services = services;
         ExecutionManager = executionManager;
         TaskManager = taskManager;
         DelegateResolver = delegateResolver;
+        Resolver = definitionResolver;
     }
 
     public ICommandExecutor CommandExecutor { get; }
@@ -42,6 +44,8 @@ internal sealed class TestEngine
     public InMemoryTaskManager TaskManager { get; }
 
     public TestDelegateResolver DelegateResolver { get; }
+
+    public TestDefinitionResolver Resolver { get; }
 
     /// <summary>已执行的服务任务名，按执行顺序记录。</summary>
     public IReadOnlyList<string> ExecutedDelegates => DelegateResolver.Executed;
@@ -56,6 +60,7 @@ internal sealed class TestEngine
         var taskManager = new InMemoryTaskManager(idGenerator, history);
         var executionManager = new InMemoryExecutionManager(idGenerator, taskManager, history);
         var delegateResolver = new TestDelegateResolver();
+        var definitionResolver = new TestDefinitionResolver();
         var behaviorFactory = new ActivityBehaviorFactory(() => holder!);
 
         var services = EngineServices.Create(
@@ -65,7 +70,8 @@ internal sealed class TestEngine
             idGenerator,
             behaviorFactory,
             delegateResolver,
-            taskManager);
+            taskManager,
+            definitionResolver);
 
         holder = services;
 
@@ -73,7 +79,7 @@ internal sealed class TestEngine
             [new TransactionInterceptor(), new CommandContextInterceptor()],
             () => new CommandContext(services));
 
-        return new TestEngine(executor, services, executionManager, taskManager, delegateResolver);
+        return new TestEngine(executor, services, executionManager, taskManager, delegateResolver, definitionResolver);
     }
 
     /// <summary>解析 XML → 启动流程实例 → 排空议程。</summary>
@@ -82,6 +88,7 @@ internal sealed class TestEngine
         var model = new BpmnXmlConverter().ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(bpmnXml)));
         var process = model.GetMainProcess()!;
 
+        Resolver.Register("test:1:1", process);
         var command = new StartProcessInstanceCommand(process, "test:1:1", "biz-key", "tester", variables);
         return await CommandExecutor.ExecuteAsync(command).ConfigureAwait(false);
     }
@@ -93,6 +100,14 @@ internal sealed class TestEngine
     /// <summary>认领 / 取消认领任务。</summary>
     public async ValueTask ClaimTaskAsync(string taskId, string? userId) =>
         await CommandExecutor.ExecuteAsync(new ClaimTaskCommand(taskId, userId)).ConfigureAwait(false);
+
+    /// <summary>改派任务（转办）。</summary>
+    public async ValueTask SetAssigneeAsync(string taskId, string? assignee) =>
+        await CommandExecutor.ExecuteAsync(new SetAssigneeCommand(taskId, assignee)).ConfigureAwait(false);
+
+    /// <summary>流程实例跳转。</summary>
+    public async ValueTask MoveActivityToAsync(string processInstanceId, string targetActivityId, string? reason = null) =>
+        await CommandExecutor.ExecuteAsync(new MoveActivityCommand(processInstanceId, targetActivityId, reason)).ConfigureAwait(false);
 
     /// <summary>构建一个带指定服务的流程 XML（start → 顺序流 → end）。</summary>
     public static string SequentialProcess(string delegateName) => $$"""

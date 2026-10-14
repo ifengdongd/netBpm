@@ -198,6 +198,18 @@
     </div>
 
     <div class="panel">
+      <h2>实例管理（当前审批人 · 改派 · 跳转）</h2>
+      <p class="muted" style="margin:0 0 10px">只列进行中的实例。改派 = 把当前环节的审批人换成别人；跳转 = 把流程搬到指定环节继续（跳到结束事件即强制办结）。两个动作都会留下审计痕迹。</p>
+      <div class="empty" id="manageEmpty">还没有进行中的流程实例。</div>
+      <div id="manageBody" style="display:none;overflow-x:auto">
+        <table>
+          <thead><tr><th>单号</th><th>申请人</th><th>当前环节</th><th>当前审批人</th><th>改派为</th><th>跳转到</th></tr></thead>
+          <tbody id="manageTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
       <h2>业务数据（落点与内容）</h2>
       <div class="row" style="margin-bottom:8px">
         <button class="ghost" id="btnBusiness">刷新业务数据</button>
@@ -294,6 +306,73 @@ async function loadInstances() {
   list.querySelectorAll('li[data-id]').forEach((node) => {
     node.onclick = () => openInstance(node.dataset.id);
   });
+
+  await loadManage();
+}
+
+// ─── 实例管理：当前审批人 / 改派 / 跳转 ───
+const JUMP_TARGETS = [
+  { id: 'task_apply', label: '回到：提交请假申请' },
+  { id: 'task_leader_approve', label: '组长审批' },
+  { id: 'task_apply_modify', label: '申请人修改' },
+  { id: 'task_manager_approve', label: '经理审批' },
+  { id: 'end_approved', label: '结束事件：审批通过' },
+  { id: 'end_refused', label: '结束事件：审批拒绝' },
+];
+
+async function loadManage() {
+  const items = await api('/api/leave/instances');
+  const running = items.filter((item) => item.status === 'Running');
+  $('manageEmpty').style.display = running.length ? 'none' : '';
+  $('manageBody').style.display = running.length ? '' : 'none';
+  $('manageTbody').innerHTML = running.map((item) => `
+    <tr data-id="${item.processInstanceId}" data-task-id="${item.taskId ?? ""}">
+      <td>${escapeHtml(item.businessKey ?? item.processInstanceId)}</td>
+      <td>${escapeHtml(item.applicantName; item.applicant)}</td>
+      <td>${escapeHtml(item.currentStep; —)}</td>
+      <td>${escapeHtml((item.approvers; []).join(、); —)}</td>
+      <td>
+        <select class="reassign-select">${['leader1', 'leader2', 'manager1', 'bob', 'alice'].map((u) => `<option value="${u}">${u}</option>`).join('')}</select>
+        <button class="ghost btn-reassign">改派</button>
+      </td>
+      <td>
+        <select class="jump-select">${JUMP_TARGETS.map((t) => `<option value="${t.id}">${t.label}</option>`).join('')}</select>
+        <button class="ghost btn-jump">跳转</button>
+      </td>
+    </tr>`).join("");
+
+  $('manageTbody').querySelectorAll('tr').forEach((row) => {
+    const id = row.dataset.id;
+    row.querySelector('.btn-reassign').onclick = async () => {
+      const userId = row.querySelector('.reassign-select').value;
+      try {
+        await api(`/api/leave/tasks/${row.dataset.taskId || row.getAttribute('data-task-id')}/assignee`, { method: 'POST', body: JSON.stringify({ userId, reason: '管理页改派' }) });
+        toast('已改派为 ' + userId);
+        await refreshAll(id);
+      } catch (error) { toast(error.message); }
+    };
+    row.querySelector('.btn-jump').onclick = async () => {
+      const targetActivityId = row.querySelector('.jump-select').value;
+      try {
+        await api(`/api/leave/instances/${id}/jump`, { method: 'POST', body: JSON.stringify({ targetActivityId, reason: '管理页跳转' }) });
+        toast('已跳转到 ' + targetActivityId);
+        await refreshAll(id);
+      } catch (error) { toast(error.message); }
+    };
+  });
+}
+
+async function refreshAll(instanceId) {
+  await loadInstances();
+  await loadManage();
+  await loadBusiness();
+  if (instanceId) {
+    try {
+      const view = await api(`/api/leave/instances/${instanceId}`);
+      renderInstance(view);
+      await loadHistory(instanceId);
+    } catch { /* 实例可能已结束，视图仍在 */ }
+  }
 }
 
 async function startInstance() {

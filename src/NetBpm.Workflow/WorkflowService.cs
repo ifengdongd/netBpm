@@ -1,4 +1,4 @@
-using NetBpm.Bpmn.Model;
+﻿using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
@@ -310,6 +310,78 @@ public sealed class WorkflowService : IWorkflowService
         return summaries;
     }
 
+    /// <inheritdoc />
+    public async ValueTask<WorkflowInstanceView?> ReassignTaskAsync(
+        string taskId,
+        string? userId,
+        string? reason = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+
+        var task = await _taskManager.FindTaskByIdAsync(taskId, ct).ConfigureAwait(false)
+            ?? throw new WorkflowNotFoundException($"待办任务 '{taskId}' 不存在（可能已完成）。");
+
+        var processInstanceId = task.ProcessInstanceId
+            ?? throw new WorkflowValidationException($"待办任务 '{taskId}' 不属于任何流程实例。");
+
+        await _engine.SetAssigneeAsync(taskId, userId, ct).ConfigureAwait(false);
+
+        // 审批人变了：当前待办（含展开后的 approvers）必须重新登记
+        await ReplaceCurrentTasksAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        return await _instanceViews.BuildAsync(processInstanceId, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<WorkflowInstanceView?> JumpToNodeAsync(
+        string processInstanceId,
+        string targetActivityId,
+        string? reason = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetActivityId);
+
+        // 业务口径的 404：实例必须登记过（引擎侧的「不存在/已结束」等校验在跳转命令里）
+        if (await _store.FindInstanceAsync(processInstanceId, ct).ConfigureAwait(false) is null)
+        {
+            throw new WorkflowNotFoundException($"流程实例 '{processInstanceId}' 未登记，无法跳转。");
+        }
+
+        await _engine.MoveActivityToAsync(processInstanceId, targetActivityId, reason, ct)
+            .ConfigureAwait(false);
+
+        // 跳转可能直接把实例送到结束 —— 当前待办随之清空
+        await ReplaceCurrentTasksAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        var view = await _instanceViews.BuildAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        // 跳到结束事件时不会经过服务任务 ⇒ 业务侧没有结论，列表会把这个已结束的
+        // 实例永远显示成进行中 —— 应用层补记「人工干预办结」，与审批结论分开取值。
+        var existingResult = await _store.FindResultAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        if (view is { Running: false } && existingResult is null)
+        {
+            var record = await _store.FindInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+
+            await _store.SaveResultAsync(
+                new WorkflowOutcomeRecord(
+                    ProcessInstanceId: processInstanceId,
+                    Base: record!.Base,
+                    Outcome: WorkflowOutcomes.Closed,
+                    ActivityId: targetActivityId,
+                    ActivityName: reason ?? "流程跳转办结",
+                    CompletedAt: DateTime.UtcNow,
+                    Parameters: await _store.FindParametersAsync(processInstanceId, ct)
+                        .ConfigureAwait(false)),
+                ct).ConfigureAwait(false);
+
+            view = await _instanceViews.BuildAsync(processInstanceId, ct).ConfigureAwait(false);
+        }
+
+        return view;
+    }
     /// <inheritdoc />
     public async ValueTask CompleteAsync(
         IDelegateExecution execution,

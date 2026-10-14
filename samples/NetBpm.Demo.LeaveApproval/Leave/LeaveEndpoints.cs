@@ -49,8 +49,7 @@ public static class LeaveEndpoints
             DecorateInstanceView = (_, view) => ValueTask.FromResult<object?>(ToInstanceView(view)),
 
             // 列表行带上人话：发起人姓名 / 部门名从组织架构联查（查不到留空，不影响列表）
-            DecorateInstanceSummary = (services, summary) =>
-                ToInstanceSummaryAsync(services.GetRequiredService<IOrgDirectory>(), summary),
+            DecorateInstanceSummary = (sp, summary) => ToInstanceSummaryAsync(sp, sp.GetRequiredService<IOrgDirectory>(), summary),
 
             ErrorResponseFactory = (message, errors) => new LeaveErrorResponse(message, errors),
         });
@@ -143,6 +142,7 @@ public static class LeaveEndpoints
 
     /// <summary>应用层摘要 → Demo 的列表行：天数 / 事由从参数里取，姓名 / 部门从组织架构里查。</summary>
     private static async ValueTask<object?> ToInstanceSummaryAsync(
+        IServiceProvider services,
         IOrgDirectory directory,
         WorkflowInstanceSummary summary)
     {
@@ -156,6 +156,15 @@ public static class LeaveEndpoints
             ? departments.FirstOrDefault(department => department.DeptId == deptId)?.Name
             : null;
 
+        // 当前环节与审批人来自「当前待办」登记（候选组已展开的具体的人）
+        var store = services.GetRequiredService<IWorkflowDataStore>();
+        var currentTasks = await store.FindCurrentTasksAsync(summary.ProcessInstanceId)
+            .ConfigureAwait(false);
+        var approvers = currentTasks
+            .SelectMany(task => task.Approvers)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
         return new InstanceSummary(
             ProcessInstanceId: summary.ProcessInstanceId,
             BusinessKey: summary.Base.BusinessId,
@@ -166,6 +175,9 @@ public static class LeaveEndpoints
             StartedAt: summary.StartedAt,
             Status: summary.Status,
             Outcome: summary.Result?.ActivityName,
-            DeptName: deptName);
+            DeptName: deptName,
+            CurrentStep: currentTasks.Count > 0 ? currentTasks[0].ActivityName : null,
+            Approvers: approvers,
+            TaskId: currentTasks.Count > 0 ? currentTasks[0].TaskId : null);
     }
 }

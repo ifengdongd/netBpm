@@ -187,6 +187,31 @@ public sealed class ProcessEngine : IProcessEngine
     }
 
     /// <inheritdoc />
+    public async ValueTask SetAssigneeAsync(string taskId, string? assignee, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+
+        await _commandExecutor
+            .ExecuteAsync(new SetAssigneeCommand(taskId, assignee), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask MoveActivityToAsync(
+        string processInstanceId,
+        string targetActivityId,
+        string? reason = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetActivityId);
+
+        await _commandExecutor
+            .ExecuteAsync(new MoveActivityCommand(processInstanceId, targetActivityId, reason), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IReadOnlyDictionary<string, object?>> GetVariablesAsync(
         string processInstanceId,
         CancellationToken ct = default)

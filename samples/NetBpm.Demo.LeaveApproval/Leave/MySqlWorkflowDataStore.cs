@@ -283,6 +283,38 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
         await SaveParameterColumnsAsync(connection, transaction, record.ProcessInstanceId, record.Parameters, ct)
             .ConfigureAwait(false);
 
+        // 跳转办结没有经过任何审批环节 ⇒ deal_history 里没有承载结论的流水；
+        // 补一条「跳转办结」流水，让 FindResultAsync（按最后一条带结果流水还原）能读回 Closed。
+        if (string.Equals(record.Outcome, WorkflowOutcomes.Closed, StringComparison.Ordinal))
+        {
+            // 实例行要在事务里再读一次：deal_history 的 business_id / apply_id 都从这里来
+            var row = await QueryInstanceAsync(connection, transaction, record.ProcessInstanceId, ct)
+                .ConfigureAwait(false);
+
+            if (row is not null)
+            {
+                await connection.ExecuteAsync(new CommandDefinition(
+                    InsertDealHistorySql,
+                    new
+                    {
+                        TenantId = _tenantId,
+                        DealHistoryId = NextId(),
+                        BusinessId = row.BusinessId,
+                        ApplyId = row.ApplyId,
+                        TaskNode = record.ActivityName,
+                        DealEmpId = record.Base.ApplyUser,
+                        DealTime = record.CompletedAt,
+                        DealResult = WorkflowOutcomes.Closed,
+                        DealComment = record.ActivityName,
+                        FormKey = (string?)null,
+                        DealEmpName = (string?)null,
+                        DealDomainAccount = record.Base.ApplyUser,
+                    },
+                    transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+            }
+        }
+
         await transaction.CommitAsync(ct).ConfigureAwait(false);
     }
 
@@ -1024,9 +1056,13 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
     /// 而能让流程走到结束的只有两个服务任务：审批通过、拒绝结束。
     /// </remarks>
     private static string OutcomeOf(string? lastDecision) =>
-        ApprovalResults.TryParseOptionId(lastDecision) == ApprovalResult.Refused
-            ? WorkflowOutcomes.Refused
-            : WorkflowOutcomes.Approved;
+        // 「Closed」是流程跳转强制办结的结论（deal_history 里那条流水的 deal_result），
+        // 不能落进审批取值域 —— 先于审批结果判定。
+        string.Equals(lastDecision, WorkflowOutcomes.Closed, StringComparison.Ordinal)
+            ? WorkflowOutcomes.Closed
+            : ApprovalResults.TryParseOptionId(lastDecision) == ApprovalResult.Refused
+                ? WorkflowOutcomes.Refused
+                : WorkflowOutcomes.Approved;
 
     /// <summary><c>leave_bill.days</c> 是 <c>smallint</c>，越界或非数字都不写（免得把已有值弄坏）。</summary>
     private bool TryParseDays(string? value, out short days)

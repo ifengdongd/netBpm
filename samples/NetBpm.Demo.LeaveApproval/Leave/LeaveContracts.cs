@@ -39,6 +39,9 @@ public sealed record InstanceView(
 /// <param name="Status">Running / Approved / Refused。</param>
 /// <param name="Outcome">结论文本（如「审批通过」）。</param>
 /// <param name="DeptName">申请部门名称（按 applyDeptId 查组织架构；查不到为空）。</param>
+/// <param name="CurrentStep">当前环节名（进行中才有）。</param>
+/// <param name="Approvers">当前审批人（候选组已展开；进行中才有，来自当前待办登记）。</param>
+/// <param name="TaskId">首个当前待办的任务 id（管理动作「改派」的入参；进行中才有）。</param>
 public sealed record InstanceSummary(
     string ProcessInstanceId,
     string? BusinessKey,
@@ -49,7 +52,10 @@ public sealed record InstanceSummary(
     DateTime? StartedAt,
     string Status,
     string? Outcome,
-    string? DeptName);
+    string? DeptName,
+    string? CurrentStep,
+    IReadOnlyList<string> Approvers,
+    string? TaskId);
 
 /// <summary>
 /// 业务数据：审批结论。由服务任务 <c>leave.ApproveComplete</c> / <c>leave.RefuseComplete</c> 写入。
