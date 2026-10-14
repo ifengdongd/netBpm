@@ -203,9 +203,10 @@
       <div class="empty" id="manageEmpty">还没有进行中的流程实例。</div>
       <div id="manageBody" style="display:none;overflow-x:auto">
         <table>
-          <thead><tr><th>单号</th><th>申请人</th><th>当前环节</th><th>当前审批人</th><th>改派为</th><th>跳转到</th></tr></thead>
+          <thead><tr><th>流程类型</th><th>申请时间</th><th>流程内容</th><th>流程步骤</th><th>当前审批人</th><th>操作</th></tr></thead>
           <tbody id="manageTbody"></tbody>
         </table>
+        <p class="muted" style="margin:8px 0 0">转移 = 把当前环节的审批人换成别人；步骤跳转 = 把流程搬到指定环节继续（选结束事件即强制办结）。两个动作都会留下审计痕迹。</p>
       </div>
     </div>
 
@@ -243,6 +244,22 @@
 
 <div class="toast" id="toast"></div>
 
+<div id="modalMask" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:50"></div>
+<div id="modal" style="display:none;position:fixed;left:50%;top:22%;transform:translateX(-50%);z-index:51;background:var(--panel);border:1px solid var(--border);border-radius:8px;min-width:440px;max-width:600px;box-shadow:0 12px 32px rgba(0,0,0,.18)">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#e8703a;color:#fff;border-radius:8px 8px 0 0">
+    <b id="modalTitle">操作</b>
+    <button class="ghost" id="modalClose" style="border-color:transparent;color:#fff">✕</button>
+  </div>
+  <div style="padding:14px">
+    <p class="muted" id="modalWarn" style="margin:0 0 10px;color:#c0392b"></p>
+    <label class="muted" id="modalFieldLabel" style="display:block;margin-bottom:4px"></label>
+    <select id="modalSelect" style="width:100%"></select>
+    <div style="margin-top:14px;text-align:right">
+      <button class="ghost" id="modalCancel">取消</button>
+      <button id="modalOk">确认</button>
+    </div>
+  </div>
+</div>
 <script>
 let currentInstanceId = null;
 
@@ -310,56 +327,75 @@ async function loadInstances() {
   await loadManage();
 }
 
-// ─── 实例管理：当前审批人 / 改派 / 跳转 ───
-const JUMP_TARGETS = [
-  { id: 'task_apply', label: '回到：提交请假申请' },
-  { id: 'task_leader_approve', label: '组长审批' },
-  { id: 'task_apply_modify', label: '申请人修改' },
-  { id: 'task_manager_approve', label: '经理审批' },
-  { id: 'end_approved', label: '结束事件：审批通过' },
-  { id: 'end_refused', label: '结束事件：审批拒绝' },
-];
+// ─── 实例管理：当前审批人 / 转移 / 步骤跳转 ───
+let manageRows = [];
 
 async function loadManage() {
   const items = await api('/api/leave/instances');
-  const running = items.filter((item) => item.status === 'Running');
-  $('manageEmpty').style.display = running.length ? 'none' : '';
-  $('manageBody').style.display = running.length ? '' : 'none';
-  $('manageTbody').innerHTML = running.map((item) => `
-    <tr data-id="${item.processInstanceId}" data-task-id="${item.taskId ?? ""}">
-      <td>${escapeHtml(item.businessKey ?? item.processInstanceId)}</td>
-      <td>${escapeHtml(item.applicantName; item.applicant)}</td>
-      <td>${escapeHtml(item.currentStep; —)}</td>
-      <td>${escapeHtml((item.approvers; []).join(、); —)}</td>
+  manageRows = items.filter((item) => item.status === 'Running');
+  $('manageEmpty').style.display = manageRows.length ? 'none' : '';
+  $('manageBody').style.display = manageRows.length ? '' : 'none';
+  $('manageTbody').innerHTML = manageRows.map((item) => `
+    <tr data-id="${item.processInstanceId}">
+      <td>请假审批</td>
+      <td>${fmtTime(item.startedAt)}</td>
+      <td><b>[${escapeHtml(item.businessKey ?? item.processInstanceId)}]</b> ${escapeHtml(item.applicantName; item.applicant)} 请假 ${item.days ?? "?"} 天</td>
+      <td>${escapeHtml(item.currentStep || '—')}</td>
+      <td>${escapeHtml((item.approverNames || item.approvers || []).join('、') || '—')}</td>
       <td>
-        <select class="reassign-select">${['leader1', 'leader2', 'manager1', 'bob', 'alice'].map((u) => `<option value="${u}">${u}</option>`).join('')}</select>
-        <button class="ghost btn-reassign">改派</button>
-      </td>
-      <td>
-        <select class="jump-select">${JUMP_TARGETS.map((t) => `<option value="${t.id}">${t.label}</option>`).join('')}</select>
-        <button class="ghost btn-jump">跳转</button>
+        <button class="ghost btn-reassign">转移</button>
+        <button class="ghost btn-jump">步骤跳转</button>
       </td>
     </tr>`).join("");
 
   $('manageTbody').querySelectorAll('tr').forEach((row) => {
     const id = row.dataset.id;
-    row.querySelector('.btn-reassign').onclick = async () => {
-      const userId = row.querySelector('.reassign-select').value;
-      try {
-        await api(`/api/leave/tasks/${row.dataset.taskId || row.getAttribute('data-task-id')}/assignee`, { method: 'POST', body: JSON.stringify({ userId, reason: '管理页改派' }) });
-        toast('已改派为 ' + userId);
-        await refreshAll(id);
-      } catch (error) { toast(error.message); }
-    };
-    row.querySelector('.btn-jump').onclick = async () => {
-      const targetActivityId = row.querySelector('.jump-select').value;
-      try {
-        await api(`/api/leave/instances/${id}/jump`, { method: 'POST', body: JSON.stringify({ targetActivityId, reason: '管理页跳转' }) });
-        toast('已跳转到 ' + targetActivityId);
-        await refreshAll(id);
-      } catch (error) { toast(error.message); }
-    };
+    row.querySelector('.btn-reassign').onclick = () => openReassignModal(id);
+    row.querySelector('.btn-jump').onclick = () => openJumpModal(id);
   });
+}
+function openModal(title, warn, fieldLabel, options, onOk) {
+  $('modalTitle').textContent = title;
+  $('modalWarn').textContent = warn;
+  $('modalFieldLabel').textContent = fieldLabel;
+  $('modalSelect').innerHTML = options.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join("");
+  $('modalMask').style.display = '';
+  $('modal').style.display = '';
+  $('modalOk').onclick = async () => {
+    const value = $('modalSelect').value;
+    closeModal();
+    try { await onOk(value); } catch (error) { toast(error.message); }
+  };
+}
+function closeModal() {
+  $('modalMask').style.display = 'none';
+  $('modal').style.display = 'none';
+}
+$('modalClose').onclick = closeModal;
+$('modalCancel').onclick = closeModal;
+$('modalMask').onclick = closeModal;
+
+async function openReassignModal(instanceId) {
+  const employees = (await api('/api/leave/org/employees')).body;
+  const options = employees.map((e) => ({ value: e.domainAccount, label: `${e.name}(${e.domainAccount})` }));
+  openModal('待办转移', '转移后原审批人将不再看到该待办，请确认无误后再保存。', '转移给', options, async (userId) => {
+    const item = manageRows.find((i) => i.processInstanceId === instanceId);
+    await api(`/api/leave/tasks/${item.taskId}/assignee`, { method: "POST", body: JSON.stringify({ userId, reason: "待办转移" }) });
+    toast('已转移给 ' + userId);
+    await refreshAll(instanceId);
+  });
+}
+
+async function openJumpModal(instanceId) {
+  const definition = await api('/api/leave/process-nodes');
+  const options = (definition.body.nodes ?? []).map((n) => ({ value: n.id, label: `${n.name} [${n.id}]` }));
+  openModal('流程步骤跳转',
+    '注意：请仔细选择目标步骤，确认无误后再保存。有并行步骤、相同步骤名要核对清楚步骤 ID（即 bpmn 中的节点 ID），有些步骤可能不能跳转，请找管理员核实后再操作。',
+    '目标步骤', options, async (targetActivityId) => {
+      await api(`/api/leave/instances/${instanceId}/jump`, { method: "POST", body: JSON.stringify({ targetActivityId, reason: "流程步骤跳转" }) });
+      toast('已跳转到 ' + targetActivityId);
+      await refreshAll(instanceId);
+    });
 }
 
 async function refreshAll(instanceId) {
@@ -374,7 +410,6 @@ async function refreshAll(instanceId) {
     } catch { /* 实例可能已结束，视图仍在 */ }
   }
 }
-
 async function startInstance() {
   const applicant = $('applicant').value.trim();
   if (!applicant) { toast('请填写申请人'); return; }

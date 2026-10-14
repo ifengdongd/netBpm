@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NetBpm.Bpmn.Model;
 using NetBpm.Engine;
 using NetBpm.Runtime;
 
@@ -66,6 +67,10 @@ public static class WorkflowEndpoints
         group.MapPost("/instances/{processInstanceId}/jump", (string processInstanceId, JumpToNodeRequest? request, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
             JumpToNodeAsync(processInstanceId, request, http, workflow, options, ct)).Produces<object>();        group.MapGet("/process-definition", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
             GetProcessDefinitionAsync(http, engine, workflow, options, ct));
+
+        // 可跳转的节点清单（流程管理页的「目标步骤」下拉数据源，对齐老系统「环节名 [节点id]」的核对习惯）
+        group.MapGet("/process-nodes", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
+            GetProcessNodesAsync(http, engine, workflow, options, ct));
 
         return group;
     }
@@ -255,6 +260,56 @@ public static class WorkflowEndpoints
         var xml = await engine.GetProcessDefinitionXmlAsync(definitionId, ct).ConfigureAwait(false);
 
         return Results.Ok(new { processDefinitionId = definitionId, xml });
+    }
+
+    /// <summary>
+    /// 可跳转的节点清单（流程管理页「目标步骤」下拉的数据源）：
+    /// id + 名称 + 类型，按流程定义顺序返回 —— 前端渲染成「环节名 [节点id]」，
+    /// 让操作人能对着 BPMN 核对（同名环节靠 id 区分，对齐老系统的跳转弹窗习惯）。
+    /// </summary>
+    private static async Task<IResult> GetProcessNodesAsync(
+        HttpContext http,
+        IProcessEngine engine,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var definitionId = await workflow
+            .ResolveDefinitionIdAsync(options.ProcessKey(http.RequestServices), ct)
+            .ConfigureAwait(false);
+
+        if (definitionId is null)
+        {
+            return Results.NotFound(options.Error("流程定义尚未部署。"));
+        }
+
+        var process = (await engine.GetBpmnModelAsync(definitionId, ct).ConfigureAwait(false))
+            ?.GetMainProcess();
+
+        if (process is null)
+        {
+            return Results.NotFound(options.Error($"流程定义 '{definitionId}' 的模型不可用。"));
+        }
+
+        // 开始事件与顺序流没有跳转意义；其余节点（任务/网关/中间事件/结束事件）都可作为目标
+        var nodes = process.FlowElements
+            .Where(element => element is not StartEvent and not SequenceFlow)
+            .Select(element => new
+            {
+                id = element.Id,
+                name = string.IsNullOrWhiteSpace(element.Name) ? element.Id : element.Name,
+                type = element switch
+                {
+                    UserTask => "userTask",
+                    ServiceTask => "serviceTask",
+                    Gateway => "gateway",
+                    EndEvent => "endEvent",
+                    _ => element.GetType().Name,
+                },
+            })
+            .ToArray();
+
+        return Results.Ok(new { processDefinitionId = definitionId, nodes });
     }
 
 

@@ -165,6 +165,14 @@ public static class LeaveEndpoints
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
+        // 审批人显示成「姓名(账号)」—— 对齐老系统待办管理列表的当前审批人列
+        var nameByAccount = (await directory.FindEmployeesAsync().ConfigureAwait(false))
+            .GroupBy(employee => employee.DomainAccount, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.Ordinal);
+        var approverNames = approvers
+            .Select(account => nameByAccount.TryGetValue(account, out var name) ? $"{name}({account})" : account)
+            .ToArray();
+
         return new InstanceSummary(
             ProcessInstanceId: summary.ProcessInstanceId,
             BusinessKey: summary.Base.BusinessId,
@@ -178,6 +186,7 @@ public static class LeaveEndpoints
             DeptName: deptName,
             CurrentStep: currentTasks.Count > 0 ? currentTasks[0].ActivityName : null,
             Approvers: approvers,
+            ApproverNames: approverNames,
             TaskId: currentTasks.Count > 0 ? currentTasks[0].TaskId : null);
     }
 }
