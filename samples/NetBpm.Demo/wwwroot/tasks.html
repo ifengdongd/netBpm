@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 待办任务列表</title>
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<h1>待办任务列表</h1>
+<div class="sub">
+  跨流程的待办中心（数据源 <code>GET /api/tasks?candidateUser=…</code>）：
+  订单审批与请假审批的待办一次查全，流程归属与跳转地址由流程信息枚举识别。
+</div>
+
+<div class="panel">
+  <div class="row" style="margin-bottom:12px">
+    <label for="user">当前用户</label>
+    <input id="user" list="people" value="leader1" style="width:160px" />
+    <datalist id="people">
+      <option value="alice"></option>
+      <option value="bob"></option>
+      <option value="leader1"></option>
+      <option value="leader2"></option>
+      <option value="manager1"></option>
+    </datalist>
+    <button id="refresh">查询</button>
+    <span class="hint muted">
+      演示账号与审批组：leader1/leader2（leaders，请假审批）、manager1（managers，订单审批）、alice/bob（申请人）
+    </span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>任务名</th><th>所属流程</th><th>业务单号</th><th>申请人</th><th>流程状态</th><th>办理人</th><th>候选组</th><th>创建时间</th><th>操作</th></tr>
+    </thead>
+    <tbody id="task-rows"><tr><td colspan="9" class="empty">加载中…</td></tr></tbody>
+  </table>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+renderNav('tasks');
+
+async function boot() {
+  $('#refresh').addEventListener('click', loadTasks);
+  $('#user').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadTasks(); });
+  await loadTasks();
+}
+
+async function loadTasks() {
+  const body = $('#task-rows');
+  body.innerHTML = '<tr><td colspan="9" class="empty">加载中…</td></tr>';
+  try {
+    const user = $('#user').value.trim();
+    if (!user) throw new Error('请输入用户（候选人 / 办理人）。');
+
+    const tasks = await api(`/api/tasks?candidateUser=${encodeURIComponent(user)}`);
+
+    if (!tasks.length) {
+      body.innerHTML = `<tr><td colspan="9" class="empty">用户 ${esc(user)} 暂无待办</td></tr>`;
+      return;
+    }
+
+    body.innerHTML = tasks.map((item) => {
+      const t = item.Task ?? {};
+      return `
+      <tr>
+        <td>${esc(t.Name ?? t.TaskId)}</td>
+        <td>${esc(item.Process?.Describe)} <span class="muted">(${esc(item.Process?.Name)})</span></td>
+        <td><code>${esc(item.BusinessKey ?? '—')}</code></td>
+        <td>${esc(item.Applicant ?? '—')}</td>
+        <td>${statusPill(item.Status)}</td>
+        <td>${esc(t.Assignee ?? '未领取')}</td>
+        <td>${esc((t.CandidateGroups ?? []).join(', '))}</td>
+        <td>${esc(fmtTime(t.CreateTime))}</td>
+        <td>
+          <a class="link" href="${esc(item.ApproveUrl)}">去审批</a>
+           &nbsp;<a class="link" href="/transfer.html?taskId=${encodeURIComponent(t.TaskId)}">转办</a>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (error) {
+    body.innerHTML = `<tr><td colspan="9" class="empty">${esc(error.message)}</td></tr>`;
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

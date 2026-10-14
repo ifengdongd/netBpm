@@ -72,7 +72,12 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
     private readonly ILogger<MySqlWorkflowDataStore> _logger;
     private readonly string _connectionString;
     private readonly long _tenantId;
-    private readonly long _workflowTypeId;
+
+    /// <summary>
+    /// 流程类型 id 的兜底值：发起请求没带 <see cref="BaseModel.WorkflowTypeId"/> 时用它
+    /// （<c>instances.workflow_type_id</c> 是 varchar(64)，存流程信息枚举的 GUID 字符串）。
+    /// </summary>
+    private readonly string _workflowTypeId;
 
     /// <summary>构造存储。</summary>
     /// <param name="connections">连接工厂（由 <c>AddNetBpm</c> 按 <c>NetBpm:*</c> 配置注册）。</param>
@@ -95,7 +100,7 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
         _logger = logger;
         _connectionString = configuration["NetBpm:ConnectionString"] ?? "(未配置)";
         _tenantId = configuration.GetValue("Leave:TenantId", 1L);
-        _workflowTypeId = configuration.GetValue("Leave:WorkflowTypeId", 1L);
+        _workflowTypeId = configuration["Leave:WorkflowTypeId"] ?? "1";
     }
 
     /// <inheritdoc />
@@ -170,7 +175,9 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
                     TenantId = _tenantId,
                     ApplyId = NextId(),
                     record.Base.ApplyTime,
-                    WorkflowTypeId = _workflowTypeId,
+
+                    // 流程类型 id：发起请求带的优先（流程信息枚举的 GUID），配置兜底
+                    WorkflowTypeId = record.Base.WorkflowTypeId ?? _workflowTypeId,
                     Version = ExtractVersion(_runtime.ProcessDefinitionId),
                     Describe = describe,
                     ApplyEmpId = record.Base.ApplyUser ?? string.Empty,
@@ -677,6 +684,7 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
                i.apply_emp_id         as ApplyEmpId,
                i.apply_dept_id        as ApplyDeptId,
                i.apply_time           as ApplyTime,
+               i.workflow_type_id     as WorkflowTypeId,
                i.workflow_instance_id as WorkflowInstanceId,
                i.status_id            as StatusId,
                i.current_step         as CurrentStep,
@@ -1046,7 +1054,8 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
         Comment: row.LastComment,
         ApplyUser: row.ApplyEmpId,
         ApplyTime: AsUtc(row.ApplyTime),
-        ApplyDeptId: row.ApplyDeptId);
+        ApplyDeptId: row.ApplyDeptId,
+        WorkflowTypeId: row.WorkflowTypeId);
 
     /// <summary>
     /// 由「最后一次审批结果」推结论：<b>以拒绝收尾就是拒绝，其余都是通过</b>。
@@ -1194,6 +1203,8 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
 
         public DateTime ApplyTime { get; set; }
 
+        public string? WorkflowTypeId { get; set; }
+
         public string WorkflowInstanceId { get; set; } = string.Empty;
 
         public string StatusId { get; set; } = string.Empty;
@@ -1215,7 +1226,7 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
 
         public DateTime ApplyTime { get; set; }
 
-        public long WorkflowTypeId { get; set; }
+        public string? WorkflowTypeId { get; set; }
 
         public string? WorkflowVersion { get; set; }
 

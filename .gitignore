@@ -30,7 +30,13 @@ web/designer/.tmp/
 # 演示工程运行时产物：请假审批 Demo 把业务数据落成 JSON（见 LeaveBusinessStore）
 # 注意：直接跑 bin 下的 apphost 时 ContentRoot 是当前目录，可能在仓库根再生成一份 data/
 samples/NetBpm.Demo.LeaveApproval/data/
+samples/NetBpm.Demo.OrderApproval/data/
+samples/NetBpm.Demo/data/
 /data/
+
+# 本地工具工作区（不提交）
+.playwright-cli/
+.tools/
 
 # Local credentials (never commit)
 # Gitee 私人令牌，供 credential.helper=store 读取：git config --local credential.helper "store --file .gittoken"

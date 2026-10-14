@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>订单审批 Demo · NetBpm</title>
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --card: #ffffff;
+    --line: #e5e9f2;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --brand: #2563eb;
+    --brand-dark: #1d4ed8;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --bad: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; font-size: 14px;
+  }
+  header {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb);
+    color: #fff; padding: 18px 28px;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header p { margin: 4px 0 0; font-size: 12px; opacity: .85; }
+  main { max-width: 1080px; margin: 20px auto; padding: 0 16px; display: grid; gap: 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 20px; box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  input, select {
+    height: 34px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px;
+    font-size: 13px; background: #fff; color: var(--text);
+  }
+  input:focus, select:focus { outline: 2px solid #bfdbfe; border-color: var(--brand); }
+  button {
+    height: 34px; border: none; border-radius: 6px; padding: 0 14px; cursor: pointer;
+    font-size: 13px; background: var(--brand); color: #fff; transition: background .15s;
+  }
+  button:hover { background: var(--brand-dark); }
+  button.ghost { background: #fff; color: var(--brand); border: 1px solid var(--line); }
+  button.ghost:hover { background: #eff6ff; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; background: #fafbfd; white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; }
+  .badge.s1   { background: #fef3c7; color: var(--warn); }
+  .badge.s100 { background: #dcfce7; color: var(--ok); }
+  .badge.s-1  { background: #fee2e2; color: var(--bad); }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row-actions button { height: 26px; padding: 0 10px; font-size: 12px; }
+  .btn-pass { background: var(--ok); }   .btn-pass:hover { background: #15803d; }
+  .btn-refuse { background: var(--bad); } .btn-refuse:hover { background: #b91c1c; }
+  .btn-refund { background: var(--warn); } .btn-refund:hover { background: #b45309; }
+  #toast {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    background: #111827; color: #fff; padding: 8px 18px; border-radius: 8px;
+    font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .25s;
+  }
+  #toast.show { opacity: .95; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); text-align: center; padding: 18px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>订单审批 Demo</h1>
+  <p>流程：<code>order_process</code>（提交申请 → 经理审批 → 通过/驳回/拒绝）· 状态：<code>1</code> 审批中 / <code>-1</code> 审批拒绝 / <code>100</code> 审批通过</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>① 提交订单申请</h2>
+    <form id="create-form">
+      <label>申请人
+        <select id="applicant">
+          <option value="alice">alice（王小爱）</option>
+          <option value="bob">bob（李小波）</option>
+        </select>
+      </label>
+      <label>订购产品 <input id="productName" value="测试服务器 R760" required /></label>
+      <label>订单金额 <input id="amount" type="number" min="0" step="0.01" value="128000" required /></label>
+      <label>备注 <input id="remark" value="浏览器演示下单" /></label>
+      <button type="submit">提交申请（status=1）</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>② 订单与审批 <button class="ghost" id="refresh" style="float:right">刷新</button></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>订单号</th><th>产品</th><th>金额</th><th>申请人</th>
+          <th>状态</th><th>当前环节</th><th>审批意见</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="bill-rows">
+        <tr><td colspan="8" class="empty">加载中…</td></tr>
+      </tbody>
+    </table>
+    <p class="meta">
+      经理账号 manager1 审批（组 managers）；「申请人修改」环节由申请人本人重提。
+      状态由服务任务 <code>order.ApproveComplete</code> / <code>order.RefuseComplete</code> 回写。
+    </p>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function toast(message) {
+  const el = $('toast');
+  el.textContent = message;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+async function api(path, options) {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+    body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const json = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(json?.message ?? `${response.status} ${response.statusText}`);
+  }
+  return json;
+}
+
+function statusBadge(bill) {
+  return `<span class="badge s${bill.status}">${bill.statusName}（${bill.status}）</span>`;
+}
+
+function statusText(view) {
+  if (view.running) return view.currentStep ?? '—';
+  if (view.outcome === 'Approved') return '已结束 · 通过';
+  if (view.outcome === 'Refused') return '已结束 · 拒绝';
+  return '已结束';
+}
+
+function renderRow(view) {
+  const bill = view.bill;
+  const actions = [];
+
+  if (view.running && view.taskId) {
+    if (view.currentStep === '申请人修改') {
+      actions.push(`<button class="btn-refund" onclick="resubmit('${bill.businessId}', '${view.taskId}')">修改后重提</button>`);
+    } else {
+      actions.push(`<button class="btn-pass" onclick="approve('${view.taskId}', '1')">通过</button>`);
+      actions.push(`<button class="btn-refuse" onclick="approve('${view.taskId}', '2')">拒绝</button>`);
+      actions.push(`<button class="btn-refund" onclick="approve('${view.taskId}', '3')">驳回修改</button>`);
+    }
+  }
+
+  return `<tr>
+    <td class="num" title="流程实例 ${view.processInstanceId ?? '—'}">${bill.businessId}</td>
+    <td>${bill.productName ?? '—'}</td>
+    <td class="num">${bill.amount ?? '—'}</td>
+    <td>${bill.applyUser}</td>
+    <td>${statusBadge(bill)}</td>
+    <td>${statusText(view)}</td>
+    <td>${bill.approveComment ?? '—'}</td>
+    <td><div class="row-actions">${actions.join('') || '—'}</div></td>
+  </tr>`;
+}
+
+async function load() {
+  const rows = $('bill-rows');
+  try {
+    const bills = await api('/api/order/bills');
+    rows.innerHTML = bills.length === 0
+      ? '<tr><td colspan="8" class="empty">还没有订单，先提交一笔申请</td></tr>'
+      : bills.map(renderRow).join('');
+  } catch (error) {
+    rows.innerHTML = `<tr><td colspan="8" class="empty">加载失败：${error.message}</td></tr>`;
+  }
+}
+
+async function submitApplication(event) {
+  event.preventDefault();
+  try {
+    const view = await api('/api/order/bills', {
+      method: 'POST',
+      body: {
+        applicant: $('applicant').value,
+        productName: $('productName').value,
+        amount: Number($('amount').value),
+        remark: $('remark').value,
+      },
+    });
+    toast(`申请已提交：订单 ${view.bill.businessId}（status=1），当前环节「${view.currentStep}」`);
+    await load();
+  } catch (error) {
+    toast(`提交失败：${error.message}`);
+  }
+}
+
+async function approve(taskId, result) {
+  const names = { 1: '通过', 2: '拒绝', 3: '驳回修改' };
+  try {
+    await api(`/api/order/tasks/${taskId}/submit`, {
+      method: 'POST',
+      body: {
+        values: { approvalResult: result, comment: `浏览器操作：${names[result]}` },
+        operator: 'manager1',
+      },
+    });
+    toast(`已提交「${names[result]}」，订单状态由流程回写`);
+    await load();
+  } catch (error) {
+    toast(`操作失败：${error.message}`);
+  }
+}
+
+async function resubmit(businessId, taskId) {
+  const amount = prompt('修改后的订单金额：');
+  if (amount === null) return;
+  try {
+    await api(`/api/order/tasks/${taskId}/submit`, {
+      method: 'POST',
+      body: { values: { amount: Number(amount) }, operator: billApplicant(businessId) },
+    });
+    toast('已重提，回到经理审批');
+    await load();
+  } catch (error) {
+    toast(`重提失败：${error.message}`);
+  }
+}
+
+let applicants = {};
+function billApplicant(businessId) {
+  return applicants[businessId] ?? 'alice';
+}
+
+$('create-form').addEventListener('submit', submitApplication);
+$('refresh').addEventListener('click', load);
+
+// 记录订单号 → 申请人，「申请人修改」环节的提交人用
+const _load = load;
+load = async function () {
+  const bills = await fetch('/api/order/bills').then((r) => r.json()).catch(() => []);
+  for (const view of bills) {
+    applicants[view.bill.businessId] = view.bill.applyUser;
+  }
+  return _load();
+};
+
+load();
+</script>
+</body>
+</html>

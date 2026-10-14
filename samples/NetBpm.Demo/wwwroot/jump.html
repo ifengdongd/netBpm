@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 流程跳转</title>
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<h1>流程跳转</h1>
+<div class="sub">
+  把未结束的流程实例从当前环节搬到指定环节并继续推进（纠错与流程干预）。
+  目标节点清单来自 <code>GET /api/{prefix}/process-nodes</code>；跳到结束事件即强制办结。跳转不产生审批记录。
+</div>
+
+<div class="grid side">
+  <div>
+    <div class="panel">
+      <h2>跳转操作</h2>
+      <div class="field">
+        <label for="instance">流程实例 <span class="hint">运行中的实例；也可手输实例 id</span></label>
+        <select id="instance"></select>
+        <input id="instance-id" placeholder="或直接输入流程实例 id" style="margin-top:6px" />
+      </div>
+      <button id="load-instance" class="ghost">加载实例</button>
+
+      <div id="jump-area" style="margin-top:14px" hidden>
+        <div class="field">
+          <label for="target">目标环节 <span class="hint">「环节名 [节点id]」，可对着 BPMN 核对</span></label>
+          <select id="target"></select>
+        </div>
+        <div class="field">
+          <label for="reason">跳转原因 <span class="hint">审计用</span></label>
+          <textarea id="reason" placeholder="例如：审批人误操作，退回上一步重批"></textarea>
+        </div>
+        <button id="jump-btn">确认跳转</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>实例信息</h2>
+      <div id="instance-info" class="empty">选择实例后点「加载实例」。</div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+renderNav('jump');
+
+let current = null;          // 实例视图
+let currentProcess = null;   // 流程信息
+
+$('#load-instance').addEventListener('click', () => loadInstance().catch((e) => toast(e.message)));
+$('#jump-btn').addEventListener('click', () => doJump().catch((e) => toast(e.message)));
+
+async function boot() {
+  const instances = await api('/api/instances');
+  const running = instances.filter((item) => item.Running);
+
+  $('#instance').innerHTML = running.length
+    ? running.map((item) => `<option value="${esc(item.ProcessInstanceId)}">
+        ${esc(item.Process?.Describe)} · 单号 ${esc(item.BusinessKey ?? '—')} · ${esc(item.Applicant)} · ${esc(item.CurrentStep ?? '')}
+      </option>`).join('')
+    : '<option value="">（暂无运行中的实例）</option>';
+}
+
+// 加载实例：确定所属流程 → 拉目标节点清单
+async function loadInstance() {
+  const instanceId = ($('#instance-id').value.trim() || $('#instance').value).trim();
+  if (!instanceId) { toast('请选择或输入流程实例 id。'); return; }
+
+  current = await api(`/api/instances/${encodeURIComponent(instanceId)}`);
+  if (!current) throw new Error(`流程实例 '${instanceId}' 不存在。`);
+
+  // 实例视图只有定义 id：反查各流程的当前定义，得到流程 key → 流程信息
+  const key = await lookupKeyByDefinitionId(current.ProcessDefinitionId);
+  currentProcess = key ? (await loadProcesses()).find((p) => p.Name === key) : null;
+
+  $('#instance-info').innerHTML = `
+    <table class="kv">
+      <tr><td>流程实例</td><td><code>${esc(current.ProcessInstanceId)}</code></td></tr>
+      <tr><td>所属流程</td><td>${esc(currentProcess?.Describe ?? '未知')}（<code>${esc(current.ProcessDefinitionId)}</code>）</td></tr>
+      <tr><td>业务单号</td><td><code>${esc(current.BusinessKey ?? '—')}</code></td></tr>
+      <tr><td>申请人</td><td>${esc(current.Base?.ApplyUser ?? '—')}</td></tr>
+      <tr><td>当前环节</td><td>${esc(current.Tasks?.[0]?.Name ?? '—')}</td></tr>
+      <tr><td>流程状态</td><td>${statusPill(current.Running ? 'Running' : current.Result?.Outcome ?? '—')}</td></tr>
+    </table>`;
+
+  if (!current.Running) { toast('该实例已结束，不能跳转。'); return; }
+  if (!currentProcess) { throw new Error('实例所属流程不在流程信息枚举里。'); }
+
+  // 目标节点下拉：「环节名 [节点id]」，对齐老系统的跳转弹窗习惯
+  const prefix = PROCESS_API[currentProcess.name];
+  const { nodes } = await api(`${prefix}/process-nodes`);
+
+  $('#target').innerHTML = nodes
+    .map((node) => `<option value="${esc(node.id)}">${esc(node.name)} [${esc(node.id)}]（${esc(node.type)}）</option>`)
+    .join('');
+
+  $('#jump-area').hidden = false;
+}
+
+let definitionKeyCache = null;
+async function lookupKeyByDefinitionId(definitionId) {
+  if (!definitionKeyCache) {
+    definitionKeyCache = {};
+    for (const p of await loadProcesses()) {
+      try {
+        const def = await api(`${PROCESS_API[p.Name]}/process-definition`);
+        if (def?.processDefinitionId) definitionKeyCache[def.processDefinitionId] = p.Name;
+      } catch { /* 该流程未部署时跳过 */ }
+    }
+  }
+  return definitionKeyCache[definitionId];
+}
+
+// 执行跳转
+async function doJump() {
+  if (!current || !currentProcess) { toast('请先加载实例。'); return; }
+
+  const targetActivityId = $('#target').value;
+  if (!targetActivityId) { toast('请选择目标环节。'); return; }
+
+  const prefix = PROCESS_API[currentProcess.name];
+  const view = await api(
+    `${prefix}/instances/${encodeURIComponent(current.ProcessInstanceId)}/jump`,
+    {
+      method: 'POST',
+      body: {
+        targetActivityId,
+        reason: $('#reason').value.trim() || null,
+      },
+    });
+
+  const done = view && !view.Running;
+  toast(done
+    ? '跳转成功：实例已办结'
+    : `跳转成功，当前环节：${view?.Tasks?.[0]?.Name ?? targetActivityId}`, 'ok');
+
+  $('#jump-area').hidden = true;
+  $('#instance-id').value = current.ProcessInstanceId;
+  await loadInstance();
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -34,6 +34,10 @@ namespace NetBpm.Workflow;
 /// <param name="ApplyUser">申请人（同时也是发起人，用于 <c>assignee="${applyUser}"</c>）。</param>
 /// <param name="ApplyTime">申请时间（发起时刻）。</param>
 /// <param name="ApplyDeptId">申请部门 id。</param>
+/// <param name="WorkflowTypeId">
+/// 流程类型 id：宿主为每条流程分配的类型标识（如设计器的 modelId
+/// 02830358-46ef-40e5-b3b9-4d5c4eb23f9f），随实例登记落库（<c>instances.workflow_type_id</c>）。
+/// </param>
 public sealed record BaseModel(
     string? BusinessId,
     string? BusinessDeptId,
@@ -41,7 +45,8 @@ public sealed record BaseModel(
     string? Comment,
     string? ApplyUser,
     DateTime? ApplyTime,
-    string? ApplyDeptId)
+    string? ApplyDeptId,
+    string? WorkflowTypeId = null)
 {
     /// <summary>全空的基础模型（字段齐备但都没有值）。</summary>
     public static BaseModel Empty { get; } = new(
@@ -51,7 +56,8 @@ public sealed record BaseModel(
         Comment: null,
         ApplyUser: null,
         ApplyTime: null,
-        ApplyDeptId: null);
+        ApplyDeptId: null,
+        WorkflowTypeId: null);
 
     /// <summary>是否已经产生审批结果（纯计算属性，不参与 JSON 序列化）。</summary>
     [JsonIgnore]
@@ -74,12 +80,14 @@ public sealed record BaseModel(
     /// <param name="applyUser">申请人。</param>
     /// <param name="applyTime">申请时间。</param>
     /// <param name="applyDeptId">申请部门 id（可空）。</param>
+    /// <param name="workflowTypeId">流程类型 id（可空；宿主按流程信息枚举填，见 <see cref="BaseModel.WorkflowTypeId"/>）。</param>
     public static BaseModel Start(
         string applyUser,
         DateTime applyTime,
         string? businessId = null,
         string? businessDeptId = null,
-        string? applyDeptId = null)
+        string? applyDeptId = null,
+        string? workflowTypeId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(applyUser);
 
@@ -90,7 +98,8 @@ public sealed record BaseModel(
             Comment: null,
             ApplyUser: applyUser,
             ApplyTime: applyTime,
-            ApplyDeptId: applyDeptId);
+            ApplyDeptId: applyDeptId,
+            WorkflowTypeId: workflowTypeId);
     }
 
     /// <summary>
@@ -141,6 +150,11 @@ public sealed record BaseModel(
             variables[BaseModelVariables.ApplyDeptId] = ApplyDeptId;
         }
 
+        if (WorkflowTypeId is not null)
+        {
+            variables[BaseModelVariables.WorkflowTypeId] = WorkflowTypeId;
+        }
+
         return variables;
     }
 
@@ -171,7 +185,8 @@ public sealed record BaseModel(
             Comment: VariableValues.AsString(Read(BaseModelVariables.Comment)) ?? basis.Comment,
             ApplyUser: VariableValues.AsString(Read(BaseModelVariables.ApplyUser)) ?? basis.ApplyUser,
             ApplyTime: VariableValues.AsDateTime(Read(BaseModelVariables.ApplyTime)) ?? basis.ApplyTime,
-            ApplyDeptId: VariableValues.AsString(Read(BaseModelVariables.ApplyDeptId)) ?? basis.ApplyDeptId);
+            ApplyDeptId: VariableValues.AsString(Read(BaseModelVariables.ApplyDeptId)) ?? basis.ApplyDeptId,
+            WorkflowTypeId: VariableValues.AsString(Read(BaseModelVariables.WorkflowTypeId)) ?? basis.WorkflowTypeId);
     }
 }
 
@@ -205,7 +220,10 @@ public static class BaseModelVariables
     /// <summary>申请部门 id。</summary>
     public const string ApplyDeptId = "applyDeptId";
 
+    /// <summary>流程类型 id（宿主为每条流程分配的类型标识，随实例登记落 <c>instances.workflow_type_id</c>）。</summary>
+    public const string WorkflowTypeId = "workflowTypeId";
+
     /// <summary>全部变量名（按 <see cref="BaseModel"/> 的字段顺序）。</summary>
     public static IReadOnlyList<string> All { get; } =
-        [BusinessId, BusinessDeptId, Result, Comment, ApplyUser, ApplyTime, ApplyDeptId];
+        [BusinessId, BusinessDeptId, Result, Comment, ApplyUser, ApplyTime, ApplyDeptId, WorkflowTypeId];
 }

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 业务单查看</title>
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<h1>业务单查看</h1>
+<div class="sub">
+  审批结束后查看业务单（流程信息枚举的 <code>viewUrl</code> 落点）：
+  业务单字段 + 审批状态 + 审批历史。
+</div>
+
+<div class="panel">
+  <div class="row">
+    <label for="process">流程</label>
+    <select id="process" style="width:220px"></select>
+    <label for="business-id">业务单号</label>
+    <input id="business-id" style="width:220px" placeholder="businessId" />
+    <button id="search" class="ghost">查询</button>
+    <span class="hint muted">URL 支持 <code>?process=order_process&amp;businessId=…</code>（由 viewUrl / 首页跳入）</span>
+  </div>
+</div>
+
+<div id="detail" class="grid two"></div>
+
+<div class="panel" id="history-panel" hidden>
+  <h2>审批历史</h2>
+  <ul class="timeline" id="timeline"></ul>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+renderNav('bill');
+
+async function boot() {
+  const processes = await loadProcesses();
+  $('#process').innerHTML = processes
+    .map((p) => `<option value="${esc(p.Name)}">${esc(p.Describe)}（${esc(p.Name)}）</option>`).join('');
+
+  const p = qs('process');      // 支持 viewUrl 带参直入
+  const bid = qs('businessId');
+  if (p) $('#process').value = p;
+  if (bid) $('#business-id').value = bid;
+
+  $('#search').addEventListener('click', load);
+  if (bid) await load();
+}
+
+async function load() {
+  const processKey = $('#process').value;
+  const businessId = $('#business-id').value.trim();
+
+  if (!businessId) { toast('请输入业务单号。'); return; }
+
+  $('#detail').innerHTML = '<div class="panel empty">加载中…</div>';
+  $('#history-panel').hidden = true;
+
+  try {
+    if (processKey === 'order_process') await loadOrderBill(businessId);
+    else if (processKey === 'leave_process') await loadLeaveBill(businessId);
+    else throw new Error(`流程 '${processKey}' 没有业务单查看实现。`);
+  } catch (error) {
+    $('#detail').innerHTML = `<div class="panel empty">${esc(error.message)}</div>`;
+  }
+}
+
+function renderBizCard(title, rows) {
+  $('#detail').innerHTML = `
+    <div class="panel">
+      <h2>${esc(title)}</h2>
+      <table class="kv">${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')}</table>
+    </div>`;
+}
+
+// ── 订单单：order_bill 行 + 审批进度（GET /api/order/bills/{id}） ──
+async function loadOrderBill(businessId) {
+  const view = await api(`/api/order/bills/${encodeURIComponent(businessId)}`);
+  const bill = view.Bill ?? {};
+  const status = String(bill.Status) === '100' ? 'Approved'
+    : String(bill.Status) === '-1' ? 'Refused' : 'Running';
+
+  renderBizCard('订单单（order_bill）', [
+    ['订单号', `<code>${esc(bill.BusinessId)}</code>`],
+    ['订购产品', esc(bill.ProductName ?? '—')],
+    ['订单金额', esc(bill.Amount ?? '—')],
+    ['备注', esc(bill.Remark ?? '—')],
+    ['申请人', esc(bill.ApplyUser ?? '—')],
+    ['单据状态', statusPill(status)],
+    ['最终审批意见', esc(bill.ApproveComment ?? '—')],
+    ['当前环节', esc(view.CurrentStep ?? (view.Running ? '—' : '已结束'))],
+    ['流程实例', `<code>${esc(view.ProcessInstanceId ?? '—')}</code>`],
+    ['发起时间', esc(fmtTime(bill.CreateTime))],
+  ]);
+
+  if (view.ProcessInstanceId) await renderHistory('order', view.ProcessInstanceId);
+}
+
+// ── 请假单：先按业务单号在实例登记里定位，再取实例视图 ──
+async function loadLeaveBill(businessId) {
+  const summaries = await api('/api/leave/instances');
+  const hit = summaries.find((s) => String(s.BusinessKey) === String(businessId));
+
+  if (!hit) throw new Error(`请假单 ${businessId} 不存在（业务登记里没有这一行）。`);
+
+  const view = await api(`/api/leave/instances/${encodeURIComponent(hit.ProcessInstanceId)}`);
+  const result = view.Result;
+
+  renderBizCard('请假单（流程登记）', [
+    ['请假单号', `<code>${esc(view.BusinessKey)}</code>`],
+    ['申请人', esc(view.Base?.ApplyUser ?? '—')],
+    ['请假天数', result ? result.Days : esc(view.Parameters?.days ?? '—')],
+    ['请假事由', esc(result?.Reason ?? view.Parameters?.reason ?? '—')],
+    ['申请部门', esc(view.Base?.ApplyDeptId ?? '—')],
+    ['业务部门', esc(view.Base?.BusinessDeptId ?? '—')],
+    ['流程状态', statusPill(view.Running ? 'Running' : (result?.Outcome ?? '—'))],
+    ['审批结论', result ? `${esc(result.Outcome)}（${esc(result.ActivityName ?? result.ActivityId)}）` : '—'],
+    ['发起时间', esc(fmtTime(view.StartedAt))],
+  ]);
+
+  await renderHistory('leave', view.ProcessInstanceId);
+}
+
+// ── 审批历史时间线（按流程取各自前缀的端点） ──
+async function renderHistory(prefix, processInstanceId) {
+  try {
+    const history = await api(
+      `${PROCESS_API[prefix === 'order' ? 'order_process' : 'leave_process']}/instances/${encodeURIComponent(processInstanceId)}/history`);
+
+    if (!history?.Steps?.length) {
+      $('#history-panel').hidden = true;
+      return;
+    }
+
+    $('#timeline').innerHTML = history.Steps.map((step) => `
+      <li class="${step.EndedAt ? 'done' : 'now'}">
+        <div class="head">
+          <b>${esc(step.ActivityName ?? step.ActivityId)}</b>
+          ${step.Assignee ? `<span class="pill">${esc(step.Assignee)}</span>` : ''}
+          ${step.DecisionName ? `<span class="pill ${step.DecisionName === '通过' ? 'ok' : 'no'}">${esc(step.DecisionName)}</span>` : ''}
+          <span class="when">${esc(fmtTime(step.StartedAt))}${step.EndedAt ? ` → ${esc(fmtTime(step.EndedAt))}` : ' · 进行中'}</span>
+        </div>
+        ${step.Comment ? `<div class="say">${esc(step.Comment)}</div>` : ''}
+      </li>`).join('');
+    $('#history-panel').hidden = false;
+  } catch (error) {
+    $('#history-panel').hidden = false;
+    $('#timeline').innerHTML = `<li class="empty">${esc(error.message)}</li>`;
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

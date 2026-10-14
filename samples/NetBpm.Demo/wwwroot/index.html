@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 首页 · 流程发起</title>
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<h1>NetBpm 合并审批 Demo</h1>
+<div class="sub">
+  一个宿主承载两条流程：订单审批（<code>order_process</code>）与请假审批（<code>leave_process</code>）。
+  流程信息来自流程信息枚举（<code>GET /api/processes</code>），页面不写死任何流程。
+</div>
+
+<!-- ─── 流程信息枚举 ─── -->
+<div class="panel">
+  <h2>流程信息（instanceEnum）</h2>
+  <table>
+    <thead>
+      <tr><th>id（流程id / modelId）</th><th>name（流程名称 / key）</th><th>describe（流程描述）</th><th>viewUrl（业务单查看）</th><th>approveUrl（流程审批）</th></tr>
+    </thead>
+    <tbody id="process-rows"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="grid side">
+  <div>
+    <!-- ─── 流程发起（订单申请 / 请假申请 二选一） ─── -->
+    <div class="panel">
+      <h2>发起流程申请</h2>
+      <div class="field">
+        <label for="start-process">选择流程</label>
+        <select id="start-process"></select>
+      </div>
+
+      <!-- 订单表单 -->
+      <div id="form-order" hidden>
+        <div class="field">
+          <label for="order-applicant">申请人</label>
+          <input id="order-applicant" value="alice" />
+        </div>
+        <div class="field">
+          <label for="order-product">订购产品</label>
+          <input id="order-product" value="云服务器 ECS（一年）" />
+        </div>
+        <div class="field">
+          <label for="order-amount">订单金额</label>
+          <input id="order-amount" type="number" min="0" value="12000" />
+        </div>
+        <div class="field">
+          <label for="order-remark">备注</label>
+          <input id="order-remark" placeholder="选填" />
+        </div>
+        <button id="submit-order">提交订单申请</button>
+        <div class="hint muted">业务入口：<code>POST /api/order/bills</code>（自动建单 + 发起流程 + 回填实例 id）</div>
+      </div>
+
+      <!-- 请假表单 -->
+      <div id="form-leave" hidden>
+        <div class="field">
+          <label for="leave-applicant">申请人</label>
+          <input id="leave-applicant" value="alice" />
+        </div>
+        <div class="field">
+          <label for="leave-days">请假天数</label>
+          <input id="leave-days" type="number" min="1" value="2" />
+          <div class="hint">大于 3 天会走「经理审批」环节（网关条件 <code>${days &gt; 3}</code>）</div>
+        </div>
+        <div class="field">
+          <label for="leave-reason">请假事由</label>
+          <textarea id="leave-reason" placeholder="事由">家中有事</textarea>
+        </div>
+        <div class="field">
+          <label for="leave-business-id">请假单号 <span class="hint">正整数；留空自动发号</span></label>
+          <input id="leave-business-id" inputmode="numeric" placeholder="留空自动生成" />
+        </div>
+        <button id="submit-leave">提交请假申请</button>
+        <div class="hint muted">业务入口：<code>POST /api/leave/instances</code>（businessKey 留空由后端发号）</div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <!-- ─── 我的申请（跨流程合并） ─── -->
+    <div class="panel">
+      <h2>我的申请（两条流程合并）</h2>
+      <div class="row" style="margin-bottom:10px">
+        <input id="applicant-filter" placeholder="按申请人过滤（如 alice）" style="width:220px" />
+        <button id="refresh-instances" class="ghost">刷新</button>
+        <span class="hint muted">数据源：<code>GET /api/instances?applicant=…</code></span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>流程</th><th>流程类型 id</th><th>业务单号</th><th>申请人</th><th>状态</th><th>当前环节</th><th>发起时间</th><th>操作</th></tr>
+        </thead>
+        <tbody id="instance-rows"><tr><td colspan="8" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+renderNav('index');
+
+let processes = [];
+
+async function boot() {
+  try {
+    processes = await loadProcesses();
+
+    // 流程信息枚举表格
+    $('#process-rows').innerHTML = processes.map((p) => `
+      <tr>
+        <td><code>${esc(p.Id)}</code></td>
+        <td><code>${esc(p.Name)}</code></td>
+        <td>${esc(p.Describe)}</td>
+        <td><code>${esc(p.ViewUrl)}</code></td>
+        <td><code>${esc(p.ApproveUrl)}</code></td>
+      </tr>`).join('');
+
+    // 发起流程的下拉 + 动态表单
+    $('#start-process').innerHTML = processes
+      .map((p) => `<option value="${esc(p.Name)}">${esc(p.Describe)}（${esc(p.Name)}）</option>`)
+      .join('');
+    $('#start-process').addEventListener('change', switchForm);
+    switchForm();
+
+    $('#submit-order').addEventListener('click', submitOrder);
+    $('#submit-leave').addEventListener('click', submitLeave);
+
+    $('#applicant-filter').value = 'alice';
+    $('#refresh-instances').addEventListener('click', loadInstances);
+    await loadInstances();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+// 按所选流程切换发起表单
+function switchForm() {
+  const key = $('#start-process').value;
+  $('#form-order').hidden = key !== 'order_process';
+  $('#form-leave').hidden = key !== 'leave_process';
+}
+
+// ── 流程发起（订单）：建单 + 发起流程一步完成 ──
+async function submitOrder() {
+  const button = $('#submit-order');
+  button.disabled = true;
+  try {
+    const view = await api('/api/order/bills', {
+      method: 'POST',
+      body: {
+        applicant: $('#order-applicant').value.trim(),
+        productName: $('#order-product').value.trim() || null,
+        amount: $('#order-amount').value ? Number($('#order-amount').value) : null,
+        remark: $('#order-remark').value.trim() || null,
+      },
+    });
+    toast(`订单 ${view.Bill?.BusinessId ?? ''} 已提交，当前环节：${view.CurrentStep ?? '—'}`, 'ok');
+    await loadInstances();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ── 流程发起（请假）：businessKey 留空由后端发号 ──
+async function submitLeave() {
+  const button = $('#submit-leave');
+  button.disabled = true;
+  try {
+    const businessId = $('#leave-business-id').value.trim();
+    const view = await api('/api/leave/instances', {
+      method: 'POST',
+      body: {
+        applicant: $('#leave-applicant').value.trim(),
+        businessKey: businessId || null,
+        paraDict: {
+          days: Number($('#leave-days').value || 0),
+          reason: $('#leave-reason').value.trim() || null,
+        },
+      },
+    });
+    toast(`请假单 ${view.BusinessKey ?? ''} 已提交，当前环节：${view.Tasks?.[0]?.Name ?? '—'}`, 'ok');
+    await loadInstances();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ── 我的申请：跨流程合并的实例列表 ──
+async function loadInstances() {
+  const body = $('#instance-rows');
+  body.innerHTML = '<tr><td colspan="8" class="empty">加载中…</td></tr>';
+  try {
+    const applicant = $('#applicant-filter').value.trim();
+    const items = await api(`/api/instances${applicant ? `?applicant=${encodeURIComponent(applicant)}` : ''}`);
+
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="8" class="empty">暂无申请</td></tr>';
+      return;
+    }
+
+    body.innerHTML = items.map((item) => `
+      <tr>
+        <td>${esc(item.Process?.Describe ?? item.Process?.Name)}</td>
+        <td><code>${esc(item.WorkflowTypeId ?? '—')}</code></td>
+        <td><code>${esc(item.BusinessKey ?? item.ProcessInstanceId)}</code></td>
+        <td>${esc(item.Applicant)}</td>
+        <td>${statusPill(item.Status)}</td>
+        <td>${esc(item.CurrentStep ?? (item.Running ? '—' : '已结束'))}</td>
+        <td>${esc(fmtTime(item.StartedAt))}</td>
+        <td>
+          ${item.ApproveUrl ? `<a class="link" href="${esc(fillTemplate(item.Process.ApproveUrl, { taskId: item.TaskId ?? '', businessId: item.BusinessKey ?? '', processInstanceId: item.ProcessInstanceId }))}">去审批</a>` : ''}
+          ${item.ViewUrl ? ` &nbsp;<a class="link" href="${esc(item.ViewUrl)}">查看业务单</a>` : ''}
+        </td>
+      </tr>`).join('');
+  } catch (error) {
+    body.innerHTML = `<tr><td colspan="7" class="empty">${esc(error.message)}</td></tr>`;
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

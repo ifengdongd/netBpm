@@ -22,12 +22,17 @@ namespace NetBpm.Workflow;
 /// 以及<b>写入流程参数表</b>（业务侧留痕，见 <c>IWorkflowDataStore.SaveParametersAsync</c>）。
 /// </para>
 /// </param>
+/// <param name="WorkflowTypeId">
+/// 流程类型 id（可选）：宿主为每条流程分配的类型标识（如设计器的 modelId），
+/// 随实例登记落库（<c>instances.workflow_type_id</c>）；同时写入变量 <c>workflowTypeId</c>。
+/// </param>
 public sealed record StartWorkflowRequest(
     string Applicant,
     string? BusinessKey = null,
     string? BusinessDeptId = null,
     string? ApplyDeptId = null,
-    IDictionary<string, JsonElement>? ParaDict = null);
+    IDictionary<string, JsonElement>? ParaDict = null,
+    string? WorkflowTypeId = null);
 
 /// <summary>
 /// 提交流程审批。

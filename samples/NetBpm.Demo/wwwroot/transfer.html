@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 待办任务转移</title>
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<h1>待办任务转移（转办）</h1>
+<div class="sub">
+  把当前环节的审批人改为指定用户（数据源 <code>GET /api/tasks/{taskId}</code>，
+  提交 <code>POST /api/{order|leave}/tasks/{taskId}/assignee</code>）。转办不产生审批记录。
+</div>
+
+<div class="grid side">
+  <div>
+    <div class="panel">
+      <h2>转办操作</h2>
+      <div class="field">
+        <label for="task-id">待办任务 id <span class="hint">从待办任务列表「转办」进入会自动带上</span></label>
+        <input id="task-id" placeholder="taskId" style="width:100%" />
+      </div>
+      <button id="load-task" class="ghost">加载任务</button>
+
+      <div id="transfer-area" style="margin-top:14px" hidden>
+        <div class="field">
+          <label for="new-assignee">新审批人</label>
+          <select id="new-assignee"></select>
+          <div class="hint">留空提交 = 退回未分配（候选人/组重新可见）</div>
+        </div>
+        <div class="field">
+          <label for="reason">转办原因 <span class="hint">审计用，随任务历史记录</span></label>
+          <textarea id="reason" placeholder="例如：审批人休假，转交同事处理"></textarea>
+        </div>
+        <div class="row">
+          <button id="transfer-btn">确认转办</button>
+          <button id="unassign-btn" class="ghost">退回未分配</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>任务信息</h2>
+      <div id="task-info" class="empty">输入任务 id 后点「加载任务」。</div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+renderNav('transfer');
+
+let current = null;   // { task, instance, process }
+
+const fromList = qs('taskId');
+if (fromList) $('#task-id').value = fromList;
+
+$('#load-task').addEventListener('click', () => loadTask().catch((e) => toast(e.message)));
+$('#transfer-btn').addEventListener('click', () => doTransfer(true).catch((e) => toast(e.message)));
+$('#unassign-btn').addEventListener('click', () => doTransfer(false).catch((e) => toast(e.message)));
+
+if (fromList) loadTask().catch((e) => toast(e.message));
+
+async function loadTask() {
+  const taskId = $('#task-id').value.trim();
+  if (!taskId) { toast('请输入待办任务 id。'); return; }
+
+  current = await api(`/api/tasks/${encodeURIComponent(taskId)}`);
+  const t = current.task ?? {};
+
+  $('#task-info').innerHTML = `
+    <table class="kv">
+      <tr><td>任务</td><td>${esc(t.Name ?? taskId)} <code class="muted">${esc(taskId)}</code></td></tr>
+      <tr><td>所属流程</td><td>${esc(current.process?.Describe)}（<code>${esc(current.process?.Name)}</code>）</td></tr>
+      <tr><td>业务单号</td><td><code>${esc(current.instance?.BusinessKey ?? '—')}</code></td></tr>
+      <tr><td>申请人</td><td>${esc(current.instance?.Base?.ApplyUser ?? '—')}</td></tr>
+      <tr><td>当前办理人</td><td>${esc(t.Assignee ?? '未领取')}</td></tr>
+      <tr><td>流程状态</td><td>${statusPill(current.instance?.Status)}</td></tr>
+      <tr><td>去审批</td><td><a class="link" href="${esc(current.approveUrl ?? '#')}">${esc(current.approveUrl ?? '—')}</a></td></tr>
+    </table>`;
+
+  // 新审批人下拉：组织架构员工（排除当前办理人）
+  const employees = await loadEmployees();
+  const options = employees
+    .filter((emp) => emp.DomainAccount !== t.Assignee)
+    .map((emp) => `<option value="${esc(emp.DomainAccount)}">${esc(emp.Name)}（${esc(emp.DomainAccount)} · ${esc(emp.DeptName)}）</option>`)
+    .join('');
+  $('#new-assignee').innerHTML = `<option value="">（留空 = 退回未分配）</option>${options}`;
+
+  $('#transfer-area').hidden = false;
+}
+
+// 转办 / 退回未分配：userId=null 即退回（候选人/组重新可见）
+async function doTransfer(withUser) {
+  const taskId = $('#task-id').value.trim();
+  if (!taskId || !current) { toast('请先加载任务。'); return; }
+
+  const prefix = PROCESS_API[current.process?.Name];
+  if (!prefix) { toast(`流程 '${current.process?.Name}' 没有对应的端点前缀。`); return; }
+
+  const body = {
+    userId: withUser ? ($('#new-assignee').value || null) : null,
+    reason: $('#reason').value.trim() || null,
+  };
+
+  if (withUser && !body.userId) { toast('请选择新审批人（或用「退回未分配」）。'); return; }
+
+  const view = await api(`${prefix}/tasks/${encodeURIComponent(taskId)}/assignee`, {
+    method: 'POST',
+    body,
+  });
+
+  const t = view?.Tasks?.[0];
+  toast(withUser
+    ? `转办成功，新审批人：${t?.Assignee ?? body.userId}`
+    : '已退回未分配（候选人/组重新可见）', 'ok');
+
+  await loadTask();
+}
+</script>
+</body>
+</html>

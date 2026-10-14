@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 流程审批</title>
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<h1>流程审批</h1>
+<div class="sub">
+  审批过程中的业务单审批页面（流程信息枚举的 <code>approveUrl</code> 落点）。
+  审批选项来自流程定义里的表单契约（<code>activiti:formProperty</code>），前端不写死任何选项。
+</div>
+
+<div id="main" class="grid side">
+  <div>
+    <!-- ─── 审批表单 ─── -->
+    <div class="panel">
+      <h2>审批提交</h2>
+      <div id="task-meta" class="empty">加载中…</div>
+      <div id="form-area" style="margin-top:12px"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="submit-btn" disabled>提交审批</button>
+        <a id="view-link" class="link" hidden>查看业务单</a>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <!-- ─── 业务单信息 ─── -->
+    <div class="panel">
+      <h2>业务单信息（流程参数）</h2>
+      <table class="kv" id="biz-table"><tbody><tr><td class="empty">加载中…</td></tr></tbody></table>
+    </div>
+
+    <!-- ─── 审批历史 ─── -->
+    <div class="panel">
+      <h2>审批历史</h2>
+      <ul class="timeline" id="timeline"><li class="empty">加载中…</li></ul>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+renderNav('approve');
+
+const taskId = qs('taskId');
+let current = null;          // { task, instance, process }
+let apiPrefix = null;        // 所属流程的 HTTP 前缀
+
+if (!taskId) {
+  document.getElementById('main').innerHTML =
+    '<div class="panel empty">缺少参数 taskId。请从 <a class="link" href="/tasks.html">待办任务列表</a> 或首页「去审批」进入。</div>';
+} else {
+  $('#submit-btn').addEventListener('click', submit);
+  boot();
+}
+
+async function boot() {
+  try {
+    current = await api(`/api/tasks/${encodeURIComponent(taskId)}`);
+    apiPrefix = PROCESS_API[current.process?.Name];
+
+    if (!apiPrefix) throw new Error(`流程 '${current.process?.Name}' 没有对应的端点前缀。`);
+
+    renderMeta();
+    renderForm();
+    renderBusiness();
+    await renderHistory();
+
+    $('#submit-btn').disabled = !current.instance?.Running;
+  } catch (error) {
+    $('#task-meta').innerHTML = `<span class="empty">${esc(error.message)}</span>`;
+    $('#submit-btn').disabled = true;
+    toast(error.message);
+  }
+}
+
+// ── 任务信息 ──
+function renderMeta() {
+  const t = current.task ?? {};
+  $('#task-meta').innerHTML = `
+    <table class="kv">
+      <tr><td>任务</td><td>${esc(t.Name ?? taskId)} <code class="muted">${esc(taskId)}</code></td></tr>
+      <tr><td>所属流程</td><td>${esc(current.process.Describe)}（<code>${esc(current.process.Name)}</code>）</td></tr>
+      <tr><td>流程实例</td><td><code>${esc(current.instance.ProcessInstanceId)}</code></td></tr>
+      <tr><td>业务单号</td><td><code>${esc(current.instance.BusinessKey ?? '—')}</code></td></tr>
+      <tr><td>申请人</td><td>${esc(current.instance.Base?.ApplyUser ?? '—')}</td></tr>
+      <tr><td>办理人</td><td>${esc(t.Assignee ?? '未领取（候选人可见）')}</td></tr>
+      <tr><td>流程状态</td><td>${statusPill(current.instance.Status)}</td></tr>
+    </table>`;
+
+  // 业务单查看地址：按流程信息枚举的 viewUrl 模板渲染
+  if (current.instance.BusinessKey) {
+    const link = $('#view-link');
+    link.href = fillTemplate(current.process.ViewUrl, {
+      businessId: current.instance.BusinessKey,
+      processInstanceId: current.instance.ProcessInstanceId,
+    });
+    link.hidden = false;
+  }
+}
+
+// ── 审批表单：完全按表单契约渲染（类型 / 必填 / 枚举选项 / 默认值） ──
+function renderForm() {
+  const form = current.task?.Form ?? [];
+  const area = $('#form-area');
+
+  if (!form.length) {
+    area.innerHTML = '<div class="empty">该环节没有表单字段。</div>';
+    return;
+  }
+
+  area.innerHTML = form.map((prop) => {
+    const id = `f_${prop.Id}`;
+    const required = prop.Required ? '<span class="pill warn">必填</span>' : '';
+    const bind = `data-var="${esc(prop.Variable || prop.Id)}"`;
+    let control;
+
+    if (prop.Type === 'enum' && (prop.Options ?? []).length) {
+      control = `<div class="opts">${prop.Options.map((opt) => `
+        <label><input type="radio" name="${esc(prop.Id)}" value="${esc(opt.Id)}"
+          ${prop.Default === opt.Id ? 'checked' : ''} ${bind} />${esc(opt.Name ?? opt.Id)}</label>`).join('')}</div>`;
+    } else if (prop.Type === 'long' || prop.Type === 'double') {
+      control = `<input id="${esc(id)}" type="number" step="${prop.Type === 'double' ? '0.01' : '1'}"
+        value="${esc(prop.Default ?? '')}" ${bind} />`;
+    } else if (prop.Type === 'date') {
+      control = `<input id="${esc(id)}" type="date" value="${esc(prop.Default ?? '')}" ${bind} />`;
+    } else if (prop.Type === 'boolean') {
+      control = `<select id="${esc(id)}" ${bind}>
+        <option value="true" ${prop.Default === 'true' ? 'selected' : ''}>是</option>
+        <option value="false" ${prop.Default === 'false' ? 'selected' : ''}>否</option></select>`;
+    } else {
+      control = `<textarea id="${esc(id)}" ${bind} placeholder="${esc(prop.Name ?? prop.Id)}">${esc(prop.Default ?? '')}</textarea>`;
+    }
+
+    return `<div class="field">
+      <label for="${esc(id)}">${esc(prop.Name ?? prop.Id)} ${required}
+        <span class="hint">${esc(prop.Type ?? 'string')} · 变量 <code>${esc(prop.Variable || prop.Id)}</code></span>
+      </label>
+      ${control}
+    </div>`;
+  }).join('');
+}
+
+// 收集表单值：按表单契约把输入映射成 values（键 = formProperty id）
+function collectValues() {
+  const values = {};
+  for (const prop of current.task?.Form ?? []) {
+    const el = $(`[name="${CSS.escape(prop.Id)}"]:checked`) || $(`#f_${CSS.escape(prop.Id)}`);
+    if (!el) continue;
+
+    let value = el.value;
+    if ((prop.Type === 'long' || prop.Type === 'double') && value !== '') value = Number(value);
+    if (value !== '' || prop.Required) values[prop.Id] = value;
+  }
+  return values;
+}
+
+// ── 提交审批：通过 / 拒绝都走同一个端点，选项由表单契约决定；
+//    审批结束后的业务数据处理（订单状态回写 / 请假结论落盘）在服务端委托里完成 ──
+async function submit() {
+  const button = $('#submit-btn');
+  button.disabled = true;
+  try {
+    const view = await api(`${apiPrefix}/tasks/${encodeURIComponent(taskId)}/submit`, {
+      method: 'POST',
+      body: { values: collectValues() },
+    });
+
+    const done = view && !view.Running;
+    toast(done
+      ? `审批已办结：${view.Result?.Outcome === 'Approved' ? '审批通过' : '审批拒绝'}（业务数据已回写）`
+      : '已提交，流程进入下一环节', 'ok');
+
+    await boot();   // 重新加载：办结后页面转为只读回执
+  } catch (error) {
+    toast(error.message);
+    button.disabled = false;
+  }
+}
+
+// ── 业务单信息：流程参数表 + BaseModel 关键字段 ──
+function renderBusiness() {
+  const params = current.instance.Parameters ?? {};
+  const rows = [
+    ['流程参数', Object.entries(params).map(([k, v]) => `${esc(k)}=${esc(v ?? '—')}`).join('，') || '—'],
+    ['业务部门', esc(current.instance.Base?.BusinessDeptId ?? '—')],
+    ['申请部门', esc(current.instance.Base?.ApplyDeptId ?? '—')],
+    ['发起时间', esc(fmtTime(current.instance.StartedAt))],
+  ];
+
+  const result = current.instance.Result;
+  if (result) {
+    rows.push(['审批结论', statusPill(result.Outcome)]);
+    rows.push(['最终意见', esc(result.Base?.Comment ?? '—')]);
+    rows.push(['结论环节', esc(result.ActivityName ?? result.ActivityId)]);
+  }
+
+  $('#biz-table').innerHTML =
+    rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('');
+}
+
+// ── 审批历史时间线 ──
+async function renderHistory() {
+  const timeline = $('#timeline');
+  try {
+    const history = await api(
+      `${apiPrefix}/instances/${encodeURIComponent(current.instance.ProcessInstanceId)}/history`);
+
+    if (!history?.Steps?.length) {
+      timeline.innerHTML = '<li class="empty">暂无历史记录。</li>';
+      return;
+    }
+
+    timeline.innerHTML = history.Steps.map((step) => `
+      <li class="${step.EndedAt ? 'done' : 'now'}">
+        <div class="head">
+          <b>${esc(step.ActivityName ?? step.ActivityId)}</b>
+          ${step.Assignee ? `<span class="pill">${esc(step.Assignee)}</span>` : ''}
+          ${step.DecisionName ? `<span class="pill ${step.DecisionName === '通过' ? 'ok' : 'no'}">${esc(step.DecisionName)}</span>` : ''}
+          <span class="when">${esc(fmtTime(step.StartedAt))}${step.EndedAt ? ` → ${esc(fmtTime(step.EndedAt))}` : ' · 进行中'}</span>
+        </div>
+        ${step.Comment ? `<div class="say">${esc(step.Comment)}</div>` : ''}
+      </li>`).join('');
+  } catch (error) {
+    timeline.innerHTML = `<li class="empty">${esc(error.message)}</li>`;
+  }
+}
+</script>
+</body>
+</html>

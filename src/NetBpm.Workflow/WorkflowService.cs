@@ -112,7 +112,8 @@ public sealed class WorkflowService : IWorkflowService
             applyTime: DateTime.UtcNow,
             businessId: request.BusinessKey,
             businessDeptId: request.BusinessDeptId,
-            applyDeptId: request.ApplyDeptId);
+            applyDeptId: request.ApplyDeptId,
+            workflowTypeId: request.WorkflowTypeId);
 
         var paraDict = ParaDict.FromJson(request.ParaDict);
         EnsureNoConflicts(paraDict);

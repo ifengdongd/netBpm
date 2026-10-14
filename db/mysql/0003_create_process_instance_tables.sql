@@ -29,7 +29,7 @@ create table instances (
     tenant_id             bigint        not null comment '多租户id',
     apply_id              bigint        not null comment '申请id',
     apply_time            datetime      not null comment '申请时间',
-    workflow_type_id      bigint        not null comment '流程类型（对应cfg.Workflow_type）',
+    workflow_type_id      varchar(64)   not null comment '流程类型id（业务侧流程信息枚举 Id：订单=02830358-46ef-40e5-b3b9-4d5c4eb23f9f，请假=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）',
     workflow_version      varchar(50)   null comment '流程版本',
     `describe`            varchar(200)  not null comment '流程实例描述',
     apply_emp_id          varchar(50)   not null comment '申请人id',
@@ -54,7 +54,7 @@ create table instances (
     index ix_instances_business_id (business_id),
     index ix_instances_status_id (tenant_id, status_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin
-  COMMENT='流程实例表';
+  COMMENT='流程实例表（订单审批/请假审批流程共用；workflow_type_id=流程信息枚举的流程类型id：订单=02830358-46ef-40e5-b3b9-4d5c4eb23f9f，请假=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）';
 
 -- ─────────────────────────── 当前审批任务记录 ───────────────────────────
 
@@ -72,7 +72,7 @@ create table instance_current_task (
     index ix_instance_current_task_apply_id (apply_id),
     index ix_instance_current_task_task_id (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin
-  COMMENT='当前审批步骤及审批人';
+  COMMENT='当前审批步骤及审批人（订单审批/请假审批流程共用）';
 
 -- ─────────────────────────── 审批历史记录 ───────────────────────────
 
@@ -93,4 +93,4 @@ create table deal_history (
     index ix_deal_history_apply_id (apply_id),
     index ix_deal_history_deal_emp_id (tenant_id, deal_emp_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin
-  COMMENT='审批历史记录';
+  COMMENT='审批历史记录（订单审批/请假审批流程共用）';

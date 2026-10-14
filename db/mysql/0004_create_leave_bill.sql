@@ -32,4 +32,4 @@ create table leave_bill (
     primary key (business_id),
     index ix_leave_bill_apply_user (tenant_id, apply_user)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin
-  COMMENT='请假单（业务表单）';
+  COMMENT='请假单（业务表单；days/reason 对应请假流程参数；流程类型id=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）';

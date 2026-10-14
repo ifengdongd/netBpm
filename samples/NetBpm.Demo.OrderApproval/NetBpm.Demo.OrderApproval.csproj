@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Demo.OrderApproval</RootNamespace>
+    <AssemblyName>NetBpm.Demo.OrderApproval</AssemblyName>
+    <UserSecretsId>netbpm-demo-order-approval</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Engine\NetBpm.Engine.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Identity\NetBpm.Identity.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\NetBpm.Workflow\NetBpm.Workflow.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+  <!--
+    流程定义的唯一来源就是设计器示例：链接进来而不是复制一份，
+    否则「设计器里改的」与「Demo 跑的」迟早会漂移成两份。
+  -->
+  <ItemGroup>
+    <Content Include="..\..\web\designer\examples\order-process.bpmn20.xml"
+             Link="processes\order-process.bpmn20.xml"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
