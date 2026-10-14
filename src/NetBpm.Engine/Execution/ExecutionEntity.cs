@@ -101,6 +101,9 @@ public class ExecutionEntity : IExecutionEntity
     public bool IsProcessInstanceType => ParentId is null;
 
     /// <inheritdoc />
+    public string? EventName { get; set; }
+
+    /// <inheritdoc />
     public IVariableScope Variables => this;
 
     /// <summary>当前执行持有的变量（值视图，诊断用）。</summary>

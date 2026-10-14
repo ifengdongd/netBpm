@@ -301,25 +301,10 @@ function validateUnsupportedCapabilities(
     const extensions = element.extensionElements?.values ?? [];
 
     for (const extension of extensions) {
-      // ⚠️ 监听器已在设计器开放编辑（listEditors.ts）：这里降级为**警告**。
-      // 后端引擎尚未实现监听器执行时，校验规则仍会拒绝部署 —— 以「后端报错」为准，
-      // 面板只提醒用户注意。等后端放开规则后，这条警告可移除。
-      if (extension.$type === 'activiti:TaskListener') {
-        issues.push(warning(id, `${label(element)} 带有任务监听器（activiti:taskListener）：后端引擎尚未实现监听器执行，部署前请确认后端校验已放开。`));
-      }
-
-      if (extension.$type === 'activiti:ExecutionListener') {
-        issues.push(warning(id, `${label(element)} 带有执行监听器（activiti:executionListener）：后端引擎尚未实现监听器执行，部署前请确认后端校验已放开。`));
-      }
-
-      if (extension.$type === 'activiti:EventListener') {
-        issues.push(warning(id, `${label(element)} 带有事件监听器（activiti:eventListener）：后端引擎尚未实现监听器执行，部署前请确认后端校验已放开。`));
-      }
-
-      if (extension.$type === 'activiti:FormProperty') {
-        issues.push(warning(id, `${label(element)} 带有表单属性（activiti:formProperty）：后端引擎尚未实现表单属性执行，部署前请确认后端校验已放开。`));
-      }
-
+      // 监听器（执行 / 任务 / 事件）与表单属性已由后端支持：
+      //   监听器由引擎执行（ListenerInvoker / EngineEventDispatcher），
+      //   表单属性是审批应用层的表单契约（WorkflowFormMapper）—— 均不再告警。
+      // 仍要拦截的只有字段注入与事件定义（子集外能力）。
       if (extension.$type === 'activiti:Field') {
         issues.push(error(id, `${label(element)} 带有字段注入（activiti:field），本子集未实现，部署会被拒绝。`));
       }

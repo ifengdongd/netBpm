@@ -40,6 +40,7 @@ const BIZ = {
   A: biz(1), B: biz(2), C: biz(3), D: biz(4),
   E: biz(5), F: biz(6), G: biz(7), H: biz(8),
   E2: biz(9), P: biz(10), P2: biz(11), P3: biz(12), I: biz(13),
+  L: biz(14), L2: biz(15),
 };
 
 
@@ -751,7 +752,27 @@ async function run() {
       hA.stepsSource, 'BusinessApprovals');
   }
 
-  // ───────────────────────── 汇总 ─────────────────────────
+    console.log('\n[12] 监听器执行：执行监听器（start/take/end）+ 事件监听器（TASK_COMPLETED）');
+
+  // 挂载点（leave-process.bpmn20.xml）：task_apply 的 start/end、flow_start_apply 的 take、
+  // 流程级 activiti:eventListener（events=TASK_COMPLETED）。
+  // 走一遍「≤3 天直接通过」：
+  //   · 执行监听器 start / take / end 各恰好 +1（task_apply 进一次、flow_start_apply 穿一次、出一次）；
+  //   · TASK_COMPLETED 每次提交任务 +1 —— 申请 + 组长各一次 ⇒ +2；
+  //   · 未订阅的事件（如 TASK_CREATED）不通知 ⇒ +0。计数来自 /api/leave/listener-stats。
+  const statsBefore = (await get('/api/leave/listener-stats')).body;
+  let viewL = await startAndApply('alice', 2, '监听器验证', BIZ.L);
+  viewL = await submit(viewL, 'task_leader_approve', { approvalResult: '1', comment: '监听器验证' });
+  const statsAfter = (await get('/api/leave/listener-stats')).body;
+
+  const deltaOf = (key) => (statsAfter[key] ?? 0) - (statsBefore[key] ?? 0);
+  check('执行监听器 start 恰好 +1（task_apply 进入）', deltaOf('executionStart'), 1);
+  check('执行监听器 take 恰好 +1（flow_start_apply 穿越）', deltaOf('executionTake'), 1);
+  check('执行监听器 end 恰好 +1（task_apply 离开）', deltaOf('executionEnd'), 1);
+  check('事件监听器 TASK_COMPLETED +2（申请 + 组长各提交一次）', deltaOf('taskCompleted'), 2);
+  check('未订阅的事件不通知（TASK_CREATED 不在 events 清单）', deltaOf('taskCreated'), 0);
+  check('实例正常结束（监听器没有干扰流转）', viewL.running, false);
+// ───────────────────────── 汇总 ─────────────────────────
 
   console.log(`\n${'─'.repeat(64)}`);
   if (failures.length === 0) {

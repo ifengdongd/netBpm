@@ -1,6 +1,7 @@
 using System.Text;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Model;
+using NetBpm.Bpmn.Validation;
 
 namespace NetBpm.UnitTests;
 
@@ -272,6 +273,71 @@ public sealed class BpmnXmlConverterTests
 
         var exception = Assert.Throws<BpmnXmlParseException>(() => Parse(xml));
         Assert.Contains("subProcess", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProcessLevelExtensionElements_ShouldBeRecordedAndRejectedByValidationRule()
+    {
+        // 回归：流程级 extensionElements（设计器「执行监听器」组写在 Process 上）曾把
+        // <activiti:executionListener> 撞上解析器的「元素 <executionListener> 不在本子集
+        // 支持范围内」误导性报错。现在应记到 Process 上，由校验规则给出准确拒绝原因。
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="withListener" isExecutable="true">
+                <extensionElements>
+                  <activiti:executionListener event="start" class="A" />
+                </extensionElements>
+                <startEvent id="start" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml).GetMainProcess()!;
+
+        var listener = Assert.Single(process.ExecutionListeners);
+        Assert.Equal("start", listener.Event);
+        Assert.Equal("A", listener.ClassName);
+
+        // 监听器已由引擎执行：不再被校验拒绝（形状由 listener-configuration 规则校验）
+        Assert.DoesNotContain(new ProcessValidator().Validate(process), error => error.Rule == "unsupported-capability");
+    }
+
+    [Fact]
+    public void ToleratedElementsWithChildren_ShouldBeSkippedWholeWithoutFalseRejection()
+    {
+        // 回归：容忍元素（laneSet / textAnnotation 等）若只跳过开始标签、不消费子树，
+        // 其子元素会被流程级循环当成子集外元素拒绝 —— 必须整棵跳过。
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                         targetNamespace="http://netbpm/test">
+              <process id="withArtifacts" isExecutable="true">
+                <laneSet id="ls">
+                  <lane id="lane1" name="审批组">
+                    <flowNodeRef>start</flowNodeRef>
+                  </lane>
+                </laneSet>
+                <startEvent id="start" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+                <textAnnotation id="note">
+                  <text>流程说明</text>
+                </textAnnotation>
+                <association id="assoc1" sourceRef="note" targetRef="start" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml).GetMainProcess()!;
+
+        Assert.NotNull(process.GetFlowElement("start"));
+        Assert.NotNull(process.GetFlowElement("end"));
     }
 
     private static BpmnModel Parse(string xml) =>

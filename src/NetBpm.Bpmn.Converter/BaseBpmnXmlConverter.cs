@@ -147,7 +147,8 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
     }
 
     /// <summary>解析 <c>extensionElements</c>（执行监听器 / 任务监听器 / 字段注入 / 表单属性）。</summary>
-    protected static void ReadExtensionElements(XmlReader reader, BaseElement element)
+    /// <remarks><c>internal</c> 供 <see cref="BpmnXmlConverter"/> 读取流程级 extensionElements（记到 Process 上）。</remarks>
+    internal static void ReadExtensionElements(XmlReader reader, BaseElement element)
     {
         if (element is UserTask userTask)
         {
@@ -183,6 +184,11 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
             else if (name == BpmnConstants.ElementFormProperty && formProperties is not null)
             {
                 formProperties.Add(ReadFormProperty(child));
+            }
+            else if (name == BpmnConstants.ElementEventListener && element is Process process)
+            {
+                // 流程级事件监听器：记到 Process 上，运行期由引擎事件分发器逐个通知
+                process.EventListeners.Add(ReadEventListener(child));
             }
         });
     }
@@ -229,13 +235,41 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         return bool.TryParse(raw, out var value) ? value : null;
     }
 
+    /// <summary>解析流程级 <c>activiti:eventListener</c>（属性无前缀，见 <see cref="ReadActivitiAttribute"/>）。</summary>
+    private static EventListener ReadEventListener(XmlReader reader) =>
+        new()
+        {
+            Events = ReadActivitiAttribute(reader, "events"),
+            EntityType = ReadActivitiAttribute(reader, "entityType"),
+            ClassName = ReadActivitiAttribute(reader, BpmnConstants.AttributeClass),
+            Expression = ReadActivitiAttribute(reader, BpmnConstants.AttributeExpression),
+            DelegateExpression = ReadActivitiAttribute(reader, BpmnConstants.AttributeDelegateExpression),
+            ThrowOnFailure = OptionalBool(reader, "throwOnFailure"),
+        };
+
+    /// <summary>写出流程级 <c>activiti:eventListener</c>（属性无前缀，见 <see cref="WriteListener"/> 的说明）。</summary>
+    internal static void WriteEventListener(XmlWriter writer, EventListener listener)
+    {
+        writer.WriteStartElement(BpmnConstants.ActivitiPrefix, BpmnConstants.ElementEventListener, BpmnConstants.ActivitiNamespace);
+        WriteAttributeIfPresent(writer, "events", listener.Events);
+        WriteAttributeIfPresent(writer, "entityType", listener.EntityType);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeClass, listener.ClassName);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeExpression, listener.Expression);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeDelegateExpression, listener.DelegateExpression);
+        WriteBoolAttributeIfPresent(writer, "throwOnFailure", listener.ThrowOnFailure);
+        writer.WriteEndElement();
+    }
+
     private static ExecutionListener ReadListener(ExecutionListener listener, XmlReader reader)
     {
-        listener.Event = Attr(reader, "event", BpmnConstants.ActivitiNamespace);
-        listener.ClassName = Attr(reader, BpmnConstants.AttributeClass, BpmnConstants.ActivitiNamespace);
-        listener.Expression = Attr(reader, BpmnConstants.AttributeExpression, BpmnConstants.ActivitiNamespace);
-        listener.DelegateExpression = Attr(reader, BpmnConstants.AttributeDelegateExpression, BpmnConstants.ActivitiNamespace);
-        listener.ImplementationType = Attr(reader, "type", BpmnConstants.ActivitiNamespace);
+        // ⚠️ activiti:* 扩展元素自身的属性是**无前缀**的（Activiti 标准格式、bpmn-js 的写出形式）：
+        // <activiti:executionListener event="start" class="A" />。
+        // 历史落库 XML 里本转换器旧版曾写出 activiti:event 前缀形式，读不到时回退限定名。
+        listener.Event = ReadActivitiAttribute(reader, "event");
+        listener.ClassName = ReadActivitiAttribute(reader, BpmnConstants.AttributeClass);
+        listener.Expression = ReadActivitiAttribute(reader, BpmnConstants.AttributeExpression);
+        listener.DelegateExpression = ReadActivitiAttribute(reader, BpmnConstants.AttributeDelegateExpression);
+        listener.ImplementationType = ReadActivitiAttribute(reader, "type");
 
         if (!reader.IsEmptyElement)
         {
@@ -252,13 +286,20 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         return listener;
     }
 
+    /// <summary>
+    /// 读 <c>activiti:*</c> 扩展元素的属性：优先无前缀形式（Activiti 标准），
+    /// 回退 <c>activiti:</c> 限定形式（历史落库 XML）。
+    /// </summary>
+    private static string? ReadActivitiAttribute(XmlReader reader, string localName) =>
+        Attr(reader, localName) ?? Attr(reader, localName, BpmnConstants.ActivitiNamespace);
+
     private static FieldExtension ReadField(XmlReader reader)
     {
         var field = new FieldExtension
         {
             FieldName = Attr(reader, "name"),
             StringValue = Attr(reader, "stringValue"),
-            Expression = Attr(reader, BpmnConstants.AttributeExpression, BpmnConstants.ActivitiNamespace),
+            Expression = ReadActivitiAttribute(reader, BpmnConstants.AttributeExpression),
         };
 
         if (!reader.IsEmptyElement)
@@ -385,7 +426,7 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         writer.WriteStartElement(BpmnConstants.ActivitiPrefix, BpmnConstants.ElementField, BpmnConstants.ActivitiNamespace);
         WriteAttributeIfPresent(writer, "name", field.FieldName);
         WriteAttributeIfPresent(writer, "stringValue", field.StringValue);
-        WriteActivitiAttribute(writer, BpmnConstants.AttributeExpression, field.Expression);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeExpression, field.Expression);
         writer.WriteEndElement();
     }
 
@@ -400,11 +441,13 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
 
     private static void WriteListener(XmlWriter writer, string elementName, ExecutionListener listener)
     {
+        // ⚠️ activiti:* 扩展元素自身的属性按 Activiti 标准格式写出（**无前缀**），
+        // 与 bpmn-js / Activiti 的解析口径一致 —— 前缀形式 activiti:event 反而读不回来。
         writer.WriteStartElement(BpmnConstants.ActivitiPrefix, elementName, BpmnConstants.ActivitiNamespace);
-        WriteActivitiAttribute(writer, "event", listener.Event);
-        WriteActivitiAttribute(writer, BpmnConstants.AttributeClass, listener.ClassName);
-        WriteActivitiAttribute(writer, BpmnConstants.AttributeExpression, listener.Expression);
-        WriteActivitiAttribute(writer, BpmnConstants.AttributeDelegateExpression, listener.DelegateExpression);
+        WriteAttributeIfPresent(writer, "event", listener.Event);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeClass, listener.ClassName);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeExpression, listener.Expression);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeDelegateExpression, listener.DelegateExpression);
         writer.WriteEndElement();
     }
 

@@ -575,12 +575,12 @@ Demo 里变量是这样进去的：
 | `start-and-end-event`                   | 没有开始事件；多于一个开始事件；没有结束事件                               | 保证**恰好一个**开始事件 + **至少一个**结束事件 |
 | `sequence-flow-reference`               | `sourceRef` / `targetRef` 解析不到节点                     | 检查 id 拼写                      |
 | `required-attributes`                   | 服务任务没写 `class` / `delegateExpression` / `expression` | 三选一补上                         |
-| `unsupported-capability`                | 用了**执行监听器** / **任务监听器** / **服务任务字段注入**               | 见下                            |
+| `listener-configuration`                | 执行/任务监听器缺事件或取值非法；事件监听器缺 events / 实现 | 补全（监听器已支持，见 §6.5）             |
+| `unsupported-capability`                | 用了**服务任务字段注入** `<activiti:field>`               | 委托用构造函数/DI 拿依赖（Demo 就是这样）     |
 
-**`unsupported-capability` 单独说明**：这三类能力本子集**没有实现**，为了不让"模型里写了、运行期静默跳过"，一律**拒绝部署**：
-
-| 被拒写法                         | 替代方案                      |
-| ---------------------------- | ------------------------- |
+> **变更记录**：执行监听器 / 任务监听器 / 流程级事件监听器已支持（2026-10-14，见 §6.5）；
+> `unsupported-capability` 现在只剩字段注入一类。
+---------------------------- | ------------------------- |
 | `activiti:executionListener` | 逻辑挪进服务任务委托                |
 | `activiti:taskListener`      | 逻辑挪进任务提交后的宿主代码            |
 | `<activiti:field>`（服务任务字段注入） | 委托用构造函数/DI 拿依赖（Demo 就是这样） |
@@ -652,6 +652,21 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUser
 
 ---
 
+### 6.5 监听器（已支持，2026-10-14）
+
+执行 / 任务 / 事件监听器已进引擎（此前被 `unsupported-capability` 拒部署，现移入本节）：
+
+| 监听器 | 挂载点 | 事件 | 契约 |
+| --- | --- | --- | --- |
+| `activiti:executionListener` | 任意流程元素 | `start`（进入节点、行为执行前）/ `take`（穿越顺序流，恰好一次）/ `end`（离开节点前） | `IExecutionListener.NotifyAsync`；`execution.EventName` 为事件名 |
+| `activiti:taskListener` | 用户任务 | `create` / `assignment`（实际指派了办理人时）/ `complete`（删除任务前，提交的变量已写入执行） | `ITaskListener.NotifyAsync(TaskListenerContext)` |
+| `activiti:eventListener` | 流程级 `extensionElements` | `events` 逗号分隔：`PROCESS_STARTED/COMPLETED`、`ACTIVITY_STARTED/COMPLETED`、`TASK_CREATED/COMPLETED` | `IEngineEventListener.OnEventAsync(WorkflowEngineEvent)`；`throwOnFailure=true` 对应 Java 端 `isFailOnException()` |
+
+- 实现方式三选一：`class` / `delegateExpression`（容器服务名，支持 ${name}）/ `expression`（EL 求值）；
+- 注册与服务任务委托同通道：`[ServiceTaskName("名字")]` + `AddServiceTaskDelegates` 扫描（监听器契约一并登记）；
+- 部署期 `listener-configuration` 校验事件与实现必填；`ServiceTaskDelegateGuard` 预解析委托（解析不到宿主起不来）；
+- Demo 样例：`Leave/WorkFlowListeners.cs`（对齐 Java 端 WorkFlowProcessListener / WorkFlowTaskCompletedListener），
+  e2e `[12]` 借 `/api/leave/listener-stats` 断言各挂点恰好触发一次。
 ## 7. 流程应用层封装（NetBpm.Workflow）
 
 第 6 节那几件事，每个接入方都要照抄一遍 —— 抄到第二遍就该意识到：**它们与业务无关，不该由宿主重复实现**。
@@ -811,7 +826,7 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 - [ ] `>` `<` 在 XML 里转义成 `&gt;` `&lt;` 了？
 - [ ] 新增的服务任务，`delegateExpression` 的值能被解析（类上有 `[ServiceTaskName]`，或写了类全名 / 短名）？
 - [ ] 新增的委托在部署期自检里过了一遍（`ServiceTaskDelegateGuard`）？
-- [ ] 没用到监听器 / 服务任务字段注入（会被拒部署）？
+- [ ] 新增监听器的事件与实现写全了（`listener-configuration` 会拦；实现需 `[ServiceTaskName]` 注册，`ServiceTaskDelegateGuard` 预解析）？服务任务字段注入仍被拒？
 - [ ] `BPMNDiagram` 补齐了（每个新节点 / 新连线都有形状与边）？
 
 改完跑一遍端到端：
@@ -874,6 +889,7 @@ node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 | `src/NetBpm.Workflow/Hosting/WorkflowEndpoints.cs` | 通用流程 HTTP 端点（业务语义经 `WorkflowEndpointOptions` 注入） |
 | `src/NetBpm.Workflow/Hosting/WorkflowProcessBootstrapper.cs` | 启动即部署 BPMN 资源 + 自检钩子 + 填充运行期上下文 |
 | `src/NetBpm.Workflow/Hosting/WorkflowRuntimeContext.cs` | 部署后运行期上下文（流程定义 id + 环节名 → id 对照表） |
+`src/NetBpm.Engine/Behavior/ListenerContracts.cs` + `ListenerInvoker.cs` + `Services/EngineEventDispatcher.cs` | 监听器契约（IExecutionListener / ITaskListener / IEngineEventListener）、触发与事件分发 |
 | `src/NetBpm.Identity/IdentityContracts.cs` | 身份模块端口（`FindUserIdsByGroupAsync` 是候选组展开的入口） |
 | `db/mysql/0003_create_process_instance_tables.sql` | 三张业务表（`instances` / `instance_current_task` / `deal_history`）的建表脚本 |
 | `db/mysql/0004_create_leave_bill.sql` | 请假单表（`days` / `reason` 真列 + `ext_params` JSON 列） |

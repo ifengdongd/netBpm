@@ -140,7 +140,7 @@ public sealed class ProcessValidatorTests
     }
 
     [Fact]
-    public void ExecutionListener_ShouldBeRejectedInsteadOfSilentlyIgnored()
+    public void ExecutionListener_ShouldBeAllowed()
     {
         const string xml = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -163,11 +163,11 @@ public sealed class ProcessValidatorTests
 
         var errors = Validator.Validate(Parse(xml));
 
-        Assert.Contains(errors, error => error.ElementId == "work" && error.Rule == "unsupported-capability");
+        Assert.DoesNotContain(errors, error => error.Rule == "unsupported-capability");
     }
 
     [Fact]
-    public void TaskListener_ShouldBeRejectedInsteadOfSilentlyIgnored()
+    public void TaskListener_ShouldBeAllowed()
     {
         const string xml = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -190,7 +190,7 @@ public sealed class ProcessValidatorTests
 
         var errors = Validator.Validate(Parse(xml));
 
-        Assert.Contains(errors, error => error.ElementId == "approve" && error.Rule == "unsupported-capability");
+        Assert.DoesNotContain(errors, error => error.Rule == "unsupported-capability");
     }
 
     [Fact]

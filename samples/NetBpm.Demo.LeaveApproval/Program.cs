@@ -21,6 +21,9 @@ builder.Services.AddNetBpm(builder.Configuration);
 // 身份模块换成演示实现，否则「按候选人查待办」永远查不到候选组任务
 builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUserGroupManager>());
 
+// 监听器触发计数（观测用单例）：两个监听器往里 +1，/api/leave/listener-stats 供 e2e 断言
+builder.Services.AddSingleton<ListenerStats>();
+
 // 运行期上下文（流程定义 id、环节名 → 环节 id 映射）由 AddNetBpmWorkflow 一并注册，
 // 部署流程定义之后由 WorkflowProcessBootstrapper 填充（见下方启动部署）。
 

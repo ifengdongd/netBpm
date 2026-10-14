@@ -47,6 +47,11 @@ public sealed class EndExecutionOperation : IOperation
 
         if (activeExecutions == 0)
         {
+            // 流程级 PROCESS_COMPLETED 事件分发：实例删除前发，监听器还能读到执行与变量
+            await EngineEventDispatcher
+                .DispatchAsync(_services, processInstanceExecution, EngineEvents.ProcessCompleted, processInstanceId, ct)
+                .ConfigureAwait(false);
+
             // ⚠️ 元素 id 取自**操作自身的执行**（而非流程实例执行）—— 流程实例根执行的 ACT_ID_ 恒为空，
             // 用它的 id 会让 ACT_HI_PROCINST.END_ACT_ID_ 永远是 null。
             await _services.ExecutionManager

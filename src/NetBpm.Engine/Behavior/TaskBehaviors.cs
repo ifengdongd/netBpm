@@ -76,6 +76,15 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
         // 办理关系需要任务 id，因此必须「先插入、后分配」
         await taskManager.InsertTaskAsync(task, executionEntity, ct).ConfigureAwait(false);
 
+        // 任务监听器（activiti:taskListener，event="create"）+ 流程级 TASK_CREATED 事件
+        await ListenerInvoker
+            .NotifyTaskListenersAsync(
+                Services, task, execution, userTask.TaskListeners, ListenerInvoker.CreateEvent, ct)
+            .ConfigureAwait(false);
+        await EngineEventDispatcher
+            .DispatchAsync(Services, execution, EngineEvents.TaskCreated, task.Id, ct)
+            .ConfigureAwait(false);
+
         if (await ShouldSkipAsync(userTask, execution, ct).ConfigureAwait(false))
         {
             await taskManager.DeleteTaskAsync(task, null, ct).ConfigureAwait(false);
@@ -84,6 +93,15 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
         }
 
         await HandleAssignmentsAsync(userTask, task, taskManager, execution, ct).ConfigureAwait(false);
+
+        // 任务监听器（activiti:taskListener，event="assignment"）：仅在实际指派了办理人时触发（同 Activiti）
+        if (!string.IsNullOrEmpty(task.Assignee))
+        {
+            await ListenerInvoker
+                .NotifyTaskListenersAsync(
+                    Services, task, execution, userTask.TaskListeners, ListenerInvoker.AssignmentEvent, ct)
+                .ConfigureAwait(false);
+        }
 
         // 用户任务不离开节点：等 CompleteTaskCommand 删除任务后由 TriggerExecutionOperation 推进
     }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
 using NetBpm.El;
@@ -80,7 +81,8 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetRequiredService<IActivityBehaviorFactory>(),
             provider.GetRequiredService<IActivityDelegateResolver>(),
             provider.GetRequiredService<ITaskManager>(),
-            provider.GetRequiredService<IProcessDefinitionResolver>()));
+            provider.GetRequiredService<IProcessDefinitionResolver>(),
+            provider.GetService<ILoggerFactory>()?.CreateLogger("NetBpm.Engine")));
 
         // ── 命令与拦截器 ────────────────────────────────────────────
         services.AddSingleton<ICommandInterceptor, LogInterceptor>();

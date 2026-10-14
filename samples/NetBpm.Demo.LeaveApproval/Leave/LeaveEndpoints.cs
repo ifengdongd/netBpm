@@ -50,6 +50,9 @@ public static class LeaveEndpoints
             ErrorResponseFactory = (message, errors) => new LeaveErrorResponse(message, errors),
         });
 
+        // 监听器触发计数（观测用）：e2e 借它断言「监听器真的被引擎调到了」。
+        group.MapGet("/listener-stats", GetListenerStatsAsync);
+
         // 业务数据核对入口（请假业务自有，与流程引擎无关）：
         // 落点自述 + 全部业务数据，方便打开核对。只依赖 ILeaveBusinessInspector，
         // 所以 Leave:Store 在 JSON / MySql 之间切换时这里一行都不用改
@@ -58,6 +61,8 @@ public static class LeaveEndpoints
 
         return group;
     }
+
+    private static IResult GetListenerStatsAsync(ListenerStats stats) => Results.Ok(stats.Snapshot());
 
     private static async Task<IResult> GetBusinessAsync(
         ILeaveBusinessInspector inspector,

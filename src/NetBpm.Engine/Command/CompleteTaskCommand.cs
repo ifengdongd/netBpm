@@ -1,4 +1,7 @@
+using NetBpm.Bpmn.Model;
+using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
+using NetBpm.Engine.Services;
 using NetBpm.Engine.Tasks;
 
 namespace NetBpm.Engine.Command;
@@ -9,13 +12,12 @@ namespace NetBpm.Engine.Command;
 /// <list type="number">
 ///   <item><description>校验任务存在 / 未挂起 / 未被委派（<c>DelegationState.Pending</c> 抛错）；</description></item>
 ///   <item><description>把变量写到<b>执行</b>上（<c>setExecutionVariables</c>，经作用域链落到流程实例）；</description></item>
+///   <item><description>触发任务监听器（<c>complete</c>）与流程级 <c>TASK_COMPLETED</c> 事件分发；</description></item>
 ///   <item><description>删除任务（含身份关系）；</description></item>
 ///   <item><description><c>planTriggerExecutionOperation(execution)</c> —— 由议程把用户任务节点推过去。</description></item>
 /// </list>
 /// <para>
-/// ⚠️ 未实现项：任务完成监听器（<c>complete</c> 事件）、<c>TASK_COMPLETED</c> 事件分发、
-/// 「当前登录用户补 <c>participant</c> 关系」（需要认证上下文）。前两项由部署期校验拦截
-/// （模型里出现监听器即拒绝部署），因此不会静默丢语义。
+/// ⚠️ 未实现项：「当前登录用户补 <c>participant</c> 关系」（需要认证上下文）。
 /// </para>
 /// </summary>
 public sealed class CompleteTaskCommand : ICommand<Unit>
@@ -76,6 +78,30 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
             await execution.SetVariablesAsync(_variables, ct).ConfigureAwait(false);
         }
 
+        // 任务监听器（activiti:taskListener，event="complete"）：变量已写入执行，监听器读得到提交值；
+        // 任务此时还未删除，监听器拿得到完整任务实体。
+        if (execution is not null)
+        {
+            var userTask = await ResolveUserTaskAsync(services, task, execution, ct).ConfigureAwait(false);
+
+            if (userTask is not null)
+            {
+                await ListenerInvoker
+                    .NotifyTaskListenersAsync(
+                        services, task, execution, userTask.TaskListeners, ListenerInvoker.CompleteEvent, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        // 流程级 TASK_COMPLETED 事件分发（activiti:eventListener，
+        // 对应 Activiti 里 WorkFlowTaskCompletedListener 这类全局监听的用法）
+        if (execution is not null)
+        {
+            await EngineEventDispatcher
+                .DispatchAsync(services, execution, EngineEvents.TaskCompleted, task.Id, ct)
+                .ConfigureAwait(false);
+        }
+
         await taskManager.DeleteTaskAsync(task, null, ct).ConfigureAwait(false);
 
         // 继续流程（独立任务没有执行，不需要推进）
@@ -85,5 +111,27 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
         }
 
         return Unit.Value;
+    }
+
+    /// <summary>
+    /// 取任务所属的用户任务元素（拿它的任务监听器配置）。
+    /// 跨命令读回的执行只有 <c>ACT_ID_</c> 字符串，须靠流程定义解析。
+    /// </summary>
+    private static async ValueTask<UserTask?> ResolveUserTaskAsync(
+        IEngineServices services,
+        TaskEntity task,
+        IExecutionEntity execution,
+        CancellationToken ct)
+    {
+        if (services.ProcessDefinitionResolver is not { } resolver)
+        {
+            return null;
+        }
+
+        var element = await resolver
+            .ResolveFlowElementAsync(execution.ProcessDefinitionId, task.TaskDefinitionKey, ct)
+            .ConfigureAwait(false);
+
+        return element as UserTask;
     }
 }

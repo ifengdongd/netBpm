@@ -24,6 +24,7 @@ public sealed class ProcessValidator : IProcessValidator
             new StartAndEndEventRule(),
             new SequenceFlowReferenceRule(),
             new RequiredAttributesRule(),
+            new ListenerConfigurationRule(),
             new UnsupportedCapabilityRule(),
         ])
     {

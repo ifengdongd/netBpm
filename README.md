@@ -61,19 +61,26 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - 所有元素 id 非空且**全局唯一**（区分大小写）。
 - 顺序流的 `sourceRef` / `targetRef` 必须能解析到流程节点，否则部署失败。
 
-### 执行监听器 / 任务监听器 / 事件监听器 / 表单属性（重要）
+### 执行监听器 / 任务监听器 / 事件监听器（已支持）
 
-- **执行 / 任务监听器与服务任务字段注入**：XML 可解析、设计器可配置，但引擎执行未实现，
-  为避免运行期静默跳过，**部署期会被直接拒绝**：
-  - `activiti:executionListener`（配置于流程、用户任务、服务任务、顺序流）
-  - `activiti:taskListener`（仅用户任务，事件 `create` / `assignment` / `complete` / `delete`）
-  - `activiti:field`（服务任务字段注入）
-- `activiti:eventListener`（流程级事件监听器）：后端不识别（静默忽略），设计器仅给警告。
-- 设计器中执行监听器事件下拉为 `start` / `end` / `take`（顺序流默认 `take`，其余默认 `start`），配置方式支持 `activiti:class` / `activiti:expression` / `activiti:delegateExpression`。
+- **执行监听器 `activiti:executionListener`**：任意流程元素可挂。事件 `start`（进入节点、行为执行前）/
+  `take`（穿越顺序流，恰好一次）/ `end`（离开节点前）；**任务监听器 `activiti:taskListener`**：仅用户任务，
+  事件 `create` / `assignment`（实际指派了办理人时）/ `complete`（删除任务前，提交的变量已写入执行）。
+- 实现方式三选一：`class`（.NET 类型名）/ `delegateExpression`（容器服务名，支持 ${name} 形式）/
+  `expression`（EL 求值）。契约：执行监听器实现 `IExecutionListener.NotifyAsync`（`execution.EventName`
+  为本次事件名）；任务监听器实现 `ITaskListener.NotifyAsync(TaskListenerContext)`。
+- **流程级事件监听器 `activiti:eventListener`**：`events` 逗号分隔（`PROCESS_STARTED` / `PROCESS_COMPLETED` /
+  `ACTIVITY_STARTED` / `ACTIVITY_COMPLETED` / `TASK_CREATED` / `TASK_COMPLETED`），实现契约
+  `IEngineEventListener.OnEventAsync(WorkflowEngineEvent)`。`throwOnFailure=true` 时监听器抛错使命令失败
+  （对应 Java 端 `isFailOnException()`），缺省只记警告并继续。
+- 监听器实现与服务任务委托走同一注册通道：类上标 `[ServiceTaskName("名字")]` + `AddServiceTaskDelegates` 扫描。
+- 部署期两道检查：`listener-configuration` 规则校验事件与实现必填（取值非法拒部署）；
+  `ServiceTaskDelegateGuard` 预解析 class / delegateExpression（解析不到宿主起不来）。
+- 设计器可配置、保存 → 重开 → 落库往返不丢；顺序流上的 take 监听器同样可配。
+- **`activiti:field`（服务任务字段注入）仍不支持**：部署期直接拒绝。
 - **`activiti:formProperty`（表单属性）引擎只透传不执行**：解析 / 落库往返保真（设计器「保存 → 重开」回显不丢、部署不被拒）；
   审批应用层（`NetBpm.Workflow`）以它为**表单契约** —— 枚举选项（`activiti:value`）随实例视图一起下发给前端、
-  提交值按 `variable` 映射成流程变量供网关取道。设计器会给出「引擎不做表单属性执行」的提醒性警告。
-- **在监听器放行之前，请勿在正式流程中使用执行 / 任务监听器**。
+  提交值按 `variable` 映射成流程变量供网关取道。
 
 ### 线（顺序流 / SequenceFlow）
 

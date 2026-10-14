@@ -122,7 +122,10 @@ public static class ServiceTaskDelegateRegistrationExtensions
                     continue;
                 }
 
-                if (typeof(IServiceTaskDelegate).IsAssignableFrom(type))
+                if (typeof(IServiceTaskDelegate).IsAssignableFrom(type)
+                    || typeof(IExecutionListener).IsAssignableFrom(type)
+                    || typeof(ITaskListener).IsAssignableFrom(type)
+                    || typeof(IEngineEventListener).IsAssignableFrom(type))
                 {
                     delegates.Add(type);
                 }

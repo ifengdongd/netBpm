@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NetBpm.El;
 using NetBpm.Engine.Agenda;
 using NetBpm.Engine.Behavior;
@@ -19,7 +20,8 @@ public sealed class EngineServices : IEngineServices
         IActivityBehaviorFactory activityBehaviorFactory,
         IActivityDelegateResolver? activityDelegateResolver = null,
         ITaskManager? taskManager = null,
-        IProcessDefinitionResolver? processDefinitionResolver = null)
+        IProcessDefinitionResolver? processDefinitionResolver = null,
+        ILogger? logger = null)
     {
         Agenda = agenda ?? throw new ArgumentNullException(nameof(agenda));
         ExecutionManager = executionManager ?? throw new ArgumentNullException(nameof(executionManager));
@@ -30,6 +32,7 @@ public sealed class EngineServices : IEngineServices
         ActivityDelegateResolver = activityDelegateResolver;
         TaskManager = taskManager;
         ProcessDefinitionResolver = processDefinitionResolver;
+        Logger = logger;
     }
 
     public IEngineAgenda Agenda { get; }
@@ -50,6 +53,8 @@ public sealed class EngineServices : IEngineServices
 
     public IProcessDefinitionResolver? ProcessDefinitionResolver { get; }
 
+    public ILogger? Logger { get; }
+
     /// <summary>
     /// 装配入口。<see cref="Agenda.EngineAgenda"/> 需要在构造操作时拿到
     /// <see cref="IEngineServices"/>，而 <see cref="IEngineServices"/> 又暴露议程 ——
@@ -63,7 +68,8 @@ public sealed class EngineServices : IEngineServices
         IActivityBehaviorFactory activityBehaviorFactory,
         IActivityDelegateResolver? activityDelegateResolver = null,
         ITaskManager? taskManager = null,
-        IProcessDefinitionResolver? processDefinitionResolver = null)
+        IProcessDefinitionResolver? processDefinitionResolver = null,
+        ILogger? logger = null)
     {
         IEngineServices? holder = null;
         var agenda = new EngineAgenda(
@@ -78,7 +84,8 @@ public sealed class EngineServices : IEngineServices
             activityBehaviorFactory,
             activityDelegateResolver,
             taskManager,
-            processDefinitionResolver);
+            processDefinitionResolver,
+            logger);
 
         holder = services;
         return services;

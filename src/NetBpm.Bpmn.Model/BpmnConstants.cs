@@ -66,6 +66,9 @@ public static class BpmnConstants
     /// <summary>Activiti 元素：任务监听器。</summary>
     public const string ElementTaskListener = "taskListener";
 
+    /// <summary>Activiti 元素：流程级事件监听器。</summary>
+    public const string ElementEventListener = "eventListener";
+
     /// <summary>Activiti 元素：字段注入。</summary>
     public const string ElementField = "field";
 

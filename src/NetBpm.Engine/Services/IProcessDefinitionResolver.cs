@@ -19,4 +19,13 @@ public interface IProcessDefinitionResolver
         string? processDefinitionId,
         string? activityId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 取 <paramref name="processDefinitionId"/> 的整个流程模型（事件监听器分发等场景用）。
+    /// 实现方应缓存：流程定义一旦部署就不可变。
+    /// </summary>
+    /// <returns>解析不到（未部署 / 未注入）时返回 <see langword="null"/>。</returns>
+    ValueTask<Process?> ResolveProcessModelAsync(
+        string? processDefinitionId,
+        CancellationToken ct = default);
 }

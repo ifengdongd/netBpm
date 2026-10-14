@@ -1,5 +1,6 @@
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Execution;
+using NetBpm.Engine.Services;
 
 namespace NetBpm.Engine.Command;
 
@@ -89,6 +90,11 @@ public sealed class StartProcessInstanceCommand : ICommand<string>
         // 历史：流程实例启动 —— START_ACT_ID_ 取开始事件 id
         await services.HistoryManager
             .RecordProcessInstanceStartAsync(processInstance, initialFlowElement.Id, ct)
+            .ConfigureAwait(false);
+
+        // 流程级 PROCESS_STARTED 事件分发（activiti:eventListener）
+        await EngineEventDispatcher
+            .DispatchAsync(services, processInstance, EngineEvents.ProcessStarted, processInstance.Id, ct)
             .ConfigureAwait(false);
 
         services.Agenda.PlanContinueProcessOperation(execution);

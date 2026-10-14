@@ -17,10 +17,13 @@ namespace NetBpm.Bpmn.Converter;
 /// </summary>
 public sealed class BpmnXmlConverter : IBpmnXmlConverter
 {
-    /// <summary>按 §1.3 第 8 条在解析时容忍并忽略的元素。</summary>
+    /// <summary>
+    /// 按 §1.3 第 8 条在解析时容忍并忽略的元素。
+    /// ⚠️ <c>extensionElements</c> 不在此列：它被显式读取（监听器记到宿主元素上，交校验拦截），
+    /// 其它容忍元素必须整棵跳过（见 <see cref="SkipSubtree"/>）。
+    /// </summary>
     private static readonly HashSet<string> IgnorableElements = new(StringComparer.Ordinal)
     {
-        "extensionElements",
         "documentation",
         "laneSet",
         "dataObject",
@@ -209,12 +212,26 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
                 continue;
             }
 
-            if (_elementReaders.TryGetValue(reader.LocalName, out var converter))
+            if (reader.LocalName == "extensionElements")
+            {
+                // 流程级 extensionElements（设计器的「执行监听器」组写在 Process 上）：
+                // 监听器要记到 Process 上，交给校验规则统一拦截 —— 解析器只负责"读得进来"，
+                // 拒绝与否由校验（unsupported-capability）给出准确原因。
+                BaseBpmnXmlConverter<FlowElement>.ReadExtensionElements(reader, process);
+            }
+            else if (_elementReaders.TryGetValue(reader.LocalName, out var converter))
             {
                 var element = converter.Read(reader, process);
                 process.AddFlowElement((FlowElement)element);
             }
-            else if (!IgnorableElements.Contains(reader.LocalName))
+            else if (IgnorableElements.Contains(reader.LocalName))
+            {
+                // 容忍元素必须**整棵跳过**：流式解析若只略过开始标签，
+                // 它的子元素会被本循环当成流程级元素撞上下面的拒绝分支，
+                // 报出「元素 <executionListener> 不在本子集支持范围内」这类误导性错误。
+                SkipSubtree(reader);
+            }
+            else
             {
                 throw new BpmnXmlParseException(
                     $"流程 '{process.Id}' 中的元素 <{reader.LocalName}> 不在本子集支持范围内。" +
@@ -258,6 +275,28 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
 
                 default:
                     break;
+            }
+        }
+    }
+
+    /// <summary>把 <paramref name="reader"/> 当前元素（含子树）整体跳过；空元素不读。</summary>
+    private static void SkipSubtree(XmlReader reader)
+    {
+        if (reader.IsEmptyElement)
+        {
+            return;
+        }
+
+        var depth = reader.Depth;
+        var localName = reader.LocalName;
+
+        while (reader.Read())
+        {
+            if (reader.NodeType == XmlNodeType.EndElement
+                && reader.Depth == depth
+                && reader.LocalName == localName)
+            {
+                return;
             }
         }
     }
@@ -444,6 +483,18 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         WriteAttributeIfPresent(writer, "id", process.Id);
         WriteAttributeIfPresent(writer, "name", process.Name);
         writer.WriteAttributeString("isExecutable", process.IsExecutable ? "true" : "false");
+
+        if (process.EventListeners.Count > 0)
+        {
+            writer.WriteStartElement("extensionElements", BpmnConstants.BpmnNamespace);
+
+            foreach (var listener in process.EventListeners)
+            {
+                BaseBpmnXmlConverter<FlowElement>.WriteEventListener(writer, listener);
+            }
+
+            writer.WriteEndElement();
+        }
 
         foreach (var flowElement in process.FlowElements.OfType<FlowElement>())
         {

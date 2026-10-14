@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NetBpm.El;
 using NetBpm.Engine.Agenda;
 using NetBpm.Engine.Behavior;
@@ -35,4 +36,10 @@ public interface IEngineServices
     /// 流程元素解析器。跨命令恢复等待型节点时必须注入（见 <see cref="IProcessDefinitionResolver"/>）。
     /// </summary>
     IProcessDefinitionResolver? ProcessDefinitionResolver { get; }
+
+    /// <summary>
+    /// 引擎日志（可空）。事件监听器 throwOnFailure=false 的失败通过它记警告；
+    /// 未注入时此类失败会响亮抛出，避免静默丢失语义。
+    /// </summary>
+    ILogger? Logger { get; }
 }

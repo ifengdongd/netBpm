@@ -303,9 +303,9 @@ public sealed class SequenceFlowReferenceRule : IProcessValidationRule
 /// <summary>
 /// 规则 9：本子集未实现的能力必须<b>显式拒绝</b>，不能静默忽略。
 /// <para>
-/// 覆盖三类：执行监听器（<c>activiti:executionListener</c>）、任务监听器（<c>activiti:taskListener</c>）、
-/// 服务任务字段注入（<c>activiti:field</c>）—— §1.2 把它们列为「可选能力」，
-/// 若放行则运行期会被无声跳过，属于最危险的一类差异（模型写了、引擎没做）。
+/// 覆盖：服务任务字段注入（<c>activiti:field</c>）—— 执行/任务/事件监听器已由引擎执行
+/// （见引擎侧 <c>ListenerInvoker</c> / <c>EngineEventDispatcher</c>），从本规则移出；
+/// 它们的形状校验见 <see cref="ListenerConfigurationRule"/>。
 /// </para>
 /// </summary>
 public sealed class UnsupportedCapabilityRule : IProcessValidationRule
@@ -316,27 +316,9 @@ public sealed class UnsupportedCapabilityRule : IProcessValidationRule
     {
         ArgumentNullException.ThrowIfNull(process);
 
-        foreach (var element in process.FlowElements.OfType<BaseElement>())
+        foreach (var serviceTask in process.FindFlowElementsOfType<ServiceTask>())
         {
-            if (element.ExecutionListeners.Count > 0)
-            {
-                yield return new ValidationError(
-                    Name,
-                    element.Id,
-                    element.GetType().Name,
-                    "执行监听器（activiti:executionListener）尚未实现，为避免运行期静默跳过，这里拒绝部署。");
-            }
-
-            if (element is UserTask { TaskListeners.Count: > 0 } userTask)
-            {
-                yield return new ValidationError(
-                    Name,
-                    userTask.Id,
-                    nameof(UserTask),
-                    "任务监听器（activiti:taskListener）尚未实现，为避免运行期静默跳过，这里拒绝部署。");
-            }
-
-            if (element is ServiceTask { Fields.Count: > 0 } serviceTask)
+            if (serviceTask.Fields.Count > 0)
             {
                 yield return new ValidationError(
                     Name,

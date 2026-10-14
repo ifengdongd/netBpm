@@ -1,5 +1,6 @@
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Agenda;
+using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Services;
 
@@ -59,27 +60,38 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
 
     /// <summary>
     /// 记录节点结束。对应 Activiti 的 <c>handleActivityEnd</c>。
-    /// <para>子集裁剪：无边界事件；执行监听器与 ACTIVITY_COMPLETED 事件分发属可选能力（见 §1.2 P8/P9）。</para>
+    /// <para>子集裁剪：无边界事件。</para>
     /// </summary>
-    private ValueTask HandleActivityEndAsync(IFlowNode flowNode, CancellationToken ct)
+    private async ValueTask HandleActivityEndAsync(IFlowNode flowNode, CancellationToken ct)
     {
         // 流程实例执行永远不会「离开」某个节点，它只会在清理阶段经过这里
         if (_execution.IsProcessInstanceType)
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
-        return _services.HistoryManager.RecordActivityEndAsync(_execution, null, ct);
+        await _services.HistoryManager.RecordActivityEndAsync(_execution, null, ct).ConfigureAwait(false);
+
+        // 执行监听器（activiti:executionListener，event="end"）：离开节点前逐个通知
+        await ListenerInvoker
+            .NotifyExecutionListenersAsync(_services, _execution, (FlowElement)flowNode, ListenerInvoker.EndEvent, ct)
+            .ConfigureAwait(false);
+
+        await EngineEventDispatcher
+            .DispatchAsync(_services, _execution, EngineEvents.ActivityCompleted, flowNode.Id, ct)
+            .ConfigureAwait(false);
     }
 
-    private ValueTask HandleSequenceFlowAsync(CancellationToken ct)
+    private async ValueTask HandleSequenceFlowAsync(CancellationToken ct)
     {
         // ⚠️ 只收口历史行（源节点那一行，见 §15.4 H4），不发 ACTIVITY_COMPLETED ——
         // 若当前元素是顺序流，说明行为已经自己发过"离开"事件（如排他网关），
-        // Activiti 在 handleSequenceFlow 里同样只有 recordActivityEnd
+        // Activiti 在 handleSequenceFlow 里同样只有 recordActivityEnd。
+        // ⚠️ take 监听器不在这里发：网关路径会二次穿越同一条顺序流，
+        // take 统一在 ContinueProcessOperation.continueThroughSequenceFlow 处恰好触发一次。
         var recorded = _services.HistoryManager.RecordActivityEndQuietlyAsync(_execution, null, ct);
         _services.Agenda.PlanContinueProcessOperation(_execution);
-        return recorded;
+        await recorded.ConfigureAwait(false);
     }
 
     private async ValueTask LeaveFlowNodeAsync(IFlowNode flowNode, CancellationToken ct)

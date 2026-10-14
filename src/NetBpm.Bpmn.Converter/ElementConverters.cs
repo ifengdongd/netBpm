@@ -24,6 +24,7 @@ public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
         writer.WriteStartElement("startEvent", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteActivitiAttribute(writer, "initiator", element.Initiator);
+        WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -42,6 +43,7 @@ public sealed class EndEventXmlConverter : BaseBpmnXmlConverter<EndEvent>
     {
         writer.WriteStartElement("endEvent", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
+        WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -64,6 +66,7 @@ public sealed class ExclusiveGatewayXmlConverter : BaseBpmnXmlConverter<Exclusiv
         writer.WriteStartElement("exclusiveGateway", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -86,6 +89,7 @@ public sealed class ParallelGatewayXmlConverter : BaseBpmnXmlConverter<ParallelG
         writer.WriteStartElement("parallelGateway", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -108,6 +112,7 @@ public sealed class InclusiveGatewayXmlConverter : BaseBpmnXmlConverter<Inclusiv
         writer.WriteStartElement("inclusiveGateway", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -129,6 +134,7 @@ public sealed class EventGatewayXmlConverter : BaseBpmnXmlConverter<EventGateway
     {
         writer.WriteStartElement("eventBasedGateway", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
+        WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -160,6 +166,7 @@ public sealed class SequenceFlowXmlConverter : BaseBpmnXmlConverter<SequenceFlow
         WriteFlowElementAttributes(writer, element);
         WriteAttributeIfPresent(writer, "sourceRef", element.SourceRef);
         WriteAttributeIfPresent(writer, "targetRef", element.TargetRef);
+        WriteExtensionElements(writer, element);
 
         if (!string.IsNullOrEmpty(element.ConditionExpression))
         {
@@ -362,6 +369,7 @@ public sealed class ManualTaskXmlConverter : BaseBpmnXmlConverter<ManualTask>
     {
         writer.WriteStartElement("manualTask", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
+        WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -398,6 +406,7 @@ public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
         WriteAttributeIfPresent(writer, "scriptFormat", element.ScriptFormat);
         WriteActivitiAttribute(writer, "resultVariable", element.ResultVariable);
         WriteActivitiAttribute(writer, "autoStoreVariables", element.AutoStoreVariables ? "true" : null);
+        WriteExtensionElements(writer, element);
         writer.WriteStartElement("script", BpmnConstants.BpmnNamespace);
         writer.WriteString(element.Script ?? string.Empty);
         writer.WriteEndElement();

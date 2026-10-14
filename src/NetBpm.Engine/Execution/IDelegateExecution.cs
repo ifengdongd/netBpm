@@ -53,4 +53,10 @@ public interface IDelegateExecution : IVariableScope
 
     /// <summary>变量作用域（与自身等价，供表达式管理器使用）。</summary>
     IVariableScope Variables { get; }
+
+    /// <summary>
+    /// 本次监听器回调的事件名（<c>start</c> / <c>take</c> / <c>end</c> 等）。
+    /// 仅在监听器回调期间有值 —— 对应 Activiti 的 <c>DelegateExecution.getEventName()</c>。
+    /// </summary>
+    string? EventName { get; set; }
 }

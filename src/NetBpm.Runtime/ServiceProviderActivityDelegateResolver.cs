@@ -44,8 +44,12 @@ public sealed class ServiceProviderActivityDelegateResolver : IActivityDelegateR
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
+        // Activiti 的 delegateExpression 是 EL 表达式（${beanName} 取容器里的 bean）：
+        // 这里解析 ${...} 包裹的名字，裸名字同样兼容（与既有 BPMN 的写法一致）。
+        var unwrapped = UnwrapExpression(name);
+
         // 先按「容器中的类型名」解析，再退化为「已注册的委托实例」
-        var byKeyedService = _serviceProvider.GetKeyedService<object>(name);
+        var byKeyedService = _serviceProvider.GetKeyedService<object>(unwrapped);
         if (byKeyedService is not null)
         {
             return byKeyedService;
@@ -53,13 +57,23 @@ public sealed class ServiceProviderActivityDelegateResolver : IActivityDelegateR
 
         foreach (var service in _serviceProvider.GetServices<IServiceTaskDelegate>())
         {
-            if (string.Equals(service.GetType().FullName, name, StringComparison.Ordinal)
-                || string.Equals(service.GetType().Name, name, StringComparison.Ordinal))
+            if (string.Equals(service.GetType().FullName, unwrapped, StringComparison.Ordinal)
+                || string.Equals(service.GetType().Name, unwrapped, StringComparison.Ordinal))
             {
                 return service;
             }
         }
 
         return null;
+    }
+
+    /// <summary>剥掉 <c>${...}</c> 包裹（不配对时按原文返回）。</summary>
+    private static string UnwrapExpression(string name)
+    {
+        var trimmed = name.Trim();
+
+        return trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith('}')
+            ? trimmed[2..^1].Trim()
+            : trimmed;
     }
 }

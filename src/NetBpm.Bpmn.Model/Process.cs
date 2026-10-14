@@ -13,6 +13,12 @@ public class Process : BaseElement, IFlowElementsContainer
     /// <summary>潜在启动者（<c>activiti:potentialStarter</c>）。</summary>
     public PotentialStarter? PotentialStarter { get; set; }
 
+    /// <summary>
+    /// 流程级事件监听器（<c>activiti:eventListener</c>）。引擎在对应事件发生时逐个通知，
+    /// 执行语义见引擎侧的 <c>IEngineEventListener</c> 与事件分发器。
+    /// </summary>
+    public IList<EventListener> EventListeners { get; } = [];
+
     public void AddFlowElement(FlowElement element)
     {
         ArgumentNullException.ThrowIfNull(element);

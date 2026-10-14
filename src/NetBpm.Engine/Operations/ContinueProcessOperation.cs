@@ -1,5 +1,6 @@
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Agenda;
+using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Services;
 
@@ -59,7 +60,14 @@ public sealed class ContinueProcessOperation : IOperation
     {
         await _services.HistoryManager.RecordActivityStartAsync(_execution, ct).ConfigureAwait(false);
 
-        // 执行监听器（activiti:executionListener，event="start"）属可选能力，见 §1.2。
+        // 执行监听器（activiti:executionListener，event="start"）：行为执行前逐个通知
+        await ListenerInvoker
+            .NotifyExecutionListenersAsync(_services, _execution, (FlowElement)flowNode, ListenerInvoker.StartEvent, ct)
+            .ConfigureAwait(false);
+
+        await EngineEventDispatcher
+            .DispatchAsync(_services, _execution, EngineEvents.ActivityStarted, flowNode.Id, ct)
+            .ConfigureAwait(false);
 
         var behavior = _services.ActivityBehaviorFactory.Create(flowNode);
         await behavior.ExecuteAsync(_execution, ct).ConfigureAwait(false);
@@ -77,6 +85,12 @@ public sealed class ContinueProcessOperation : IOperation
         // 改成目标节点后就再也拿不到"选了哪条流"（2026-10-12 真值比对时我们整段缺失）。
         await _services.HistoryManager
             .RecordSequenceFlowTakenAsync(_execution, ct)
+            .ConfigureAwait(false);
+
+        // 执行监听器（activiti:executionListener，event="take"）：挂在顺序流上，
+        // 在"穿越顺序流"处恰好触发一次（网关路径与普通路径都经这里，不会双发）
+        await ListenerInvoker
+            .NotifyExecutionListenersAsync(_services, _execution, sequenceFlow, ListenerInvoker.TakeEvent, ct)
             .ConfigureAwait(false);
 
         _execution.CurrentFlowElement = targetFlowElement;

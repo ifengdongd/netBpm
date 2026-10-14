@@ -31,13 +31,24 @@
     ⚠️ 三条排他网关都设置了 default 流：本子集「排他网关每条出流都带条件且无默认流」会被
        校验规则 exclusive-gateway-has-selectable-flow 拒部署（条件全假时选不出流）。
        按 Activiti 语义，默认流上的条件会被忽略，因此这里不给默认流写条件。
+
+    监听器（对齐 Java 端的两个实现，见 Demo 的 Leave/WorkFlowListeners.cs）：
+      - 流程级 activiti:eventListener：events=TASK_COMPLETED，任务每次完成即通知
+        （Java 端在这里写 deal_history / 删 instance_current_task；NetBpm 由应用层落库）；
+      - activiti:executionListener：start / take / end，delegateExpression=${WorkFlowProcessListener}，
+        通过 execution.EventName 区分事件。
   -->
   <bpmn:process id="leave_process" name="请假流程" isExecutable="true">
+    <bpmn:extensionElements>
+      <activiti:eventListener events="TASK_COMPLETED" delegateExpression="${WorkFlowTaskCompletedListener}" />
+    </bpmn:extensionElements>
     <bpmn:startEvent id="start" name="发起请假">
       <bpmn:outgoing>flow_start_apply</bpmn:outgoing>
     </bpmn:startEvent>
     <bpmn:userTask id="task_apply" name="提交请假申请" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
       <bpmn:extensionElements>
+        <activiti:executionListener event="start" delegateExpression="${WorkFlowProcessListener}" />
+        <activiti:executionListener event="end" delegateExpression="${WorkFlowProcessListener}" />
         <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
         <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
       </bpmn:extensionElements>
@@ -111,7 +122,11 @@
     <bpmn:endEvent id="end_refused" name="审批拒绝结束">
       <bpmn:incoming>flow_refuse_end</bpmn:incoming>
     </bpmn:endEvent>
-    <bpmn:sequenceFlow id="flow_start_apply" sourceRef="start" targetRef="task_apply" />
+    <bpmn:sequenceFlow id="flow_start_apply" sourceRef="start" targetRef="task_apply">
+      <bpmn:extensionElements>
+        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
+      </bpmn:extensionElements>
+    </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="flow_apply_leader" sourceRef="task_apply" targetRef="task_leader_approve" />
     <bpmn:sequenceFlow id="flow_leader_gw" sourceRef="task_leader_approve" targetRef="gw_leader" />
     <bpmn:sequenceFlow id="flow_leader_pass" sourceRef="gw_leader" targetRef="gw_days" name="通过">

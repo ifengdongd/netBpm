@@ -417,7 +417,7 @@ test('校验：并行网关不得有默认流，排他网关不得"全条件且�
   assert.ok(issues.some((issue) => issue.elementId === 'gw' && issue.message.includes('默认流')));
 });
 
-test('校验：监听器只告警（后端裁决），事件定义与字段注入仍拦下部署', () => {
+test('校验：监听器/表单属性已支持不再告警，事件定义与字段注入仍拦下部署', () => {
   const issues = validateDiagram(
     registryOf([
       {
@@ -442,10 +442,9 @@ test('校验：监听器只告警（后端裁决），事件定义与字段注�
     ]),
   );
 
-  // 监听器/表单属性 → 警告，不阻断
-  const warnings = issues.filter((issue) => issue.severity === 'warning');
-  assert.ok(warnings.some((issue) => issue.message.includes('执行监听器')));
-  assert.ok(warnings.some((issue) => issue.message.includes('表单属性')));
+  // 监听器/表单属性已由后端支持，不再告警
+  assert.ok(!issues.some((issue) => issue.message.includes('执行监听器')));
+  assert.ok(!issues.some((issue) => issue.message.includes('表单属性')));
 
   // 字段注入 / 事件定义 → 错误，阻断
   assert.ok(issues.some((issue) => issue.severity === 'error' && issue.message.includes('字段注入')));
@@ -631,6 +630,7 @@ test('XML 往返：表单属性与监听器保存后重新载入仍出现在 ext
       <bpmn:extensionElements>
         <activiti:executionListener event="start" class="A" />
         <activiti:taskListener event="create" class="B" />
+        <activiti:eventListener events="TASK_COMPLETED" delegateExpression="WorkFlowTaskCompletedListener" />
         <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true">
           <activiti:value id="approved" name="同意" />
           <activiti:value id="rejected" name="驳回" />
@@ -652,10 +652,10 @@ test('XML 往返：表单属性与监听器保存后重新载入仍出现在 ext
 
   assert.deepEqual(
     values.map((value) => value.$type),
-    ['activiti:ExecutionListener', 'activiti:TaskListener', 'activiti:FormProperty', 'activiti:FormProperty'],
+    ['activiti:ExecutionListener', 'activiti:TaskListener', 'activiti:EventListener', 'activiti:FormProperty', 'activiti:FormProperty'],
   );
 
-  const enumProperty = values[2];
+  const enumProperty = values[3];
 
   assert.equal(enumProperty.id, 'approvalResult');
   assert.equal(enumProperty.type, 'enum');
@@ -678,7 +678,7 @@ test('XML 往返：表单属性与监听器保存后重新载入仍出现在 ext
   const reparsedProcess = reparsed.rootElements.find((element) => element.$type === 'bpmn:Process')!;
   const reparsedTask = reparsedProcess.flowElements.find((element) => element.$type === 'bpmn:UserTask')!;
 
-  assert.equal((reparsedTask.extensionElements?.values ?? []).length, 4);
+  assert.equal((reparsedTask.extensionElements?.values ?? []).length, 5);
 });
 
 test('XML 往返：排他网关默认流以引用对象读写（回归）', async () => {

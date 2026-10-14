@@ -42,6 +42,19 @@ public sealed class ProcessDefinitionResolver : IProcessDefinitionResolver
         return process?.GetFlowElement(activityId);
     }
 
+    /// <inheritdoc />
+    public async ValueTask<Process?> ResolveProcessModelAsync(
+        string? processDefinitionId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(processDefinitionId))
+        {
+            return null;
+        }
+
+        return await GetProcessAsync(processDefinitionId, ct).ConfigureAwait(false);
+    }
+
     private async ValueTask<Process?> GetProcessAsync(string processDefinitionId, CancellationToken ct)
     {
         if (_processCache.TryGetValue(processDefinitionId, out var cached))
