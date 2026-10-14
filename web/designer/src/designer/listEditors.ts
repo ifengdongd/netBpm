@@ -121,7 +121,7 @@ function rewriteValues(
 
 // ─────────────────────────── 编辑器组件 ───────────────────────────
 
-/** 实现方式「类型 + 取值」联动行；切换类型时清空取值（三项互斥）。 */
+/** 实现方式「类型 + 取值」联动行；切换类型时取值跟随（三项互斥，对齐 Activiti 原版）。 */
 function implementationFields(
   element: DiagramElement,
   context: EntryContext,
@@ -141,11 +141,16 @@ function implementationFields(
   const activeValue = misclassifiedAsClass ? textOf(item[currentKey]) : textOf(item[currentKey]);
 
   const setType = (key: string): void => {
+    // ⚠️ 取值必须跟随切换：把现有实现值带到新选中的键（三项互斥）。
+    // 只按「新键保留它自己原有的值」处理时，从「类名」切到「委托表达式」
+    // 会让新键拿到空 ⇒ 三个属性全部清空 ⇒ 重渲染回落 class，
+    // 表现为「切换实现方式没有发生变化」且取值丢失。
+    // 把「类名位置填了 ${...}」的值迁到委托表达式时，正好完成数据落定。
+    const carried = textOf(item[key]) || textOf(item[currentKey]);
     const properties: Record<string, unknown> = {};
 
     for (const candidate of IMPLEMENTATION_KEYS) {
-      // 新选中的保留原值（若无则为空 ⇒ undefined）；其余清空
-      properties[candidate] = candidate === key ? (item[candidate] ?? undefined) : undefined;
+      properties[candidate] = candidate === key ? (normalize(carried) || undefined) : undefined;
     }
 
     context.modeling.updateModdleProperties(element, item, properties);
