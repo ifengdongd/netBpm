@@ -668,6 +668,47 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUser
 - 部署期 `listener-configuration` 校验事件与实现必填；`ServiceTaskDelegateGuard` 预解析委托（解析不到宿主起不来）；
 - Demo 样例：`Leave/WorkFlowListeners.cs`（对齐 Java 端 WorkFlowProcessListener / WorkFlowTaskCompletedListener），
   e2e `[12]` 借 `/api/leave/listener-stats` 断言各挂点恰好触发一次。
+
+对齐 Java 端 `WorkFlowProcessListener` 的 C# 写法 —— 一个类同时承担流程级执行监听器与
+任务完成事件监听器（`execution.EventName` 由引擎在调用前置为本次事件名，调用后还原）：
+
+```csharp
+// 执行监听器：start / take / end 按事件名分支（对应 Java 的 ExecutionListener.notify）
+[ServiceTaskName("WorkFlowProcessListener")]
+public sealed class WorkFlowProcessListener : IExecutionListener
+{
+    public ValueTask NotifyAsync(IDelegateExecution execution, CancellationToken ct = default)
+    {
+        switch (execution.EventName)
+        {
+            case "start": break;                                   // 流程启动观测
+            case "end":
+                var businessId = long.Parse(execution.ProcessInstanceBusinessKey!);
+                // 对应 Java 端 processEndListener.endProcess(businessId)
+                break;
+            case "take": break;                                    // 顺序流穿越观测
+        }
+        return ValueTask.CompletedTask;
+    }
+}
+
+// 事件监听器：TASK_COMPLETED 等引擎事件（对应 Java 的 ActivitiEventListener）
+[ServiceTaskName("WorkFlowTaskCompletedListener")]
+public sealed class WorkFlowTaskCompletedListener : IEngineEventListener
+{
+    public ValueTask OnEventAsync(WorkflowEngineEvent engineEvent, CancellationToken ct = default) =>
+        engineEvent.Type switch
+        {
+            "TASK_COMPLETED" => /* 记录任务完成 */, ValueTask.CompletedTask,
+            _ => ValueTask.CompletedTask,
+        };
+}
+```
+
+> ⚠️ **实现方式选「委托表达式」，别把 `${...}` 填进「类名」**。`class` 的语义是 .NET 类型名，
+> 填 `${...}` 在这里永远解析不成类型（引擎侧做了兼容兜底：剥壳后按委托表达式解析，功能不受影响，
+> 但落库形态是错的）。设计器面板会把「类名位置填了 `${...}`」自动按委托表达式显示与写入；
+> 历史草稿里已写成 `class="${...}"` 的，重开面板轻触一次取值保存即可落定为 `delegateExpression`。
 ## 7. 流程应用层封装（NetBpm.Workflow）
 
 第 6 节那几件事，每个接入方都要照抄一遍 —— 抄到第二遍就该意识到：**它们与业务无关，不该由宿主重复实现**。
