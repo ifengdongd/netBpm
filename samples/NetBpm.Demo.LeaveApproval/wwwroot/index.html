@@ -333,6 +333,8 @@ let manageRows = [];
 async function loadManage() {
   const items = await api('/api/leave/instances');
   manageRows = items.filter((item) => item.status === 'Running');
+  // 按申请时间倒序：最近发起的在最上面
+  manageRows.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
   $('manageEmpty').style.display = manageRows.length ? 'none' : '';
   $('manageBody').style.display = manageRows.length ? '' : 'none';
   $('manageTbody').innerHTML = manageRows.map((item) => `
@@ -376,7 +378,7 @@ $('modalCancel').onclick = closeModal;
 $('modalMask').onclick = closeModal;
 
 async function openReassignModal(instanceId) {
-  const employees = (await api('/api/leave/org/employees')).body;
+  const employees = await api('/api/leave/org/employees');
   const options = employees.map((e) => ({ value: e.domainAccount, label: `${e.name}(${e.domainAccount})` }));
   openModal('待办转移', '转移后原审批人将不再看到该待办，请确认无误后再保存。', '转移给', options, async (userId) => {
     const item = manageRows.find((i) => i.processInstanceId === instanceId);
@@ -388,7 +390,7 @@ async function openReassignModal(instanceId) {
 
 async function openJumpModal(instanceId) {
   const definition = await api('/api/leave/process-nodes');
-  const options = (definition.body.nodes ?? []).map((n) => ({ value: n.id, label: `${n.name} [${n.id}]` }));
+  const options = (definition.nodes ?? []).map((n) => ({ value: n.id, label: `${n.name} [${n.id}]` }));
   openModal('流程步骤跳转',
     '注意：请仔细选择目标步骤，确认无误后再保存。有并行步骤、相同步骤名要核对清楚步骤 ID（即 bpmn 中的节点 ID），有些步骤可能不能跳转，请找管理员核实后再操作。',
     '目标步骤', options, async (targetActivityId) => {
