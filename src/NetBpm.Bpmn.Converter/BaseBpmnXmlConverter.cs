@@ -169,7 +169,6 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         {
             var name = child.LocalName;
 
-            if (name == "executionListener" && element is Process pp) { System.Console.WriteLine("[探针-解析] 流程级 executionListener 命中"); System.Console.Out.Flush(); }
             if (name == BpmnConstants.ElementExecutionListener)
             {
                 element.ExecutionListeners.Add(ReadListener(new ExecutionListener(), child));

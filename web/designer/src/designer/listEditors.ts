@@ -132,6 +132,14 @@ function implementationFields(
   const currentKey: ImplementationKey =
     IMPLEMENTATION_KEYS.find((key) => isSet(item[key])) ?? 'class';
 
+  // 防御性校正：类名位置填了 ${...}（委托表达式语法）。class 的语义是 .NET 类型名，
+  // ${} 在这里永远不会解析成功（引擎侧也只是兼容兜底）；自动按委托表达式处理 ——
+  // 读取时借值显示，写入时落定为 delegateExpression 并清空 class。
+  const misclassifiedAsClass =
+    currentKey === 'class' && /^\$\{.+\}$/.test(textOf(item[currentKey]).trim());
+  const activeKey: ImplementationKey = misclassifiedAsClass ? 'delegateExpression' : currentKey;
+  const activeValue = misclassifiedAsClass ? textOf(item[currentKey]) : textOf(item[currentKey]);
+
   const setType = (key: string): void => {
     const properties: Record<string, unknown> = {};
 
@@ -147,7 +155,7 @@ function implementationFields(
     const properties: Record<string, unknown> = {};
 
     for (const candidate of IMPLEMENTATION_KEYS) {
-      properties[candidate] = candidate === currentKey ? normalize(raw) : undefined;
+      properties[candidate] = candidate === activeKey ? normalize(raw) : undefined;
     }
 
     context.modeling.updateModdleProperties(element, item, properties);
@@ -158,7 +166,7 @@ function implementationFields(
       'select',
       {
         class: 'nb-impl-type',
-        value: currentKey,
+        value: activeKey,
         onChange: (event: Event) => setType((event.target as HTMLSelectElement).value),
       },
       IMPLEMENTATION_KEYS.map((key) =>
@@ -168,8 +176,8 @@ function implementationFields(
     h('input', {
       class: 'nb-impl-value',
       type: 'text',
-      placeholder: t(IMPLEMENTATION_LABELS[currentKey]),
-      value: textOf(item[currentKey]),
+      placeholder: t(IMPLEMENTATION_LABELS[activeKey]),
+      value: activeValue,
       onChange: (event: Event) => debounce(setValue)((event.target as HTMLInputElement).value),
     }),
   ];

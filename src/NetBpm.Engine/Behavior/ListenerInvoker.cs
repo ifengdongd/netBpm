@@ -80,7 +80,6 @@ public static class ListenerInvoker
         }
 
         var process = await resolver.ResolveProcessModelAsync(execution.ProcessDefinitionId, ct).ConfigureAwait(false);
-        Microsoft.Extensions.Logging.LoggerExtensions.LogInformation(services.Logger!, "[探针] 流程级监听器：defId={DefId}，listeners={Count}", execution.ProcessDefinitionId, process?.ExecutionListeners.Count ?? -1);
 
         foreach (var listener in process?.ExecutionListeners ?? [])
         {

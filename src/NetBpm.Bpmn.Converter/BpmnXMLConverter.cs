@@ -484,7 +484,7 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         WriteAttributeIfPresent(writer, "name", process.Name);
         writer.WriteAttributeString("isExecutable", process.IsExecutable ? "true" : "false");
 
-        if (process.EventListeners.Count > 0)
+        if (process.EventListeners.Count > 0 || process.ExecutionListeners.Count > 0)
         {
             writer.WriteStartElement("extensionElements", BpmnConstants.BpmnNamespace);
 

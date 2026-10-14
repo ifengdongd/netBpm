@@ -340,6 +340,42 @@ public sealed class BpmnXmlConverterTests
         Assert.NotNull(process.GetFlowElement("end"));
     }
 
+    [Fact]
+    public void ProcessLevelListeners_ShouldRoundTripThroughSerialization()
+    {
+        // 回归：流程级 extensionElements 里的执行监听器曾被 WriteProcess 丢弃
+        //（写出条件只看 EventListeners），部署 → 落库 → 回显后执行监听器全部消失。
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="mixed" isExecutable="true">
+                <extensionElements>
+                  <activiti:executionListener event="start" delegateExpression="${P}" />
+                  <activiti:executionListener event="end" delegateExpression="${P}" />
+                  <activiti:eventListener events="TASK_COMPLETED" delegateExpression="${C}" />
+                </extensionElements>
+                <startEvent id="start" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var model = Parse(xml);
+        var process = model.GetMainProcess()!;
+        Assert.Equal(2, process.ExecutionListeners.Count);
+        Assert.Single(process.EventListeners);
+
+        var output = new MemoryStream();
+        new BpmnXmlConverter().ConvertToXml(model, output);
+        output.Position = 0;
+        var roundTripped = Parse(Encoding.UTF8.GetString(output.ToArray()));
+        Assert.Equal(2, roundTripped.GetMainProcess()!.ExecutionListeners.Count);
+        Assert.Single(roundTripped.GetMainProcess()!.EventListeners);
+    }
+
     private static BpmnModel Parse(string xml) =>
         new BpmnXmlConverter().ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(xml)));
 }
