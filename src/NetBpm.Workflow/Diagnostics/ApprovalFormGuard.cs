@@ -17,7 +17,7 @@ namespace NetBpm.Workflow;
 /// 与其等出事，不如部署完立刻对一遍：不一致就<b>让宿主起不来</b>，并指明该改哪个文件。
 /// </para>
 /// </remarks>
-public static class ApprovalResultFormGuard
+public static class ApprovalFormGuard
 {
     /// <summary>校验流程定义里的选项与枚举一致；不一致抛 <see cref="InvalidOperationException"/>。</summary>
     /// <param name="engine">引擎门面。</param>

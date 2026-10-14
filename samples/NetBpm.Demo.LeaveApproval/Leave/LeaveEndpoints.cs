@@ -1,4 +1,5 @@
 using NetBpm.Workflow;
+using NetBpm.Workflow.Hosting;
 
 namespace NetBpm.Demo.LeaveApproval.Leave;
 
@@ -67,7 +68,7 @@ public static class LeaveEndpoints
         group.MapGet("/listener-stats", GetListenerStatsAsync);
 
         // 业务数据核对入口（请假业务自有，与流程引擎无关）：
-        // 落点自述 + 全部业务数据，方便打开核对。只依赖 ILeaveBusinessInspector，
+        // 落点自述 + 全部业务数据，方便打开核对。只依赖 IWorkflowStoreInspector，
         // 所以 Leave:Store 在 JSON / MySql 之间切换时这里一行都不用改
         // （键名由实现方给：JSON 实现给区块名，MySQL 实现给表名）。
         group.MapGet("/business", GetBusinessAsync);
@@ -111,7 +112,7 @@ public static class LeaveEndpoints
     private static IResult GetListenerStatsAsync(ListenerStats stats) => Results.Ok(stats.Snapshot());
 
     private static async Task<IResult> GetBusinessAsync(
-        ILeaveBusinessInspector inspector,
+        IWorkflowStoreInspector inspector,
         CancellationToken ct)
     {
         var snapshot = await inspector.SnapshotAsync(ct).ConfigureAwait(false);

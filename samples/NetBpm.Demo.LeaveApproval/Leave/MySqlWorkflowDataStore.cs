@@ -38,7 +38,7 @@ namespace NetBpm.Demo.LeaveApproval.Leave;
 ///   </description></item>
 /// </list>
 /// </remarks>
-public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessInspector
+public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreInspector
 {
     /// <summary><c>instances.status_id</c>：流程还在走。</summary>
     public const string StatusRunning = "审批中";

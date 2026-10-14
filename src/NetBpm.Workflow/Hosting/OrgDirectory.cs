@@ -1,6 +1,6 @@
 using NetBpm.Identity;
 
-namespace NetBpm.Demo.LeaveApproval.Leave;
+namespace NetBpm.Workflow.Hosting;
 
 /// <summary>部门。</summary>
 /// <param name="DeptId">部门 id（业务表 <c>apply_dept_id</c> 存的是它）。</param>

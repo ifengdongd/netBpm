@@ -33,13 +33,13 @@ internal static class LeaveProcessBootstrapper
                 DeploymentName = "请假审批 Demo",
 
                 // 部署成功后立刻自检：
-                // ① BPMN 里的 approvalResult 选项与 C# 枚举必须一致（见 ApprovalResultFormGuard）；
+                // ① BPMN 里的 approvalResult 选项与 C# 枚举必须一致（见 ApprovalFormGuard）；
                 // ② 每个服务任务的 class / delegateExpression 都能解析成已注册的委托
                 //    （见 ServiceTaskDelegateGuard）—— 名字写错、忘了注册都要在启动期暴露，
                 //    别等流程跑到那儿。
                 VerifyAsync = async (provider, engine, definitionId, deployLogger, token) =>
                 {
-                    await ApprovalResultFormGuard
+                    await ApprovalFormGuard
                         .VerifyAsync(engine, definitionId, deployLogger, token)
                         .ConfigureAwait(false);
 

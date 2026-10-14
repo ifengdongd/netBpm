@@ -3,6 +3,7 @@ using NetBpm.Demo.LeaveApproval.Leave;
 using NetBpm.Identity;
 using NetBpm.Runtime;
 using NetBpm.Workflow;
+using NetBpm.Workflow.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,7 +47,7 @@ builder.Services.AddSingleton<ListenerStats>();
 // 部署流程定义之后由 WorkflowProcessBootstrapper 填充（见下方启动部署）。
 
 // 应用层：发起 / 环节信息 / 提交 / 审批历史四件事都由它提供，业务数据端口按类型注册。
-// 两种实现的形状完全一致（都实现 IWorkflowDataStore + ILeaveBusinessInspector），
+// 两种实现的形状完全一致（都实现 IWorkflowDataStore + IWorkflowStoreInspector），
 // 所以换存储只动这一处 —— 端点、演示页、委托都不用改。
 var inMemoryEngine = builder.Configuration.GetValue("NetBpm:UseInMemoryExecutionTree", true);
 
@@ -58,9 +59,9 @@ if (useMySqlStore)
 }
 else
 {
-    builder.Services.AddNetBpmWorkflow<LeaveBusinessStore>();
+    builder.Services.AddNetBpmWorkflow<JsonWorkflowDataStore>();
     builder.Services.AddSingleton<ILeaveBusinessInspector>(
-        provider => provider.GetRequiredService<LeaveBusinessStore>());
+        provider => provider.GetRequiredService<JsonWorkflowDataStore>());
 }
 
 // 两个服务任务委托 —— 与 BPMN 里的 activiti:delegateExpression 一一对应。
@@ -98,7 +99,7 @@ app.MapLeaveEndpoints();
 // 打开即用：启动时部署请假流程（定义来自 web/designer/examples/leave-process.bpmn20.xml）
 await LeaveProcessBootstrapper.DeployAsync(app.Services, app.Logger);
 
-// 业务数据落在哪儿 —— 这句话是给人核对的，两种存储各报各的（见 ILeaveBusinessInspector）。
+// 业务数据落在哪儿 —— 这句话是给人核对的，两种存储各报各的（见 IWorkflowStoreInspector）。
 var inspector = app.Services.GetRequiredService<ILeaveBusinessInspector>();
 
 app.Logger.LogInformation("业务数据落点：{Location}", inspector.Location);

@@ -286,6 +286,14 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 | `WorkflowProcessBootstrapper` + `WorkflowDeployOptions` | 启动即部署 BPMN 资源 + 部署期自检钩子 |
 | `WorkflowRuntimeContext` / `WorkflowNodeRegistry` | 部署后运行期上下文：流程定义 id + 环节名 ↔ 环节 id 对照表（随 ② 自动注册） |
 | `IWorkflowDataStore` | 应用层与宿主之间唯一的缝：实例登记 / 审批结论 / 流程参数 / 审批记录 / 当前待办 |
+| `JsonWorkflowDataStore` | 端口的**参考实现**：五个区块直接落一个 JSON 文件（零落库跑通全链路，换真库时数据形状不变） |
+| `WorkflowCompletionDelegate` | 「结束收口」委托基类：派生一个类只需声明 `[ServiceTaskName]` 与结论名 |
+| `IOrgDirectory` / `InMemoryOrgDirectory` | 组织架构查询（部门 / 员工 / 按候选组找审批人）+ 内置演示实现；真库实现参照 Demo 的 `MySqlOrgDirectory` |
+| `ApprovalFormGuard` | 部署期自检：审批表单约定（`approvalResult` 枚举 ↔ `result` 变量） |
+| `ListenerStats` | 监听器触发计数（端到端断言「监听器真的被调到了」） |
+
+多个流程接入同一宿主：② ③ ④ 各自传入流程 key / 资源路径即可重复部署；
+`WorkflowRuntimeContext.NodeRegistry` 按流程定义 id 分表缓存，互不干扰。
 
 服务任务委托里写结论只需一句话：
 
