@@ -390,9 +390,12 @@ async function openReassignModal(instanceId) {
 
 async function openJumpModal(instanceId) {
   const definition = await api('/api/leave/process-nodes');
-  const options = (definition.nodes ?? []).map((n) => ({ value: n.id, label: `${n.name} [${n.id}]` }));
+  // 只允许跳到「用户任务」与「服务任务」（网关/结束事件不在下拉里 —— 强制办结走转移之外的专用场景）
+  const options = (definition.nodes ?? [])
+    .filter((n) => n.type === 'userTask' || n.type === 'serviceTask')
+    .map((n) => ({ value: n.id, label: `${n.name} [${n.id}]` }));
   openModal('流程步骤跳转',
-    '注意：请仔细选择目标步骤，确认无误后再保存。有并行步骤、相同步骤名要核对清楚步骤 ID（即 bpmn 中的节点 ID），有些步骤可能不能跳转，请找管理员核实后再操作。',
+    '注意：目标步骤只列出用户任务与服务任务。有并行步骤、相同步骤名要核对清楚步骤 ID（即 bpmn 中的节点 ID），确认无误后再保存。',
     '目标步骤', options, async (targetActivityId) => {
       await api(`/api/leave/instances/${instanceId}/jump`, { method: "POST", body: JSON.stringify({ targetActivityId, reason: "流程步骤跳转" }) });
       toast('已跳转到 ' + targetActivityId);
