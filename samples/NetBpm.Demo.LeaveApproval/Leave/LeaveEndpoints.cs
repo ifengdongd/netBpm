@@ -11,7 +11,8 @@ namespace NetBpm.Demo.LeaveApproval.Leave;
 /// <see cref="WorkflowEndpoints"/>，本类只注入请假业务的三件事：
 /// <b>业务单号生成与校验</b>（<see cref="LeaveBusinessKey"/>，经 <c>TransformStartRequest</c>）、
 /// <b>视图摊平</b>（天数 / 事由从流程参数摊成列）、<b>错误响应形状</b>（<see cref="LeaveErrorResponse"/>）。
-/// 端点下面只剩业务数据核对入口与 DTO 映射；换成 gRPC、消息队列、控制台调用时，业务代码一行都不用改。
+/// 端点下面只剩业务数据核对入口、组织架构查询与 DTO 映射；
+/// 换成 gRPC、消息队列、控制台调用时，业务代码一行都不用改。
 /// </para>
 /// <para>设计要点：<b>前端不写死任何审批选项</b>。实例视图会把当前待办连同它的表单定义
 /// （含 <c>approvalResult</c> 的候选值）一次返回，前端照着渲染；提交时回传所选值即可。</para>
@@ -45,10 +46,23 @@ public static class LeaveEndpoints
                 return request with { BusinessKey = businessKey };
             },
 
-            DecorateInstanceView = (_, view) => ToInstanceView(view),
-            DecorateInstanceSummary = (_, summary) => ToInstanceSummary(summary),
+            DecorateInstanceView = (_, view) => ValueTask.FromResult<object?>(ToInstanceView(view)),
+
+            // 列表行带上人话：发起人姓名 / 部门名从组织架构联查（查不到留空，不影响列表）
+            DecorateInstanceSummary = (services, summary) =>
+                ToInstanceSummaryAsync(services.GetRequiredService<IOrgDirectory>(), summary),
+
             ErrorResponseFactory = (message, errors) => new LeaveErrorResponse(message, errors),
         });
+
+        // ─── 组织架构（真实环境的数据源：部门 / 员工 / 审批人查找） ───
+        // 数据来自 IOrgDirectory：JSON 模式是内置演示数据，MySQL 模式落 sys_* 四张表。
+        group.MapGet("/org/departments", GetDepartmentsAsync);
+        group.MapGet("/org/employees", GetEmployeesAsync);
+
+        // 查找审批人：按候选组展开成员（组名即流程定义里的 candidateGroups，如 leaders / managers）。
+        // 「发起时到底会派给谁」与「这一步该谁办」都用它回答。
+        group.MapGet("/org/approvers", GetApproversAsync);
 
         // 监听器触发计数（观测用）：e2e 借它断言「监听器真的被引擎调到了」。
         group.MapGet("/listener-stats", GetListenerStatsAsync);
@@ -61,6 +75,39 @@ public static class LeaveEndpoints
 
         return group;
     }
+
+    // ─────────────────────────── 组织架构端点 ───────────────────────────
+
+    private static async Task<IResult> GetDepartmentsAsync(IOrgDirectory directory, CancellationToken ct) =>
+        Results.Ok(await directory.FindDepartmentsAsync(ct).ConfigureAwait(false));
+
+    private static async Task<IResult> GetEmployeesAsync(IOrgDirectory directory, CancellationToken ct) =>
+        Results.Ok(await directory.FindEmployeesAsync(ct).ConfigureAwait(false));
+
+    private static async Task<IResult> GetApproversAsync(
+        IOrgDirectory directory,
+        string? group,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(group))
+        {
+            return Results.BadRequest(new LeaveErrorResponse("缺少 group 参数（候选组 id，如 leaders / managers）。"));
+        }
+
+        var members = await directory.FindEmployeesAsync(ct).ConfigureAwait(false);
+
+        var approvers = members
+            .Where(employee => employee.Groups.Contains(group.Trim(), StringComparer.Ordinal))
+            .ToArray();
+
+        return Results.Ok(new
+        {
+            @group = group.Trim(),
+            approvers,
+        });
+    }
+
+    // ─────────────────────────── 其余端点 ───────────────────────────
 
     private static IResult GetListenerStatsAsync(ListenerStats stats) => Results.Ok(stats.Snapshot());
 
@@ -94,14 +141,31 @@ public static class LeaveEndpoints
         Base: view.Base,
         Parameters: view.Parameters);
 
-    /// <summary>应用层摘要 → Demo 的列表行（天数 / 事由同样从流程参数里取）。</summary>
-    private static InstanceSummary ToInstanceSummary(WorkflowInstanceSummary summary) => new(
-        ProcessInstanceId: summary.ProcessInstanceId,
-        BusinessKey: summary.Base.BusinessId,
-        Applicant: summary.Base.ApplyUser ?? string.Empty,
-        Days: LeaveParameterNames.DaysOf(summary.Parameters),
-        Reason: LeaveParameterNames.ReasonOf(summary.Parameters),
-        StartedAt: summary.StartedAt,
-        Status: summary.Status,
-        Outcome: summary.Result?.ActivityName);
+    /// <summary>应用层摘要 → Demo 的列表行：天数 / 事由从参数里取，姓名 / 部门从组织架构里查。</summary>
+    private static async ValueTask<object?> ToInstanceSummaryAsync(
+        IOrgDirectory directory,
+        WorkflowInstanceSummary summary)
+    {
+        var applicant = await directory
+            .FindEmployeeAsync(summary.Base.ApplyUser ?? string.Empty)
+            .ConfigureAwait(false);
+
+        var departments = await directory.FindDepartmentsAsync().ConfigureAwait(false);
+
+        var deptName = long.TryParse(summary.Base.ApplyDeptId, out var deptId)
+            ? departments.FirstOrDefault(department => department.DeptId == deptId)?.Name
+            : null;
+
+        return new InstanceSummary(
+            ProcessInstanceId: summary.ProcessInstanceId,
+            BusinessKey: summary.Base.BusinessId,
+            Applicant: summary.Base.ApplyUser ?? string.Empty,
+            ApplicantName: applicant?.Name ?? string.Empty,
+            Days: LeaveParameterNames.DaysOf(summary.Parameters),
+            Reason: LeaveParameterNames.ReasonOf(summary.Parameters),
+            StartedAt: summary.StartedAt,
+            Status: summary.Status,
+            Outcome: summary.Result?.ActivityName,
+            DeptName: deptName);
+    }
 }

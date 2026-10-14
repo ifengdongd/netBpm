@@ -31,21 +31,25 @@ public sealed record InstanceView(
 /// <summary>流程实例摘要（列表用）。</summary>
 /// <param name="ProcessInstanceId">流程实例 id。</param>
 /// <param name="BusinessKey">业务主键。</param>
-/// <param name="Applicant">发起人。</param>
+/// <param name="Applicant">发起人（域账号）。</param>
+/// <param name="ApplicantName">发起人姓名（组织架构表联查；查不到为空）。</param>
 /// <param name="Days">请假天数（从流程参数 <c>days</c> 取）。</param>
 /// <param name="Reason">请假事由（从流程参数 <c>reason</c> 取）。</param>
 /// <param name="StartedAt">发起时间。</param>
 /// <param name="Status">Running / Approved / Refused。</param>
 /// <param name="Outcome">结论文本（如「审批通过」）。</param>
+/// <param name="DeptName">申请部门名称（按 applyDeptId 查组织架构；查不到为空）。</param>
 public sealed record InstanceSummary(
     string ProcessInstanceId,
     string? BusinessKey,
     string Applicant,
+    string ApplicantName,
     int Days,
     string? Reason,
     DateTime? StartedAt,
     string Status,
-    string? Outcome);
+    string? Outcome,
+    string? DeptName);
 
 /// <summary>
 /// 业务数据：审批结论。由服务任务 <c>leave.ApproveComplete</c> / <c>leave.RefuseComplete</c> 写入。

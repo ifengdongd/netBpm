@@ -32,8 +32,45 @@ return options.Command switch
     "check" => Check(options),
     "purge" => Purge(options),
     "migrate" => Migrate(options),
+    "apply" => Apply(options),
     _ => Unknown(options.Command),
 };
+
+/// <summary>
+/// 执行<b>单个</b> SQL 脚本（幂等性由脚本自己保证）。
+/// </summary>
+/// <remarks>
+/// <c>migrate</c> 只管引擎表（库已初始化就整体跳过），业务侧的增量脚本
+/// （如 0003/0004/0005 业务表）走这条命令按文件执行。
+/// </remarks>
+static int Apply(CommandLineOptions options)
+{
+    if (string.IsNullOrWhiteSpace(options.ScriptFile))
+    {
+        Console.Error.WriteLine("apply 命令需要 --script <sql文件路径>。");
+        return 2;
+    }
+
+    if (!File.Exists(options.ScriptFile))
+    {
+        Console.Error.WriteLine($"脚本不存在：{options.ScriptFile}");
+        return 2;
+    }
+
+    var statements = SqlScriptReader.ReadStatements(File.ReadAllText(options.ScriptFile));
+
+    using var connection = new DbConnectionFactory(options.DatabaseType, options.ConnectionString).CreateConnection();
+
+    foreach (var statement in statements)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = statement;
+        command.ExecuteNonQuery();
+    }
+
+    Console.WriteLine($"已执行 {options.ScriptFile}（{statements.Count} 条语句）。");
+    return 0;
+}
 
 static int Purge(CommandLineOptions options)
 {
@@ -187,6 +224,7 @@ internal sealed class CommandLineOptions
     public string? ScriptDirectory { get; init; }
 
     public string? DatabaseName { get; init; }
+    public string? ScriptFile { get; init; }
 
     public static CommandLineOptions? Parse(string[] args)
     {
@@ -241,6 +279,7 @@ internal sealed class CommandLineOptions
             CreateDatabase = flags.Contains("create-database"),
             ScriptDirectory = values.GetValueOrDefault("script-dir"),
             DatabaseName = ExtractDatabaseName(connectionString),
+            ScriptFile = values.GetValueOrDefault("script"),
         };
     }
 
@@ -255,6 +294,9 @@ internal sealed class CommandLineOptions
         Console.WriteLine("选项：");
         Console.WriteLine("  --create-database    migrate 前按需创建数据库（库名取自连接字符串的 Database）");
         Console.WriteLine("  --script-dir <目录>  指定脚本目录（默认自动定位 db/<dialect>）");
+        Console.WriteLine("  apply    执行单个 SQL 脚本（--script <文件>；幂等性由脚本保证）");
+        Console.WriteLine("  --script <文件>      apply 命令的脚本文件路径");
+
     }
 
     private static string? ExtractDatabaseName(string connectionString)

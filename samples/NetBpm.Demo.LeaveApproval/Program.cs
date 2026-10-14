@@ -17,9 +17,27 @@ builder.Services.AddOpenApi();
 // ⚠️ 两者<b>要一起切</b>：内存宿主的流程实例 id 每次启动都从 1 重新开始，
 // 而真库里的 instances 是持久化的 —— 混用会让新实例把同 id 的旧记录覆盖掉，看上去像「流程串了」。
 builder.Services.AddNetBpm(builder.Configuration);
+var useMySqlStore = UseMySqlStore(builder.Configuration);
 
-// 身份模块换成演示实现，否则「按候选人查待办」永远查不到候选组任务
-builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUserGroupManager>());
+// 身份与组织架构：两种模式各一套实现，注册处只换类型 ——
+//   JSON 演示模式：InMemoryOrgDirectory（固定演示数据，用户 id 与 e2e 对齐）；
+//   MySQL 模式：MySqlOrgDirectory（落 0005 建的 sys_dept / sys_emp / sys_emp_group* 四张表）。
+// 两者同时实现 IOrgDirectory（业务查询：部门/员工/审批人名单，组织端点与视图装饰用）
+// 与 IUserGroupManager（引擎查待办要用的「用户 ↔ 组」展开）—— 同一份数据，两个视角。
+if (useMySqlStore)
+{
+    builder.Services.AddSingleton<MySqlOrgDirectory>();
+    builder.Services.AddSingleton<IOrgDirectory>(provider => provider.GetRequiredService<MySqlOrgDirectory>());
+    builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager>(provider =>
+        provider.GetRequiredService<MySqlOrgDirectory>()));
+}
+else
+{
+    builder.Services.AddSingleton<InMemoryOrgDirectory>();
+    builder.Services.AddSingleton<IOrgDirectory>(provider => provider.GetRequiredService<InMemoryOrgDirectory>());
+    builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager>(provider =>
+        provider.GetRequiredService<InMemoryOrgDirectory>()));
+}
 
 // 监听器触发计数（观测用单例）：两个监听器往里 +1，/api/leave/listener-stats 供 e2e 断言
 builder.Services.AddSingleton<ListenerStats>();
@@ -30,10 +48,9 @@ builder.Services.AddSingleton<ListenerStats>();
 // 应用层：发起 / 环节信息 / 提交 / 审批历史四件事都由它提供，业务数据端口按类型注册。
 // 两种实现的形状完全一致（都实现 IWorkflowDataStore + ILeaveBusinessInspector），
 // 所以换存储只动这一处 —— 端点、演示页、委托都不用改。
-var mySqlStore = UseMySqlStore(builder.Configuration);
 var inMemoryEngine = builder.Configuration.GetValue("NetBpm:UseInMemoryExecutionTree", true);
 
-if (mySqlStore)
+if (useMySqlStore)
 {
     builder.Services.AddNetBpmWorkflow<MySqlWorkflowDataStore>();
     builder.Services.AddSingleton<ILeaveBusinessInspector>(
@@ -89,12 +106,12 @@ app.Logger.LogInformation("业务数据落点：{Location}", inspector.Location)
 // ⚠️ 两组开关混用是个容易踩的坑：内存引擎的流程实例 id 每次启动从 1 重新开始，
 // 而持久化的业务数据是累积的 —— 新实例会把同 id 的旧记录覆盖掉，看上去像「流程串了」。
 // 这里提前说一句，省得排查半天。
-if (inMemoryEngine != !mySqlStore)
+if (inMemoryEngine != !useMySqlStore)
 {
     app.Logger.LogWarning(
         "引擎与业务数据没有一起切（UseInMemoryExecutionTree={InMemory}，Leave:Store={Store}）："
         + "流程实例 id 会与旧记录撞号并覆盖它，请把两者一起切到真库。",
-        inMemoryEngine, mySqlStore ? "MySql" : "Json");
+        inMemoryEngine, useMySqlStore ? "MySql" : "Json");
 }
 
 // 注意：此刻 app.Run() 还没跑，app.Urls 是空的（Kestrel 尚未绑定），

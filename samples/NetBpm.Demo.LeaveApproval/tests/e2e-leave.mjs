@@ -659,8 +659,8 @@ async function run() {
       rowOf(BIZ.A)?.describe, 'alice · 请假 2 天 · 年假两天');
     check('instances：current_step 记下结束在哪个环节', rowOf(BIZ.A)?.currentStep, '审批通过');
     check('instances：已完成 ⇒ assign_emp 清空', rowOf(BIZ.A)?.assignEmp, null);
-    check('instances：审批中 ⇒ assign_emp = 解析后的审批人（候选组已展开）',
-      rowOf(BIZ.E)?.assignEmp, 'leader1');
+    check('instances：审批中 ⇒ assign_emp = 解析后的审批人（候选组已展开，leaders 组两名组长）',
+      rowOf(BIZ.E)?.assignEmp, 'leader1,leader2');
     check('instances：workflow_instance_id 就是引擎实例 id',
       rowOf(BIZ.A)?.workflowInstanceId, idA);
 
@@ -693,8 +693,8 @@ async function run() {
     check('instance_current_task：已结束的单子没有待办', currentOf(BIZ.A).length, 0);
     check('instance_current_task：E 停在组长审批',
       currentOf(BIZ.E).map((row) => row.taskNode), ['组长审批']);
-    check('instance_current_task：assign_emp_id 是解析后的审批人',
-      currentOf(BIZ.E)[0]?.assignEmpId, 'leader1');
+    check('instance_current_task：assign_emp_id 是解析后的审批人（候选组已展开）',
+      currentOf(BIZ.E)[0]?.assignEmpId, 'leader1,leader2');
     check('instance_current_task：task_owner 留着流程定义里的候选组',
       currentOf(BIZ.E)[0]?.taskOwner, 'leaders');
     check('instance_current_task：task_id 能反查回引擎待办',
@@ -743,7 +743,8 @@ async function run() {
 
     const currentRows = inspector.body.currentTasks.filter((t) => t.processInstanceId === idE);
     check('当前待办区块记下了 E 的组长审批', currentRows.map((t) => t.activityName), ['组长审批']);
-    check('当前待办的审批人是解析后的（候选组已展开）', currentRows[0]?.approvers, ['leader1']);
+    check('当前待办的审批人是解析后的（候选组已展开，leaders 组两名组长）',
+     currentRows[0]?.approvers, ['leader1', 'leader2']);
 
     // ── 宿主差异：JSON 宿主想存什么就存什么 ──
     check('JSON 宿主：审批记录存下了完整表单值快照',

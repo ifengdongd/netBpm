@@ -446,6 +446,14 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
             return;
         }
 
+        // 审批人姓名从组织架构表联查（deal_emp_name / deal_domain_account 两列此前一直空着）；
+        // 员工不在 sys_emp 里（如测试账号）就只记域账号，不阻断落库。
+        var approverName = await connection.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
+            "select emp_name from sys_emp where tenant_id = @TenantId and domain_account = @DealEmpId limit 1",
+            new { TenantId = _tenantId, DealEmpId = record.Assignee },
+            transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
         await connection.ExecuteAsync(new CommandDefinition(
             InsertDealHistorySql,
             new
@@ -461,6 +469,8 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
                 DealResult = record.Decision,
                 DealComment = record.Comment,
                 FormKey = record.FormKey,
+                DealEmpName = approverName,
+                DealDomainAccount = record.Assignee,
             },
             transaction,
             cancellationToken: ct)).ConfigureAwait(false);
@@ -745,10 +755,10 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, ILeaveBusinessI
     private const string InsertDealHistorySql = """
         insert into deal_history
             (tenant_id, deal_history_id, business_id, apply_id, task_node, deal_emp_id,
-             deal_time, deal_result, deal_comment, form_key)
+             deal_time, deal_result, deal_comment, form_key, deal_emp_name, deal_domain_account)
         values
             (@TenantId, @DealHistoryId, @BusinessId, @ApplyId, @TaskNode, @DealEmpId,
-             @DealTime, @DealResult, @DealComment, @FormKey)
+             @DealTime, @DealResult, @DealComment, @FormKey, @DealEmpName, @DealDomainAccount)
         """;
 
     private const string SelectCurrentTasksSql = """
