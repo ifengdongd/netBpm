@@ -231,6 +231,13 @@ npm test         # 设计器单元测试
 `samples/NetBpm.Demo.LeaveApproval` 是「审批流公共能力」的完整接入示例：演示页在根路径，
 启动即自动部署 `web/designer/examples/leave-process.bpmn20.xml`，端到端脚本可反复跑。
 
+演示页带**实例管理**面板（对齐老系统待办管理列表）：进行中实例的当前环节与审批人
+（「姓名(账号)」形式）一目了然，支持**转移**（改派）与**步骤跳转**（目标下拉渲染
+「环节名 [节点id]」，跳到结束事件即强制办结）——两个引擎能力（`SetAssigneeCommand` /
+`MoveActivityCommand`，对应 Activiti 的 `setAssignee` / `moveActivityIdTo`）经应用层
+`ReassignTaskAsync` / `JumpToNodeAsync` 暴露为 `POST /tasks/{id}/assignee` 与
+`POST /instances/{id}/jump`，任何宿主一行接入。
+
 ```bash
 # 默认 MySQL 宿主（appsettings.Development.json；内存引擎 + JSON 业务数据见 appsettings.json）
 dotnet run --project samples/NetBpm.Demo.LeaveApproval --urls http://localhost:5090

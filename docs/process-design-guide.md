@@ -709,6 +709,33 @@ public sealed class WorkFlowTaskCompletedListener : IEngineEventListener
 > 填 `${...}` 在这里永远解析不成类型（引擎侧做了兼容兜底：剥壳后按委托表达式解析，功能不受影响，
 > 但落库形态是错的）。设计器面板会把「类名位置填了 `${...}`」自动按委托表达式显示与写入；
 > 历史草稿里已写成 `class="${...}"` 的，重开面板轻触一次取值保存即可落定为 `delegateExpression`。
+
+### 6.6 实例管理：改派与跳转（管理动作）
+
+审批人配置错了、环节卡死了，需要**人工干预**。这类动作与审批结论无关，引擎与应用层都按「管理语义」处理：
+
+| 动作 | 引擎命令（对应 Activiti） | HTTP 端点 | 行为 |
+| --- | --- | --- | --- |
+| **改派**（转办） | `SetAssigneeCommand`（`setAssignee`） | `POST /api/leave/tasks/{taskId}/assignee` | 直接换当前待办的办理人；不校验是否已被认领、不动认领时间；传空表示退回未分配 |
+| **跳转** | `MoveActivityCommand`（`moveActivityIdTo` 子集版） | `POST /api/leave/instances/{id}/jump` | 把实例从当前等待节点搬到目标节点并继续推进到下一个等待点；变量保留 |
+
+跳转的引擎行为：定位实例当前**唯一**等待的执行 → 删除当前待办（带原因，任务历史收口）→
+收口当前活动历史 → 改道到目标节点 → 由议程从目标节点重新推进（目标节点的 start 监听器、
+网关取道照常发生）。目标可以是任意任务 / 网关 / **结束事件**（跳到结束 = 强制办结）。
+
+> ⚠️ 三条红线（老系统跳转弹窗同款警示）：
+> ① 实例停在**多个并行分支**上时拒绝跳转（语义未定义）；
+> ② **同名环节靠节点 id 区分**——目标下拉一律渲染「环节名 [节点id]」（数据来自 `GET /api/leave/process-nodes`）；
+> ③ 必须带 `reason`——被删待办的任务历史与活动历史都记它，审计靠这个。
+
+应用层（`IWorkflowService.ReassignTaskAsync` / `JumpToNodeAsync`）在动作之后统一刷新业务侧「当前待办」
+与 `instances.current_step / assign_emp` 冗余列。**跳到结束事件不会经过服务任务** ⇒ 业务侧没有结论，
+应用层会补记一条 `Closed`（人工干预办结）——它与 `Approved` / `Refused` 分开取值，
+否则列表会把这个已结束的实例永远显示成进行中。
+
+Demo 的「实例管理」面板（对齐老系统待办管理列表）把这两件事接到界面上：
+所有进行中实例的当前环节与审批人（「姓名(账号)」形式）一目了然，行内转移 / 步骤跳转。
+---
 ## 7. 流程应用层封装（NetBpm.Workflow）
 
 第 6 节那几件事，每个接入方都要照抄一遍 —— 抄到第二遍就该意识到：**它们与业务无关，不该由宿主重复实现**。
@@ -902,6 +929,12 @@ node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 | `POST` | `/api/leave/tasks/{taskId}/submit`      | 提交审批：`{"values":{"approvalResult":"2"},"paraDict":{…},"operator":"leader1"}` |
 | `GET`  | `/api/leave/business`                   | **业务数据落点 + 内容**：`store` / `location` + 全部业务数据（见下）            |
 | `GET`  | `/api/leave/process-definition`         | 当前生效的流程定义（含 BPMN XML）                                      |
+| `GET`  | `/api/leave/process-nodes`              | **可跳转节点清单**（id/name/type，排除开始事件与顺序流）——目标步骤下拉数据源 |
+| `GET`  | `/api/leave/org/departments`            | 部门清单（组织架构，MySQL 模式落 `sys_dept`）                            |
+| `GET`  | `/api/leave/org/employees`              | 员工清单（含所属部门与审批组）                                           |
+| `GET`  | `/api/leave/org/approvers?group=`       | **查找审批人**：按候选组展开成员（组名即流程定义里的 `candidateGroups`）        |
+| `POST` | `/api/leave/tasks/{taskId}/assignee`    | **改派**：`{"userId":"manager1","reason":"组长休假"}`（管理动作）       |
+| `POST` | `/api/leave/instances/{id}/jump`        | **流程跳转**：`{"targetActivityId":"task_leader_approve","reason":"回退重审"}`（管理动作） |
 
 > ⚠️ `businessKey` 是请假单号，**必须是正整数** —— 业务表里 `instances.business_id` /
 > `leave_bill.business_id` 都是 `bigint`，带前缀的字符串（`LV-2026-0001`）落到真表就写不进去。
