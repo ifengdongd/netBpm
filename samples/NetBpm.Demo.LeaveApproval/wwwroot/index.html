@@ -339,7 +339,7 @@ async function loadManage() {
     <tr data-id="${item.processInstanceId}">
       <td>请假审批</td>
       <td>${fmtTime(item.startedAt)}</td>
-      <td><b>[${escapeHtml(item.businessKey ?? item.processInstanceId)}]</b> ${escapeHtml(item.applicantName; item.applicant)} 请假 ${item.days ?? "?"} 天</td>
+      <td><b>[${escapeHtml(item.businessKey ?? item.processInstanceId)}]</b> ${escapeHtml(item.applicantName ?? item.applicant)} 请假 ${item.days ?? "?"} 天</td>
       <td>${escapeHtml(item.currentStep || '—')}</td>
       <td>${escapeHtml((item.approverNames || item.approvers || []).join('、') || '—')}</td>
       <td>
