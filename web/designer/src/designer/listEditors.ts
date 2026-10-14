@@ -12,7 +12,6 @@
  * 组件在面板渲染树内执行（hooks 可用），所有修改都走 modeling 命令栈（可撤销）。
  */
 import { h, type JSX } from 'preact';
-import { useState } from 'preact/hooks';
 
 import { localDebounce, type EntryContext, type SelectOption } from './entries';
 import { businessObject, type DiagramElement, type ModdleElement, type PropertyEntry } from './types';
@@ -149,7 +148,7 @@ export function computeTypeChange(item: ModdleElement, nextKey: ImplementationKe
   return properties;
 }
 
-/** 纯函数：决定下拉显示哪个键。用户显式选择（含值为空）优先，其次按数据推导（含 ${} 校正）。 */
+/** 纯函数：决定下拉显示哪个键。用户显式选择（WeakMap 记忆，含值为空）优先，其次按数据推导（含 ${} 校正）。 */
 export function resolveDisplayKey(item: ModdleElement, overrideKey: ImplementationKey | null): ImplementationKey {
   if (overrideKey !== null) {
     return overrideKey;
@@ -171,6 +170,8 @@ export function resolveDisplayKey(item: ModdleElement, overrideKey: Implementati
  * ⚠️ 用户的类型选择用组件状态记住：三项全空时切换类型，数据里没有可推导的键，
  * 不记状态的话下拉会回落 class —— 这正是「选择了委托表达式后还显示类名」的原因。
  */
+const typeSelectionOverrides = new WeakMap<ModdleElement, ImplementationKey>();
+
 function ImplementationRow(props: {
   element: DiagramElement;
   context: EntryContext;
@@ -179,18 +180,20 @@ function ImplementationRow(props: {
   debounce: <A>(fn: (value: A) => void) => (value: A) => void;
 }): JSX.Element[] {
   const { element, context, t, item, debounce } = props;
-  const [overrideKey, setOverrideKey] = useState<ImplementationKey | null>(null);
 
-  const displayKey = resolveDisplayKey(item, overrideKey);
+  // ⚠️ 不能用 preact/hooks：properties-panel 自带一份 preact 渲染器，与应用的
+  // preact 不是同一实例 —— 组件里的 useState 会因 hooks 状态（__H）找不到而崩溃，
+  // 表现为「添加监听器后页面无响应」。用户选择用 WeakMap 按监听器条目记忆。
+  const displayKey = resolveDisplayKey(item, typeSelectionOverrides.get(item) ?? null);
   const derivedKey = resolveDisplayKey(item, null);
   // 借值显示：用户选的键还没有落值时（如刚从类名切过来），把现有实现值借过来显示
-  const displayValue = textOf(item[displayKey]); 
-    (displayKey !== derivedKey ? textOf(item[derivedKey]) : '');
+  const displayValue = textOf(item[displayKey])
+; (displayKey !== derivedKey ? textOf(item[derivedKey]) : '');
 
   const setType = (key: string): void => {
     const nextKey = key as ImplementationKey;
     context.modeling.updateModdleProperties(element, item, computeTypeChange(item, nextKey));
-    setOverrideKey(nextKey);
+    typeSelectionOverrides.set(item, nextKey);
   };
 
   const setValue = (raw: unknown): void => {
