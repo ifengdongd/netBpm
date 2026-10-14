@@ -12,6 +12,7 @@
  * 组件在面板渲染树内执行（hooks 可用），所有修改都走 modeling 命令栈（可撤销）。
  */
 import { h, type JSX } from 'preact';
+import { useState } from 'preact/hooks';
 
 import { localDebounce, type EntryContext, type SelectOption } from './entries';
 import { businessObject, type DiagramElement, type ModdleElement, type PropertyEntry } from './types';
@@ -128,39 +129,75 @@ export function implementationFields(
   t: Translate,
   item: ModdleElement,
   debounce: <A>(fn: (value: A) => void) => (value: A) => void,
-): JSX.Element[] {
+): JSX.Element {
+  return h(ImplementationRow, { element, context, t, item, debounce });
+}
+
+/** 纯函数：计算「切换实现方式」要写入的三项互斥属性。
+/// 取值跟随迁移：新键没有值时把当前键的值带过去（class=A 切委托表达式 ⇒ delegateExpression=A）。
+ */
+export function computeTypeChange(item: ModdleElement, nextKey: ImplementationKey): Record<string, unknown> {
+  const currentKey: ImplementationKey =
+    IMPLEMENTATION_KEYS.find((key) => isSet(item[key])) ?? 'class';
+  const carried = textOf(item[nextKey]) || textOf(item[currentKey]);
+  const properties: Record<string, unknown> = {};
+
+  for (const candidate of IMPLEMENTATION_KEYS) {
+    properties[candidate] = candidate === nextKey ? (normalize(carried) || undefined) : undefined;
+  }
+
+  return properties;
+}
+
+/** 纯函数：决定下拉显示哪个键。用户显式选择（含值为空）优先，其次按数据推导（含 ${} 校正）。 */
+export function resolveDisplayKey(item: ModdleElement, overrideKey: ImplementationKey | null): ImplementationKey {
+  if (overrideKey !== null) {
+    return overrideKey;
+  }
+
   const currentKey: ImplementationKey =
     IMPLEMENTATION_KEYS.find((key) => isSet(item[key])) ?? 'class';
 
-  // 防御性校正：类名位置填了 ${...}（委托表达式语法）。class 的语义是 .NET 类型名，
-  // ${} 在这里永远不会解析成功（引擎侧也只是兼容兜底）；自动按委托表达式处理 ——
-  // 读取时借值显示，写入时落定为 delegateExpression 并清空 class。
-  const misclassifiedAsClass =
-    currentKey === 'class' && /^\$\{.+\}$/.test(textOf(item[currentKey]).trim());
-  const activeKey: ImplementationKey = misclassifiedAsClass ? 'delegateExpression' : currentKey;
-  const activeValue = misclassifiedAsClass ? textOf(item[currentKey]) : textOf(item[currentKey]);
+  // 防御性校正：类名位置填了 ${...}（委托表达式语法）—— 自动按委托表达式处理
+  if (currentKey === 'class' && /^\$\{.+\}$/.test(textOf(item[currentKey]).trim())) {
+    return 'delegateExpression';
+  }
+
+  return currentKey;
+}
+
+/**
+ * 实现方式「类型 + 取值」联动行。
+ * ⚠️ 用户的类型选择用组件状态记住：三项全空时切换类型，数据里没有可推导的键，
+ * 不记状态的话下拉会回落 class —— 这正是「选择了委托表达式后还显示类名」的原因。
+ */
+function ImplementationRow(props: {
+  element: DiagramElement;
+  context: EntryContext;
+  t: Translate;
+  item: ModdleElement;
+  debounce: <A>(fn: (value: A) => void) => (value: A) => void;
+}): JSX.Element[] {
+  const { element, context, t, item, debounce } = props;
+  const [overrideKey, setOverrideKey] = useState<ImplementationKey | null>(null);
+
+  const displayKey = resolveDisplayKey(item, overrideKey);
+  const derivedKey = resolveDisplayKey(item, null);
+  // 借值显示：用户选的键还没有落值时（如刚从类名切过来），把现有实现值借过来显示
+  const displayValue = textOf(item[displayKey]); 
+    (displayKey !== derivedKey ? textOf(item[derivedKey]) : '');
 
   const setType = (key: string): void => {
-    // ⚠️ 取值必须跟随切换：把现有实现值带到新选中的键（三项互斥）。
-    // 只按「新键保留它自己原有的值」处理时，从「类名」切到「委托表达式」
-    // 会让新键拿到空 ⇒ 三个属性全部清空 ⇒ 重渲染回落 class，
-    // 表现为「切换实现方式没有发生变化」且取值丢失。
-    // 把「类名位置填了 ${...}」的值迁到委托表达式时，正好完成数据落定。
-    const carried = textOf(item[key]) || textOf(item[currentKey]);
-    const properties: Record<string, unknown> = {};
-
-    for (const candidate of IMPLEMENTATION_KEYS) {
-      properties[candidate] = candidate === key ? (normalize(carried) || undefined) : undefined;
-    }
-
-    context.modeling.updateModdleProperties(element, item, properties);
+    const nextKey = key as ImplementationKey;
+    context.modeling.updateModdleProperties(element, item, computeTypeChange(item, nextKey));
+    setOverrideKey(nextKey);
   };
 
   const setValue = (raw: unknown): void => {
     const properties: Record<string, unknown> = {};
 
     for (const candidate of IMPLEMENTATION_KEYS) {
-      properties[candidate] = candidate === activeKey ? normalize(raw) : undefined;
+      properties[candidate] = candidate === displayKey ? normalize(raw) : undefined;
     }
 
     context.modeling.updateModdleProperties(element, item, properties);
@@ -171,7 +208,7 @@ export function implementationFields(
       'select',
       {
         class: 'nb-impl-type',
-        value: activeKey,
+        value: displayKey,
         onChange: (event: Event) => setType((event.target as HTMLSelectElement).value),
       },
       IMPLEMENTATION_KEYS.map((key) =>
@@ -181,8 +218,8 @@ export function implementationFields(
     h('input', {
       class: 'nb-impl-value',
       type: 'text',
-      placeholder: t(IMPLEMENTATION_LABELS[activeKey]),
-      value: activeValue,
+      placeholder: t(IMPLEMENTATION_LABELS[displayKey]),
+      value: displayValue,
       onChange: (event: Event) => debounce(setValue)((event.target as HTMLInputElement).value),
     }),
   ];
@@ -250,7 +287,7 @@ function ListenersEditor(props: ListenersEditorProps): unknown {
       h('div', { class: 'nb-item', key: index },
         h('span', { class: 'nb-item-index' }, `${index + 1}.`),
         eventEditor(item),
-        ...implementationFields(element, context, t, item, debounce),
+        implementationFields(element, context, t, item, debounce),
         h('button', { class: 'nb-remove', type: 'button', title: t('删除'), onClick: () => removeItem(item) }, '✕'),
       ),
     ),
@@ -325,7 +362,7 @@ function EventListenersEditor(props: { element: DiagramElement; context: EntryCo
           ),
           h('button', { class: 'nb-remove', type: 'button', title: t('删除'), onClick: () => removeItem(item) }, '✕'),
         ),
-        ...implementationFields(element, context, t, item, debounce),
+        implementationFields(element, context, t, item, debounce),
         h('label', { class: 'nb-check' },
           h('input', {
             type: 'checkbox',

@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import { BpmnModdle } from 'bpmn-moddle';
 
 import activitiModdle from '../src/activiti-moddle.json';
-import { implementationFields } from '../src/designer/listEditors';
+import { computeTypeChange, resolveDisplayKey } from '../src/designer/listEditors';
 import NetBpmPropertiesProvider from '../src/designer/propertiesProvider';
 import { parseProcessMeta, upsertDiagram, type DiagramRecord } from '../src/storage';
 import { hasBlockingError, summarize, validateDiagram } from '../src/validation';
@@ -720,32 +720,33 @@ test('XML 往返：排他网关默认流以引用对象读写（回归）', asyn
 test('监听器实现方式：切换类型时取值跟随（回归）', () => {
   // 回归：setType 原实现是「新键保留它自己原有的值」——从「类名」切到「委托表达式」
   // 时新键原本为空 ⇒ 三个属性全部清空 ⇒ 重渲染回落 class，表现为「切换没有发生变化」。
-  const updates: Array<Record<string, unknown>> = [];
-  const context = {
-    modeling: {
-      updateModdleProperties: (_e: unknown, _i: unknown, properties: Record<string, unknown>) => {
-        updates.push(properties);
-      },
-    },
-  } as never;
-  const element = { id: "p1", type: "bpmn:Process", businessObject: { $type: "bpmn:Process", id: "p1" } } as never;
   const item = { $type: 'activiti:ExecutionListener', class: 'A' } as never;
-  const t = (text: string) => text;
 
-  const [typeSelect, valueInput] = implementationFields(element, context, t, item, (fn) => fn);
+  assert.deepEqual(computeTypeChange(item, 'delegateExpression'), {
+    class: undefined,
+    delegateExpression: 'A',
+    expression: undefined,
+  });
 
-  // 初始：class 有值 ⇒ 显示「类名」，取值框带出 A
-  assert.equal((typeSelect.props as { value: string }).value, 'class');
-  assert.equal((valueInput.props as { value: string }).value, 'A');
+  assert.deepEqual(computeTypeChange(item, 'expression'), {
+    class: undefined,
+    delegateExpression: undefined,
+    expression: 'A',
+  });
+});
 
-  // 切到委托表达式 ⇒ 取值跟随迁移，三项互斥
-  (typeSelect.props as { onChange: (event: { target: { value: string } }) => void }).onChange(
-    { target: { value: 'delegateExpression' } });
-  assert.deepEqual(updates.at(-1), { class: undefined, delegateExpression: 'A', expression: undefined });
+test('监听器实现方式：三项全空时用户的选择不回落（回归）', () => {
+  // 回归：旧代码把值清空后（三项全空），重渲染回落 class —— 用户选了委托表达式
+  // 却一直显示「类名」。用户显式选择必须被记住（组件状态），空值也要保持所选键。
+  const empty = { $type: 'activiti:ExecutionListener' } as never;
 
-  // 数据更新后再次渲染：显示「委托表达式」且取值不丢
-  const item2 = { $type: 'activiti:ExecutionListener', delegateExpression: 'A' } as never;
-  const [select2, input2] = implementationFields(element, context, t, item2, (fn) => fn);
-  assert.equal((select2.props as { value: string }).value, 'delegateExpression');
-  assert.equal((input2.props as { value: string }).value, 'A');
+  assert.equal(resolveDisplayKey(empty, 'delegateExpression'), 'delegateExpression');
+  assert.equal(resolveDisplayKey(empty, 'expression'), 'expression');
+  assert.equal(resolveDisplayKey(empty, null), 'class');
+
+  const withClass = { $type: 'activiti:ExecutionListener', class: 'A' } as never;
+  assert.equal(resolveDisplayKey(withClass, null), 'class');
+
+  const misclassified = { $type: 'activiti:ExecutionListener', class: '${WorkFlowProcessListener}' } as never;
+  assert.equal(resolveDisplayKey(misclassified, null), 'delegateExpression');
 });
