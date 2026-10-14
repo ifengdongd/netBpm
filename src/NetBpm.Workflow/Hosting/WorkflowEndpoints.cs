@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -73,7 +74,16 @@ public static class WorkflowEndpoints
         WorkflowEndpointOptions options,
         CancellationToken ct)
     {
-        var request = await http.Request.ReadFromJsonAsync<StartWorkflowRequest>(ct).ConfigureAwait(false);
+        StartWorkflowRequest? request;
+
+        try
+        {
+            request = await http.Request.ReadFromJsonAsync<StartWorkflowRequest>(ct).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            return Results.BadRequest(options.Error("请求体不是合法 JSON。"));
+        }
 
         if (request is null)
         {
@@ -91,7 +101,7 @@ public static class WorkflowEndpoints
                 .StartAsync(options.ProcessKey(http.RequestServices), request, ct)
                 .ConfigureAwait(false);
 
-            return Results.Ok(Decorate(http.RequestServices, options.DecorateInstanceView, view));
+            return Results.Ok(await Decorate(http.RequestServices, options.DecorateInstanceView, view).ConfigureAwait(false));
         }
         catch (WorkflowValidationException exception)
         {
@@ -112,9 +122,14 @@ public static class WorkflowEndpoints
     {
         var summaries = await workflow.FindInstancesAsync(ct).ConfigureAwait(false);
 
-        return Results.Ok(summaries
-            .Select(summary => Decorate(http.RequestServices, options.DecorateInstanceSummary, summary))
-            .ToArray());
+                var decorated = new List<object?>(summaries.Count);
+
+        foreach (var summary in summaries)
+        {
+            decorated.Add(await Decorate(http.RequestServices, options.DecorateInstanceSummary, summary).ConfigureAwait(false));
+        }
+
+        return Results.Ok(decorated);
     }
 
     /// <summary>流程实例详情：变量 + 当前待办（含表单定义）+ 审批结论 + 流程参数。</summary>
@@ -129,7 +144,7 @@ public static class WorkflowEndpoints
 
         return view is null
             ? Results.NotFound(options.Error($"流程实例 '{processInstanceId}' 不存在。"))
-            : Results.Ok(Decorate(http.RequestServices, options.DecorateInstanceView, view));
+            : Results.Ok(await Decorate(http.RequestServices, options.DecorateInstanceView, view).ConfigureAwait(false));
     }
 
     /// <summary>审批历史记录：环节序列 + 审批记录（谁在什么时候批了什么）。</summary>
@@ -197,7 +212,7 @@ public static class WorkflowEndpoints
 
             return view is null
                 ? Results.NoContent()
-                : Results.Ok(Decorate(http.RequestServices, options.DecorateInstanceView, view));
+                : Results.Ok(await Decorate(http.RequestServices, options.DecorateInstanceView, view).ConfigureAwait(false));
         }
         catch (WorkflowNotFoundException exception)
         {
@@ -239,10 +254,20 @@ public static class WorkflowEndpoints
 
     // ─────────────────────────── 工具 ───────────────────────────
 
-    private static object? Decorate<TView>(
+    private static async ValueTask<object?> Decorate<TView>(
         IServiceProvider services,
-        Func<IServiceProvider, TView, object?>? decorator,
-        TView view) => decorator is null ? view : decorator(services, view);
+        Func<IServiceProvider, TView, ValueTask<object?>>? decorator,
+        TView view)
+    {
+        if (decorator is null)
+        {
+            return view;
+        }
+
+        var decorated = await decorator(services, view).ConfigureAwait(false);
+
+        return decorated ?? view;
+    }
 
     /// <summary>输入不合法 → 400，并把字段级明细一起回给前端。</summary>
     private static IResult Invalid(WorkflowValidationException exception, WorkflowEndpointOptions options) =>

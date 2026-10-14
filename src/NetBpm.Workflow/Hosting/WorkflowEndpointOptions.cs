@@ -25,10 +25,10 @@ public sealed class WorkflowEndpointOptions
     public Func<IServiceProvider, StartWorkflowRequest, StartWorkflowRequest>? TransformStartRequest { get; init; }
 
     /// <summary>实例视图的业务化加工（可选）：返回值直接作为响应体。</summary>
-    public Func<IServiceProvider, WorkflowInstanceView, object?>? DecorateInstanceView { get; init; }
+    public Func<IServiceProvider, WorkflowInstanceView, ValueTask<object?>>? DecorateInstanceView { get; init; }
 
     /// <summary>实例摘要（列表行）的业务化加工（可选）：返回值直接作为响应体。</summary>
-    public Func<IServiceProvider, WorkflowInstanceSummary, object?>? DecorateInstanceSummary { get; init; }
+    public Func<IServiceProvider, WorkflowInstanceSummary, ValueTask<object?>>? DecorateInstanceSummary { get; init; }
 
     /// <summary>
     /// 错误响应工厂：默认形状 <c>{ message, errors? }</c>。宿主可换成自己的错误 DTO。
