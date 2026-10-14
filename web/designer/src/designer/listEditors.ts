@@ -122,7 +122,7 @@ function rewriteValues(
 // ─────────────────────────── 编辑器组件 ───────────────────────────
 
 /** 实现方式「类型 + 取值」联动行；切换类型时取值跟随（三项互斥，对齐 Activiti 原版）。 */
-function implementationFields(
+export function implementationFields(
   element: DiagramElement,
   context: EntryContext,
   t: Translate,
