@@ -169,6 +169,7 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         {
             var name = child.LocalName;
 
+            if (name == "executionListener" && element is Process pp) { System.Console.WriteLine("[探针-解析] 流程级 executionListener 命中"); System.Console.Out.Flush(); }
             if (name == BpmnConstants.ElementExecutionListener)
             {
                 element.ExecutionListeners.Add(ReadListener(new ExecutionListener(), child));
@@ -439,6 +440,12 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         }
     }
 
+    /// <summary>
+    /// 写单个执行监听器（<c>activiti:executionListener</c>）。
+    /// 供 BpmnXMLConverter 写流程级监听器（Process.ExecutionListeners）使用。
+    /// </summary>
+    internal static void WriteExecutionListener(XmlWriter writer, ExecutionListener listener) =>
+        WriteListener(writer, BpmnConstants.ElementExecutionListener, listener);
     private static void WriteListener(XmlWriter writer, string elementName, ExecutionListener listener)
     {
         // ⚠️ activiti:* 扩展元素自身的属性按 Activiti 标准格式写出（**无前缀**），

@@ -77,6 +77,8 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
             .NotifyExecutionListenersAsync(_services, _execution, (FlowElement)flowNode, ListenerInvoker.EndEvent, ct)
             .ConfigureAwait(false);
 
+        // 流程级执行监听器（全局观测）：离开节点前通知
+        await ListenerInvoker.NotifyProcessListenersAsync(_services, _execution, ListenerInvoker.EndEvent, ct).ConfigureAwait(false);
         await EngineEventDispatcher
             .DispatchAsync(_services, _execution, EngineEvents.ActivityCompleted, flowNode.Id, ct)
             .ConfigureAwait(false);

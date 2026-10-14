@@ -35,20 +35,20 @@
     监听器（对齐 Java 端的两个实现，见 Demo 的 Leave/WorkFlowListeners.cs）：
       - 流程级 activiti:eventListener：events=TASK_COMPLETED，任务每次完成即通知
         （Java 端在这里写 deal_history / 删 instance_current_task；NetBpm 由应用层落库）；
-      - activiti:executionListener：start / take / end，delegateExpression=${WorkFlowProcessListener}，
         通过 execution.EventName 区分事件。
   -->
   <bpmn:process id="leave_process" name="请假流程" isExecutable="true">
     <bpmn:extensionElements>
       <activiti:eventListener events="TASK_COMPLETED" delegateExpression="${WorkFlowTaskCompletedListener}" />
+        <activiti:executionListener event="start" delegateExpression="${WorkFlowProcessListener}" />
+        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
+        <activiti:executionListener event="end" delegateExpression="${WorkFlowProcessListener}" />
     </bpmn:extensionElements>
     <bpmn:startEvent id="start" name="发起请假">
       <bpmn:outgoing>flow_start_apply</bpmn:outgoing>
     </bpmn:startEvent>
     <bpmn:userTask id="task_apply" name="提交请假申请" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
       <bpmn:extensionElements>
-        <activiti:executionListener event="start" delegateExpression="${WorkFlowProcessListener}" />
-        <activiti:executionListener event="end" delegateExpression="${WorkFlowProcessListener}" />
         <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
         <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
       </bpmn:extensionElements>
@@ -57,8 +57,6 @@
     </bpmn:userTask>
     <bpmn:userTask id="task_leader_approve" name="组长审批" activiti:candidateGroups="leaders" activiti:formKey="leave-approve">
       <bpmn:extensionElements>
-        <activiti:executionListener event="start" delegateExpression="${WorkFlowProcessListener}" />
-        <activiti:executionListener event="end" delegateExpression="${WorkFlowProcessListener}" />
         <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
           <activiti:value id="1" name="通过" />
           <activiti:value id="2" name="拒绝" />
@@ -78,8 +76,6 @@
     </bpmn:exclusiveGateway>
     <bpmn:userTask id="task_apply_modify" name="申请人修改" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
       <bpmn:extensionElements>
-        <activiti:executionListener event="start" delegateExpression="${WorkFlowProcessListener}" />
-        <activiti:executionListener event="end" delegateExpression="${WorkFlowProcessListener}" />
         <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
         <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
       </bpmn:extensionElements>
@@ -94,8 +90,6 @@
     </bpmn:exclusiveGateway>
     <bpmn:userTask id="task_manager_approve" name="经理审批" activiti:candidateGroups="managers" activiti:formKey="leave-approve">
       <bpmn:extensionElements>
-        <activiti:executionListener event="start" delegateExpression="${WorkFlowProcessListener}" />
-        <activiti:executionListener event="end" delegateExpression="${WorkFlowProcessListener}" />
         <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
           <activiti:value id="1" name="通过" />
           <activiti:value id="2" name="拒绝" />
@@ -128,86 +122,31 @@
     <bpmn:endEvent id="end_refused" name="审批拒绝结束">
       <bpmn:incoming>flow_refuse_end</bpmn:incoming>
     </bpmn:endEvent>
-    <bpmn:sequenceFlow id="flow_start_apply" sourceRef="start" targetRef="task_apply">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_apply_leader" sourceRef="task_apply" targetRef="task_leader_approve">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_leader_gw" sourceRef="task_leader_approve" targetRef="gw_leader">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_start_apply" sourceRef="start" targetRef="task_apply" />
+    <bpmn:sequenceFlow id="flow_apply_leader" sourceRef="task_apply" targetRef="task_leader_approve" />
+    <bpmn:sequenceFlow id="flow_leader_gw" sourceRef="task_leader_approve" targetRef="gw_leader" />
     <bpmn:sequenceFlow id="flow_leader_pass" sourceRef="gw_leader" targetRef="gw_days" name="通过">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 1}</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="flow_leader_refuse" sourceRef="gw_leader" targetRef="task_refuse" name="拒绝">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 2}</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_leader_modify" sourceRef="gw_leader" targetRef="task_apply_modify" name="驳回修改">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_modify_leader" sourceRef="task_apply_modify" targetRef="task_leader_approve" name="修改后重提">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_leader_modify" sourceRef="gw_leader" targetRef="task_apply_modify" name="驳回修改" />
+    <bpmn:sequenceFlow id="flow_modify_leader" sourceRef="task_apply_modify" targetRef="task_leader_approve" name="修改后重提" />
     <bpmn:sequenceFlow id="flow_days_over3" sourceRef="gw_days" targetRef="task_manager_approve" name="超过3天">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${days &gt; 3}</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_days_within3" sourceRef="gw_days" targetRef="task_approve_complete" name="3天及以内">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_manager_gw" sourceRef="task_manager_approve" targetRef="gw_manager">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_days_within3" sourceRef="gw_days" targetRef="task_approve_complete" name="3天及以内" />
+    <bpmn:sequenceFlow id="flow_manager_gw" sourceRef="task_manager_approve" targetRef="gw_manager" />
     <bpmn:sequenceFlow id="flow_manager_pass" sourceRef="gw_manager" targetRef="task_approve_complete" name="通过">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 1}</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="flow_manager_refuse" sourceRef="gw_manager" targetRef="task_refuse" name="拒绝">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${result == 2}</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_manager_modify" sourceRef="gw_manager" targetRef="task_apply_modify" name="驳回修改">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_approve_end" sourceRef="task_approve_complete" targetRef="end_approved">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="flow_refuse_end" sourceRef="task_refuse" targetRef="end_refused">
-      <bpmn:extensionElements>
-        <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
-      </bpmn:extensionElements>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_manager_modify" sourceRef="gw_manager" targetRef="task_apply_modify" name="驳回修改" />
+    <bpmn:sequenceFlow id="flow_approve_end" sourceRef="task_approve_complete" targetRef="end_approved" />
+    <bpmn:sequenceFlow id="flow_refuse_end" sourceRef="task_refuse" targetRef="end_refused" />
   </bpmn:process>
   <bpmndi:BPMNDiagram id="BPMNDiagram_Leave">
     <bpmndi:BPMNPlane id="BPMNPlane_Leave" bpmnElement="leave_process">

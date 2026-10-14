@@ -60,6 +60,52 @@ public static class ListenerInvoker
         }
     }
 
+    /// <summary>
+    /// 触发<b>流程级</b>执行监听器（Process.ExecutionListeners，设计器里挂在流程上的那组）。
+    /// 对应 Activiti 设计器「在流程上配置执行监听器」的用法：语义是<b>全局观测</b> ——
+    /// 全流程任何节点的 start / end、任何顺序流的 take 都会通知到这里，元素不必逐个挂。
+    /// 触发顺序：元素级先、流程级后（元素级由 NotifyExecutionListenersAsync 负责）。
+    /// </summary>
+    public static async ValueTask NotifyProcessListenersAsync(
+        IEngineServices services,
+        IDelegateExecution execution,
+        string eventName,
+        CancellationToken ct = default)
+    {
+        var resolver = services.ProcessDefinitionResolver;
+
+        if (resolver is null || string.IsNullOrEmpty(execution.ProcessDefinitionId))
+        {
+            return;
+        }
+
+        var process = await resolver.ResolveProcessModelAsync(execution.ProcessDefinitionId, ct).ConfigureAwait(false);
+        Microsoft.Extensions.Logging.LoggerExtensions.LogInformation(services.Logger!, "[探针] 流程级监听器：defId={DefId}，listeners={Count}", execution.ProcessDefinitionId, process?.ExecutionListeners.Count ?? -1);
+
+        foreach (var listener in process?.ExecutionListeners ?? [])
+        {
+            if (!Matches(listener.Event, eventName))
+            {
+                continue;
+            }
+
+            var target = await ResolveAsync<IExecutionListener>(
+                services, execution, process!.Id ?? "?", "执行监听器（流程级）", eventName,
+                listener.ClassName, listener.DelegateExpression, listener.Expression, ct).ConfigureAwait(false);
+
+            var previous = execution.EventName;
+            execution.EventName = eventName;
+
+            try
+            {
+                await target.NotifyAsync(execution, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                execution.EventName = previous;
+            }
+        }
+    }
     /// <summary>触发用户任务上匹配事件的任务监听器（按配置顺序逐个调用）。</summary>
     public static async ValueTask NotifyTaskListenersAsync(
         IEngineServices services,

@@ -65,6 +65,7 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 
 - **执行监听器 `activiti:executionListener`**：任意流程元素可挂。事件 `start`（进入节点、行为执行前）/
   `take`（穿越顺序流，恰好一次）/ `end`（离开节点前）；**任务监听器 `activiti:taskListener`**：仅用户任务，
+- **流程级执行监听器**（挂在流程 extensionElements 上，对齐 Activiti 设计器「流程上配监听器」）：语义是**全局观测** —— 全流程任何节点的 start/end、任何顺序流的 take 都会通知，元素不必逐个配置（请假 Demo 即此用法）。
   事件 `create` / `assignment`（实际指派了办理人时）/ `complete`（删除任务前，提交的变量已写入执行）。
 - 实现方式三选一：`class`（.NET 类型名）/ `delegateExpression`（容器服务名，支持 ${name} 形式）/
   `expression`（EL 求值）。契约：执行监听器实现 `IExecutionListener.NotifyAsync`（`execution.EventName`

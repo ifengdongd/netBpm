@@ -29,10 +29,14 @@ public sealed class ServiceProviderActivityDelegateResolver : IActivityDelegateR
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(className);
 
-        var type = Type.GetType(className, throwOnError: false);
+        // 宿主常把 delegateExpression 的写法（${name}）误用到 class 上：
+        // class 的本义是 .NET 类型名，但剥壳后按 keyed 服务名解析同样成立 —— 宽容兼容。
+        var unwrapped = UnwrapExpression(className);
+        var type = Type.GetType(unwrapped, throwOnError: false);
         if (type is null)
         {
-            return null;
+            // 类型名解析不到：回退 keyed 服务名（与 delegateExpression 同一条路）
+            return _serviceProvider.GetKeyedService<object>(unwrapped);
         }
 
         var fromContainer = _serviceProvider.GetService(type);

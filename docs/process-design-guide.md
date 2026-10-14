@@ -659,6 +659,7 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUser
 | 监听器 | 挂载点 | 事件 | 契约 |
 | --- | --- | --- | --- |
 | `activiti:executionListener` | 任意流程元素 | `start`（进入节点、行为执行前）/ `take`（穿越顺序流，恰好一次）/ `end`（离开节点前） | `IExecutionListener.NotifyAsync`；`execution.EventName` 为事件名 |
+| **流程级** executionListener | 流程 `extensionElements`（对齐 Activiti 设计器「流程上配监听器」） | 同上三事件，但语义是**全局观测**：全流程任何节点/顺序流触发都通知，元素不必逐个挂（Demo 请假流程即此用法） | 同左 |
 | `activiti:taskListener` | 用户任务 | `create` / `assignment`（实际指派了办理人时）/ `complete`（删除任务前，提交的变量已写入执行） | `ITaskListener.NotifyAsync(TaskListenerContext)` |
 | `activiti:eventListener` | 流程级 `extensionElements` | `events` 逗号分隔：`PROCESS_STARTED/COMPLETED`、`ACTIVITY_STARTED/COMPLETED`、`TASK_CREATED/COMPLETED` | `IEngineEventListener.OnEventAsync(WorkflowEngineEvent)`；`throwOnFailure=true` 对应 Java 端 `isFailOnException()` |
 

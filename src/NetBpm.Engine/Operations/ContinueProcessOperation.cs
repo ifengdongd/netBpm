@@ -69,6 +69,8 @@ public sealed class ContinueProcessOperation : IOperation
             .DispatchAsync(_services, _execution, EngineEvents.ActivityStarted, flowNode.Id, ct)
             .ConfigureAwait(false);
 
+        // 流程级执行监听器（全局观测）：元素级之后通知（对齐 Activiti 设计器「流程上配监听器」用法）
+        await ListenerInvoker.NotifyProcessListenersAsync(_services, _execution, ListenerInvoker.StartEvent, ct).ConfigureAwait(false);
         var behavior = _services.ActivityBehaviorFactory.Create(flowNode);
         await behavior.ExecuteAsync(_execution, ct).ConfigureAwait(false);
     }
@@ -93,6 +95,8 @@ public sealed class ContinueProcessOperation : IOperation
             .NotifyExecutionListenersAsync(_services, _execution, sequenceFlow, ListenerInvoker.TakeEvent, ct)
             .ConfigureAwait(false);
 
+        // 流程级执行监听器（全局观测）：take 随元素级一起，恰好一次
+        await ListenerInvoker.NotifyProcessListenersAsync(_services, _execution, ListenerInvoker.TakeEvent, ct).ConfigureAwait(false);
         _execution.CurrentFlowElement = targetFlowElement;
 
         _services.Agenda.PlanContinueProcessOperation(_execution);

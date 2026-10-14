@@ -488,6 +488,11 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         {
             writer.WriteStartElement("extensionElements", BpmnConstants.BpmnNamespace);
 
+            foreach (var listener in process.ExecutionListeners)
+            {
+                BaseBpmnXmlConverter<FlowElement>.WriteExecutionListener(writer, listener);
+            }
+
             foreach (var listener in process.EventListeners)
             {
                 BaseBpmnXmlConverter<FlowElement>.WriteEventListener(writer, listener);

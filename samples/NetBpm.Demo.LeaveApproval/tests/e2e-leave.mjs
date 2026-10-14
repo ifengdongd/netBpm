@@ -754,11 +754,11 @@ async function run() {
 
     console.log('\n[12] 监听器执行：执行监听器（start/take/end）+ 事件监听器（TASK_COMPLETED）');
 
-  // 挂载点（leave-process.bpmn20.xml）：task_apply 的 start/end、flow_start_apply 的 take、
-  // 流程级 activiti:eventListener（events=TASK_COMPLETED）。
-  // 走一遍「≤3 天直接通过」：
-  //   · 监听器已覆盖全部 4 个用户任务（start/end）与 15 条顺序流（take）：
-  //     走一遍「≤3 天直接通过」跨 6 条连线、2 个用户任务 ⇒ start/end 各 +2、take +6；
+  // 挂载点（leave-process.bpmn20.xml）：流程级 activiti:executionListener（start/take/end）+
+  // activiti:eventListener（events=TASK_COMPLETED）—— 对齐 Activiti 设计器「流程上配监听器」用法，
+  // 全局观测：全流程任何节点/顺序流都会通知。走一遍「≤3 天直接通过」：
+  //   · 途经 7 个节点 ⇒ start +7；
+  //   · 穿越离开 5 个节点 ⇒ end +5；跨 6 条顺序流 ⇒ take +6；
   //   · 未订阅的事件（如 TASK_CREATED）不通知 ⇒ +0。计数来自 /api/leave/listener-stats。
   const statsBefore = (await get('/api/leave/listener-stats')).body;
   let viewL = await startAndApply('alice', 2, '监听器验证', BIZ.L);
@@ -766,9 +766,9 @@ async function run() {
   const statsAfter = (await get('/api/leave/listener-stats')).body;
 
   const deltaOf = (key) => (statsAfter[key] ?? 0) - (statsBefore[key] ?? 0);
-  check('执行监听器 start +2（task_apply / 组长审批进入）', deltaOf('executionStart'), 2);
+  check('执行监听器 start +7（途经节点含开始/结束事件与网关）', deltaOf('executionStart'), 7);
   check('执行监听器 take +6（路径跨 6 条顺序流）', deltaOf('executionTake'), 6);
-  check('执行监听器 end +2（task_apply / 组长审批离开）', deltaOf('executionEnd'), 2);
+  check('执行监听器 end +5（离开的节点；结束事件不再离开）', deltaOf('executionEnd'), 5);
   check('事件监听器 TASK_COMPLETED +2（申请 + 组长各提交一次）', deltaOf('taskCompleted'), 2);
   check('未订阅的事件不通知（TASK_CREATED 不在 events 清单）', deltaOf('taskCreated'), 0);
   check('实例正常结束（监听器没有干扰流转）', viewL.running, false);
