@@ -152,9 +152,12 @@ SVG 流程图图片 —— 图形信息取文件里的 `bpmndi:BPMNDiagram`（�
 ```
 NetBpm.Demo/
 ├── Program.cs            组合根
-├── Common/               流程信息枚举 / 流程端点 / 跨流程合并端点
-├── Order/                订单契约 / 单号发号 / 业务存储(JSON) / 审批结束委托 / 端点
-├── Leave/                请假契约 / 单号发号 / 审批收口委托 / 流程监听器 / 端点
+├── ConstField.cs(Common) 流程相关统一常量（key / 资源 / 部署名 / 前缀 / 配置键）
+├── Common/               流程信息枚举（workflow_type 加载）/ 流程端点 / 跨流程合并端点
+├── Workflow/             两条流程共用：启动即部署（bootstrapper 合并）/ 业务单号发号器 / 流程监听器 / 统一错误响应
+├── Delegates/            服务任务委托（审批结束的业务回写：请假收口 / 订单状态回写）
+├── Order/                订单契约 / 业务存储(JSON) / 端点
+├── Leave/                请假契约 / 端点
 ├── Storage/              MySQL 实现（MySqlWorkflowDataStore / MySqlOrderBillStore）
-└── wwwroot/              六个独立页面 + 共享 css/js
+└── wwwroot/              七个独立页面 + 共享 css/js
 ```

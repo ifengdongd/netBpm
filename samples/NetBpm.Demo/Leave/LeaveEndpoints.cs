@@ -1,4 +1,5 @@
 using NetBpm.Demo.Common;
+using NetBpm.Demo.Workflow;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
 
@@ -35,10 +36,10 @@ public static class LeaveEndpoints
             TransformStartRequest = (_, request) =>
             {
                 var businessKey = string.IsNullOrWhiteSpace(request.BusinessKey)
-                    ? LeaveBusinessKey.Next()
+                    ? BusinessKeys.NextMilliseconds()
                     : request.BusinessKey.Trim();
 
-                if (!LeaveBusinessKey.IsValid(businessKey))
+                if (!BusinessKeys.IsValid(businessKey))
                 {
                     throw new WorkflowValidationException(
                         $"businessKey 必须是正整数（业务表里 business_id 是 bigint），当前为 '{request.BusinessKey}'。");
@@ -57,7 +58,7 @@ public static class LeaveEndpoints
             // 列表行带上人话：发起人姓名 / 部门名从组织架构联查（查不到留空，不影响列表）
             DecorateInstanceSummary = (sp, summary) => ToInstanceSummaryAsync(sp, sp.GetRequiredService<IOrgDirectory>(), summary),
 
-            ErrorResponseFactory = (message, errors) => new LeaveErrorResponse(message, errors),
+            ErrorResponseFactory = (message, errors) => new ErrorResponse(message, errors),
         });
 
         // 业务数据核对入口（请假业务自有，与流程引擎无关）：

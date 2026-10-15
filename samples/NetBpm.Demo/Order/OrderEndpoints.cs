@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using NetBpm.Demo.Common;
+using NetBpm.Demo.Workflow;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
 
@@ -35,7 +36,7 @@ public static class OrderEndpoints
         group.MapWorkflowEndpoints(string.Empty, new WorkflowEndpointOptions
         {
             ProcessKey = _ => ConstField.OrderProcessKey,
-            ErrorResponseFactory = (message, errors) => new OrderErrorResponse(message, errors),
+            ErrorResponseFactory = (message, errors) => new ErrorResponse(message, errors),
         });
 
         // ─── 订单业务（与流程引擎无关的 CRUD 视角） ───
@@ -62,16 +63,16 @@ public static class OrderEndpoints
     {
         if (string.IsNullOrWhiteSpace(request.Applicant))
         {
-            return Results.BadRequest(new OrderErrorResponse("applicant（申请人）必填。"));
+            return Results.BadRequest(new ErrorResponse("applicant（申请人）必填。"));
         }
 
         if (request.Amount is < 0)
         {
-            return Results.BadRequest(new OrderErrorResponse("amount（订单金额）不能为负。"));
+            return Results.BadRequest(new ErrorResponse("amount（订单金额）不能为负。"));
         }
 
         var tenantId = configuration.GetValue(ConstField.OrderTenantConfigKey, 1L);
-        var businessId = long.Parse(OrderBusinessKey.Next(), CultureInfo.InvariantCulture);
+        var businessId = long.Parse(BusinessKeys.NextSeconds(), CultureInfo.InvariantCulture);
         var now = DateTime.UtcNow;
 
         // ① 订单行落库：status = 1（审批中）。先有订单再有流程 —— 流程参数与 businessId 都指向它
@@ -158,7 +159,7 @@ public static class OrderEndpoints
 
         if (bill is null)
         {
-            return Results.NotFound(new OrderErrorResponse($"订单 {businessId} 不存在。"));
+            return Results.NotFound(new ErrorResponse($"订单 {businessId} 不存在。"));
         }
 
         return Results.Ok(await ToViewAsync(bill, workflow, ct).ConfigureAwait(false));
@@ -171,18 +172,18 @@ public static class OrderEndpoints
 
         if (bill is null)
         {
-            return Results.NotFound(new OrderErrorResponse($"订单 {businessId} 不存在。"));
+            return Results.NotFound(new ErrorResponse($"订单 {businessId} 不存在。"));
         }
 
         if (bill.ProcessInstanceId is not { } processInstanceId)
         {
-            return Results.Ok(new OrderErrorResponse($"订单 {businessId} 尚未发起审批流程。"));
+            return Results.Ok(new ErrorResponse($"订单 {businessId} 尚未发起审批流程。"));
         }
 
         var history = await workflow.FindHistoryAsync(processInstanceId, ct).ConfigureAwait(false);
 
         return history is null
-            ? Results.NotFound(new OrderErrorResponse($"订单 {businessId} 的流程实例 {processInstanceId} 不存在。"))
+            ? Results.NotFound(new ErrorResponse($"订单 {businessId} 的流程实例 {processInstanceId} 不存在。"))
             : Results.Ok(history);
     }
 

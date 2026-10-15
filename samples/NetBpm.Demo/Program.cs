@@ -102,8 +102,12 @@ app.MapLeaveEndpoints();
 // 打开即用：启动时部署两条流程
 //（定义来自 web/designer/examples/*.bpmn20.xml；设计器画的流程导出 XML 后替换即可，委托契约不变）。
 // ⚠️ 必须在 app.Run() 之前：运行期上下文（流程定义 id + 环节名对照表）要在接受请求前装好。
-await OrderProcessBootstrapper.DeployAsync(app.Services, app.Logger);
-await LeaveProcessBootstrapper.DeployAsync(app.Services, app.Logger);
+await NetBpm.Demo.Workflow.ProcessBootstrapper.DeployAsync(
+    app.Services, app.Logger,
+    ConstField.OrderProcessKey, ConstField.OrderResourceName, ConstField.OrderDeploymentName);
+await NetBpm.Demo.Workflow.ProcessBootstrapper.DeployAsync(
+    app.Services, app.Logger,
+    ConstField.LeaveProcessKey, ConstField.LeaveResourceName, ConstField.LeaveDeploymentName);
 
 // 启动时从 workflow_type 表（0008）加载流程信息至 ProcessInfoEnum：
 // 新增流程 = 表里插一行，不用改代码。表不存在 / 加载失败回退内置默认清单。

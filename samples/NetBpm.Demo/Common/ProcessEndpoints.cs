@@ -1,12 +1,8 @@
 using Microsoft.AspNetCore.Routing;
 using NetBpm.Demo.Common;
+using NetBpm.Demo.Workflow;
 
 namespace NetBpm.Demo;
-
-/// <summary>统一错误响应（合并 Demo 的公共端点用）。</summary>
-/// <param name="Message">错误说明。</param>
-/// <param name="Errors">明细。</param>
-public sealed record ErrorResponse(string Message, IReadOnlyList<string>? Errors = null);
 
 /// <summary>
 /// 流程信息端点：把 <see cref="ProcessInfoEnum"/> 暴露给前端。

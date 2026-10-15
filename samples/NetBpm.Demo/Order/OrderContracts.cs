@@ -47,34 +47,7 @@ public static class OrderParameterNames
     public const string Remark = "remark";
 }
 
-// ─────────────────────────── 订单单号 ───────────────────────────
-
-/// <summary>
-/// 订单单号（业务主键）—— 校验与发号：「秒级时间戳 &lt;&lt; 20 | 进程内序号」，
-/// 单进程内不重复、单调递增。
-/// </summary>
-/// <remarks>
-/// ⚠️ 业务表里 <c>order_bill.business_id</c> 是 <c>bigint</c>，所以单号必须是正整数；
-/// 用秒级而不是毫秒级时间戳，是为了把单号压在 JS 的安全整数范围内（&lt; 2^53）。
-/// 多实例部署要换成统一发号服务。
-/// </remarks>
-public static class OrderBusinessKey
-{
-    private static long _sequence;
-
-    /// <summary>单号是否合法（正整数，且能放进 <c>bigint</c>）。</summary>
-    public static bool IsValid(string? value) =>
-        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0;
-
-    /// <summary>发一个新单号（单进程内唯一，单调递增）。</summary>
-    public static string Next()
-    {
-        var seconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-        return ((seconds << 20) | (Interlocked.Increment(ref _sequence) & 0xFFFFF))
-            .ToString(CultureInfo.InvariantCulture);
-    }
-}
+// 订单单号的校验与发号见 Workflow/BusinessKeys.cs（两条流程共用同一发号器）。
 
 // ─────────────────────────── 行与契约 ───────────────────────────
 
@@ -144,7 +117,4 @@ public sealed record OrderBillView(
     string? TaskId,
     string? Outcome);
 
-/// <summary>统一错误响应。</summary>
-/// <param name="Message">错误说明。</param>
-/// <param name="Errors">明细。</param>
-public sealed record OrderErrorResponse(string Message, IReadOnlyList<string>? Errors = null);
+// 统一错误响应见 Workflow/ErrorResponse.cs（两条流程共用同一形状）。

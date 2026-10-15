@@ -92,7 +92,4 @@ public sealed record LeaveResultRecord(
             CompletedAt: record.CompletedAt);
 }
 
-/// <summary>统一错误响应。</summary>
-/// <param name="Message">错误说明。</param>
-/// <param name="Errors">明细（如表单字段校验错误）。</param>
-public sealed record LeaveErrorResponse(string Message, IReadOnlyList<string>? Errors = null);
+// 统一错误响应见 Workflow/ErrorResponse.cs（两条流程共用同一形状）。
