@@ -151,13 +151,18 @@ SVG 流程图图片 —— 图形信息取文件里的 `bpmndi:BPMNDiagram`（�
 
 ```
 NetBpm.Demo/
-├── Program.cs            组合根
-├── ConstField.cs(Common) 流程相关统一常量（key / 资源 / 部署名 / 前缀 / 配置键）
-├── Common/               流程信息枚举（workflow_type 加载）/ 流程端点 / 跨流程合并端点
-├── Workflow/             两条流程共用：启动即部署（bootstrapper 合并）/ 业务单号发号器 / 流程监听器 / 统一错误响应
-├── Delegates/            服务任务委托（审批结束的业务回写：请假收口 / 订单状态回写）
-├── Order/                订单契约 / 业务存储(JSON) / 端点
+├── Program.cs            薄组合根：注册框架与存储、映射端点、执行启动序列
+├── Common/               ConstField 统一常量；流程信息枚举（workflow_type 加载）；
+│                         流程端点 / 跨流程合并端点
+├── Workflow/             两条流程共用的公共层：
+│                         StartupInitializer（启动序列：部署→加载流程信息→发布流程图）、
+│                         ProcessBootstrapper（参数化启动即部署 + 部署期自检）、
+│                         BusinessKeys（业务单号发号器）、ProcessListeners（流程监听器）、
+│                         ErrorResponse（统一错误响应）
+├── Delegates/            服务任务委托（审批结束的业务回写）：leave.* 收口 / order.* 状态回写
+├── Order/                订单契约 / JSON 业务存储 / 端点
 ├── Leave/                请假契约 / 端点
-├── Storage/              MySQL 实现（MySqlWorkflowDataStore / MySqlOrderBillStore）
-└── wwwroot/              七个独立页面 + 共享 css/js
+├── Storage/              MySQL 实现（MySqlWorkflowDataStore 主体 + Sql/Rows 两个 partial、
+│                         MySqlOrderBillStore）+ AddDemoStores 存储注册扩展
+└── wwwroot/              七个独立页面 + diagrams/（发布生成的流程图）+ 共享 css/js
 ```

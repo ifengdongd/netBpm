@@ -1,8 +1,7 @@
 using Microsoft.AspNetCore.Routing;
-using NetBpm.Demo.Common;
 using NetBpm.Demo.Workflow;
 
-namespace NetBpm.Demo;
+namespace NetBpm.Demo.Common;
 
 /// <summary>
 /// 流程信息端点：把 <see cref="ProcessInfoEnum"/> 暴露给前端。
