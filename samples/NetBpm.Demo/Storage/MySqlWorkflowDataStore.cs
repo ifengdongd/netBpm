@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Globalization;
 using Dapper;
+using NetBpm.Demo.Common;
 using NetBpm.Persistence;
 using NetBpm.Workflow;
 
@@ -63,7 +64,7 @@ public sealed class MySqlWorkflowDataStore : IWorkflowDataStore, IWorkflowStoreI
         _runtime = runtime;
         _logger = logger;
         _connectionString = configuration["NetBpm:ConnectionString"] ?? "(未配置)";
-        _tenantId = configuration.GetValue("Workflow:TenantId", 1L);
+        _tenantId = configuration.GetValue(ConstField.WorkflowTenantConfigKey, 1L);
     }
 
     /// <inheritdoc />

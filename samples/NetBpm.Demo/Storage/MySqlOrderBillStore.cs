@@ -1,5 +1,6 @@
 using System.Globalization;
 using Dapper;
+using NetBpm.Demo.Common;
 using NetBpm.Demo.Order;
 using NetBpm.Persistence;
 
@@ -32,7 +33,7 @@ public sealed class MySqlOrderBillStore : IOrderBillStore
         _connections = connections;
         _logger = logger;
         _connectionString = configuration["NetBpm:ConnectionString"] ?? "(未配置)";
-        _tenantId = configuration.GetValue("Order:TenantId", 1L);
+        _tenantId = configuration.GetValue(ConstField.OrderTenantConfigKey, 1L);
     }
 
     /// <inheritdoc />

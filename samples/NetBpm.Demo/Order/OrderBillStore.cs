@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Hosting;
+using NetBpm.Demo.Common;
 using NetBpm.Workflow;
 
 namespace NetBpm.Demo.Order;
@@ -69,7 +70,7 @@ public sealed class OrderBillStore : IOrderBillStore, IDisposable
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(environment);
 
-        var configured = configuration["Order:BillDataFile"];
+        var configured = configuration[ConstField.OrderBillDataFileConfigKey];
         var relative = string.IsNullOrWhiteSpace(configured) ? "data/order-bill.json" : configured;
 
         FilePath = Path.IsPathRooted(relative)

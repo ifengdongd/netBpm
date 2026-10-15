@@ -27,14 +27,14 @@ public static class OrderEndpoints
 {
     public static RouteGroupBuilder MapOrderEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var group = endpoints.MapGroup("/api/order").WithTags("order");
+        var group = endpoints.MapGroup(ConstField.OrderApiPrefix).WithTags("order");
 
         // 流程通用端点（提交审批走这里：POST /api/order/tasks/{taskId}/submit）。
         // 注意：直接 POST /api/order/instances 发起流程不会建订单行，委托回写状态时会失败 ——
         // 业务入口请走 POST /api/order/bills（提交申请）。
         group.MapWorkflowEndpoints(string.Empty, new WorkflowEndpointOptions
         {
-            ProcessKey = _ => OrderProcessBootstrapper.ProcessKey,
+            ProcessKey = _ => ConstField.OrderProcessKey,
             ErrorResponseFactory = (message, errors) => new OrderErrorResponse(message, errors),
         });
 
@@ -70,7 +70,7 @@ public static class OrderEndpoints
             return Results.BadRequest(new OrderErrorResponse("amount（订单金额）不能为负。"));
         }
 
-        var tenantId = configuration.GetValue("Order:TenantId", 1L);
+        var tenantId = configuration.GetValue(ConstField.OrderTenantConfigKey, 1L);
         var businessId = long.Parse(OrderBusinessKey.Next(), CultureInfo.InvariantCulture);
         var now = DateTime.UtcNow;
 
@@ -95,14 +95,14 @@ public static class OrderEndpoints
         // ② 发起流程：BaseModel 字段 + 订单参数（product_name / amount / remark）一起进流程。
         // WorkflowTypeId = 流程信息枚举里的流程类型 id（02830358-…），随实例登记落 workflow_type_id
         var view = await workflow.StartAsync(
-            OrderProcessBootstrapper.ProcessKey,
+            ConstField.OrderProcessKey,
             new StartWorkflowRequest(
                 Applicant: bill.ApplyUser,
                 BusinessKey: businessId.ToString(CultureInfo.InvariantCulture),
                 BusinessDeptId: bill.BusinessDeptId,
                 ApplyDeptId: bill.ApplyDeptId,
                 ParaDict: BuildParaDict(bill),
-                WorkflowTypeId: ProcessInfoEnum.Require(OrderProcessBootstrapper.ProcessKey).Id),
+                WorkflowTypeId: ProcessInfoEnum.Require(ConstField.OrderProcessKey).Id),
             ct).ConfigureAwait(false);
 
         // ③ 回填流程实例 id：之后「按订单查审批进度 / 历史」都靠它反查

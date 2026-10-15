@@ -60,7 +60,7 @@ public static class ProcessInfoEnum
     /// <summary>内置默认（workflow_type 表不存在 / 加载失败 / JSON 演示模式时的兜底）。</summary>
     public static readonly ProcessInfo Order = new(
         Id: "02830358-46ef-40e5-b3b9-4d5c4eb23f9f",
-        Name: NetBpm.Demo.Order.OrderProcessBootstrapper.ProcessKey,
+        Name: ConstField.OrderProcessKey,
         Describe: "订单审批流程",
         ViewUrl: "/bill.html?process=order_process&businessId={businessId}",
         ApproveUrl: "/approve.html?process=order_process&taskId={taskId}");
@@ -68,7 +68,7 @@ public static class ProcessInfoEnum
     /// <summary>内置默认：请假申请流程。</summary>
     public static readonly ProcessInfo Leave = new(
         Id: "3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7",
-        Name: NetBpm.Demo.Leave.LeaveProcessBootstrapper.ProcessKey,
+        Name: ConstField.LeaveProcessKey,
         Describe: "请假申请流程",
         ViewUrl: "/bill.html?process=leave_process&businessId={businessId}",
         ApproveUrl: "/approve.html?process=leave_process&taskId={taskId}");

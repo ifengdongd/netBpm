@@ -22,13 +22,13 @@ public static class LeaveEndpoints
 {
     public static RouteGroupBuilder MapLeaveEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var group = endpoints.MapGroup("/api/leave").WithTags("leave");
+        var group = endpoints.MapGroup(ConstField.LeaveApiPrefix).WithTags("leave");
 
         // 流程通用的端点：发起 / 实例列表 / 实例详情 / 历史 / 待办 / 提交 / 流程定义。
         // 路由与既有 Demo、e2e 测试保持一致（挂在 /api/leave 前缀下）。
         group.MapWorkflowEndpoints(string.Empty, new WorkflowEndpointOptions
         {
-            ProcessKey = _ => LeaveProcessBootstrapper.ProcessKey,
+            ProcessKey = _ => ConstField.LeaveProcessKey,
 
             // 发起前生成 / 校验业务单号：请假单号必须是正整数（业务表里 business_id 是 bigint）。
             // 校验不过抛 WorkflowValidationException → 统一映射成 400 连同明细。
@@ -48,7 +48,7 @@ public static class LeaveEndpoints
                 return request with
                 {
                     BusinessKey = businessKey,
-                    WorkflowTypeId = ProcessInfoEnum.Require(LeaveProcessBootstrapper.ProcessKey).Id,
+                    WorkflowTypeId = ProcessInfoEnum.Require(ConstField.LeaveProcessKey).Id,
                 };
             },
 

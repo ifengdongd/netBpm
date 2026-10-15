@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using NetBpm.Demo.Common;
 using NetBpm.Runtime;
 using NetBpm.Workflow;
 
@@ -12,20 +13,11 @@ namespace NetBpm.Demo.Order;
 /// 流程定义来自 <c>web/designer/examples/order-process.bpmn20.xml</c>（经 csproj 链接进输出目录）。
 /// 设计器里画的订单流程（<c>?modelId=…</c>）导出 XML 后替换该文件即可，委托契约
 /// <c>order.ApproveComplete</c> / <c>order.RefuseComplete</c> 保持不变。
-/// </para>
-/// <para>
-/// 部署动作本身是通用能力（<see cref="WorkflowProcessBootstrapper"/>），这里只剩流程 key
-/// 与部署期自检（守卫都是通用类，往钩子里塞即可）。
+/// 常量（流程 key / 资源名 / 部署名）统一定义在 <see cref="ConstField"/>。
 /// </para>
 /// </remarks>
 internal static class OrderProcessBootstrapper
 {
-    /// <summary>流程 key（= BPMN 里 <c>process/@id</c>）。</summary>
-    internal const string ProcessKey = "order_process";
-
-    /// <summary>资源名，同时也是链接进输出目录的文件名。</summary>
-    internal const string ResourceName = "order-process.bpmn20.xml";
-
     /// <summary>部署流程定义，返回流程定义 id（自检不过会让宿主起不来）。</summary>
     internal static Task<string> DeployAsync(
         IServiceProvider services,
@@ -36,8 +28,8 @@ internal static class OrderProcessBootstrapper
             services,
             new WorkflowDeployOptions
             {
-                ResourcePath = Path.Combine("processes", ResourceName),
-                DeploymentName = "订单审批 Demo",
+                ResourcePath = Path.Combine(ConstField.ProcessResourceDirectory, ConstField.OrderResourceName),
+                DeploymentName = ConstField.OrderDeploymentName,
 
                 // 部署成功后立刻自检：BPMN 里的 approvalResult 选项与 C# 枚举必须一致；
                 // 每个服务任务的 delegateExpression 都能解析成已注册的委托

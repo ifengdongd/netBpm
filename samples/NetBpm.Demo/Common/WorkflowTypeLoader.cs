@@ -26,7 +26,7 @@ public sealed class WorkflowTypeLoader
 
         _connections = connections;
         _logger = logger;
-        _tenantId = configuration.GetValue("Workflow:TenantId", 1L);
+        _tenantId = configuration.GetValue(ConstField.WorkflowTenantConfigKey, 1L);
     }
 
     /// <summary>加载启用的流程类型（按 sort_order 排序）；表不可用时返回 null。</summary>

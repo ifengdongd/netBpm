@@ -1,4 +1,5 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
+using NetBpm.Demo.Common;
 using NetBpm.Runtime;
 using NetBpm.Workflow;
 
@@ -9,16 +10,10 @@ namespace NetBpm.Demo.Leave;
 /// </summary>
 /// <remarks>
 /// 部署动作本身是通用能力（<see cref="WorkflowProcessBootstrapper"/>），这里只剩
-/// 请假业务的两个常量与两条部署期自检（守卫都是通用类，往钩子里塞即可）。
+/// 两条部署期自检（守卫都是通用类，往钩子里塞即可）；常量统一定义在 <see cref="ConstField"/>。
 /// </remarks>
 internal static class LeaveProcessBootstrapper
 {
-    /// <summary>流程 key（= BPMN 里 <c>process/@id</c>）。</summary>
-    internal const string ProcessKey = "leave_process";
-
-    /// <summary>资源名，同时也是链接进输出目录的文件名。</summary>
-    internal const string ResourceName = "leave-process.bpmn20.xml";
-
     /// <summary>部署流程定义，返回流程定义 id（自检不过会让宿主起不来）。</summary>
     internal static Task<string> DeployAsync(
         IServiceProvider services,
@@ -29,8 +24,8 @@ internal static class LeaveProcessBootstrapper
             services,
             new WorkflowDeployOptions
             {
-                ResourcePath = Path.Combine("processes", ResourceName),
-                DeploymentName = "请假审批 Demo",
+                ResourcePath = Path.Combine(ConstField.ProcessResourceDirectory, ConstField.LeaveResourceName),
+                DeploymentName = ConstField.LeaveDeploymentName,
 
                 // 部署成功后立刻自检：
                 // ① BPMN 里的 approvalResult 选项与 C# 枚举必须一致（见 ApprovalFormGuard）；

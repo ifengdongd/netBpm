@@ -29,7 +29,7 @@ builder.Services.AddNetBpm(builder.Configuration);
 
 // 应用层：发起 / 环节信息 / 提交 / 审批历史四件事都由它提供（两条流程共用一个存储实现）。
 // 业务数据核对端点（/api/leave/business）依赖 IWorkflowStoreInspector，与具体实现指向同一份。
-var storage = builder.Configuration["Workflow:Storage"] ?? "MySql";
+var storage = builder.Configuration[ConstField.StorageConfigKey] ?? ConstField.DefaultStorage;
 
 if (string.Equals(storage, "MySql", StringComparison.OrdinalIgnoreCase))
 {
@@ -88,7 +88,7 @@ app.MapGet("/health", () => Results.Ok(new
     status = "ok",
     engine = "NetBpm",
     demo = "merged-approval",
-    processes = new[] { OrderProcessBootstrapper.ProcessKey, LeaveProcessBootstrapper.ProcessKey },
+    processes = new[] { ConstField.OrderProcessKey, ConstField.LeaveProcessKey },
 }));
 
 // 公共端点：流程信息枚举、跨流程的待办中心 / 申请单列表 / 组织架构
@@ -152,14 +152,14 @@ async Task GenerateDiagramAsync(string processKey)
 
     var svg = BpmnDiagramSvgRenderer.RenderSvg(xml, DiagramHighlight.None);
 
-    var directory = Path.Combine(app.Environment.WebRootPath, "diagrams");
+    var directory = Path.Combine(app.Environment.WebRootPath, ConstField.DiagramDirectory);
     Directory.CreateDirectory(directory);
     await File.WriteAllTextAsync(Path.Combine(directory, $"{processKey}.svg"), svg).ConfigureAwait(false);
     app.Logger.LogInformation("流程图图片已生成：/diagrams/{ProcessKey}.svg", processKey);
 }
 
-await GenerateDiagramAsync(OrderProcessBootstrapper.ProcessKey);
-await GenerateDiagramAsync(LeaveProcessBootstrapper.ProcessKey);
+await GenerateDiagramAsync(ConstField.OrderProcessKey);
+await GenerateDiagramAsync(ConstField.LeaveProcessKey);
 
 var billStore = app.Services.GetRequiredService<IOrderBillStore>();
 app.Logger.LogInformation("订单数据落点：{Location}", billStore.Location);
