@@ -21,29 +21,53 @@ namespace NetBpm.Demo.Workflow;
 /// </remarks>
 internal static class StartupInitializer
 {
-    /// <summary>执行完整启动序列。</summary>
+    /// <summary>执行完整启动序列（部署清单来自注册的 IBusinessProcess —— 新流程自动纳入）。</summary>
     public static async Task InitializeAsync(WebApplication app)
     {
-        await DeployProcessesAsync(app).ConfigureAwait(false);
+        var processes = app.Services.GetServices<IBusinessProcess>().ToArray();
+
+        LogStorageMode(app);
+
+        await DeployProcessesAsync(app, processes).ConfigureAwait(false);
         await LoadProcessInfosAsync(app).ConfigureAwait(false);
-        await PublishDiagramsAsync(app).ConfigureAwait(false);
+        await PublishDiagramsAsync(app, processes).ConfigureAwait(false);
 
         var billStore = app.Services.GetRequiredService<IOrderBillStore>();
         app.Logger.LogInformation("订单数据落点：{Location}", billStore.Location);
     }
 
-    /// <summary>部署两条流程（定义来自 web/designer/examples/*.bpmn20.xml，ConstField 提供常量）。</summary>
-    private static async Task DeployProcessesAsync(WebApplication app)
+    /// <summary>
+    /// 打印生效的存储模式。⚠️ 业务数据固定落 MySQL 真库，引擎也必须落 MySQL
+    /// （UseInMemoryExecutionTree=false）：内存宿主的实例 id 每次启动从 1 重新开始，
+    /// 会撞真库里累积的 workflow_instance_id，启动即警告。
+    /// </summary>
+    private static void LogStorageMode(WebApplication app)
     {
-        await ProcessBootstrapper.DeployAsync(
-            app.Services, app.Logger,
-            ConstField.OrderProcessKey, ConstField.OrderResourceName, ConstField.OrderDeploymentName)
-            .ConfigureAwait(false);
+        var inMemoryEngine = app.Configuration.GetValue("NetBpm:UseInMemoryExecutionTree", false);
 
-        await ProcessBootstrapper.DeployAsync(
-            app.Services, app.Logger,
-            ConstField.LeaveProcessKey, ConstField.LeaveResourceName, ConstField.LeaveDeploymentName)
-            .ConfigureAwait(false);
+        app.Logger.LogInformation(
+            "存储模式：MySQL（引擎：{EngineMode}）—— 引擎与业务数据都落 netbpm_demo",
+            inMemoryEngine ? "内存执行树（危险：会与真库 instances 撞号）" : "MySQL（ACT_* 表）");
+
+        if (inMemoryEngine)
+        {
+            app.Logger.LogWarning(
+                "危险组合：引擎是内存执行树而业务数据落 MySQL 真库 —— "
+                + "重启后流程实例 id 从 1 重新开始，会覆盖真库里 workflow_instance_id 相同的旧登记行。"
+                + "请设置 NetBpm:UseInMemoryExecutionTree=false。");
+        }
+    }
+
+    /// <summary>部署全部已注册的业务流程（定义来自 web/designer/examples/*.bpmn20.xml）。</summary>
+    private static async Task DeployProcessesAsync(WebApplication app, IReadOnlyList<IBusinessProcess> processes)
+    {
+        foreach (var process in processes)
+        {
+            await ProcessBootstrapper.DeployAsync(
+                app.Services, app.Logger,
+                process.ProcessKey, process.ResourceName, process.DeploymentName)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -52,13 +76,6 @@ internal static class StartupInitializer
     /// </summary>
     private static async Task LoadProcessInfosAsync(WebApplication app)
     {
-        var storage = app.Configuration[ConstField.StorageConfigKey] ?? ConstField.DefaultStorage;
-
-        if (!string.Equals(storage, "MySql", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
         var loader = new WorkflowTypeLoader(
             app.Services.GetRequiredService<IDbConnectionFactory>(),
             app.Configuration,
@@ -83,17 +100,17 @@ internal static class StartupInitializer
     /// 实例的流转状态图（红线/红框标注走过的节点与线）走
     /// /api/{prefix}/instances/{id}/diagram.svg，由审批历史实时渲染。
     /// </summary>
-    private static async Task PublishDiagramsAsync(WebApplication app)
+    private static async Task PublishDiagramsAsync(WebApplication app, IReadOnlyList<IBusinessProcess> processes)
     {
-        foreach (var processKey in new[] { ConstField.OrderProcessKey, ConstField.LeaveProcessKey })
+        foreach (var process in processes)
         {
             try
             {
-                await PublishDiagramAsync(app, processKey).ConfigureAwait(false);
+                await PublishDiagramAsync(app, process.ProcessKey).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
-                app.Logger.LogWarning(exception, "流程 {ProcessKey} 的流程图生成失败（可由端点实时渲染兜底）。", processKey);
+                app.Logger.LogWarning(exception, "流程 {ProcessKey} 的流程图生成失败（可由端点实时渲染兜底）。", process.ProcessKey);
             }
         }
     }

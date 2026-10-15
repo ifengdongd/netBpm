@@ -51,89 +51,57 @@ public static class OrderEndpoints
     // ─────────────────────────── 提交申请 ───────────────────────────
 
     /// <summary>
-    /// 提交订单申请：生成订单号 → 建 <c>order_bill</c> 行（<see cref="OrderBillStatus.UnderReview"/>）→
-    /// 发起订单审批流程 → 回填流程实例 id。返回订单视图与首个待办。
+    /// 提交订单申请：委托给 <see cref="OrderBusinessProcess"/>（发号 → 建
+    /// <c>order_bill</c> 行 → 发起流程 → 回填实例 id）。返回订单视图与首个待办。
     /// </summary>
+    /// <remarks>页面兼容入口；统一业务入口是 <c>POST /api/order/business/start</c>（ParaDict 携带业务参数）。</remarks>
     private static async Task<IResult> CreateAsync(
         CreateOrderBillRequest request,
+        IEnumerable<IBusinessProcess> processes,
         IWorkflowService workflow,
         IOrderBillStore store,
-        IConfiguration configuration,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(request.Applicant))
+        var process = processes.First(p => p.ProcessKey == ConstField.OrderProcessKey);
+
+        try
         {
-            return Results.BadRequest(new ErrorResponse("applicant（申请人）必填。"));
-        }
-
-        if (request.Amount is < 0)
-        {
-            return Results.BadRequest(new ErrorResponse("amount（订单金额）不能为负。"));
-        }
-
-        var tenantId = configuration.GetValue(ConstField.OrderTenantConfigKey, 1L);
-        var businessId = long.Parse(BusinessKeys.NextSeconds(), CultureInfo.InvariantCulture);
-        var now = DateTime.UtcNow;
-
-        // ① 订单行落库：status = 1（审批中）。先有订单再有流程 —— 流程参数与 businessId 都指向它
-        var bill = await store.AddAsync(
-            new OrderBillRow(
-                TenantId: tenantId,
-                BusinessId: businessId,
-                ProductName: request.ProductName,
-                Amount: request.Amount,
-                Remark: request.Remark,
-                Status: OrderBillStatus.UnderReview,
-                ApproveComment: null,
-                ApplyUser: request.Applicant.Trim(),
-                ApplyDeptId: request.ApplyDeptId,
+            // 业务参数打进 ParaDict，走统一的 IBusinessProcess.PrepareStart（发号 + 建单 + 组参）
+            var startRequest = new StartWorkflowRequest(
+                Applicant: request.Applicant,
                 BusinessDeptId: request.BusinessDeptId,
-                ProcessInstanceId: null,
-                CreateTime: now,
-                ModifyTime: null),
-            ct).ConfigureAwait(false);
+                ApplyDeptId: request.ApplyDeptId,
+                ParaDict: new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+                {
+                    [OrderParameterNames.ProductName] = JsonSerializer.SerializeToElement(request.ProductName),
+                    [OrderParameterNames.Amount] = JsonSerializer.SerializeToElement(request.Amount),
+                    [OrderParameterNames.Remark] = JsonSerializer.SerializeToElement(request.Remark),
+                });
 
-        // ② 发起流程：BaseModel 字段 + 订单参数（product_name / amount / remark）一起进流程。
-        // WorkflowTypeId = 流程信息枚举里的流程类型 id（02830358-…），随实例登记落 workflow_type_id
-        var view = await workflow.StartAsync(
-            ConstField.OrderProcessKey,
-            new StartWorkflowRequest(
-                Applicant: bill.ApplyUser,
-                BusinessKey: businessId.ToString(CultureInfo.InvariantCulture),
-                BusinessDeptId: bill.BusinessDeptId,
-                ApplyDeptId: bill.ApplyDeptId,
-                ParaDict: BuildParaDict(bill),
-                WorkflowTypeId: ProcessInfoEnum.Require(ConstField.OrderProcessKey).Id),
-            ct).ConfigureAwait(false);
+            var prepared = await process.PrepareStart(startRequest, ct).ConfigureAwait(false);
+            var view = await workflow
+                .StartAsync(ConstField.OrderProcessKey, prepared, ct)
+                .ConfigureAwait(false);
 
-        // ③ 回填流程实例 id：之后「按订单查审批进度 / 历史」都靠它反查
-        bill = await store.SetProcessInstanceAsync(businessId, view.ProcessInstanceId, ct).ConfigureAwait(false)
-            ?? bill;
+            if (prepared.BusinessKey is not { } businessKey)
+            {
+                return Results.NotFound(new ErrorResponse("发起成功但业务单号缺失（数据异常）。"));
+            }
 
-        return Results.Created($"/api/order/bills/{businessId}", ToView(bill, view));
-    }
+            await process.OnStartedAsync(businessKey, view.ProcessInstanceId, ct).ConfigureAwait(false);
 
-    /// <summary>订单参数 → 流程参数表（键名与 <c>order_bill</c> 真列同名）。</summary>
-    private static Dictionary<string, JsonElement> BuildParaDict(OrderBillRow bill)
-    {
-        var paraDict = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            var bill = await store
+                .FindAsync(long.Parse(businessKey, CultureInfo.InvariantCulture), ct)
+                .ConfigureAwait(false);
 
-        if (bill.ProductName is not null)
-        {
-            paraDict[OrderParameterNames.ProductName] = JsonSerializer.SerializeToElement(bill.ProductName);
+            return bill is null
+                ? Results.NotFound(new ErrorResponse($"订单 {businessKey} 刚创建却查不到（数据异常）。"))
+                : Results.Created($"/api/order/bills/{bill.BusinessId}", ToView(bill, view));
         }
-
-        if (bill.Amount is { } amount)
+        catch (WorkflowValidationException exception)
         {
-            paraDict[OrderParameterNames.Amount] = JsonSerializer.SerializeToElement(amount);
+            return Results.BadRequest(new ErrorResponse(exception.Message, exception.Errors));
         }
-
-        if (bill.Remark is not null)
-        {
-            paraDict[OrderParameterNames.Remark] = JsonSerializer.SerializeToElement(bill.Remark);
-        }
-
-        return paraDict;
     }
 
     // ─────────────────────────── 查询 ───────────────────────────

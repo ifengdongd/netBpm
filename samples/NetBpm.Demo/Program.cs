@@ -21,11 +21,15 @@ builder.Services.AddOpenApi();
 // 请求反序列化默认大小写不敏感，前端传 camelCase 的键（userId / targetActivityId…）照样能绑上。
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = null);
 
-// 引擎：内存执行树或 MySQL（ACT_* 表），随 Workflow:Storage 一起切
+// 引擎：落 MySQL（ACT_* 表）—— 必须与业务数据一致（内存执行树会与真库 instances 撞号）
 builder.Services.AddNetBpm(builder.Configuration);
 
-// 业务数据存储：MySQL（instances 等 + order_bill）或 JSON（data/*.json）
-builder.Services.AddDemoStores(builder.Configuration);
+// 业务数据存储：固定 MySQL（instances 等 + order_bill）
+builder.Services.AddDemoStores();
+
+// 业务流程接入：新建业务流程只需实现 IBusinessProcess（+ 两个收口委托 + BPMN + workflow_type 行）
+builder.Services.AddSingleton<IBusinessProcess, OrderBusinessProcess>();
+builder.Services.AddSingleton<IBusinessProcess, LeaveBusinessProcess>();
 
 // 身份与组织架构：InMemoryOrgDirectory 同时实现 IOrgDirectory（业务查询）
 // 与 IUserGroupManager（引擎查候选组待办要用的「用户 ↔ 组」展开）—— 同一份数据，两个视角。
@@ -69,6 +73,13 @@ app.MapTaskCenterEndpoints();
 // 两条流程各自的业务端点（/api/order/*、/api/leave/*）
 app.MapOrderEndpoints();
 app.MapLeaveEndpoints();
+
+// 每个业务流程的统一业务入口：POST {ApiPrefix}/business/start
+// （PrepareStart 业务处理 → 发起流程 → OnStartedAsync 收尾）
+foreach (var process in app.Services.GetServices<IBusinessProcess>())
+{
+    app.MapBusinessProcess(process);
+}
 
 // 启动序列：部署两条流程 → 从 workflow_type 表加载流程信息 → 发布流程图图片
 //（⚠️ 必须在 app.Run() 之前：运行期上下文与流程信息枚举要在接受请求前装好）

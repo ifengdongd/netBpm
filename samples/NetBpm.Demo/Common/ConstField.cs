@@ -55,21 +55,9 @@ public static class ConstField
 
     // ───────────────── 配置键 ─────────────────
 
-    /// <summary>业务数据存储模式（MySql / Json；引擎与业务数据必须一起切）。</summary>
-    public const string StorageConfigKey = "Workflow:Storage";
-
-    /// <summary>业务数据存储的默认模式。</summary>
-    public const string DefaultStorage = "MySql";
-
     /// <summary>流程参数 / 流程类型表共用的租户 id 配置键。</summary>
     public const string WorkflowTenantConfigKey = "Workflow:TenantId";
 
     /// <summary>订单行的租户 id 配置键。</summary>
     public const string OrderTenantConfigKey = "Order:TenantId";
-
-    /// <summary>JSON 模式下订单行落点的配置键。</summary>
-    public const string OrderBillDataFileConfigKey = "Order:BillDataFile";
-
-    /// <summary>JSON 模式下流程业务数据落点的配置键。</summary>
-    public const string JsonDataFileConfigKey = "Workflow:JsonDataFile";
 }

@@ -8,7 +8,7 @@ namespace NetBpm.Demo.Common;
 /// </summary>
 /// <remarks>
 /// 系统启动时调用 <see cref="LoadAsync"/>：<b>新增流程 = 表里插一行</b>，不用改代码。
-/// 表不存在 / 查询失败（如 JSON 演示模式没跑过 0008）→ 返回 <see langword="null"/>，
+/// 表不存在 / 查询失败（如尚未执行 0008 建表脚本）→ 返回 <see langword="null"/>，
 /// 调用方回退 <see cref="ProcessInfoEnum.Defaults"/>，宿主永远起得来。
 /// </remarks>
 public sealed class WorkflowTypeLoader

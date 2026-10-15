@@ -52,8 +52,7 @@ public static class OrderParameterNames
 // ─────────────────────────── 行与契约 ───────────────────────────
 
 /// <summary>
-/// 订单表的一行（与 <c>order_bill</c> 的列一一对应；JSON 演示模式下落
-/// <c>data/order-bill.json</c>，换真库时形状不变、变的只是落点）。
+/// 订单表的一行（与 <c>order_bill</c> 的列一一对应，落 MySQL 真库）。
 /// </summary>
 /// <param name="TenantId">多租户 id。</param>
 /// <param name="BusinessId">业务 id（订单单号，由业务侧生成，主键）。</param>

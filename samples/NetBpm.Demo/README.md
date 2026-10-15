@@ -13,16 +13,11 @@ dotnet run --project samples/NetBpm.Demo
 # 打开 http://localhost:5188（首页即流程发起入口；OpenAPI 见 /openapi/v1.json）
 ```
 
-存储模式由 `appsettings.json` 的 `Workflow:Storage` 决定，**引擎与业务数据必须一起切**：
+**存储固定 MySQL 真库（库 `netbpm_demo`）**：引擎落 ACT_* 表（`UseInMemoryExecutionTree=false`），
+业务数据落 `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` + `order_bill`。
+⚠️ 引擎与业务数据是一体的 —— 内存执行树的流程实例 id 每次重启从 1 重新开始，会与真库累积行撞号。
 
-| 配置 | 引擎 | 业务数据 |
-|---|---|---|
-| `Storage=MySql`（默认） | ACT_* 表（`UseInMemoryExecutionTree=false`） | `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` + `order_bill`（库 `netbpm_demo`） |
-| `Storage=Json` | 内存执行树 | `data/workflow.json` + `data/order-bill.json` |
-
-⚠️ 内存宿主的流程实例 id 每次启动都从 1 重新开始，而真库里的 `instances` 是累积的 —— 混用会撞号覆盖。
-
-前置脚本（MySQL 模式，按序执行）：`db/mysql/0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007`。
+前置脚本（按序执行）：`db/mysql/0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008`。
 
 ## 流程设计
 
@@ -75,16 +70,31 @@ dotnet run --project samples/NetBpm.Demo
 ### 组合根（Program.cs）
 
 ```
-AddNetBpm(configuration)                       引擎（连接串 / 执行树模式 / schema 校验）
-AddNetBpmWorkflow<TDataStore>()                应用层四件事（发起/环节信息/提交/历史）+ WorkflowRuntimeContext
+AddNetBpm(configuration)                       引擎（MySQL ACT_* 表 / 连接串 / schema 校验）
+AddDemoStores()                                业务数据三端口（MySqlWorkflowDataStore +
+                                               MySqlOrderBillStore + IWorkflowStoreInspector）
+AddSingleton<IBusinessProcess, …>              业务流程接入（Order / Leave 各一个实现）
 AddSingleton<InMemoryOrgDirectory>             IOrgDirectory + IUserGroupManager（同一份数据两个视角）
-AddSingleton<IOrderBillStore, …>               订单行落点（随 Workflow:Storage 切换）
-AddServiceTaskDelegates(typeof(Program).Assembly)   [ServiceTaskName] 扫描注册四个委托
-OrderProcessBootstrapper / LeaveProcessBootstrapper  启动即部署 + 部署期自检（审批选项/委托解析）
+AddServiceTaskDelegates(typeof(Program).Assembly)   [ServiceTaskName] 扫描注册收口委托
+MapBusinessProcess(process)                    统一业务入口：POST {ApiPrefix}/business/start
+StartupInitializer.InitializeAsync(app)        启动序列：部署全部已注册流程 → 加载流程信息 → 发布流程图
 ```
 
-存储切换（`Workflow:Storage`）：`MySqlWorkflowDataStore` + `MySqlOrderBillStore` ↔
-`JsonWorkflowDataStore` + `OrderBillStore`，端口语义完全一致。
+### 新增业务流程（三步接入）
+
+后续新建业务流程**不需要再写端点、部署或页面逻辑** —— 实现 `Workflow/IBusinessProcess`
+接口即可获得全部流程能力（发起 / 实例 / 审批 / 历史 / 流程图 / 待办中心 / 部署列表自动纳入）：
+
+1. **实现 `IBusinessProcess`**：四个标识属性（`ProcessKey` / `ResourceName` / `DeploymentName` /
+   `ApiPrefix` / `WorkflowTypeId`）+ `PrepareStart`（业务单号发号、业务数据落库、流程参数组装）
+   + `OnStartedAsync`（回填等收尾，可省略）；在 Program 注册 `AddSingleton<IBusinessProcess, …>`；
+2. **两个审批收口委托**：派生 `Delegates/ApprovalCompletionDelegate`，实现
+   `OnApprovalCompletedAsync`（把「通过 / 拒绝」翻译成业务变更），标 `[ServiceTaskName("xx.ApproveComplete")]`
+   并与 BPMN 的 `delegateExpression` 对应；
+3. **BPMN 定义 + workflow_type 表插一行**（id / name / describe / view_url / approve_url）。
+
+参照实现：`Order/OrderBusinessProcess.cs`（有业务单表 + 状态回写）与
+`Leave/LeaveBusinessProcess.cs`（无业务单表，参数落流程参数表）。
 
 ### 审批结束后的业务回写（拒绝/通过的数据处理）
 

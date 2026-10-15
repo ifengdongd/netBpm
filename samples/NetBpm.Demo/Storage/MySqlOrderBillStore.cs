@@ -10,8 +10,8 @@ namespace NetBpm.Demo.Storage;
 /// 订单业务数据落 <b>MySQL <c>order_bill</c> 表</b>的 <see cref="IOrderBillStore"/> 实现。
 /// </summary>
 /// <remarks>
-/// 与 JSON 版 <see cref="OrderBillStore"/> 同一套端口语义（读-改-写、状态回写），
-/// 落点换成 0006 建的 <c>order_bill</c> 表；状态回写在事务里完成。
+/// 端口语义：读-改-写、审批结束回写状态（100 / -1）在事务里完成；
+/// 落点是 db/mysql/0006 建的 <c>order_bill</c> 表。
 /// </remarks>
 public sealed class MySqlOrderBillStore : IOrderBillStore
 {

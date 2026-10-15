@@ -31,27 +31,9 @@ public static class LeaveEndpoints
         {
             ProcessKey = _ => ConstField.LeaveProcessKey,
 
-            // 发起前生成 / 校验业务单号：请假单号必须是正整数（业务表里 business_id 是 bigint）。
-            // 校验不过抛 WorkflowValidationException → 统一映射成 400 连同明细。
-            TransformStartRequest = (_, request) =>
-            {
-                var businessKey = string.IsNullOrWhiteSpace(request.BusinessKey)
-                    ? BusinessKeys.NextMilliseconds()
-                    : request.BusinessKey.Trim();
-
-                if (!BusinessKeys.IsValid(businessKey))
-                {
-                    throw new WorkflowValidationException(
-                        $"businessKey 必须是正整数（业务表里 business_id 是 bigint），当前为 '{request.BusinessKey}'。");
-                }
-
-                // WorkflowTypeId = 流程信息枚举里的流程类型 id（3a7c2f14-…），随实例登记落 workflow_type_id
-                return request with
-                {
-                    BusinessKey = businessKey,
-                    WorkflowTypeId = ProcessInfoEnum.Require(ConstField.LeaveProcessKey).Id,
-                };
-            },
+            // 发起前生成 / 校验业务单号：逻辑与 LeaveBusinessProcess.PrepareStart 同源
+            //（WorkflowTypeId 一并带上，随实例登记落 workflow_type_id）。
+            TransformStartRequest = (_, request) => new LeaveBusinessProcess().ResolveStartRequest(request),
 
             DecorateInstanceView = (_, view) => ValueTask.FromResult<object?>(ToInstanceView(view)),
 

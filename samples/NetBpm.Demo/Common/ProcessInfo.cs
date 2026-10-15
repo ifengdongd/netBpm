@@ -57,7 +57,7 @@ public sealed record ProcessInfo(
 /// </remarks>
 public static class ProcessInfoEnum
 {
-    /// <summary>内置默认（workflow_type 表不存在 / 加载失败 / JSON 演示模式时的兜底）。</summary>
+    /// <summary>内置默认（workflow_type 表不存在 / 加载失败时的兜底）。</summary>
     public static readonly ProcessInfo Order = new(
         Id: "02830358-46ef-40e5-b3b9-4d5c4eb23f9f",
         Name: ConstField.OrderProcessKey,

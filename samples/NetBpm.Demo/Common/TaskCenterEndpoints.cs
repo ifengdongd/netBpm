@@ -74,7 +74,7 @@ public static class TaskCenterEndpoints
         group.MapGet("/tasks/{taskId}", GetTaskAsync);       // 单个待办 + 所属实例（审批页数据源）
         group.MapGet("/instances", FindInstancesAsync);      // 申请单列表：跨流程合并
 
-        // 组织架构（待办转移页选新审批人用）：JSON 演示模式是内置演示数据
+        // 组织架构（待办转移页选新审批人用）：内置演示数据
         group.MapGet("/org/departments", async (IOrgDirectory directory, CancellationToken ct) =>
             Results.Ok(await directory.FindDepartmentsAsync(ct).ConfigureAwait(false)));
         group.MapGet("/org/employees", async (IOrgDirectory directory, CancellationToken ct) =>
