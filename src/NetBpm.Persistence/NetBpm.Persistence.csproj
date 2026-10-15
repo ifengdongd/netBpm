@@ -20,9 +20,10 @@
   <!--
     把建表脚本拷到输出目录，使运行时（DbMigrate 工具 / Rest 的 AutoMigrate）
     不依赖仓库目录结构 —— DatabaseScripts.ResolveDirectory 会优先看输出目录。
+    用 None 而非 Content：Content 会在 dotnet pack 时入包并与 LinkBase 路径冲突（NU5118）。
   -->
   <ItemGroup>
-    <Content Include="..\..\db\**\*.sql" LinkBase="db" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\db\**\*.sql" LinkBase="db" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

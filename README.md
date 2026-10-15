@@ -226,6 +226,41 @@ npm run build    # 类型检查 + 构建
 npm test         # 设计器单元测试
 ```
 
+**设计器地址**：`http://localhost:5273/?modelId=<模型 id>`（`npm run dev` 后浏览器打开）。
+画完的流程导出 BPMN XML，放进 `web/designer/examples/`（或宿主的 `processes/` 目录）即可被引擎启动时部署；
+两套示例：`order-process.bpmn20.xml`（订单审批）与 `leave-process.bpmn20.xml`（请假审批）。
+流程设计指引见 [`docs/process-design-guide.md`](docs/process-design-guide.md)。
+
+### 引擎启动步骤（其它 .NET 项目接入）
+
+1. **建库**：执行 `db/mysql/` 或 `db/sqlserver/` 建表脚本（分层与顺序见 [`db/README.md`](db/README.md)；
+   引擎必跑 `0001 → 0002`，流程实例业务表 `0003` 与流程类型表 `0008` 按需）；
+2. **引用引擎包**：`dotnet pack` 产出见下节「打包分发」，或直接引用 `src/` 各项目；
+3. **组合根注册**（详见 [`samples/NetBpm.Demo/README.md`](samples/NetBpm.Demo/README.md)）：
+
+```csharp
+builder.Services.AddNetBpm(builder.Configuration);          // 引擎（连接串 / 执行树模式 / schema 校验）
+builder.Services.AddNetBpmWorkflow<MySqlWorkflowDataStore>(); // 业务数据端口（五块数据落库）
+builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly); // 收口委托扫描
+```
+
+4. **启动即部署**：`WorkflowProcessBootstrapper.DeployAsync(...)` 把 BPMN 定义灌进引擎
+   （`NetBpm.Rest` 宿主亦可 `AutoMigrate=true` 自动建表）；
+5. **验证**：`/openapi/v1.json` 查看端点；`ACT_*` 表与业务表开始产生数据。
+
+### 打包分发
+
+```bash
+powershell -File tools/pack.ps1 -Configuration Release
+```
+
+产物（`artifacts/`，已 gitignore）：
+
+- `nuget/*.nupkg` —— 9 个引擎包（接入入口 `NetBpm.Workflow`，依赖链自动带上；
+  `NetBpm.Persistence` 包内含两方言建表脚本）；
+- `netbpm-<版本>.zip` —— nupkg + 两方言 SQL 脚本 + 接入说明（`README.txt`），
+  供其它 .NET 项目离线引用（本地 NuGet 源：`dotnet nuget add source <目录> -n netbpm`）。
+
 ### 运行合并审批 Demo
 
 `samples/NetBpm.Demo` 是「审批流公共能力」的完整接入示例：一个宿主承载**两条流程**

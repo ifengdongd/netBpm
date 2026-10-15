@@ -29,6 +29,8 @@
     <Authors>NetBpm contributors</Authors>
     <Copyright>Copyright (c) NetBpm contributors</Copyright>
     <NeutralLanguage>zh-CN</NeutralLanguage>
+    <Description>NetBpm 工作流引擎组件（BPMN 子集解析 / Activiti 语义执行引擎 / 审批应用层 / 持久化）</Description>
+    <PackageTags>netbpm;workflow;bpmn;activiti;approval</PackageTags>
   </PropertyGroup>
 
   <!-- 测试工程不因分析器噪音阻断构建（CI 仍会输出警告） -->
