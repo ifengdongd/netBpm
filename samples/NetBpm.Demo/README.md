@@ -63,7 +63,12 @@ dotnet run --project samples/NetBpm.Demo
 `Common/ProcessInfo.cs`：`ProcessInfoEnum.All` 每项五个字段 ——
 `Id`（流程类型 id / 设计器 modelId）、`Name`（流程 key）、`Describe`（描述）、
 `ViewUrl`（审批结束后业务单查看地址，含 `{businessId}` 占位符）、`ApproveUrl`（审批页地址，含 `{taskId}` 占位符）。
-端点 `GET /api/processes` 暴露给前端；新增一条流程只需加一行，端点与页面零改动。
+端点 `GET /api/processes` 暴露给前端。
+
+**数据源是 `workflow_type` 表（0008）**：系统启动时（MySQL 模式）由
+`WorkflowTypeLoader` 加载进 `ProcessInfoEnum` —— **新增流程 = 表里插一行**，不用改代码。
+表不存在 / 加载失败（如 JSON 演示模式）回退内置默认清单；`name` 必须与 BPMN 流程 key 一致；
+`describe` 是 MySQL 保留字，SQL 里要写反引号。
 
 ## 后端处理
 
@@ -103,6 +108,7 @@ Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；MySQL 侧
 | `instance_current_task` | 当前待办（每到达一个环节整体替换） |
 | `deal_history` | 审批流水（每次提交追加；`deal_result`=BPMN 选项 id） |
 | `workflow_parameters` | 流程参数（0007 新增：「实例 × 参数名」键值表，两条流程共用） |
+| `workflow_type` | 流程类型表（0008：ProcessInfoEnum 的数据源，启动时加载） |
 | `order_bill` | 订单业务行（`status` 随审批回写） |
 | `ACT_*` | 引擎 13 张表（执行树 / 任务 / 变量 / 历史 / 部署） |
 

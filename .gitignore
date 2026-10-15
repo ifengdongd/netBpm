@@ -27,10 +27,8 @@ web/designer/.tmp/
 # Container / OCR artifacts
 *.log
 
-# 演示工程运行时产物：请假审批 Demo 把业务数据落成 JSON（见 LeaveBusinessStore）
+# 演示工程运行时产物（业务数据落成 JSON）
 # 注意：直接跑 bin 下的 apphost 时 ContentRoot 是当前目录，可能在仓库根再生成一份 data/
-samples/NetBpm.Demo.LeaveApproval/data/
-samples/NetBpm.Demo.OrderApproval/data/
 samples/NetBpm.Demo/data/
 # 流程图图片：发布后由 BpmnDiagramSvgRenderer 重新生成（见 Program.cs）
 samples/NetBpm.Demo/wwwroot/diagrams/

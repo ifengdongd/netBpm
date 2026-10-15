@@ -1,0 +1,1173 @@
+{
+  "instances": [
+    {
+      "processInstanceId": "3",
+      "base": {
+        "businessId": "6158802000",
+        "businessDeptId": "D-SALES",
+        "applyUser": "probe-a",
+        "applyTime": "2026-10-14T02:49:18.9799723Z",
+        "applyDeptId": "D-SALES"
+      },
+      "days": 2,
+      "reason": "probe"
+    },
+    {
+      "processInstanceId": "7",
+      "base": {
+        "businessId": "6158802001",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "comment": "同意，注意交接",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.1034146Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "年假两天"
+    },
+    {
+      "processInstanceId": "13",
+      "base": {
+        "businessId": "6158802002",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.2001753Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 5,
+      "reason": "长途休假"
+    },
+    {
+      "processInstanceId": "21",
+      "base": {
+        "businessId": "6158802003",
+        "businessDeptId": "D-SALES",
+        "result": 2,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.2384778Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "拒绝"
+      },
+      "days": 5,
+      "reason": "想让领导批"
+    },
+    {
+      "processInstanceId": "27",
+      "base": {
+        "businessId": "6158802007",
+        "businessDeptId": "D-SALES",
+        "result": 2,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.2678833Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "拒绝"
+      },
+      "days": 6,
+      "reason": "经理说不"
+    },
+    {
+      "processInstanceId": "35",
+      "base": {
+        "businessId": "6158802004",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.304315Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "改成年假两天"
+    },
+    {
+      "processInstanceId": "44",
+      "base": {
+        "businessId": "6158802008",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.3535277Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 3,
+      "reason": "压缩到三天"
+    },
+    {
+      "processInstanceId": "55",
+      "base": {
+        "businessId": "6158802005",
+        "businessDeptId": "D-SALES",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.4217113Z",
+        "applyDeptId": "D-SALES"
+      },
+      "days": 0
+    },
+    {
+      "processInstanceId": "61",
+      "base": {
+        "businessId": "1878991736088297474",
+        "businessDeptId": "D-SALES",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.4476591Z",
+        "applyDeptId": "D-SALES"
+      },
+      "days": 0
+    },
+    {
+      "processInstanceId": "65",
+      "base": {
+        "businessId": "6158802009",
+        "businessDeptId": "D-SALES",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.4618066Z",
+        "applyDeptId": "D-SALES"
+      },
+      "days": 0
+    },
+    {
+      "processInstanceId": "69",
+      "base": {
+        "businessId": "6158802006",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.4699656Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 4,
+      "reason": "待办查询"
+    },
+    {
+      "processInstanceId": "77",
+      "base": {
+        "businessId": "6158802010",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.5541029Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 4,
+      "reason": "参数用例"
+    },
+    {
+      "processInstanceId": "85",
+      "base": {
+        "businessId": "6158802012",
+        "businessDeptId": "D-SALES",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.6050953Z",
+        "applyDeptId": "D-SALES"
+      },
+      "days": 0
+    },
+    {
+      "processInstanceId": "89",
+      "base": {
+        "businessId": "6158802013",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.6468859Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "办理人记录"
+    },
+    {
+      "processInstanceId": "95",
+      "base": {
+        "businessId": "6158802014",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "comment": "监听器验证",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.7114045Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "监听器验证"
+    }
+  ],
+  "results": [
+    {
+      "processInstanceId": "3",
+      "base": {
+        "businessId": "998877669",
+        "result": 1,
+        "comment": "p",
+        "applyUser": "probe",
+        "applyTime": "2026-10-14T02:48:27.7860891Z",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "probe",
+      "outcome": "Approved",
+      "activityId": "task_approve_complete",
+      "activityName": "审批通过",
+      "completedAt": "2026-10-14T02:48:27.9705059Z"
+    },
+    {
+      "processInstanceId": "7",
+      "base": {
+        "businessId": "6158802001",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "comment": "同意，注意交接",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.1034146Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "年假两天",
+      "outcome": "Approved",
+      "activityId": "task_approve_complete",
+      "activityName": "审批通过",
+      "completedAt": "2026-10-14T02:49:19.1779555Z"
+    },
+    {
+      "processInstanceId": "13",
+      "base": {
+        "businessId": "6158802002",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.2001753Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 5,
+      "reason": "长途休假",
+      "outcome": "Approved",
+      "activityId": "task_approve_complete",
+      "activityName": "审批通过",
+      "completedAt": "2026-10-14T02:49:19.230704Z"
+    },
+    {
+      "processInstanceId": "21",
+      "base": {
+        "businessId": "6158802003",
+        "businessDeptId": "D-SALES",
+        "result": 2,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.2384778Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "拒绝"
+      },
+      "days": 5,
+      "reason": "想让领导批",
+      "outcome": "Refused",
+      "activityId": "task_refuse",
+      "activityName": "拒绝结束",
+      "completedAt": "2026-10-14T02:49:19.2581589Z"
+    },
+    {
+      "processInstanceId": "27",
+      "base": {
+        "businessId": "6158802007",
+        "businessDeptId": "D-SALES",
+        "result": 2,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.2678833Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "拒绝"
+      },
+      "days": 6,
+      "reason": "经理说不",
+      "outcome": "Refused",
+      "activityId": "task_refuse",
+      "activityName": "拒绝结束",
+      "completedAt": "2026-10-14T02:49:19.2961488Z"
+    },
+    {
+      "processInstanceId": "35",
+      "base": {
+        "businessId": "6158802004",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.304315Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "改成年假两天",
+      "outcome": "Approved",
+      "activityId": "task_approve_complete",
+      "activityName": "审批通过",
+      "completedAt": "2026-10-14T02:49:19.3451092Z"
+    },
+    {
+      "processInstanceId": "44",
+      "base": {
+        "businessId": "6158802008",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.3535277Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 3,
+      "reason": "压缩到三天",
+      "outcome": "Approved",
+      "activityId": "task_approve_complete",
+      "activityName": "审批通过",
+      "completedAt": "2026-10-14T02:49:19.4110131Z"
+    },
+    {
+      "processInstanceId": "89",
+      "base": {
+        "businessId": "6158802013",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.6468859Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "办理人记录",
+      "outcome": "Approved",
+      "activityId": "task_approve_complete",
+      "activityName": "审批通过",
+      "completedAt": "2026-10-14T02:49:19.6745813Z"
+    },
+    {
+      "processInstanceId": "95",
+      "base": {
+        "businessId": "6158802014",
+        "businessDeptId": "D-SALES",
+        "result": 1,
+        "comment": "监听器验证",
+        "applyUser": "alice",
+        "applyTime": "2026-10-14T02:49:19.7114045Z",
+        "applyDeptId": "D-SALES",
+        "resultName": "通过"
+      },
+      "days": 2,
+      "reason": "监听器验证",
+      "outcome": "Approved",
+      "activityId": "task_approve_complete",
+      "activityName": "审批通过",
+      "completedAt": "2026-10-14T02:49:19.7387555Z"
+    }
+  ],
+  "parameters": [
+    {
+      "processInstanceId": "3",
+      "name": "days",
+      "value": "2",
+      "updatedAt": "2026-10-14T02:48:27.9129472Z"
+    },
+    {
+      "processInstanceId": "3",
+      "name": "reason",
+      "value": "probe",
+      "updatedAt": "2026-10-14T02:48:27.9129472Z"
+    },
+    {
+      "processInstanceId": "7",
+      "name": "days",
+      "value": "2",
+      "updatedAt": "2026-10-14T02:49:19.1283408Z"
+    },
+    {
+      "processInstanceId": "7",
+      "name": "reason",
+      "value": "年假两天",
+      "updatedAt": "2026-10-14T02:49:19.1283408Z"
+    },
+    {
+      "processInstanceId": "13",
+      "name": "days",
+      "value": "5",
+      "updatedAt": "2026-10-14T02:49:19.2090266Z"
+    },
+    {
+      "processInstanceId": "13",
+      "name": "reason",
+      "value": "长途休假",
+      "updatedAt": "2026-10-14T02:49:19.2090266Z"
+    },
+    {
+      "processInstanceId": "21",
+      "name": "days",
+      "value": "5",
+      "updatedAt": "2026-10-14T02:49:19.2471351Z"
+    },
+    {
+      "processInstanceId": "21",
+      "name": "reason",
+      "value": "想让领导批",
+      "updatedAt": "2026-10-14T02:49:19.2471351Z"
+    },
+    {
+      "processInstanceId": "27",
+      "name": "days",
+      "value": "6",
+      "updatedAt": "2026-10-14T02:49:19.2761517Z"
+    },
+    {
+      "processInstanceId": "27",
+      "name": "reason",
+      "value": "经理说不",
+      "updatedAt": "2026-10-14T02:49:19.2761517Z"
+    },
+    {
+      "processInstanceId": "35",
+      "name": "days",
+      "value": "2",
+      "updatedAt": "2026-10-14T02:49:19.332772Z"
+    },
+    {
+      "processInstanceId": "35",
+      "name": "reason",
+      "value": "改成年假两天",
+      "updatedAt": "2026-10-14T02:49:19.332772Z"
+    },
+    {
+      "processInstanceId": "44",
+      "name": "days",
+      "value": "3",
+      "updatedAt": "2026-10-14T02:49:19.3938804Z"
+    },
+    {
+      "processInstanceId": "44",
+      "name": "reason",
+      "value": "压缩到三天",
+      "updatedAt": "2026-10-14T02:49:19.3938804Z"
+    },
+    {
+      "processInstanceId": "55",
+      "name": "days",
+      "value": "1",
+      "updatedAt": "2026-10-14T02:49:19.4320391Z"
+    },
+    {
+      "processInstanceId": "55",
+      "name": "reason",
+      "value": "校验用例",
+      "updatedAt": "2026-10-14T02:49:19.4320391Z"
+    },
+    {
+      "processInstanceId": "69",
+      "name": "days",
+      "value": "4",
+      "updatedAt": "2026-10-14T02:49:19.4809005Z"
+    },
+    {
+      "processInstanceId": "69",
+      "name": "reason",
+      "value": "待办查询",
+      "updatedAt": "2026-10-14T02:49:19.4809005Z"
+    },
+    {
+      "processInstanceId": "77",
+      "name": "level",
+      "value": "3",
+      "updatedAt": "2026-10-14T02:49:19.559046Z"
+    },
+    {
+      "processInstanceId": "77",
+      "name": "days",
+      "value": "4",
+      "updatedAt": "2026-10-14T02:49:19.5802885Z"
+    },
+    {
+      "processInstanceId": "77",
+      "name": "reason",
+      "value": "参数用例",
+      "updatedAt": "2026-10-14T02:49:19.5802885Z"
+    },
+    {
+      "processInstanceId": "77",
+      "name": "city",
+      "value": "BJ",
+      "updatedAt": "2026-10-14T02:49:19.5935597Z"
+    },
+    {
+      "processInstanceId": "77",
+      "name": "backupUser",
+      "value": "bob",
+      "updatedAt": "2026-10-14T02:49:19.5935597Z"
+    },
+    {
+      "processInstanceId": "89",
+      "name": "days",
+      "value": "2",
+      "updatedAt": "2026-10-14T02:49:19.6584202Z"
+    },
+    {
+      "processInstanceId": "89",
+      "name": "reason",
+      "value": "办理人记录",
+      "updatedAt": "2026-10-14T02:49:19.6584202Z"
+    },
+    {
+      "processInstanceId": "95",
+      "name": "days",
+      "value": "2",
+      "updatedAt": "2026-10-14T02:49:19.7224423Z"
+    },
+    {
+      "processInstanceId": "95",
+      "name": "reason",
+      "value": "监听器验证",
+      "updatedAt": "2026-10-14T02:49:19.7224423Z"
+    }
+  ],
+  "approvals": [
+    {
+      "processInstanceId": "3",
+      "taskId": "5",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "probe",
+      "values": {
+        "days": "2",
+        "reason": "probe"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:48:27.9443755Z"
+    },
+    {
+      "processInstanceId": "3",
+      "taskId": "7",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "comment": "p",
+      "values": {
+        "result": "1",
+        "comment": "p"
+      },
+      "nextSteps": [],
+      "outcome": "Approved",
+      "submittedAt": "2026-10-14T02:48:27.9837132Z"
+    },
+    {
+      "processInstanceId": "7",
+      "taskId": "9",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "2",
+        "reason": "年假两天"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.1582274Z"
+    },
+    {
+      "processInstanceId": "7",
+      "taskId": "11",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "comment": "同意，注意交接",
+      "values": {
+        "result": "1",
+        "comment": "同意，注意交接"
+      },
+      "nextSteps": [],
+      "outcome": "Approved",
+      "submittedAt": "2026-10-14T02:49:19.1884943Z"
+    },
+    {
+      "processInstanceId": "13",
+      "taskId": "15",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "5",
+        "reason": "长途休假"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.2124232Z"
+    },
+    {
+      "processInstanceId": "13",
+      "taskId": "17",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_manager_approve",
+          "activityName": "经理审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.2209096Z"
+    },
+    {
+      "processInstanceId": "13",
+      "taskId": "19",
+      "activityId": "task_manager_approve",
+      "activityName": "经理审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [],
+      "outcome": "Approved",
+      "submittedAt": "2026-10-14T02:49:19.2342109Z"
+    },
+    {
+      "processInstanceId": "21",
+      "taskId": "23",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "5",
+        "reason": "想让领导批"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.2508211Z"
+    },
+    {
+      "processInstanceId": "21",
+      "taskId": "25",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "2",
+      "decisionName": "拒绝",
+      "values": {
+        "result": "2"
+      },
+      "nextSteps": [],
+      "outcome": "Refused",
+      "submittedAt": "2026-10-14T02:49:19.2634053Z"
+    },
+    {
+      "processInstanceId": "27",
+      "taskId": "29",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "6",
+        "reason": "经理说不"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.2800514Z"
+    },
+    {
+      "processInstanceId": "27",
+      "taskId": "31",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_manager_approve",
+          "activityName": "经理审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.2884087Z"
+    },
+    {
+      "processInstanceId": "27",
+      "taskId": "33",
+      "activityId": "task_manager_approve",
+      "activityName": "经理审批",
+      "formKey": "leave-approve",
+      "decision": "2",
+      "decisionName": "拒绝",
+      "values": {
+        "result": "2"
+      },
+      "nextSteps": [],
+      "outcome": "Refused",
+      "submittedAt": "2026-10-14T02:49:19.3003724Z"
+    },
+    {
+      "processInstanceId": "35",
+      "taskId": "37",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "9",
+        "reason": "写得不清"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.3167997Z"
+    },
+    {
+      "processInstanceId": "35",
+      "taskId": "39",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "3",
+      "decisionName": "驳回修改",
+      "values": {
+        "result": "3"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_apply_modify",
+          "activityName": "申请人修改"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.3261791Z"
+    },
+    {
+      "processInstanceId": "35",
+      "taskId": "41",
+      "activityId": "task_apply_modify",
+      "activityName": "申请人修改",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "2",
+        "reason": "改成年假两天"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.3367594Z"
+    },
+    {
+      "processInstanceId": "35",
+      "taskId": "42",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [],
+      "outcome": "Approved",
+      "submittedAt": "2026-10-14T02:49:19.3490429Z"
+    },
+    {
+      "processInstanceId": "44",
+      "taskId": "46",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "7",
+        "reason": "经理让改"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.3672821Z"
+    },
+    {
+      "processInstanceId": "44",
+      "taskId": "48",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_manager_approve",
+          "activityName": "经理审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.3771667Z"
+    },
+    {
+      "processInstanceId": "44",
+      "taskId": "50",
+      "activityId": "task_manager_approve",
+      "activityName": "经理审批",
+      "formKey": "leave-approve",
+      "decision": "3",
+      "decisionName": "驳回修改",
+      "values": {
+        "result": "3"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_apply_modify",
+          "activityName": "申请人修改"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.3864467Z"
+    },
+    {
+      "processInstanceId": "44",
+      "taskId": "52",
+      "activityId": "task_apply_modify",
+      "activityName": "申请人修改",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "3",
+        "reason": "压缩到三天"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.3980027Z"
+    },
+    {
+      "processInstanceId": "44",
+      "taskId": "53",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [],
+      "outcome": "Approved",
+      "submittedAt": "2026-10-14T02:49:19.4157363Z"
+    },
+    {
+      "processInstanceId": "55",
+      "taskId": "57",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "1",
+        "reason": "校验用例"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.4362508Z"
+    },
+    {
+      "processInstanceId": "69",
+      "taskId": "71",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "4",
+        "reason": "待办查询"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.4852052Z"
+    },
+    {
+      "processInstanceId": "69",
+      "taskId": "73",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_manager_approve",
+          "activityName": "经理审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.50132Z"
+    },
+    {
+      "processInstanceId": "77",
+      "taskId": "79",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "4",
+        "reason": "参数用例"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.5854231Z"
+    },
+    {
+      "processInstanceId": "77",
+      "taskId": "81",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_manager_approve",
+          "activityName": "经理审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.5989594Z"
+    },
+    {
+      "processInstanceId": "89",
+      "taskId": "91",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "2",
+        "reason": "办理人记录"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.6636673Z"
+    },
+    {
+      "processInstanceId": "89",
+      "taskId": "93",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "assignee": "leader1",
+      "decision": "1",
+      "decisionName": "通过",
+      "values": {
+        "result": "1"
+      },
+      "nextSteps": [],
+      "outcome": "Approved",
+      "submittedAt": "2026-10-14T02:49:19.6799128Z"
+    },
+    {
+      "processInstanceId": "95",
+      "taskId": "97",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "formKey": "leave-apply",
+      "assignee": "alice",
+      "values": {
+        "days": "2",
+        "reason": "监听器验证"
+      },
+      "nextSteps": [
+        {
+          "activityId": "task_leader_approve",
+          "activityName": "组长审批"
+        }
+      ],
+      "submittedAt": "2026-10-14T02:49:19.7286577Z"
+    },
+    {
+      "processInstanceId": "95",
+      "taskId": "99",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "formKey": "leave-approve",
+      "decision": "1",
+      "decisionName": "通过",
+      "comment": "监听器验证",
+      "values": {
+        "result": "1",
+        "comment": "监听器验证"
+      },
+      "nextSteps": [],
+      "outcome": "Approved",
+      "submittedAt": "2026-10-14T02:49:19.7452323Z"
+    }
+  ],
+  "currentTasks": [
+    {
+      "processInstanceId": "3",
+      "taskId": "5",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "approvers": [
+        "probe-a"
+      ],
+      "candidateUsers": [],
+      "candidateGroups": [],
+      "formKey": "leave-apply",
+      "createdAt": "2026-10-14T02:49:19.0042121Z"
+    },
+    {
+      "processInstanceId": "55",
+      "taskId": "59",
+      "activityId": "task_leader_approve",
+      "activityName": "组长审批",
+      "approvers": [
+        "leader1"
+      ],
+      "candidateUsers": [],
+      "candidateGroups": [
+        "leaders"
+      ],
+      "formKey": "leave-approve",
+      "createdAt": "2026-10-14T02:49:19.4338832Z"
+    },
+    {
+      "processInstanceId": "61",
+      "taskId": "63",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "approvers": [
+        "alice"
+      ],
+      "candidateUsers": [],
+      "candidateGroups": [],
+      "formKey": "leave-apply",
+      "createdAt": "2026-10-14T02:49:19.4477694Z"
+    },
+    {
+      "processInstanceId": "65",
+      "taskId": "67",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "approvers": [
+        "alice"
+      ],
+      "candidateUsers": [],
+      "candidateGroups": [],
+      "formKey": "leave-apply",
+      "createdAt": "2026-10-14T02:49:19.4619272Z"
+    },
+    {
+      "processInstanceId": "69",
+      "taskId": "75",
+      "activityId": "task_manager_approve",
+      "activityName": "经理审批",
+      "approvers": [
+        "manager1"
+      ],
+      "candidateUsers": [],
+      "candidateGroups": [
+        "managers"
+      ],
+      "formKey": "leave-approve",
+      "createdAt": "2026-10-14T02:49:19.4988398Z"
+    },
+    {
+      "processInstanceId": "77",
+      "taskId": "83",
+      "activityId": "task_manager_approve",
+      "activityName": "经理审批",
+      "approvers": [
+        "manager1"
+      ],
+      "candidateUsers": [],
+      "candidateGroups": [
+        "managers"
+      ],
+      "formKey": "leave-approve",
+      "createdAt": "2026-10-14T02:49:19.5956072Z"
+    },
+    {
+      "processInstanceId": "85",
+      "taskId": "87",
+      "activityId": "task_apply",
+      "activityName": "提交请假申请",
+      "approvers": [
+        "alice"
+      ],
+      "candidateUsers": [],
+      "candidateGroups": [],
+      "formKey": "leave-apply",
+      "createdAt": "2026-10-14T02:49:19.6051948Z"
+    }
+  ]
+}

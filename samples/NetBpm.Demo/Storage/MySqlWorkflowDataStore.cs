@@ -11,7 +11,7 @@ namespace NetBpm.Demo.Storage;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 与 <c>NetBpm.Demo.LeaveApproval</c> 里的同名实现同源，但为「一个宿主承载两条流程」做了两处泛化：
+/// 为「一个宿主承载两条流程」做了两处泛化（区别于单流程 Demo 的 MySQL 实现）：
 /// </para>
 /// <list type="bullet">
 ///   <item><description>

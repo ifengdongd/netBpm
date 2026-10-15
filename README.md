@@ -143,13 +143,13 @@ NetBpm/
 │   ├── NetBpm.DifferentialTests/ # 差分对拍（与 Java 预言机逐维比对）
 │   └── corpus/                   # 自建语料与生成器（脚本生成，禁手改）
 ├── samples/
-│   └── NetBpm.Demo.LeaveApproval/ # 请假审批 Demo（公共应用层 + 通用端点的完整接入示例）
+│   └── NetBpm.Demo/              # 合并审批 Demo（订单 + 请假；公共应用层 + 通用端点的完整接入示例）
 ├── web/designer/                 # 流程设计器（bpmn-js 18 + Vite 6 + TS）
 ├── db/
-│   ├── mysql/                    # 0001 引擎表 / 0002 初始数据 / 0003 流程实例业务表 / 0004 请假单表
+│   ├── mysql/                    # 0001 引擎表 / 0002 初始数据 / 0003 流程实例业务表 / 0004-0008 业务表
 │   └── sqlserver/                # 同上（两套方言同步维护）
 ├── docs/
-│   └── process-design-guide.md   # 流程设计操作指引（以请假流程为例）
+│   └── process-design-guide.md   # 流程设计操作指引（以请假 / 订单流程为例）
 ├── tools/
 │   ├── NetBpm.DbMigrate/         # 建库 / 迁移 / 校验 / 清库命令行工具
 │   └── Oracle/                   # Java 预言机（产生对拍真值）
@@ -226,28 +226,27 @@ npm run build    # 类型检查 + 构建
 npm test         # 设计器单元测试
 ```
 
-### 运行请假审批 Demo
+### 运行合并审批 Demo
 
-`samples/NetBpm.Demo.LeaveApproval` 是「审批流公共能力」的完整接入示例：演示页在根路径，
-启动即自动部署 `web/designer/examples/leave-process.bpmn20.xml`，端到端脚本可反复跑。
+`samples/NetBpm.Demo` 是「审批流公共能力」的完整接入示例：一个宿主承载**两条流程**
+（订单审批 `order_process` + 请假审批 `leave_process`），演示页在根路径，
+启动即自动部署 `web/designer/examples/*.bpmn20.xml`，流程信息从 `workflow_type` 表加载。
 
-演示页带**实例管理**面板（对齐老系统待办管理列表）：进行中实例的当前环节与审批人
-（「姓名(账号)」形式）一目了然，支持**转移**（改派）与**步骤跳转**（目标下拉渲染
-「环节名 [节点id]」，跳到结束事件即强制办结）——两个引擎能力（`SetAssigneeCommand` /
+演示页含七个独立页面：流程发起 / 待办任务列表 / 流程审批 / 业务单查看 / **流程部署**（含
+历史版本流程图链接）/ **待办任务转移** / **流程跳转**——两个引擎能力（`SetAssigneeCommand` /
 `MoveActivityCommand`，对应 Activiti 的 `setAssignee` / `moveActivityIdTo`）经应用层
 `ReassignTaskAsync` / `JumpToNodeAsync` 暴露为 `POST /tasks/{id}/assignee` 与
-`POST /instances/{id}/jump`，任何宿主一行接入。
+`POST /instances/{id}/jump`，任何宿主一行接入。审批页 / 业务单页还能打开**流转状态图**
+（走过的节点/线标红），部署列表可查看历史版本流程图。
 
 ```bash
-# 默认 MySQL 宿主（appsettings.Development.json；内存引擎 + JSON 业务数据见 appsettings.json）
-dotnet run --project samples/NetBpm.Demo.LeaveApproval --urls http://localhost:5090
-
-# 端到端测试（可反复跑，每轮使用新的业务单号）
-node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
+# 默认 MySQL 宿主（引擎与业务数据一起落 netbpm_demo；JSON 演示模式见 appsettings.json 注释）
+dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
+# 打开 http://localhost:5188，从首页发起订单 / 请假申请
 ```
 
-Demo 的 HTTP 接口（发起 / 实例 / 历史 / 待办 / 提交 / 业务数据核对）见
-`docs/process-design-guide.md` §9.1。
+Demo 的 HTTP 接口（发起 / 实例 / 历史 / 待办 / 提交 / 流程图 / 业务数据核对）见
+`docs/process-design-guide.md` §9.1，详细设计见 `samples/NetBpm.Demo/README.md`。
 
 ### 在自己的宿主接入审批流（公共类）
 

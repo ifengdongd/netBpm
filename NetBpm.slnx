@@ -18,8 +18,6 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/NetBpm.Demo/NetBpm.Demo.csproj" />
-    <Project Path="samples/NetBpm.Demo.LeaveApproval/NetBpm.Demo.LeaveApproval.csproj" />
-    <Project Path="samples/NetBpm.Demo.OrderApproval/NetBpm.Demo.OrderApproval.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/NetBpm.DbMigrate/NetBpm.DbMigrate.csproj" />

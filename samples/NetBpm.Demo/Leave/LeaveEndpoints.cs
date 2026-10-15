@@ -48,7 +48,7 @@ public static class LeaveEndpoints
                 return request with
                 {
                     BusinessKey = businessKey,
-                    WorkflowTypeId = ProcessInfoEnum.Leave.Id,
+                    WorkflowTypeId = ProcessInfoEnum.Require(LeaveProcessBootstrapper.ProcessKey).Id,
                 };
             },
 

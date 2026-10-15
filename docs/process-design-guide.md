@@ -1,7 +1,8 @@
 # NetBpm 流程设计指引
 
-> **配套示例**：请假审批流程 —— [`web/designer/examples/leave-process.bpmn20.xml`](../web/designer/examples/leave-process.bpmn20.xml)  
-> **可运行 Demo**：[`samples/NetBpm.Demo.LeaveApproval`](../samples/NetBpm.Demo.LeaveApproval)（内存宿主，`dotnet run` 即用）  
+> **配套示例**：请假审批流程 —— [`web/designer/examples/leave-process.bpmn20.xml`](../web/designer/examples/leave-process.bpmn20.xml)；
+> 订单审批流程 —— [`web/designer/examples/order-process.bpmn20.xml`](../web/designer/examples/order-process.bpmn20.xml)  
+> **可运行 Demo**：[`samples/NetBpm.Demo`](../samples/NetBpm.Demo)（一个宿主承载两条流程；JSON / MySQL 双模式，`dotnet run` 即用；详见其 [README](../samples/NetBpm.Demo/README.md)）  
 > **设计器**：`http://localhost:5273/?modelId=<模型 id>`  
 > **适用范围**：NetBpm 流程子集（BPMN 2.0 子集 + Activiti 解析行为 + Activiti 运行时语义）
 
@@ -898,19 +899,19 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 - [ ] 新增监听器的事件与实现写全了（`listener-configuration` 会拦；实现需 `[ServiceTaskName]` 注册，`ServiceTaskDelegateGuard` 预解析）？服务任务字段注入仍被拒？
 - [ ] `BPMNDiagram` 补齐了（每个新节点 / 新连线都有形状与边）？
 
-改完跑一遍端到端：
+改完跑一遍 Demo（两条流程都过一遍，含拒绝/驳回路径）：
 
 ```bash
-dotnet run --project samples/NetBpm.Demo.LeaveApproval --urls http://localhost:5090
-node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
+dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
+# 打开 http://localhost:5188 —— 首页发起订单/请假，待办列表逐环节审批到办结，
+# 部署页核对流程图，业务单页核对状态回写与审批历史
 ```
 
-> **可以反复跑**：脚本每轮取一段**新的业务单号**（见脚本里的 `RUN`），断言只认本轮的号，
-> 库里留着上一轮的行不会干扰。
+> **可以反复跑**：业务单号由 Demo 自动发号（毫秒时间戳 + 序号），不会与上一轮冲突。
 >
-> ⚠️ 唯一的例外是 `Leave:Store = Json` **且**引擎是内存宿主时：流程实例 id 每次启动都从 1 重新开始，
+> ⚠️ `Workflow:Storage = Json` **且**引擎是内存宿主时：流程实例 id 每次启动都从 1 重新开始，
 > 而 JSON 是持久化的，同 id 的旧审批记录会混进来 —— 那种组合下先删
-> `samples/NetBpm.Demo.LeaveApproval/data/leave-business.json`。默认的 `appsettings.Development.json`
+> `samples/NetBpm.Demo/data/` 目录。默认的 `appsettings.json`
 > 是 MySQL 宿主，不受影响。
 
 ---
@@ -919,36 +920,41 @@ node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 
 ### 9.1 Demo 的 HTTP 接口
 
+流程端点按前缀挂在两条流程下（`/api/order` / `/api/leave`），路由约定一致；另有跨流程的合并端点。
+
 | 方法     | 路径                                      | 说明                                                         |
 | ------ | --------------------------------------- | ---------------------------------------------------------- |
-| `POST` | `/api/leave/instances`                  | 发起请假（`applicant`、`businessKey`、`businessDeptId`、`applyDeptId`、`paraDict`），返回首个待办及其表单 |
-| `GET`  | `/api/leave/instances`                  | 请假单列表 + 审批结论（状态即结论名，未结束为 `Running`）                        |
-| `GET`  | `/api/leave/instances/{id}`             | 实例详情：变量 + 当前待办（含表单定义）+ 审批结论 + 流程参数                         |
-| `GET`  | `/api/leave/instances/{id}/history`     | **审批历史**：环节序列（含 `isActive` 标记）+ 审批记录 + 结论                    |
-| `GET`  | `/api/leave/tasks?candidateUser=`       | 按候选人 / 办理人查待办，可加 `processInstanceId`                       |
-| `POST` | `/api/leave/tasks/{taskId}/submit`      | 提交审批：`{"values":{"approvalResult":"2"},"paraDict":{…},"operator":"leader1"}` |
+| `POST` | `/api/leave/instances`                  | 发起请假（`applicant`、`businessKey`、`applyDeptId`、`paraDict`；单号留空自动发号），返回首个待办及其表单 |
+| `POST` | `/api/order/bills`                      | **提交订单申请**：建 `order_bill` 行（status=1）→ 发起流程 → 回填实例 id（业务入口，勿直接发流程） |
+| `GET`  | `/api/{prefix}/instances`               | 实例列表 + 审批结论（状态即结论名，未结束为 `Running`）                         |
+| `GET`  | `/api/{prefix}/instances/{id}`          | 实例详情：变量 + 当前待办（含表单定义）+ 审批结论 + 流程参数                         |
+| `GET`  | `/api/{prefix}/instances/{id}/history`  | **审批历史**：环节序列（含 `isActive` 标记）+ 审批记录 + 结论                    |
+| `GET`  | `/api/{prefix}/tasks?candidateUser=`    | 按候选人 / 办理人查待办，可加 `processInstanceId`                       |
+| `POST` | `/api/{prefix}/tasks/{taskId}/submit`   | 提交审批：`{"values":{"approvalResult":"1","comment":"…"}}`（选项来自表单契约） |
+| `POST` | `/api/{prefix}/tasks/{taskId}/assignee` | **改派（任务转移）**：`{"userId":"manager1","reason":"组长休假"}`（管理动作） |
+| `POST` | `/api/{prefix}/instances/{id}/jump`     | **流程跳转**：`{"targetActivityId":"task_manager_approve","reason":"回退重审"}`（管理动作） |
+| `GET`  | `/api/{prefix}/process-definition`      | 当前生效的流程定义（含 BPMN XML）                                      |
+| `GET`  | `/api/{prefix}/process-nodes`           | **可跳转节点清单**（id/name/type）—— 流程跳转页的目标环节下拉数据源                |
+| `GET`  | `/api/{prefix}/process-diagram.svg`     | **流程图图片**（SVG）；`?definitionId=` 查看任意历史版本（部署列表的链接指向这里）       |
+| `GET`  | `/api/{prefix}/instances/{id}/diagram.svg` | **流转状态图**：走过的节点=红框、走过的线=红线，当前环节加粗红框（数据来自审批历史）             |
+| `GET`  | `/api/{prefix}/process-deployments`     | **流程部署列表**：每个部署一行（含历史版本），逐项带 `DiagramUrl`                  |
 | `GET`  | `/api/leave/business`                   | **业务数据落点 + 内容**：`store` / `location` + 全部业务数据（见下）            |
-| `GET`  | `/api/leave/process-definition`         | 当前生效的流程定义（含 BPMN XML）                                      |
-| `GET`  | `/api/leave/process-nodes`              | **可跳转节点清单**（id/name/type，排除开始事件与顺序流）——目标步骤下拉数据源 |
-| `GET`  | `/api/leave/org/departments`            | 部门清单（组织架构，MySQL 模式落 `sys_dept`）                            |
-| `GET`  | `/api/leave/org/employees`              | 员工清单（含所属部门与审批组）                                           |
-| `GET`  | `/api/leave/org/approvers?group=`       | **查找审批人**：按候选组展开成员（组名即流程定义里的 `candidateGroups`）        |
-| `POST` | `/api/leave/tasks/{taskId}/assignee`    | **改派**：`{"userId":"manager1","reason":"组长休假"}`（管理动作）       |
-| `POST` | `/api/leave/instances/{id}/jump`        | **流程跳转**：`{"targetActivityId":"task_leader_approve","reason":"回退重审"}`（管理动作） |
+| `GET`  | `/api/processes`                        | **流程信息枚举**（数据源 `workflow_type` 表，启动时加载）                    |
+| `GET`  | `/api/tasks?candidateUser=`             | **待办中心**：两条流程的待办合并返回，流程归属已识别                               |
+| `GET`  | `/api/instances?applicant=`             | **申请单列表**：两条流程合并，带各流程的 viewUrl / approveUrl                |
+| `GET`  | `/api/tasks/{taskId}`                   | 单个待办 + 所属实例 + 流程信息（审批页数据源）                                |
+| `GET`  | `/api/org/employees` / `org/departments` | 组织架构清单（任务转移页选审批人用）                                        |
 
-> ⚠️ `businessKey` 是请假单号，**必须是正整数** —— 业务表里 `instances.business_id` /
+> ⚠️ `businessKey` **必须是正整数** —— 业务表里 `instances.business_id` /
 > `leave_bill.business_id` 都是 `bigint`，带前缀的字符串（`LV-2026-0001`）落到真表就写不进去。
-> 留空则由 Demo 发一个（真实系统里这是业务单号生成器的活，见 `LeaveBusinessKey`）。
+> 留空则由 Demo 发一个（真实系统里这是业务单号生成器的活，见 `LeaveBusinessKey` / `OrderBusinessKey`）。
 
 `GET /api/leave/business` 的响应是「落点自述 + 全部业务数据」，`store` 字段告诉调用方看的是哪一套：
 
 | `store` | 快照键 | 说明 |
 | ------- | --------------------------------------------------------- | ----------------------------- |
 | `Json` | `instances` / `results` / `parameters` / `approvals` / `currentTasks` | 五个区块与 JSON 文件的属性一一对应 |
-| `MySql` | `instances` / `instance_current_task` / `deal_history` / `leave_bill` | 四张业务表直接 dump，断言的就是库里的行 |
-
-> `operator` 是「办理人」的显式记账：按候选组审批的任务本身没有 `assignee`，
-> 不带它的话审批历史里就只剩一个 `null`，事后无法回答"这一步到底是谁批的"。
+| `MySql` | `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` | 四张业务表直接 dump，断言的就是库里的行 |
 
 ### 9.2 关键文件
 
@@ -968,17 +974,20 @@ node samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs
 | `src/NetBpm.Identity/IdentityContracts.cs` | 身份模块端口（`FindUserIdsByGroupAsync` 是候选组展开的入口） |
 | `db/mysql/0003_create_process_instance_tables.sql` | 三张业务表（`instances` / `instance_current_task` / `deal_history`）的建表脚本 |
 | `db/mysql/0004_create_leave_bill.sql` | 请假单表（`days` / `reason` 真列 + `ext_params` JSON 列） |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/MySqlWorkflowDataStore.cs` | 业务数据端口的 **MySQL 实现**（四张业务表的映射样版） |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveBusinessStore.cs` | 业务数据端口的 JSON 实现（零依赖、可打开核对） |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/ILeaveBusinessInspector.cs` | 「数据落在哪儿、长什么样」的只读口子（两种实现都实现它） |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveRuntime.cs` | 部署之后才有值的运行时上下文（流程定义 id + 环节名 → 环节 id 映射） |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveBusinessKey.cs` | 业务单号校验与发号（业务表里是 `bigint`） |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveDelegates.cs` | 两个服务任务委托（只声明结论名） |
-| `samples/NetBpm.Demo.LeaveApproval/Leave/LeaveEndpoints.cs` | HTTP 适配层：绑定请求、摊平 DTO、翻状态码 |
-| `samples/NetBpm.Demo.LeaveApproval/Program.cs` | 组合根：`AddNetBpmWorkflow` + 委托扫描注册 + 身份模块替换 + 存储切换 |
-| `samples/NetBpm.Demo.LeaveApproval/appsettings.Development.json` | 本地开发：引擎与业务数据**一起**切到 MySQL（库 `netbpm_demo`） |
-| `samples/NetBpm.Demo.LeaveApproval/wwwroot/index.html` | 演示页（审批历史面板消费 `/history`） |
-| `samples/NetBpm.Demo.LeaveApproval/tests/e2e-leave.mjs` | 端到端验证脚本（207 项断言，覆盖四条路径 + 历史 + 落库核对） |
+| `db/mysql/0006_create_order_bill.sql` / `0007_create_workflow_parameters.sql` / `0008_create_workflow_type.sql` | 订单单表 / 流程参数键值表 / 流程类型表（`ProcessInfoEnum` 数据源） |
+| `samples/NetBpm.Demo/Program.cs` | 组合根：`AddNetBpmWorkflow` + 委托扫描注册 + 身份模块替换 + 存储/流程信息切换 + 启动即部署 |
+| `samples/NetBpm.Demo/Common/ProcessInfo.cs` | **流程信息枚举**（id/name/describe/viewUrl/approveUrl；数据源 `workflow_type` 表） |
+| `samples/NetBpm.Demo/Common/WorkflowTypeLoader.cs` | 启动时从 `workflow_type` 表加载流程信息（失败回退内置默认） |
+| `samples/NetBpm.Demo/Common/TaskCenterEndpoints.cs` | 跨流程合并端点：待办中心 / 申请单列表 / 任务详情 / 组织架构 |
+| `samples/NetBpm.Demo/Storage/MySqlWorkflowDataStore.cs` | 业务数据端口的 **MySQL 实现**（两流程通用，参数落 `workflow_parameters`） |
+| `samples/NetBpm.Demo/Storage/MySqlOrderBillStore.cs` | 订单行的 MySQL 实现（`order_bill`，状态随审批回写） |
+| `samples/NetBpm.Demo/Order/OrderBillStore.cs` | 业务数据端口的 JSON 实现（零依赖、可打开核对） |
+| `samples/NetBpm.Demo/Leave/LeaveBusinessKey.cs` / `Order/OrderBusinessKey.cs`（在 OrderContracts.cs 内） | 业务单号校验与发号（业务表里是 `bigint`） |
+| `samples/NetBpm.Demo/Leave/LeaveDelegates.cs` / `Order/OrderDelegates.cs` | 服务任务委托（审批结束后业务回写：请假只声明结论名；订单先回写状态再落结论） |
+| `samples/NetBpm.Demo/Leave/LeaveEndpoints.cs` / `Order/OrderEndpoints.cs` | HTTP 适配层：绑定请求、摊平 DTO、翻状态码 |
+| `samples/NetBpm.Demo/Order/OrderProcessBootstrapper.cs` / `Leave/LeaveProcessBootstrapper.cs` | 启动即部署 + 部署期自检（审批选项 / 委托解析） |
+| `samples/NetBpm.Demo/wwwroot/*.html` | 七个独立页面：发起 / 待办 / 审批 / 业务单 / 部署 / 转办 / 跳转 |
+| `src/NetBpm.Workflow/Diagram/BpmnDiagramSvgRenderer.cs` | BPMN → SVG 流程图渲染器（发布图片 + 流转状态红线/红框高亮） |
 
 ### 9.3 相关源码（想深挖时看这里）
 

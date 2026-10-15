@@ -10,7 +10,7 @@
   <!--
     请假审批流程（NetBpm 子集示例）。
 
-    流转规则（与 samples/NetBpm.Demo.LeaveApproval 的审批 Demo 配套）：
+    流转规则（与 samples/NetBpm.Demo 的审批 Demo 配套）：
       1. 发起后「提交请假申请」→「组长审批」；
       2. 组长审批的审批选项来自表单属性 approvalResult（enum）== 1 通过 / 2 拒绝 / 3 驳回修改，
          其 variable="result" 即把选择结果映射为流程变量 result；

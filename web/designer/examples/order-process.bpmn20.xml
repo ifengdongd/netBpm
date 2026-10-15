@@ -8,7 +8,7 @@
                   id="Definitions_Order"
                   targetNamespace="http://netbpm/bpmn">
   <!--
-    订单审批流程（NetBpm 子集示例，配套 samples/NetBpm.Demo.OrderApproval）。
+    订单审批流程（NetBpm 子集示例，配套 samples/NetBpm.Demo）。
 
     流转规则：
       1. 业务侧「提交申请」（POST /api/order/bills）发起流程，order_bill.status 写 1（审批中）；

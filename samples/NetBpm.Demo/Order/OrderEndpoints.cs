@@ -102,7 +102,7 @@ public static class OrderEndpoints
                 BusinessDeptId: bill.BusinessDeptId,
                 ApplyDeptId: bill.ApplyDeptId,
                 ParaDict: BuildParaDict(bill),
-                WorkflowTypeId: ProcessInfoEnum.Order.Id),
+                WorkflowTypeId: ProcessInfoEnum.Require(OrderProcessBootstrapper.ProcessKey).Id),
             ct).ConfigureAwait(false);
 
         // ③ 回填流程实例 id：之后「按订单查审批进度 / 历史」都靠它反查

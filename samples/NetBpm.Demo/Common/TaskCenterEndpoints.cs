@@ -266,10 +266,10 @@ public static class TaskCenterEndpoints
         if (long.TryParse(businessId, out var orderId)
             && await orderBills.FindAsync(orderId, ct).ConfigureAwait(false) is not null)
         {
-            return ProcessInfoEnum.Order.Name;
+            return Order.OrderProcessBootstrapper.ProcessKey;
         }
 
-        return ProcessInfoEnum.Leave.Name;
+        return Leave.LeaveProcessBootstrapper.ProcessKey;
     }
 
     // ─────────────────────────── 内部工具 ───────────────────────────

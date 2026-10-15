@@ -4,6 +4,7 @@ using NetBpm.Demo.Common;
 using NetBpm.Demo.Leave;
 using NetBpm.Demo.Order;
 using NetBpm.Identity;
+using NetBpm.Persistence;
 using NetBpm.Runtime;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
@@ -103,6 +104,29 @@ app.MapLeaveEndpoints();
 // ⚠️ 必须在 app.Run() 之前：运行期上下文（流程定义 id + 环节名对照表）要在接受请求前装好。
 await OrderProcessBootstrapper.DeployAsync(app.Services, app.Logger);
 await LeaveProcessBootstrapper.DeployAsync(app.Services, app.Logger);
+
+// 启动时从 workflow_type 表（0008）加载流程信息至 ProcessInfoEnum：
+// 新增流程 = 表里插一行，不用改代码。表不存在 / 加载失败回退内置默认清单。
+if (string.Equals(storage, "MySql", StringComparison.OrdinalIgnoreCase))
+{
+    var loader = new WorkflowTypeLoader(
+        app.Services.GetRequiredService<IDbConnectionFactory>(),
+        builder.Configuration,
+        app.Logger);
+
+    var workflowTypes = await loader.LoadAsync().ConfigureAwait(false);
+
+    if (workflowTypes is not null)
+    {
+        ProcessInfoEnum.Load(workflowTypes);
+    }
+    else
+    {
+        app.Logger.LogInformation(
+            "流程信息枚举使用内置默认清单（{Count} 条）。",
+            ProcessInfoEnum.Defaults.Count);
+    }
+}
 
 // 发布即生成流程图图片（SVG）：部署完成后把当前定义渲染成图片落到 wwwroot/diagrams/{key}.svg，
 // 静态可直接访问；实例的流转状态图（红线/红框标注走过的节点与线）走
