@@ -8,6 +8,8 @@ using NetBpm.Runtime;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
 
+// 注意：IProcessEngine 在 NetBpm.Runtime 命名空间（本文件 using 已含）
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
@@ -101,6 +103,39 @@ app.MapLeaveEndpoints();
 // ⚠️ 必须在 app.Run() 之前：运行期上下文（流程定义 id + 环节名对照表）要在接受请求前装好。
 await OrderProcessBootstrapper.DeployAsync(app.Services, app.Logger);
 await LeaveProcessBootstrapper.DeployAsync(app.Services, app.Logger);
+
+// 发布即生成流程图图片（SVG）：部署完成后把当前定义渲染成图片落到 wwwroot/diagrams/{key}.svg，
+// 静态可直接访问；实例的流转状态图（红线/红框标注走过的节点与线）走
+// /api/{prefix}/instances/{id}/diagram.svg，由审批历史实时渲染。
+async Task GenerateDiagramAsync(string processKey)
+{
+    var workflow = app.Services.GetRequiredService<IWorkflowService>();
+    var engine = app.Services.GetRequiredService<IProcessEngine>();
+
+    var definitionId = await workflow.ResolveDefinitionIdAsync(processKey).ConfigureAwait(false);
+    if (definitionId is null)
+    {
+        return;
+    }
+
+    var xml = await engine.GetProcessDefinitionXmlAsync(definitionId).ConfigureAwait(false);
+
+    if (string.IsNullOrEmpty(xml))
+    {
+        app.Logger.LogWarning("流程定义 {DefinitionId} 没有 XML 资源，跳过流程图生成。", definitionId);
+        return;
+    }
+
+    var svg = BpmnDiagramSvgRenderer.RenderSvg(xml, DiagramHighlight.None);
+
+    var directory = Path.Combine(app.Environment.WebRootPath, "diagrams");
+    Directory.CreateDirectory(directory);
+    await File.WriteAllTextAsync(Path.Combine(directory, $"{processKey}.svg"), svg).ConfigureAwait(false);
+    app.Logger.LogInformation("流程图图片已生成：/diagrams/{ProcessKey}.svg", processKey);
+}
+
+await GenerateDiagramAsync(OrderProcessBootstrapper.ProcessKey);
+await GenerateDiagramAsync(LeaveProcessBootstrapper.ProcessKey);
 
 var billStore = app.Services.GetRequiredService<IOrderBillStore>();
 app.Logger.LogInformation("订单数据落点：{Location}", billStore.Location);

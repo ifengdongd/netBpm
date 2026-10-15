@@ -112,14 +112,32 @@ Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；MySQL 侧
 - 流程通用（`/api/{order|leave}`）：`instances` / `instances/{id}` / `history` / `tasks` / `tasks/{id}/submit` / `tasks/{id}/assignee`（转办） / `instances/{id}/jump`（跳转） / `process-nodes` / `process-definition`；
 - 跨流程合并（`/api`）：`GET processes` / `GET tasks?candidateUser=` / `GET tasks/{taskId}` / `GET instances?applicant=` / `GET org/*`。
 
+### 流程图与流转状态
+
+`BpmnDiagramSvgRenderer`（`NetBpm.Workflow/Diagram`）把**已发布**流程定义的 BPMN XML 渲染成
+SVG 流程图图片 —— 图形信息取文件里的 `bpmndi:BPMNDiagram`（设计器导出自带），
+节点（事件=圆 / 网关=菱形 / 任务=圆角矩形）与连线按 DI 定位绘制，零第三方依赖。
+
+三个入口（每条流程自动获得）：
+
+| 端点 | 说明 |
+|---|---|
+| `GET /api/{prefix}/process-diagram.svg` | 发布定义的流程图图片；`?definitionId=` 可看任意**历史版本**（部署列表的链接指向这里，校验定义属于本流程防串图） |
+| `GET /api/{prefix}/instances/{id}/diagram.svg` | **流转状态图**：走过的节点=红框、走过的线=红线（两端都已流转的顺序流），当前正停的环节=加粗红框+浅红填充；数据来自审批历史（`ActivityId` / `IsActive`），办结后全图标红到结束事件 |
+| `GET /api/{prefix}/process-deployments` | 流程部署列表：每个部署一行（含历史版本，按部署时间倒序），每项带 `DiagramUrl` 指向该版本的流程图 |
+
+发布即生成：部署完成后 Demo 把当前定义的流程图落到 `wwwroot/diagrams/{key}.svg`，静态可直接访问。
+页面入口：审批页 / 业务单页的「流转状态图」链接；`deployments.html` 的部署列表逐行带「查看流程图」链接（含历史版本）。
+
 ### 页面（wwwroot，占位符由流程信息枚举的 viewUrl/approveUrl 渲染）
 
 | 页面 | 用途 |
 |---|---|
 | `index.html` | 流程信息枚举展示、流程发起（订单/请假动态表单）、我的申请 |
 | `tasks.html` | 待办任务列表（跨流程合并） |
-| `approve.html` | 流程审批页（表单契约渲染 + 提交 + 历史） |
-| `bill.html` | 业务单查看页（订单行 / 请假参数 + 审批历史） |
+| `approve.html` | 流程审批页（表单契约渲染 + 提交 + 历史 + 流转状态图） |
+| `bill.html` | 业务单查看页（订单行 / 请假参数 + 审批历史 + 流转状态图） |
+| `deployments.html` | 流程部署列表（含历史版本，逐行带查看流程图链接） |
 | `transfer.html` | 待办任务转移（转办 / 退回未分配） |
 | `jump.html` | 流程跳转（目标节点来自 `process-nodes`） |
 

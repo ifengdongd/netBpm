@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NetBpm · 流程部署</title>
+<link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<h1>流程部署列表</h1>
+<div class="sub">
+  发布（部署）成功的流程定义，每个部署一行（<b>含历史版本</b>，按部署时间倒序）。
+  「流程图」链接打开该版本定义渲染出的流程图图片（SVG）；
+  运行中的实例还可在审批页 / 业务单页查看<b>流转状态图</b>（走过的节点/线标红）。
+</div>
+
+<div class="panel">
+  <h2>部署记录（两条流程合并）</h2>
+  <table>
+    <thead>
+      <tr><th>流程</th><th>版本</th><th>定义 id</th><th>部署名称</th><th>部署时间</th><th>状态</th><th>操作</th></tr>
+    </thead>
+    <tbody id="deploy-rows"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+  </table>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+renderNav('deployments');
+
+async function boot() {
+  const rows = $('#deploy-rows');
+  try {
+    const processes = await loadProcesses();
+
+    // 每条流程各取自己的部署列表（/api/{prefix}/process-deployments），合并展示
+    const lists = await Promise.all(processes.map(async (p) => {
+      const prefix = PROCESS_API[p.Name];
+      if (!prefix) return [];
+      const items = await api(`${prefix}/process-deployments`);
+      return items.map((item) => ({ ...item, Process: p, Prefix: prefix }));
+    }));
+
+    const items = lists.flat()
+      .sort((a, b) => (b.DeployTime ?? '').localeCompare(a.DeployTime ?? ''));
+
+    if (!items.length) {
+      rows.innerHTML = '<tr><td colspan="7" class="empty">暂无部署记录（启动宿主会自动部署）。</td></tr>';
+      return;
+    }
+
+    rows.innerHTML = items.map((item) => `
+      <tr>
+        <td>${esc(item.Process.Describe)} <span class="muted">(${esc(item.Key)})</span></td>
+        <td>v${esc(item.Version)}</td>
+        <td><code>${esc(item.Id)}</code></td>
+        <td>${esc(item.Name ?? '—')}</td>
+        <td>${esc(fmtTime(item.DeployTime))}</td>
+        <td>${item.IsCurrent ? '<span class="pill ok">当前生效</span>' : '<span class="pill warn">历史版本</span>'}</td>
+        <td>
+          <a class="link" target="_blank" href="${esc(item.Prefix)}/${esc(item.DiagramUrl)}">查看流程图</a>
+          ${item.IsCurrent ? '' : ' &nbsp;<span class="muted">（历史流程图，按部署时的定义渲染）</span>'}
+        </td>
+      </tr>`).join('');
+  } catch (error) {
+    rows.innerHTML = `<tr><td colspan="7" class="empty">${esc(error.message)}</td></tr>`;
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -68,6 +68,19 @@ public static class WorkflowEndpoints
             JumpToNodeAsync(processInstanceId, request, http, workflow, options, ct)).Produces<object>();        group.MapGet("/process-definition", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
             GetProcessDefinitionAsync(http, engine, workflow, options, ct));
 
+        // 流程图图片：发布（部署）后的定义渲染成 SVG —— 浏览器直接当图片显示，可另存。
+        // ?definitionId= 指定任意历史版本（流程部署列表的「查看历史流程图」链接指向这里）
+        group.MapGet("/process-diagram.svg", (string? definitionId, HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
+            GetProcessDiagramAsync(definitionId, http, engine, workflow, options, ct)).Produces<string>(200, "image/svg+xml");
+
+        // 流程部署列表：每个部署一行（含历史版本），每项带流程图链接 —— 方便查看历史流程图信息
+        group.MapGet("/process-deployments", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
+            GetProcessDeploymentsAsync(http, engine, workflow, options, ct)).Produces<object>();
+
+        // 实例的流转状态图：走过的节点=红框、走过的线=红线，当前正停的环节加粗红框
+        group.MapGet("/instances/{processInstanceId}/diagram.svg", (string processInstanceId, HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
+            GetInstanceDiagramAsync(processInstanceId, http, engine, workflow, options, ct)).Produces<string>(200, "image/svg+xml");
+
         // 可跳转的节点清单（流程管理页的「目标步骤」下拉数据源，对齐老系统「环节名 [节点id]」的核对习惯）
         group.MapGet("/process-nodes", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
             GetProcessNodesAsync(http, engine, workflow, options, ct));
@@ -260,6 +273,149 @@ public static class WorkflowEndpoints
         var xml = await engine.GetProcessDefinitionXmlAsync(definitionId, ct).ConfigureAwait(false);
 
         return Results.Ok(new { processDefinitionId = definitionId, xml });
+    }
+
+    /// <summary>
+    /// 流程图图片：渲染流程定义为 SVG。不带 <c>?definitionId=</c> 时取当前生效定义；
+    /// 带了就渲染指定版本（流程部署列表的「查看历史流程图」链接指向这里）。
+    /// </summary>
+    private static async Task<IResult> GetProcessDiagramAsync(
+        string? definitionId,
+        HttpContext http,
+        IProcessEngine engine,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var definitions = await engine.FindProcessDefinitionsAsync(ct).ConfigureAwait(false);
+        var processKey = options.ProcessKey(http.RequestServices);
+
+        string? resolvedId;
+
+        if (!string.IsNullOrEmpty(definitionId))
+        {
+            // 指定版本：必须是本流程 key 下真实存在的定义（防串流程取图）
+            resolvedId = definitions
+                .Where(definition => definition.Key == processKey && definition.Id == definitionId)
+                .Select(definition => definition.Id)
+                .FirstOrDefault();
+
+            if (resolvedId is null)
+            {
+                return Results.NotFound(options.Error($"流程定义 '{definitionId}' 不存在或不属于流程 '{processKey}'。"));
+            }
+        }
+        else
+        {
+            resolvedId = await workflow
+                .ResolveDefinitionIdAsync(processKey, ct)
+                .ConfigureAwait(false);
+
+            if (resolvedId is null)
+            {
+                return Results.NotFound(options.Error("流程定义尚未部署。"));
+            }
+        }
+
+        var xml = await engine.GetProcessDefinitionXmlAsync(resolvedId, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(xml))
+        {
+            return Results.NotFound(options.Error($"流程定义 '{resolvedId}' 没有 XML 资源。"));
+        }
+
+        var svg = BpmnDiagramSvgRenderer.RenderSvg(xml, DiagramHighlight.None);
+
+        return Results.Content(svg, "image/svg+xml");
+    }
+
+    /// <summary>
+    /// 实例的流转状态图：审批历史（走过的环节）+ 当前待办（正停的环节）映射到流程图上 ——
+    /// 走过的节点/线标红，当前环节加粗红框。已结束的实例全图标红到结束事件。
+    /// </summary>
+    private static async Task<IResult> GetInstanceDiagramAsync(
+        string processInstanceId,
+        HttpContext http,
+        IProcessEngine engine,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var history = await workflow.FindHistoryAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        if (history is null)
+        {
+            return Results.NotFound(options.Error($"流程实例 '{processInstanceId}' 不存在。"));
+        }
+
+        var visited = history.Steps
+            .Select(step => step.ActivityId)
+            .Where(activityId => !string.IsNullOrEmpty(activityId))
+            .Distinct()
+            .ToArray();
+        var active = history.Steps.Where(step => step.IsActive).Select(step => step.ActivityId).ToArray();
+
+        // 定义 id：优先用历史里记录的（实例可能停在旧版本定义上），没有就取当前生效定义
+        var definitionId = !string.IsNullOrEmpty(history.ProcessDefinitionId)
+            ? history.ProcessDefinitionId
+            : await workflow.ResolveDefinitionIdAsync(options.ProcessKey(http.RequestServices), ct).ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(definitionId))
+        {
+            return Results.NotFound(options.Error("流程定义尚未部署。"));
+        }
+
+        var xml = await engine.GetProcessDefinitionXmlAsync(definitionId, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(xml))
+        {
+            return Results.NotFound(options.Error($"流程定义 '{definitionId}' 没有 XML 资源。"));
+        }
+
+        var svg = BpmnDiagramSvgRenderer.RenderSvg(xml, new DiagramHighlight(visited, active));
+
+        return Results.Content(svg, "image/svg+xml");
+    }
+
+    /// <summary>
+    /// 流程部署列表：本流程 key 下每个部署一行（<b>含历史版本</b>，按部署时间倒序），
+    /// 每项带 <c>diagramUrl</c> —— 指向该版本定义的流程图图片，方便查看历史流程图信息。
+    /// </summary>
+    private static async Task<IResult> GetProcessDeploymentsAsync(
+        HttpContext http,
+        IProcessEngine engine,
+        IWorkflowService workflow,
+        WorkflowEndpointOptions options,
+        CancellationToken ct)
+    {
+        var processKey = options.ProcessKey(http.RequestServices);
+        var definitions = await engine.FindProcessDefinitionsAsync(ct).ConfigureAwait(false);
+
+        // 同 key 取版本最高者为「当前生效」；其余是历史版本
+        var currentId = definitions
+            .Where(definition => definition.Key == processKey)
+            .OrderByDescending(definition => definition.Version)
+            .Select(definition => definition.Id)
+            .FirstOrDefault();
+
+        var items = definitions
+            .Where(definition => definition.Key == processKey)
+            .Select(definition => new
+            {
+                definition.Id,
+                definition.Key,
+                definition.Name,
+                definition.Version,
+                definition.DeploymentId,
+                DeployTime = definition.DeployTime,
+                IsCurrent = definition.Id == currentId,
+
+                // 相对链接（挂在本前缀下）：流程部署列表的「查看流程图」直接跳
+                DiagramUrl = $"process-diagram.svg?definitionId={Uri.EscapeDataString(definition.Id)}",
+            })
+            .ToArray();
+
+        return Results.Ok(items);
     }
 
     /// <summary>

@@ -72,8 +72,15 @@ function renderBizCard(title, rows) {
   $('#detail').innerHTML = `
     <div class="panel">
       <h2>${esc(title)}</h2>
-      <table class="kv">${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')}</table>
+      <table class="kv">${rows.filter(Boolean).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')}</table>
     </div>`;
+}
+
+// 流转状态图链接：走过的节点/线标红（实例的审批历史实时渲染）
+function diagramLink(prefix, processInstanceId) {
+  if (!processInstanceId) return '—';
+  const base = PROCESS_API[prefix === 'order' ? 'order_process' : 'leave_process'];
+  return `<a class="link" target="_blank" href="${esc(base)}/instances/${encodeURIComponent(processInstanceId)}/diagram.svg">查看流转状态图（红线/红框）</a>`;
 }
 
 // ── 订单单：order_bill 行 + 审批进度（GET /api/order/bills/{id}） ──
@@ -94,7 +101,8 @@ async function loadOrderBill(businessId) {
     ['当前环节', esc(view.CurrentStep ?? (view.Running ? '—' : '已结束'))],
     ['流程实例', `<code>${esc(view.ProcessInstanceId ?? '—')}</code>`],
     ['发起时间', esc(fmtTime(bill.CreateTime))],
-  ]);
+    view.ProcessInstanceId ? ['流转状态图', diagramLink('order', view.ProcessInstanceId)] : null,
+  ].filter(Boolean));
 
   if (view.ProcessInstanceId) await renderHistory('order', view.ProcessInstanceId);
 }
@@ -119,6 +127,7 @@ async function loadLeaveBill(businessId) {
     ['流程状态', statusPill(view.Running ? 'Running' : (result?.Outcome ?? '—'))],
     ['审批结论', result ? `${esc(result.Outcome)}（${esc(result.ActivityName ?? result.ActivityId)}）` : '—'],
     ['发起时间', esc(fmtTime(view.StartedAt))],
+    ['流转状态图', diagramLink('leave', view.ProcessInstanceId)],
   ]);
 
   await renderHistory('leave', view.ProcessInstanceId);

@@ -112,6 +112,7 @@ function renderNav(active) {
     ['tasks', '待办任务列表', '/tasks.html'],
     ['approve', '流程审批', null],          // 审批页要带任务参数，导航里不可直接点
     ['bill', '业务单查看', null],
+    ['deployments', '流程部署', '/deployments.html'],
     ['transfer', '待办任务转移', '/transfer.html'],
     ['jump', '流程跳转', '/jump.html'],
   ];

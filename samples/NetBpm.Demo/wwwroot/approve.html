@@ -91,6 +91,8 @@ function renderMeta() {
       <tr><td>申请人</td><td>${esc(current.instance.Base?.ApplyUser ?? '—')}</td></tr>
       <tr><td>办理人</td><td>${esc(t.Assignee ?? '未领取（候选人可见）')}</td></tr>
       <tr><td>流程状态</td><td>${statusPill(current.instance.Status)}</td></tr>
+      <tr><td>流转图</td><td><a class="link" target="_blank"
+        href="${esc(apiPrefix)}/instances/${encodeURIComponent(current.instance.ProcessInstanceId)}/diagram.svg">查看流转状态图（红线/红框标注已流转的节点与线）</a></td></tr>
     </table>`;
 
   // 业务单查看地址：按流程信息枚举的 viewUrl 模板渲染

@@ -32,6 +32,8 @@ web/designer/.tmp/
 samples/NetBpm.Demo.LeaveApproval/data/
 samples/NetBpm.Demo.OrderApproval/data/
 samples/NetBpm.Demo/data/
+# 流程图图片：发布后由 BpmnDiagramSvgRenderer 重新生成（见 Program.cs）
+samples/NetBpm.Demo/wwwroot/diagrams/
 /data/
 
 # 本地工具工作区（不提交）
