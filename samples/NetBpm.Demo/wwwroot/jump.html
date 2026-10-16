@@ -65,7 +65,7 @@ async function boot() {
     ? running.map((item) => `<option value="${esc(item.ProcessInstanceId)}">
         ${esc(item.Process?.Describe)} · 单号 ${esc(item.BusinessKey ?? '—')} · ${esc(item.Applicant)} · ${esc(item.CurrentStep ?? '')}
       </option>`).join('')
-    : '<option value="">（暂无运行中的实例）</option>';
+    : '<option value="">（暂无运行中的实例 —— 先到「首页 · 流程发起」提交一笔申请，再回来跳转）</option>';
 }
 
 // 加载实例：确定所属流程 → 拉目标节点清单

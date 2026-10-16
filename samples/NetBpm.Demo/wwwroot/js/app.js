@@ -132,3 +132,40 @@ function renderNav(active) {
 async function loadEmployees() {
   return api('/api/org/employees');
 }
+
+// ─────────────────────────── 待办查询（候选人 + 办理人两路合并）───────────────────────────
+
+// 一个用户的全部待办：候选语义（候选组/候选用户，未签收）∪ 办理人语义（直派），
+// 按任务 id 去重 —— 待办任务列表与待办转移页共用。
+// 引擎的 candidateUser 是纯候选语义（不含 assignee 任务，与 Activiti 一致），
+// 直派环节（如「提交请假申请」「申请人修改」）只能用 assignee 查到，所以要两路一起查。
+async function findMyTasks(user) {
+  const [byCandidate, byAssignee] = await Promise.all([
+    api(`/api/tasks?candidateUser=${encodeURIComponent(user)}`),
+    api(`/api/tasks?assignee=${encodeURIComponent(user)}`),
+  ]);
+
+  const seen = new Set();
+  return [...byCandidate, ...byAssignee].filter((item) => {
+    const id = item.Task?.TaskId;
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+// 空待办的用户指引：说明演示账号与审批组的对应关系（待办列表 / 转移页共用文案）
+function emptyTaskHint(user) {
+  const groupMap = {
+    leader1: 'leaders（请假审批）',
+    leader2: 'leaders（请假审批）',
+    manager1: 'managers（订单审批）',
+  };
+  const group = groupMap[user];
+  const groupHint = group
+    ? `${esc(user)} 属于审批组 ${group}，只能看到该组的待办。`
+    : `${esc(user)} 不在演示审批组里（leader1/leader2=请假审批，manager1=订单审批）。`;
+  return `用户 ${esc(user)} 暂无待办。${groupHint} `
+    + `提示：在首页发起申请后再查；订单待办切 manager1，请假待办切 leader1/leader2，`
+    + `直派给申请人的环节（提交请假申请 / 申请人修改）用申请人账号查询。`;
+}

@@ -19,7 +19,7 @@
     <div class="panel">
       <h2>转办操作</h2>
       <div class="field">
-        <label for="task-id">待办任务 id <span class="hint">从待办任务列表「转办」进入会自动带上</span></label>
+        <label for="task-id">待办任务 id <span class="hint">可从下方「快速选择待办」点选，或从待办任务列表「转办」进入</span></label>
         <input id="task-id" placeholder="taskId" style="width:100%" />
       </div>
       <button id="load-task" class="ghost">加载任务</button>
@@ -40,12 +40,31 @@
         </div>
       </div>
     </div>
+
+    <div class="panel" style="margin-top:14px">
+      <h2>快速选择待办</h2>
+      <div class="field">
+        <label for="pick-user">按用户查询（候选人 / 办理人）</label>
+        <div class="row">
+          <input id="pick-user" list="people" value="manager1" style="flex:1" />
+          <button id="pick-refresh" class="ghost">查询</button>
+        </div>
+        <datalist id="people">
+          <option value="alice"></option>
+          <option value="bob"></option>
+          <option value="leader1"></option>
+          <option value="leader2"></option>
+          <option value="manager1"></option>
+        </datalist>
+      </div>
+      <div id="pick-list" class="empty">输入用户后点「查询」。</div>
+    </div>
   </div>
 
   <div>
     <div class="panel">
       <h2>任务信息</h2>
-      <div id="task-info" class="empty">输入任务 id 后点「加载任务」。</div>
+      <div id="task-info" class="empty">输入任务 id 后点「加载任务」，或从下方「快速选择待办」里点选。</div>
     </div>
   </div>
 </div>
@@ -62,8 +81,53 @@ if (fromList) $('#task-id').value = fromList;
 $('#load-task').addEventListener('click', () => loadTask().catch((e) => toast(e.message)));
 $('#transfer-btn').addEventListener('click', () => doTransfer(true).catch((e) => toast(e.message)));
 $('#unassign-btn').addEventListener('click', () => doTransfer(false).catch((e) => toast(e.message)));
+$('#pick-refresh').addEventListener('click', () => loadPickList().catch((e) => toast(e.message)));
+$('#pick-user').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loadPickList().catch((err) => toast(err.message));
+});
 
 if (fromList) loadTask().catch((e) => toast(e.message));
+else loadPickList().catch((e) => toast(e.message));
+
+// 迷你待办列表：候选 ∪ 办理人两路合并，点行即填入 task-id 并加载任务详情
+async function loadPickList() {
+  const box = $('#pick-list');
+  const user = $('#pick-user').value.trim();
+  if (!user) { box.textContent = '请输入用户。'; return; }
+
+  box.className = 'empty';
+  box.textContent = '查询中…';
+  const tasks = await findMyTasks(user);
+
+  if (!tasks.length) {
+    box.className = 'empty';
+    box.innerHTML = emptyTaskHint(user);
+    return;
+  }
+
+  box.className = '';
+  box.innerHTML = `<table>
+    <thead><tr><th>任务</th><th>单号</th><th>办理人</th><th>操作</th></tr></thead>
+    <tbody>
+      ${tasks.map((item) => {
+        const t = item.Task ?? {};
+        return `<tr>
+          <td>${esc(t.Name ?? t.TaskId)} <span class="muted">(${esc(item.Process?.Name)})</span></td>
+          <td><code>${esc(item.BusinessKey ?? '—')}</code></td>
+          <td>${esc(t.Assignee ?? '未领取')}</td>
+          <td><a class="link" href="javascript:void(0)" data-task-id="${esc(t.TaskId)}">选择</a></td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+
+  $$('#pick-list a[data-task-id]').forEach((link) => {
+    link.addEventListener('click', () => {
+      $('#task-id').value = link.dataset.taskId;
+      loadTask().catch((err) => toast(err.message));
+    });
+  });
+}
 
 async function loadTask() {
   const taskId = $('#task-id').value.trim();

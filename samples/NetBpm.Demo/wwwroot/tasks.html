@@ -55,10 +55,11 @@ async function loadTasks() {
     const user = $('#user').value.trim();
     if (!user) throw new Error('请输入用户（候选人 / 办理人）。');
 
-    const tasks = await api(`/api/tasks?candidateUser=${encodeURIComponent(user)}`);
+    // 候选语义 ∪ 办理人语义：直派环节（提交请假申请 / 申请人修改）也进列表
+    const tasks = await findMyTasks(user);
 
     if (!tasks.length) {
-      body.innerHTML = `<tr><td colspan="9" class="empty">用户 ${esc(user)} 暂无待办</td></tr>`;
+      body.innerHTML = `<tr><td colspan="9" class="empty">${emptyTaskHint(user)}</td></tr>`;
       return;
     }
 
