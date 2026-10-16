@@ -33,6 +33,7 @@ create table order_bill (
     process_instance_id varchar(64)   null comment '流程实例 id（提交申请后回填，用于反查审批进度）',
     create_time        datetime       not null comment '创建时间',
     modify_time        datetime       null comment '最后修改时间',
+    deleted_flag       tinyint        not null default 0 comment '伪删除标志（0 正常 / 1 已删除；公共数据操作接口 DeleteAsync 置位，列表与明细自动过滤）',
     primary key (business_id),
     index ix_order_bill_apply_user (tenant_id, apply_user),
     index ix_order_bill_status (tenant_id, status)

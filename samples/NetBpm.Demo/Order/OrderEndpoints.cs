@@ -44,6 +44,7 @@ public static class OrderEndpoints
         group.MapGet("/bills", ListAsync);                                 // 订单列表（含状态与当前环节）
         group.MapGet("/bills/{businessId:long}", GetAsync);                // 订单详情（含审批进度）
         group.MapGet("/bills/{businessId:long}/history", GetHistoryAsync); // 按订单反查审批历史
+        group.MapDelete("/bills/{businessId:long}", DeleteAsync);          // 删除订单（伪删除：置 deleted_flag）
 
         return group;
     }
@@ -153,6 +154,19 @@ public static class OrderEndpoints
         return history is null
             ? Results.NotFound(new ErrorResponse($"订单 {businessId} 的流程实例 {processInstanceId} 不存在。"))
             : Results.Ok(history);
+    }
+
+    /// <summary>删除订单（伪删除：置 deleted_flag，列表与明细自动过滤）。返回是否删到。</summary>
+    private static async Task<IResult> DeleteAsync(
+        long businessId,
+        IOrderBillStore store,
+        CancellationToken ct)
+    {
+        var deleted = await store.DeleteAsync(businessId, ct).ConfigureAwait(false);
+
+        return deleted
+            ? Results.Ok(new ErrorResponse($"订单 {businessId} 已删除（伪删除）。"))
+            : Results.NotFound(new ErrorResponse($"订单 {businessId} 不存在（或已删除）。"));
     }
 
     // ─────────────────────────── 视图组装 ───────────────────────────

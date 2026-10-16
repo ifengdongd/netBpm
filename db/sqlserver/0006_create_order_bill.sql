@@ -25,6 +25,7 @@ create table wf.order_bill (
     process_instance_id nvarchar(64)    null,
     create_time         datetime        not null,
     modify_time         datetime        null,
+    deleted_flag        tinyint         not null constraint df_order_bill_deleted default (0),
     constraint pk_order_bill primary key (business_id)
 );
 go

@@ -32,4 +32,10 @@ public interface IOrderBillStore
     /// 同时记下最终审批意见。订单不存在返回 <see langword="null"/>。
     /// </summary>
     ValueTask<OrderBillRow?> UpdateStatusAsync(long businessId, short status, string? approveComment, CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除订单 —— <b>伪删除</b>：置 <c>deleted_flag</c>（不物理删行）；
+    /// 之后的列表与明细查询自动过滤。返回是否删到（订单不存在 / 已删除为 false）。
+    /// </summary>
+    ValueTask<bool> DeleteAsync(long businessId, CancellationToken ct = default);
 }

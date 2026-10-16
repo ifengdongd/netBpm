@@ -176,9 +176,16 @@ NetBpm.Demo/
 ├── Delegates/            服务任务委托（审批结束的业务回写）：leave.* 收口 / order.* 状态回写
 ├── Order/                订单契约 / JSON 业务存储 / 端点
 ├── Leave/                请假契约 / 端点
-├── Storage/              双方言业务存储：MySqlWorkflowDataStore（主体 + Sql/Rows partial）、
-│                         MySqlOrderBillStore；SqlServerWorkflowDataStore（同构三件套）、
-│                         SqlServerOrderBillStore；DemoSchemaInitializer（建库+迁移）；
-│                         AddDemoStores 按 DatabaseType 注册
+├── Storage/              双方言业务存储（逻辑下沉基类，方言收敛 SQL 常量层）：
+│                         WorkflowDataStoreBase（四张流程表全部端口逻辑）+
+│                         WorkflowStoreDialect（IWorkflowStoreDialect + MySQL/SqlServer 两个实现）+
+│                         WorkflowStoreRows（共用行映射）；
+│                         DataAccess/（公共数据操作接口：IDataAccessor 五件套 —— 按条件查列表 /
+│                         按 id 查明细 / 新增返回 id / 修改返回影响行数 / 伪删除改状态列；
+│                         DataAccessorBase 公共拼装 + MySql/SqlServerDataAccessor 两个方言实现；
+│                         EntityTableSpec 列白名单 + IEntityMapper 实体映射 + OrderBillMapper 示范）；
+│                         OrderBillStoreBase（订单 CRUD 委托 IDataAccessor）；
+│                         四个薄子类：MySql/SqlServerWorkflowDataStore、MySql/SqlServerOrderBillStore；
+│                         DemoSchemaInitializer（建库+迁移）；AddDemoStores 按 DatabaseType 注册
 └── wwwroot/              七个独立页面 + diagrams/（发布生成的流程图）+ 共享 css/js
 ```

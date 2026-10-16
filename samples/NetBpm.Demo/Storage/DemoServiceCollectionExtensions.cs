@@ -1,4 +1,5 @@
 ﻿using NetBpm.Demo.Order;
+using NetBpm.Demo.Storage.DataAccess;
 using NetBpm.Persistence;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
@@ -36,9 +37,13 @@ public static class DemoServiceCollectionExtensions
 
         var databaseType = configuration.GetValue("NetBpm:DatabaseType", DatabaseType.MySql);
 
+        // 公共数据操作接口（五件套 CRUD）：实体映射器方言无关，访问器按方言注册
+        services.AddSingleton<IEntityMapper<OrderBillRow>, OrderBillMapper>();
+
         switch (databaseType)
         {
             case DatabaseType.SqlServer:
+                services.AddSingleton<IDataAccessor<OrderBillRow>, SqlServerDataAccessor<OrderBillRow>>();
                 services.AddNetBpmWorkflow<SqlServerWorkflowDataStore>();
                 services.AddSingleton<IWorkflowStoreInspector>(sp =>
                     sp.GetRequiredService<SqlServerWorkflowDataStore>());
@@ -46,6 +51,7 @@ public static class DemoServiceCollectionExtensions
                 break;
 
             default:
+                services.AddSingleton<IDataAccessor<OrderBillRow>, MySqlDataAccessor<OrderBillRow>>();
                 services.AddNetBpmWorkflow<MySqlWorkflowDataStore>();
                 services.AddSingleton<IWorkflowStoreInspector>(sp =>
                     sp.GetRequiredService<MySqlWorkflowDataStore>());
