@@ -21,11 +21,11 @@ builder.Services.AddOpenApi();
 // 请求反序列化默认大小写不敏感，前端传 camelCase 的键（userId / targetActivityId…）照样能绑上。
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = null);
 
-// 引擎：落 MySQL（ACT_* 表）—— 必须与业务数据一致（内存执行树会与真库 instances 撞号）
+// 引擎：落真库（ACT_* 表，方言随 NetBpm:DatabaseType）—— 必须与业务数据一致（内存执行树会与真库 instances 撞号）
 builder.Services.AddNetBpm(builder.Configuration);
 
-// 业务数据存储：固定 MySQL（instances 等 + order_bill）
-builder.Services.AddDemoStores();
+// 业务数据存储：方言随 NetBpm:DatabaseType（引擎同一个库：MySQL 直落；SqlServer 业务表在 wf schema）
+builder.Services.AddDemoStores(builder.Configuration);
 
 // 业务流程接入：新建业务流程只需实现 IBusinessProcess（+ 两个收口委托 + BPMN + workflow_type 行）
 builder.Services.AddSingleton<IBusinessProcess, OrderBusinessProcess>();

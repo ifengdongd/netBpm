@@ -13,11 +13,14 @@ dotnet run --project samples/NetBpm.Demo
 # 打开 http://localhost:5188（首页即流程发起入口；OpenAPI 见 /openapi/v1.json）
 ```
 
-**存储固定 MySQL 真库（库 `netbpm_demo`）**：引擎落 ACT_* 表（`UseInMemoryExecutionTree=false`），
-业务数据落 `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` + `order_bill`。
+**存储落真库（默认 SQL Server 10.1.245.36，Windows 身份认证，库 `netbpm_demo`；可切回 MySQL）**：
+方言随 `NetBpm:DatabaseType`，引擎落 ACT_* 表（`UseInMemoryExecutionTree=false`），
+业务数据落 `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` + `order_bill`
+（MySQL 无 schema 前缀；SQL Server 业务表在 `wf` schema）。启动时自动建库（若缺）并幂等执行
+`db/<dialect>` 全部脚本，重复启动跳过。
 ⚠️ 引擎与业务数据是一体的 —— 内存执行树的流程实例 id 每次重启从 1 重新开始，会与真库累积行撞号。
 
-前置脚本（按序执行）：`db/mysql/0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008`。
+前置脚本（按序执行，现由启动序列自动执行）：`db/<dialect>/0001 → 0002 → … → 0008`。
 
 ## 流程设计
 
@@ -60,24 +63,24 @@ dotnet run --project samples/NetBpm.Demo
 `ViewUrl`（审批结束后业务单查看地址，含 `{businessId}` 占位符）、`ApproveUrl`（审批页地址，含 `{taskId}` 占位符）。
 端点 `GET /api/processes` 暴露给前端。
 
-**数据源是 `workflow_type` 表（0008）**：系统启动时（MySQL 模式）由
-`WorkflowTypeLoader` 加载进 `ProcessInfoEnum` —— **新增流程 = 表里插一行**，不用改代码。
+**数据源是 `workflow_type` 表（0008）**：系统启动时由
+`WorkflowTypeLoader`（方言随 `NetBpm:DatabaseType`）加载进 `ProcessInfoEnum` ——
+**新增流程 = 表里插一行**，不用改代码。
 表不存在 / 加载失败（如 JSON 演示模式）回退内置默认清单；`name` 必须与 BPMN 流程 key 一致；
-`describe` 是 MySQL 保留字，SQL 里要写反引号。
+`describe` 在 MySQL 是保留字（反引号）、SQL Server 方括号引用，SQL 常量已按方言分开。
 
 ## 后端处理
 
 ### 组合根（Program.cs）
 
 ```
-AddNetBpm(configuration)                       引擎（MySQL ACT_* 表 / 连接串 / schema 校验）
-AddDemoStores()                                业务数据三端口（MySqlWorkflowDataStore +
-                                               MySqlOrderBillStore + IWorkflowStoreInspector）
+AddNetBpm(configuration)                       引擎（真库 ACT_* 表，方言随 DatabaseType）
+AddDemoStores(configuration)                   业务数据三端口（按 DatabaseType 选 MySql/SqlServer 实现）
 AddSingleton<IBusinessProcess, …>              业务流程接入（Order / Leave 各一个实现）
 AddSingleton<InMemoryOrgDirectory>             IOrgDirectory + IUserGroupManager（同一份数据两个视角）
 AddServiceTaskDelegates(typeof(Program).Assembly)   [ServiceTaskName] 扫描注册收口委托
 MapBusinessProcess(process)                    统一业务入口：POST {ApiPrefix}/business/start
-StartupInitializer.InitializeAsync(app)        启动序列：部署全部已注册流程 → 加载流程信息 → 发布流程图
+StartupInitializer.InitializeAsync(app)        启动序列：建库迁移 → 部署全部已注册流程 → 加载流程信息 → 发布流程图
 ```
 
 ### 新增业务流程（三步接入）
@@ -107,10 +110,11 @@ StartupInitializer.InitializeAsync(app)        启动序列：部署全部已注
 ### 发起时的流程类型 id（workflow_type_id）
 
 `StartWorkflowRequest.WorkflowTypeId`（框架契约）→ `BaseModel.Start` → 实例登记。
-Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；MySQL 侧
-`instances.workflow_type_id`（`varchar(64)`）写入该值，兜底用流程定义 key；同时落扁平变量 `workflowTypeId`。
+Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；
+`instances.workflow_type_id`（MySQL `varchar(64)` / SQL Server `nvarchar(64)`）写入该值，
+兜底用流程定义 key；同时落扁平变量 `workflowTypeId`。
 
-### MySQL 表（netbpm_demo）
+### 业务表（netbpm_demo；MySQL 无前缀 / SQL Server 在 wf schema）
 
 | 表 | 职责 |
 |---|---|
@@ -172,7 +176,9 @@ NetBpm.Demo/
 ├── Delegates/            服务任务委托（审批结束的业务回写）：leave.* 收口 / order.* 状态回写
 ├── Order/                订单契约 / JSON 业务存储 / 端点
 ├── Leave/                请假契约 / 端点
-├── Storage/              MySQL 实现（MySqlWorkflowDataStore 主体 + Sql/Rows 两个 partial、
-│                         MySqlOrderBillStore）+ AddDemoStores 存储注册扩展
+├── Storage/              双方言业务存储：MySqlWorkflowDataStore（主体 + Sql/Rows partial）、
+│                         MySqlOrderBillStore；SqlServerWorkflowDataStore（同构三件套）、
+│                         SqlServerOrderBillStore；DemoSchemaInitializer（建库+迁移）；
+│                         AddDemoStores 按 DatabaseType 注册
 └── wwwroot/              七个独立页面 + diagrams/（发布生成的流程图）+ 共享 css/js
 ```

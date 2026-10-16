@@ -32,7 +32,7 @@ create table wf.instances (
     tenant_id              bigint        not null,
     apply_id               bigint        not null,
     apply_time             datetime      not null,
-    workflow_type_id       bigint        not null,
+    workflow_type_id       nvarchar(64)  not null,
     workflow_version       nvarchar(50)  null,
     [describe]             nvarchar(200) not null,
     apply_emp_id           nvarchar(50)  not null,
@@ -115,7 +115,7 @@ exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请时间',
     @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'apply_time';
-exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型（对应cfg.Workflow_type）',
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型id（业务侧流程信息枚举 Id，GUID 字符串）',
     @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'workflow_type_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程版本',

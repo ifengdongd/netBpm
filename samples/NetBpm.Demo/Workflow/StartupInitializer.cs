@@ -1,5 +1,6 @@
 ﻿using NetBpm.Demo.Common;
 using NetBpm.Demo.Order;
+using NetBpm.Demo.Storage;
 using NetBpm.Persistence;
 using NetBpm.Runtime;
 using NetBpm.Workflow;
@@ -26,6 +27,7 @@ internal static class StartupInitializer
     {
         var processes = app.Services.GetServices<IBusinessProcess>().ToArray();
 
+        EnsureDatabaseSchema(app);
         LogStorageMode(app);
 
         await DeployProcessesAsync(app, processes).ConfigureAwait(false);
@@ -37,22 +39,53 @@ internal static class StartupInitializer
     }
 
     /// <summary>
-    /// 打印生效的存储模式。⚠️ 业务数据固定落 MySQL 真库，引擎也必须落 MySQL
+    /// 建库（若缺）+ 幂等执行 db/&lt;dialect&gt; 脚本（引擎 ACT_* 表 + wf 业务表）。
+    /// 已初始化的库直接跳过，重复启动不重复建表。
+    /// </summary>
+    private static void EnsureDatabaseSchema(WebApplication app)
+    {
+        var databaseType = app.Configuration.GetValue("NetBpm:DatabaseType", DatabaseType.MySql);
+        var connectionString = app.Configuration["NetBpm:ConnectionString"];
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException("NetBpm:ConnectionString 未配置。");
+        }
+
+        var migration = DemoSchemaInitializer.EnsureSchema(databaseType, connectionString);
+
+        if (migration.AlreadyInitialized)
+        {
+            app.Logger.LogInformation("数据库已初始化（{Dialect}），跳过建表脚本。", databaseType);
+        }
+        else
+        {
+            app.Logger.LogInformation(
+                "已执行建表脚本（{Dialect}）：{Scripts}",
+                databaseType,
+                string.Join(", ", migration.AppliedScripts));
+        }
+    }
+
+    /// <summary>
+    /// 打印生效的存储模式。⚠️ 业务数据固定落真库，引擎也必须落同一个真库
     /// （UseInMemoryExecutionTree=false）：内存宿主的实例 id 每次启动从 1 重新开始，
     /// 会撞真库里累积的 workflow_instance_id，启动即警告。
     /// </summary>
     private static void LogStorageMode(WebApplication app)
     {
+        var databaseType = app.Configuration.GetValue("NetBpm:DatabaseType", DatabaseType.MySql);
         var inMemoryEngine = app.Configuration.GetValue("NetBpm:UseInMemoryExecutionTree", false);
 
         app.Logger.LogInformation(
-            "存储模式：MySQL（引擎：{EngineMode}）—— 引擎与业务数据都落 netbpm_demo",
-            inMemoryEngine ? "内存执行树（危险：会与真库 instances 撞号）" : "MySQL（ACT_* 表）");
+            "存储模式：{Dialect}（引擎：{EngineMode}）—— 引擎与业务数据都落同一个库",
+            databaseType,
+            inMemoryEngine ? "内存执行树（危险：会与真库 instances 撞号）" : $"{databaseType}（ACT_* 表）");
 
         if (inMemoryEngine)
         {
             app.Logger.LogWarning(
-                "危险组合：引擎是内存执行树而业务数据落 MySQL 真库 —— "
+                "危险组合：引擎是内存执行树而业务数据落真库 —— "
                 + "重启后流程实例 id 从 1 重新开始，会覆盖真库里 workflow_instance_id 相同的旧登记行。"
                 + "请设置 NetBpm:UseInMemoryExecutionTree=false。");
         }

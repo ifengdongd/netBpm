@@ -4,10 +4,11 @@ using NetBpm.Persistence;
 namespace NetBpm.Demo.Common;
 
 /// <summary>
-/// 从 MySQL workflow_type 表（0008）加载流程信息，灌进 <see cref="ProcessInfoEnum"/>。
+/// 从 workflow_type 表（db/*/0008）加载流程信息，灌进 <see cref="ProcessInfoEnum"/>。
 /// </summary>
 /// <remarks>
 /// 系统启动时调用 <see cref="LoadAsync"/>：<b>新增流程 = 表里插一行</b>，不用改代码。
+/// 方言随 <c>NetBpm:DatabaseType</c>（MySQL 无 schema 前缀；SQL Server 业务表在 <c>wf</c> schema）。
 /// 表不存在 / 查询失败（如尚未执行 0008 建表脚本）→ 返回 <see langword="null"/>，
 /// 调用方回退 <see cref="ProcessInfoEnum.Defaults"/>，宿主永远起得来。
 /// </remarks>
@@ -16,6 +17,7 @@ public sealed class WorkflowTypeLoader
     private readonly IDbConnectionFactory _connections;
     private readonly ILogger _logger;
     private readonly long _tenantId;
+    private readonly DatabaseType _databaseType;
 
     /// <summary>构造加载器。</summary>
     public WorkflowTypeLoader(IDbConnectionFactory connections, IConfiguration configuration, ILogger logger)
@@ -27,6 +29,7 @@ public sealed class WorkflowTypeLoader
         _connections = connections;
         _logger = logger;
         _tenantId = configuration.GetValue(ConstField.WorkflowTenantConfigKey, 1L);
+        _databaseType = configuration.GetValue("NetBpm:DatabaseType", DatabaseType.MySql);
     }
 
     /// <summary>加载启用的流程类型（按 sort_order 排序）；表不可用时返回 null。</summary>
@@ -36,18 +39,32 @@ public sealed class WorkflowTypeLoader
         {
             await using var connection = _connections.CreateConnection();
 
+            var sql = _databaseType == DatabaseType.SqlServer
+                ? """
+                  select id          as Id,
+                         name        as Name,
+                         [describe]  as [Describe],
+                         view_url    as ViewUrl,
+                         approve_url as ApproveUrl
+                    from wf.workflow_type
+                   where tenant_id = @TenantId
+                     and enabled = 1
+                   order by sort_order asc, id asc
+                  """
+                : """
+                  select id          as Id,
+                         name        as Name,
+                         `describe`  as `Describe`,
+                         view_url    as ViewUrl,
+                         approve_url as ApproveUrl
+                    from workflow_type
+                   where tenant_id = @TenantId
+                     and enabled = 1
+                   order by sort_order asc, id asc
+                  """;
+
             var rows = await connection.QueryAsync<WorkflowTypeRow>(new CommandDefinition(
-                """
-                select id          as Id,
-                       name        as Name,
-                       `describe`  as `Describe`,
-                       view_url    as ViewUrl,
-                       approve_url as ApproveUrl
-                  from workflow_type
-                 where tenant_id = @TenantId
-                   and enabled = 1
-                 order by sort_order asc, id asc
-                """,
+                sql,
                 new { TenantId = _tenantId },
                 cancellationToken: ct)).ConfigureAwait(false);
 

@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
 
