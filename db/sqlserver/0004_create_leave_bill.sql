@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --  NetBpm · SQL Server 业务层建表脚本：请假单（1 张）
 -- ============================================================================
 --  来源：**本项目新增**（不是来源库的存量表）—— 0003 的三张表是「流程」表，
@@ -18,7 +18,7 @@
 --  执行顺序：0001 → 0002 → 0003 → 0004
 -- ============================================================================
 
-create table wf.leave_bill (
+create table leave_bill (
     tenant_id          bigint         not null,
     business_id        bigint         not null,
     apply_user         nvarchar(50)   not null,
@@ -34,5 +34,5 @@ create table wf.leave_bill (
 go
 
 if not exists (select * from sys.indexes where name = N'ix_leave_bill_apply_user')
-    create index ix_leave_bill_apply_user on wf.leave_bill (tenant_id, apply_user);
+    create index ix_leave_bill_apply_user on leave_bill (tenant_id, apply_user);
 go

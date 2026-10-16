@@ -1,11 +1,11 @@
-using NetBpm.Demo.Common;
+﻿using NetBpm.Demo.Common;
 using NetBpm.Persistence;
 using NetBpm.Workflow;
 
 namespace NetBpm.Demo.Storage;
 
 /// <summary>
-/// 业务数据落 <b>SQL Server 业务表</b>（库 netbpm_demo，<c>wf</c> schema）的实现。
+/// 业务数据落 <b>SQL Server 业务表</b>（库 netbpm_demo，统一 dbo，与 MySQL 表名逐字相同）的实现。
 /// </summary>
 /// <remarks>
 /// 端口逻辑全部在 <see cref="WorkflowDataStoreBase"/>，本类只挑 SQL Server 方言

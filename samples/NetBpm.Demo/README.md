@@ -1,4 +1,4 @@
-# NetBpm.Demo · 合并审批 Demo（订单 + 请假）
+﻿# NetBpm.Demo · 合并审批 Demo（订单 + 请假）
 
 一个宿主同时承载**两条审批流程**（订单审批 / 请假审批），演示流程设计、流程发起、
 审批提交、通过/拒绝后的业务回写、待办中心、任务转移与流程跳转的完整后端处理。
@@ -13,10 +13,10 @@ dotnet run --project samples/NetBpm.Demo
 # 打开 http://localhost:5188（首页即流程发起入口；OpenAPI 见 /openapi/v1.json）
 ```
 
-**存储落真库（默认 SQL Server 10.1.245.36，Windows 身份认证，库 `netbpm_demo`；可切回 MySQL）**：
+**存储落真库（默认 MySQL 127.0.0.1，库 `netbpm_demo`；可切 SQL Server 10.1.245.36 Windows 身份认证）**：
 方言随 `NetBpm:DatabaseType`，引擎落 ACT_* 表（`UseInMemoryExecutionTree=false`），
 业务数据落 `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` + `order_bill`
-（MySQL 无 schema 前缀；SQL Server 业务表在 `wf` schema）。启动时自动建库（若缺）并幂等执行
+（双方言同库同 schema：业务表与引擎 ACT_* 表表名逐字相同）。启动时自动建库（若缺）并幂等执行
 `db/<dialect>` 全部脚本，重复启动跳过。
 ⚠️ 引擎与业务数据是一体的 —— 内存执行树的流程实例 id 每次重启从 1 重新开始，会与真库累积行撞号。
 
@@ -114,7 +114,7 @@ Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；
 `instances.workflow_type_id`（MySQL `varchar(64)` / SQL Server `nvarchar(64)`）写入该值，
 兜底用流程定义 key；同时落扁平变量 `workflowTypeId`。
 
-### 业务表（netbpm_demo；MySQL 无前缀 / SQL Server 在 wf schema）
+### 业务表（netbpm_demo；双方言同库同 schema、表名逐字相同）
 
 | 表 | 职责 |
 |---|---|

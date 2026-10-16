@@ -1,4 +1,4 @@
-using NetBpm.Demo.Common;
+﻿using NetBpm.Demo.Common;
 using NetBpm.Demo.Order;
 using NetBpm.Demo.Storage.DataAccess;
 using NetBpm.Persistence;
@@ -11,7 +11,7 @@ namespace NetBpm.Demo.Storage;
 /// </summary>
 /// <remarks>
 /// 端口语义：读-改-写、审批结束回写状态（100 / -1）；落点是 db/*/0006 建的
-/// <c>order_bill</c> 表（MySQL 无前缀 / SQL Server 在 <c>wf</c> schema —— 表名前缀由方言的
+/// <c>order_bill</c> 表（双方言表名逐字相同、同库同 schema —— 见方言的
 /// 标识符引用处理，见 <see cref="MySqlDataAccessor{TEntity}"/> / <see cref="SqlServerDataAccessor{TEntity}"/>）。
 /// 伪删除（<see cref="DeleteAsync"/>）由访问器把 <c>deleted_flag</c> 置 1；列表与明细自动过滤已删除行。
 /// </remarks>

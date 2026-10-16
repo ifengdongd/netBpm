@@ -1,4 +1,4 @@
--- ============================================================================
+﻿-- ============================================================================
 --  NetBpm · SQL Server 业务层建表脚本：订单表（1 张）
 -- ============================================================================
 --  与 db/mysql/0006_create_order_bill.sql 同一套约定，方言换成 SQL Server。
@@ -11,7 +11,7 @@
 --  执行顺序：0001 → 0002 → 0003 → 0004 → 0005 → 0006
 -- ============================================================================
 
-create table wf.order_bill (
+create table order_bill (
     tenant_id           bigint          not null,
     business_id         bigint          not null,
     product_name        nvarchar(200)   null,
@@ -31,9 +31,9 @@ create table wf.order_bill (
 go
 
 if not exists (select * from sys.indexes where name = N'ix_order_bill_apply_user')
-    create index ix_order_bill_apply_user on wf.order_bill (tenant_id, apply_user);
+    create index ix_order_bill_apply_user on order_bill (tenant_id, apply_user);
 go
 
 if not exists (select * from sys.indexes where name = N'ix_order_bill_status')
-    create index ix_order_bill_status on wf.order_bill (tenant_id, status);
+    create index ix_order_bill_status on order_bill (tenant_id, status);
 go

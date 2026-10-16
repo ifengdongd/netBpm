@@ -1,4 +1,4 @@
-using NetBpm.Demo.Common;
+﻿using NetBpm.Demo.Common;
 using NetBpm.Demo.Order;
 using NetBpm.Demo.Storage.DataAccess;
 using NetBpm.Persistence;
@@ -6,7 +6,7 @@ using NetBpm.Persistence;
 namespace NetBpm.Demo.Storage;
 
 /// <summary>
-/// 订单业务数据落 <b>SQL Server <c>wf.order_bill</c> 表</b>的实现。
+/// 订单业务数据落 <b>SQL Server <c>order_bill</c> 表</b>（dbo，与 MySQL 表名逐字相同）的实现。
 /// </summary>
 /// <remarks>
 /// CRUD 全部委托 <see cref="IDataAccessor{TEntity}"/>（<see cref="SqlServerDataAccessor{TEntity}"/>：

@@ -9,7 +9,8 @@
 /// 审批人联查（sys_emp）的表结构双方言完全一致，只有 SQL 写法不同：
 /// </para>
 /// <list type="bullet">
-///   <item><description><b>schema</b>：MySQL 无前缀；SQL Server 业务表在 <c>wf</c> schema；</description></item>
+///   <item><description><b>schema</b>：双方言一致 —— 业务表与引擎 ACT_* 同库同 schema
+///     （MySQL 无前缀 / SQL Server 统一 dbo），表名双方言逐字相同；</description></item>
 ///   <item><description><b>单行查询</b>：MySQL <c>limit 1</c>；SQL Server <c>top (1)</c>；</description></item>
 ///   <item><description><b>保留字</b>：<c>describe</c> MySQL 反引号 / SQL Server 方括号；</description></item>
 ///   <item><description><b>upsert</b>：MySQL <c>on duplicate key update</c>；SQL Server 先 update、
@@ -328,7 +329,7 @@ public sealed class MySqlWorkflowStoreDialect : IWorkflowStoreDialect
         """;
 }
 
-/// <summary>SQL Server 方言（db/sqlserver 脚本，业务表在 wf schema）。</summary>
+/// <summary>SQL Server 方言（db/sqlserver 脚本，业务表统一 dbo，与 MySQL 表名逐字相同）。</summary>
 public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
 {
     /// <summary>单例（SQL 常量不可变）。</summary>
@@ -359,11 +360,11 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
                i.last_audited_time    as LastAuditedTime,
                h.deal_result          as LastResult,
                h.deal_comment         as LastComment
-          from wf.instances i
-          left join wf.deal_history h
+          from instances i
+          left join deal_history h
             on h.deal_history_id = (
                  select top (1) h2.deal_history_id
-                   from wf.deal_history h2
+                   from deal_history h2
                   where h2.apply_id = i.apply_id
                     and h2.deal_result is not null
                   order by h2.deal_time desc, h2.deal_history_id desc)
@@ -371,16 +372,16 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
 
     /// <inheritdoc />
     public string SelectApplyIdSql =>
-        "select top (1) apply_id from wf.instances where workflow_instance_id = @processInstanceId";
+        "select top (1) apply_id from instances where workflow_instance_id = @processInstanceId";
 
     /// <inheritdoc />
     public string SelectInstanceRefSql =>
         "select top (1) apply_id as ApplyId, business_id as BusinessId "
-        + "from wf.instances where workflow_instance_id = @processInstanceId";
+        + "from instances where workflow_instance_id = @processInstanceId";
 
     /// <inheritdoc />
     public string InsertInstanceSql => """
-        insert into wf.instances
+        insert into instances
             (tenant_id, apply_id, apply_time, workflow_type_id, workflow_version, [describe],
              apply_emp_id, apply_dept_id, business_id, business_dept_id, status_id,
              workflow_instance_id, create_emp_id, create_time)
@@ -392,7 +393,7 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
 
     /// <inheritdoc />
     public string UpdateInstanceSql => """
-        update wf.instances
+        update instances
            set workflow_version = @Version,
                [describe]       = @Describe,
                business_dept_id = @BusinessDeptId,
@@ -402,7 +403,7 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
 
     /// <inheritdoc />
     public string FinishInstanceSql => """
-        update wf.instances
+        update instances
            set status_id         = N'已完成',
                current_step      = @CurrentStep,
                assign_emp        = null,
@@ -414,7 +415,7 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
 
     /// <inheritdoc />
     public string UpdateInstanceStateSql => """
-        update wf.instances
+        update instances
            set current_step  = @CurrentStep,
                assign_emp    = @AssignEmp,
                modify_time   = @Now
@@ -426,20 +427,20 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
         select workflow_instance_id as WorkflowInstanceId,
                param_name           as ParamName,
                param_value          as ParamValue
-          from wf.workflow_parameters
+          from workflow_parameters
          where workflow_instance_id = @processInstanceId
         """;
 
     /// <inheritdoc />
     public string UpsertParameterSql => """
-        update wf.workflow_parameters
+        update workflow_parameters
            set param_value = @ParamValue,
                modify_time = @Now
          where workflow_instance_id = @processInstanceId
            and param_name = @ParamName;
 
         if @@rowcount = 0
-            insert into wf.workflow_parameters
+            insert into workflow_parameters
                 (tenant_id, workflow_instance_id, param_name, param_value, create_time)
             values
                 (@TenantId, @processInstanceId, @ParamName, @ParamValue, @Now);
@@ -450,7 +451,7 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
         select workflow_instance_id as WorkflowInstanceId,
                param_name           as ParamName,
                param_value          as ParamValue
-          from wf.workflow_parameters
+          from workflow_parameters
          order by workflow_instance_id asc, param_name asc
         """;
 
@@ -464,15 +465,15 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
                h.deal_comment    as DealComment,
                h.form_key        as FormKey,
                i.status_id       as StatusId
-          from wf.deal_history h
-          join wf.instances i on i.apply_id = h.apply_id
+          from deal_history h
+          join instances i on i.apply_id = h.apply_id
          where i.workflow_instance_id = @processInstanceId
          order by h.deal_time asc, h.deal_history_id asc
         """;
 
     /// <inheritdoc />
     public string InsertDealHistorySql => """
-        insert into wf.deal_history
+        insert into deal_history
             (tenant_id, deal_history_id, business_id, apply_id, task_node, deal_emp_id,
              deal_time, deal_result, deal_comment, form_key, deal_emp_name, deal_domain_account)
         values
@@ -488,15 +489,15 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
                t.assign_emp_id as AssignEmpId,
                t.form_key      as FormKey,
                t.create_time   as CreateTime
-          from wf.instance_current_task t
-          join wf.instances i on i.apply_id = t.apply_id
+          from instance_current_task t
+          join instances i on i.apply_id = t.apply_id
          where i.workflow_instance_id = @processInstanceId
          order by t.step_id asc
         """;
 
     /// <inheritdoc />
     public string InsertCurrentTaskSql => """
-        insert into wf.instance_current_task
+        insert into instance_current_task
             (tenant_id, step_id, apply_id, task_id, task_node, task_owner, assign_emp_id, form_key, create_time)
         values
             (@TenantId, @StepId, @ApplyId, @TaskId, @TaskNode, @TaskOwner, @AssignEmpId, @FormKey, @Now)
@@ -504,11 +505,11 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
 
     /// <inheritdoc />
     public string DeleteCurrentTasksSql =>
-        "delete from wf.instance_current_task where apply_id = @applyId";
+        "delete from instance_current_task where apply_id = @applyId";
 
     /// <inheritdoc />
     public string SelectApproverNameSql =>
-        "select top (1) emp_name from wf.sys_emp "
+        "select top (1) emp_name from sys_emp "
         + "where tenant_id = @TenantId and domain_account = @DealEmpId";
 
     /// <inheritdoc />
@@ -536,7 +537,7 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
                deleted_flag          as DeletedFlag,
                original_business_id  as OriginalBusinessId,
                flow_file_id          as FlowFileId
-          from wf.instances
+          from instances
          order by apply_id desc
         """;
 
@@ -551,7 +552,7 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
                assign_emp_id as AssignEmpId,
                form_key      as FormKey,
                create_time   as CreateTime
-          from wf.instance_current_task
+          from instance_current_task
          order by step_id desc
         """;
 
@@ -569,7 +570,7 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
                form_key            as FormKey,
                deal_emp_name       as DealEmpName,
                deal_domain_account as DealDomainAccount
-          from wf.deal_history
+          from deal_history
          order by deal_history_id desc
         """;
 }

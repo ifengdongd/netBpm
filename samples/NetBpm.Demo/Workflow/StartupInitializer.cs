@@ -39,7 +39,7 @@ internal static class StartupInitializer
     }
 
     /// <summary>
-    /// 建库（若缺）+ 幂等执行 db/&lt;dialect&gt; 脚本（引擎 ACT_* 表 + wf 业务表）。
+    /// 建库（若缺）+ 幂等执行 db/&lt;dialect&gt; 脚本（引擎 ACT_* 表 + 业务表，双方言同库同 schema）。
     /// 已初始化的库直接跳过，重复启动不重复建表。
     /// </summary>
     private static void EnsureDatabaseSchema(WebApplication app)

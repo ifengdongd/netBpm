@@ -1,17 +1,17 @@
--- ============================================================================
+﻿-- ============================================================================
 --  NetBpm · SQL Server 业务层建表脚本：流程实例相关表（3 张）
 -- ============================================================================
---  来源：业务系统存量库（wf schema）：
---        wf.instances              流程实例表
---        wf.instance_current_task  当前审批任务记录
---        wf.deal_history           审批历史记录
+--  来源：业务系统存量库（原 wf schema，本库统一落 dbo，与引擎 ACT_* 同 schema）：
+--        instances              流程实例表
+--        instance_current_task  当前审批任务记录
+--        deal_history           审批历史记录
 --
 --  与引擎表（dbo.ACT_*，见 0001_create_schema.sql）的关系：
 --    instances.workflow_instance_id  → ACT_RU_EXECUTION.ID_ / ACT_HI_PROCINST.PROC_INST_ID_
 --    instance_current_task.task_id   → ACT_RU_TASK.ID_
 --    deal_history.task_node          → 用户任务节点名（ACT_RU_TASK.NAME_）
 --
---  ⚠️ 表名、列名与来源库逐字一致（含 [wf] schema），请勿改名。
+--  ⚠️ 表名、列名与来源库逐字一致（schema 统一为 dbo），请勿改名。
 --     主键均为业务侧生成的 BIGINT，不使用 IDENTITY（与来源一致）。
 --
 --  ➕ 在来源 DDL 基础上补充了 3 个查询索引（apply_id / workflow_instance_id / business_id），
@@ -20,15 +20,9 @@
 --  执行顺序：0001_create_schema.sql → 0002_init_data.sql → 0003_create_process_instance_tables.sql
 -- ============================================================================
 
--- ─────────────────────────── schema（来源库使用 wf）───────────────────────────
-
-if not exists (select * from sys.schemas where name = N'wf')
-    exec('create schema wf');
-go
-
 -- ─────────────────────────── 流程实例表 ───────────────────────────
 
-create table wf.instances (
+create table instances (
     tenant_id              bigint        not null,
     apply_id               bigint        not null,
     apply_time             datetime      not null,
@@ -57,7 +51,7 @@ create table wf.instances (
 
 -- ─────────────────────────── 当前审批任务记录 ───────────────────────────
 
-create table wf.instance_current_task (
+create table instance_current_task (
     tenant_id       bigint        not null,
     step_id         bigint        not null,
     apply_id        bigint        null,
@@ -72,7 +66,7 @@ create table wf.instance_current_task (
 
 -- ─────────────────────────── 审批历史记录 ───────────────────────────
 
-create table wf.deal_history (
+create table deal_history (
     tenant_id            bigint         not null,
     deal_history_id      bigint         not null,
     business_id          bigint         null,
@@ -90,163 +84,163 @@ create table wf.deal_history (
 
 -- ─────────────────────────── 索引（来源 DDL 之外的补充）───────────────────────────
 
-create index ix_wf_instances_workflow_instance_id on wf.instances(workflow_instance_id);
-create index ix_wf_instances_business_id          on wf.instances(business_id);
-create index ix_wf_instances_status_id            on wf.instances(tenant_id, status_id);
-create index ix_wf_instance_current_task_apply_id on wf.instance_current_task(apply_id);
-create index ix_wf_instance_current_task_task_id  on wf.instance_current_task(task_id);
-create index ix_wf_deal_history_apply_id          on wf.deal_history(apply_id);
-create index ix_wf_deal_history_deal_emp_id       on wf.deal_history(tenant_id, deal_emp_id);
+create index ix_instances_workflow_instance_id on instances(workflow_instance_id);
+create index ix_instances_business_id          on instances(business_id);
+create index ix_instances_status_id            on instances(tenant_id, status_id);
+create index ix_instance_current_task_apply_id on instance_current_task(apply_id);
+create index ix_instance_current_task_task_id  on instance_current_task(task_id);
+create index ix_deal_history_apply_id          on deal_history(apply_id);
+create index ix_deal_history_deal_emp_id       on deal_history(tenant_id, deal_emp_id);
 
 go
 
 -- ─────────────────────────── 表与列注释（扩展属性 MS_Description）───────────────────────────
 
--- wf.instances / 流程实例表
+-- instances / 流程实例表
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例表',
-    @level0type = N'SCHEMA', @level0name = N'wf',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
     @level1type = N'TABLE', @level1name = N'instances';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'tenant_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'apply_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请时间',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'apply_time';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型id（业务侧流程信息枚举 Id，GUID 字符串）',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'workflow_type_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程版本',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'workflow_version';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例描述',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'describe';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'apply_emp_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人部门',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'apply_dept_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'对应的业务id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'business_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务部门id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'business_dept_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例状态 审批中、已完成',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'status_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'是否是最新流程实例',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'newest_flag';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例id(对应于流程引擎中的id）',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'workflow_instance_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后审批完成时间',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'last_audited_time';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建人',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'create_emp_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'create_time';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前步骤名称',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'current_step';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前处理人',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'assign_emp';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'修改人',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'modify_emp_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'修改时间',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'modify_time';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'删除标志',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'deleted_flag';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'原始业务ID',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'original_business_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图文件ID',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instances',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
     @level2type = N'COLUMN', @level2name = N'flow_file_id';
 
--- wf.instance_current_task / 当前审批步骤及审批人
+-- instance_current_task / 当前审批步骤及审批人
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前审批步骤及审批人',
-    @level0type = N'SCHEMA', @level0name = N'wf',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
     @level1type = N'TABLE', @level1name = N'instance_current_task';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'tenant_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'数据行id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'step_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'apply_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'步骤ID',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'task_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前步骤名称',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'task_node';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'待办项归属人',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'task_owner';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前审批者',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'assign_emp_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程步骤对应的环节配置',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'form_key';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'instance_current_task',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
     @level2type = N'COLUMN', @level2name = N'create_time';
 
--- wf.deal_history / 审批历史记录
+-- deal_history / 审批历史记录
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批历史记录',
-    @level0type = N'SCHEMA', @level0name = N'wf',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
     @level1type = N'TABLE', @level1name = N'deal_history';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'tenant_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'数据行id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'deal_history_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'对应业务表单的ID',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'business_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'apply_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'步骤名称',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'task_node';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批者员工id',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'deal_emp_id';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批时间',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'deal_time';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批结果',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'deal_result';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批说明',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'deal_comment';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程步骤对应的环节配置',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'form_key';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批人姓名',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'deal_emp_name';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批人域帐号',
-    @level0type = N'SCHEMA', @level0name = N'wf', @level1type = N'TABLE', @level1name = N'deal_history',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
     @level2type = N'COLUMN', @level2name = N'deal_domain_account';
 
 go

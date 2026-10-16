@@ -24,7 +24,7 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.P
 // 引擎：落真库（ACT_* 表，方言随 NetBpm:DatabaseType）—— 必须与业务数据一致（内存执行树会与真库 instances 撞号）
 builder.Services.AddNetBpm(builder.Configuration);
 
-// 业务数据存储：方言随 NetBpm:DatabaseType（引擎同一个库：MySQL 直落；SqlServer 业务表在 wf schema）
+// 业务数据存储：方言随 NetBpm:DatabaseType（引擎同一个库，双方言业务表与 ACT_* 表同库同 schema、表名逐字相同）
 builder.Services.AddDemoStores(builder.Configuration);
 
 // 业务流程接入：新建业务流程只需实现 IBusinessProcess（+ 两个收口委托 + BPMN + workflow_type 行）

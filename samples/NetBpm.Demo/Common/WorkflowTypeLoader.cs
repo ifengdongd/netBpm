@@ -8,7 +8,7 @@ namespace NetBpm.Demo.Common;
 /// </summary>
 /// <remarks>
 /// 系统启动时调用 <see cref="LoadAsync"/>：<b>新增流程 = 表里插一行</b>，不用改代码。
-/// 方言随 <c>NetBpm:DatabaseType</c>（MySQL 无 schema 前缀；SQL Server 业务表在 <c>wf</c> schema）。
+/// 方言随 <c>NetBpm:DatabaseType</c>（表双方言同名同 schema，仅 <c>describe</c> 保留字引用方式不同）。
 /// 表不存在 / 查询失败（如尚未执行 0008 建表脚本）→ 返回 <see langword="null"/>，
 /// 调用方回退 <see cref="ProcessInfoEnum.Defaults"/>，宿主永远起得来。
 /// </remarks>
@@ -46,7 +46,7 @@ public sealed class WorkflowTypeLoader
                          [describe]  as [Describe],
                          view_url    as ViewUrl,
                          approve_url as ApproveUrl
-                    from wf.workflow_type
+                    from workflow_type
                    where tenant_id = @TenantId
                      and enabled = 1
                    order by sort_order asc, id asc
