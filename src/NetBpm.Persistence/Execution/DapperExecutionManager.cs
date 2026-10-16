@@ -97,7 +97,8 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         Process process,
         string processDefinitionId,
         string? businessKey,
-        string? startUserId)
+        string? startUserId,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
@@ -114,6 +115,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
             ProcessDefinitionId = processDefinitionId,
             BusinessKey = businessKey,
             StartUserId = startUserId,
+            TenantId = tenantId,
             StartTime = DateTime.UtcNow,
             IsScope = true,
             IsActive = true,
@@ -139,6 +141,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
             ProcessInstanceId = parent.ProcessInstanceId ?? parent.Id,
             RootProcessInstanceId = parent.RootProcessInstanceId ?? parent.ProcessInstanceId ?? parent.Id,
             ProcessDefinitionId = parent.ProcessDefinitionId,
+            TenantId = parent.TenantId,
             StartTime = DateTime.UtcNow,
             IsScope = false,
             IsActive = true,
@@ -418,8 +421,13 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         // 任务与流程实例级身份关系的清理交给任务管理器（对应 TaskEntityManagerImpl.deleteTasksByProcessInstanceId）
         await _taskManager.DeleteTasksByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
 
-        await ExecuteAsync(session, DeleteVariablesByProcessInstanceSql, new { processInstanceId }, ct)
-            .ConfigureAwait(false);
+        // 变量行 → 字节行（ACT_FK_VAR_BYTEARRAY 为 RESTRICT，先取 id 再删）
+        await DeleteVariablesAndByteArraysAsync(
+            session,
+            CaptureByteArrayIdsByProcessInstanceSql,
+            DeleteVariablesByProcessInstanceSql,
+            new { processInstanceId },
+            ct).ConfigureAwait(false);
 
         // 先删子执行（深层在前），再删根执行 —— 满足 ACT_FK_EXE_PARENT
         var children = await QueryStatesAsync(
@@ -612,8 +620,12 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
                 .ConfigureAwait(false);
             await ExecuteAsync(session, DeleteTasksByExecutionSql, new { id = execution.Id }, ct)
                 .ConfigureAwait(false);
-            await ExecuteAsync(session, DeleteVariablesByExecutionSql, new { id = execution.Id }, ct)
-                .ConfigureAwait(false);
+            await DeleteVariablesAndByteArraysAsync(
+                session,
+                CaptureByteArrayIdsByExecutionSql,
+                DeleteVariablesByExecutionSql,
+                new { id = execution.Id },
+                ct).ConfigureAwait(false);
 
             // delete from ACT_RU_EXECUTION where ID_ = @id and REV_ = @revision
             var affected = await ExecuteAsync(
@@ -706,7 +718,6 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         var rows = await session.Connection
             .QueryAsync(new CommandDefinition(sql, parameters, session.Transaction, cancellationToken: ct))
             .ConfigureAwait(false);
-
         var states = new List<ExecutionState>();
 
         foreach (IDictionary<string, object> row in rows)
@@ -722,6 +733,20 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         }
 
         return states;
+    }
+
+    /// <summary>查询单列字符串集合（longString 字节行 id 捕获用）。</summary>
+    private static async Task<List<string>> QueryColumnAsync(
+        IDbSession session,
+        string sql,
+        object? parameters,
+        CancellationToken ct)
+    {
+        var values = await session.Connection
+            .QueryAsync<string>(new CommandDefinition(sql, parameters, session.Transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        return [.. values];
     }
 
     private static DynamicParameters BuildParameters(
@@ -744,6 +769,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         parameters.Add("SuperExecutionId", execution.SuperExecutionId);
         parameters.Add("RootProcessInstanceId", execution.RootProcessInstanceId);
         parameters.Add("SuspensionState", execution.SuspensionState);
+        parameters.Add("TenantId", execution.TenantId ?? string.Empty);
         parameters.Add("Name", execution is ExecutionEntity entity ? entity.Name : null);
         parameters.Add("StartTime", execution.StartTime);
         parameters.Add("StartUserId", execution.StartUserId);
@@ -782,7 +808,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         values (
             @Id, 1, @ProcessInstanceId, @BusinessKey, @ProcessDefinitionId, @ActivityId,
             @IsActive, @IsConcurrent, @IsScope, @IsEventScope, 0,
-            @ParentId, @SuperExecutionId, @RootProcessInstanceId, @SuspensionState, '',
+            @ParentId, @SuperExecutionId, @RootProcessInstanceId, @SuspensionState, @TenantId,
             @Name, @StartTime, @StartUserId, 0, 0, 0,
             0, 0, 0, 0, 0,
             0, null)
@@ -840,6 +866,35 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
 
     private const string DeleteVariablesByProcessInstanceSql =
         "delete from ACT_RU_VARIABLE where PROC_INST_ID_ = @processInstanceId";
+
+    private const string CaptureByteArrayIdsByExecutionSql =
+        "select BYTEARRAY_ID_ from ACT_RU_VARIABLE where EXECUTION_ID_ = @id and BYTEARRAY_ID_ is not null";
+
+    private const string CaptureByteArrayIdsByProcessInstanceSql =
+        "select BYTEARRAY_ID_ from ACT_RU_VARIABLE where PROC_INST_ID_ = @processInstanceId and BYTEARRAY_ID_ is not null";
+
+    private const string DeleteByteArraysByIdsSql =
+        "delete from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null and ID_ in @ids";
+
+    /// <summary>删除变量行 + 其 longString 字节行（先取 id → 删变量行 → 按 id 删字节行，满足 RESTRICT 外键）。</summary>
+    private static async Task DeleteVariablesAndByteArraysAsync(
+        IDbSession session,
+        string captureByteArrayIdsSql,
+        string deleteVariablesSql,
+        object args,
+        CancellationToken ct)
+    {
+        var byteArrayIds = (await QueryColumnAsync(session, captureByteArrayIdsSql, args, ct).ConfigureAwait(false))
+            .ToList();
+
+        await ExecuteAsync(session, deleteVariablesSql, args, ct).ConfigureAwait(false);
+
+        if (byteArrayIds.Count > 0)
+        {
+            await ExecuteAsync(session, DeleteByteArraysByIdsSql, new { ids = byteArrayIds }, ct)
+                .ConfigureAwait(false);
+        }
+    }
 
     private const string DeleteTasksByExecutionSql =
         "delete from ACT_RU_TASK where EXECUTION_ID_ = @id";

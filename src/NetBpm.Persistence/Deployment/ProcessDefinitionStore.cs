@@ -39,7 +39,8 @@ public sealed record DeployedProcessDefinition(
     string? Name,
     int Version,
     string DeploymentId,
-    DateTime? DeployTime);
+    DateTime? DeployTime,
+    string? TenantId = null);
 
 /// <summary>
 /// 流程定义仓储（部署 / 回显）。
@@ -47,20 +48,39 @@ public sealed record DeployedProcessDefinition(
 /// </summary>
 public interface IProcessDefinitionStore
 {
+    /// <summary>
+    /// 部署流程定义。
+    /// <para>
+    /// <paramref name="rawResourceBytes"/> 是<b>调用方提供的原始 XML 字节</b>（B2.5）：
+    /// 传入时 <c>ACT_GE_BYTEARRAY.BYTES_</c> 存原始字节（与 Activiti 一致），而不是重新序列化的 XML；
+    /// 为 <see langword="null"/> 时退回重新序列化（内存仓储 / 内部部署路径）。
+    /// </para>
+    /// <para>
+    /// <paramref name="tenantId"/> 为部署租户（B2.3），落到 <c>ACT_RE_DEPLOYMENT</c> 与
+    /// <c>ACT_RE_PROCDEF.TENANT_ID_</c>；为 <see langword="null"/> 时落 <c>''</c>（无租户，与 Activiti 一致）。
+    /// </para>
+    /// </summary>
     ValueTask<ProcessDefinition> DeployAsync(
         BpmnModel bpmnModel,
         string resourceName,
         string? deploymentName = null,
+        byte[]? rawResourceBytes = null,
+        string? tenantId = null,
         CancellationToken ct = default);
 
     ValueTask<ProcessDefinition?> FindByIdAsync(string processDefinitionId, CancellationToken ct = default);
 
-    /// <summary>查全部已部署的流程定义（每个部署一行，按部署时间倒序）。</summary>
-    ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(CancellationToken ct = default);
+    /// <summary>查全部已部署的流程定义（每个部署一行，按部署时间倒序）；<paramref name="tenantId"/> 过滤可选。</summary>
+    ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(
+        string? tenantId = null,
+        CancellationToken ct = default);
 
     ValueTask<BpmnModel?> GetBpmnModelAsync(string processDefinitionId, CancellationToken ct = default);
 
     ValueTask<string?> GetResourceXmlAsync(string processDefinitionId, CancellationToken ct = default);
+
+    /// <summary>查流程定义的租户（B2.3，启动实例时继承）；定义不存在返回 <see langword="null"/>。</summary>
+    ValueTask<string?> GetTenantIdAsync(string processDefinitionId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -76,6 +96,7 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
     private readonly Dictionary<string, BpmnModel> _models = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _resources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTime> _deployTimes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> Tenants = new(StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
 
     public InMemoryProcessDefinitionStore(IIdGenerator idGenerator, IBpmnXmlConverter xmlConverter)
@@ -92,6 +113,8 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
         BpmnModel bpmnModel,
         string resourceName,
         string? deploymentName = null,
+        byte[]? rawResourceBytes = null,
+        string? tenantId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(bpmnModel);
@@ -108,7 +131,8 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
         lock (_syncRoot)
         {
             var version = _definitions.Values
-                .Where(definition => string.Equals(definition.Key, process.Id, StringComparison.Ordinal))
+                .Where(definition => string.Equals(definition.Key, process.Id, StringComparison.Ordinal)
+                    && string.Equals(Tenants.GetValueOrDefault(definition.Id), tenantId, StringComparison.Ordinal))
                 .Select(definition => definition.Version)
                 .DefaultIfEmpty(0)
                 .Max() + 1;
@@ -126,8 +150,11 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
 
             _definitions[definitionId] = definition;
             _models[definitionId] = bpmnModel;
-            _resources[definitionId] = Serialize(bpmnModel);
+            _resources[definitionId] = rawResourceBytes is { Length: > 0 } raw
+                ? System.Text.Encoding.UTF8.GetString(raw)
+                : Serialize(bpmnModel);
             _deployTimes[deploymentId] = DateTime.UtcNow;
+            Tenants[definitionId] = tenantId;
 
             return ValueTask.FromResult(definition);
         }
@@ -145,18 +172,23 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
     }
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(CancellationToken ct = default)
+    public ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(
+        string? tenantId = null,
+        CancellationToken ct = default)
     {
         lock (_syncRoot)
         {
             var result = _definitions.Values
+                .Where(definition => tenantId is null
+                    || string.Equals(Tenants.GetValueOrDefault(definition.Id), tenantId, StringComparison.Ordinal))
                 .Select(definition => new DeployedProcessDefinition(
                     definition.Id,
                     definition.Key,
                     definition.Name,
                     definition.Version,
                     definition.DeploymentId,
-                    _deployTimes.GetValueOrDefault(definition.DeploymentId)))
+                    _deployTimes.GetValueOrDefault(definition.DeploymentId),
+                    Tenants.GetValueOrDefault(definition.Id)))
                 .OrderByDescending(definition => definition.DeployTime ?? DateTime.MinValue)
                 .ToList();
 
@@ -183,6 +215,17 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
         lock (_syncRoot)
         {
             return ValueTask.FromResult(_resources.GetValueOrDefault(processDefinitionId));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<string?> GetTenantIdAsync(string processDefinitionId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        lock (_syncRoot)
+        {
+            return ValueTask.FromResult(Tenants.GetValueOrDefault(processDefinitionId));
         }
     }
 

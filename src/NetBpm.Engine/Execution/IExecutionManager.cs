@@ -8,12 +8,16 @@ namespace NetBpm.Engine.Execution;
 /// </summary>
 public interface IExecutionManager
 {
-    /// <summary>创建流程实例根执行（<c>IsScope = true</c>，<c>ParentId = null</c>）。</summary>
+    /// <summary>
+    /// 创建流程实例根执行（<c>IsScope = true</c>，<c>ParentId = null</c>）。
+    /// <paramref name="tenantId"/> 为部署时指定的租户（B2.3，缺省无租户）。
+    /// </summary>
     IExecutionEntity CreateProcessInstanceExecution(
         Process process,
         string processDefinitionId,
         string? businessKey,
-        string? startUserId);
+        string? startUserId,
+        string? tenantId = null);
 
     /// <summary>创建并发子执行（<c>IsConcurrent = true</c>）。</summary>
     IExecutionEntity CreateChildExecution(IExecutionEntity parent);

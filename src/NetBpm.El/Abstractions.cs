@@ -21,6 +21,13 @@ public interface IVariableScope
     ValueTask<IDictionary<string, object?>> GetVariablesAsync(CancellationToken ct = default);
 
     ValueTask SetVariablesAsync(IDictionary<string, object?> variables, CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除变量。对应 Activiti <c>VariableScopeImpl.removeVariable</c>：
+    /// 本作用域有则删本地，否则沿作用域链上溯；到顶仍无则无操作。
+    /// </summary>
+    /// <returns>是否删除了某个作用域上的变量。</returns>
+    ValueTask<bool> RemoveVariableAsync(string name, CancellationToken ct = default);
 }
 
 /// <summary>

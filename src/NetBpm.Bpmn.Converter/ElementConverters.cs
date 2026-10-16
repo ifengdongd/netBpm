@@ -207,6 +207,10 @@ public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
         {
             switch (child.LocalName)
             {
+                case "multiInstanceLoopCharacteristics":
+                    element.LoopCharacteristics = ReadMultiInstanceLoopCharacteristics(child);
+                    break;
+
                 case "humanPerformer":
                     {
                         // 对应 UserTaskXMLConverter.HumanPerformerParser：
@@ -297,6 +301,7 @@ public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
         WriteActivitiAttribute(writer, "category", element.Category);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeSkipExpression, element.SkipExpression);
         WriteExtensionElements(writer, element);
+        WriteMultiInstanceLoopCharacteristics(writer, element.LoopCharacteristics);
         writer.WriteEndElement();
     }
 
@@ -338,7 +343,14 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
                     : ServiceTaskImplementationType.None;
 
         // extensionElements（任务监听器 / 字段注入）由基类的 ReadChildren 集中处理
-        ReadChildren(reader, element, _ => { });
+        ReadChildren(reader, element, child =>
+        {
+            // 多实例解析进模型但引擎不支持 —— 由 MultiInstanceRule 部署期拒绝
+            if (child.LocalName == "multiInstanceLoopCharacteristics")
+            {
+                element.LoopCharacteristics = ReadMultiInstanceLoopCharacteristics(child);
+            }
+        });
     }
 
     protected override void ConvertElementToXml(XmlWriter writer, ServiceTask element)
@@ -351,6 +363,7 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
         WriteActivitiAttribute(writer, BpmnConstants.AttributeExpression, element.Expression);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeResultVariableName, element.ResultVariableName);
         WriteExtensionElements(writer, element);
+        WriteMultiInstanceLoopCharacteristics(writer, element.LoopCharacteristics);
         writer.WriteEndElement();
     }
 }
@@ -363,13 +376,20 @@ public sealed class ManualTaskXmlConverter : BaseBpmnXmlConverter<ManualTask>
     protected override ManualTask CreateElement() => new();
 
     protected override void ConvertXmlToElement(XmlReader reader, ManualTask element, Process process) =>
-        ReadChildren(reader, element, _ => { });
+        ReadChildren(reader, element, child =>
+        {
+            if (child.LocalName == "multiInstanceLoopCharacteristics")
+            {
+                element.LoopCharacteristics = ReadMultiInstanceLoopCharacteristics(child);
+            }
+        });
 
     protected override void ConvertElementToXml(XmlWriter writer, ManualTask element)
     {
         writer.WriteStartElement("manualTask", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteExtensionElements(writer, element);
+        WriteMultiInstanceLoopCharacteristics(writer, element.LoopCharacteristics);
         writer.WriteEndElement();
     }
 }
@@ -392,6 +412,12 @@ public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
 
         ReadChildren(reader, element, child =>
         {
+            if (child.LocalName == "multiInstanceLoopCharacteristics")
+            {
+                element.LoopCharacteristics = ReadMultiInstanceLoopCharacteristics(child);
+                return;
+            }
+
             if (child.LocalName == "script")
             {
                 element.Script = ReadElementText(child);
@@ -407,6 +433,7 @@ public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
         WriteActivitiAttribute(writer, "resultVariable", element.ResultVariable);
         WriteActivitiAttribute(writer, "autoStoreVariables", element.AutoStoreVariables ? "true" : null);
         WriteExtensionElements(writer, element);
+        WriteMultiInstanceLoopCharacteristics(writer, element.LoopCharacteristics);
         writer.WriteStartElement("script", BpmnConstants.BpmnNamespace);
         writer.WriteString(element.Script ?? string.Empty);
         writer.WriteEndElement();

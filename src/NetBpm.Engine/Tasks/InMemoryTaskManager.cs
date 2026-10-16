@@ -94,6 +94,7 @@ public sealed class InMemoryTaskManager : ITaskManager
             task.ExecutionId = execution.Id;
             task.ProcessInstanceId = execution.ProcessInstanceId ?? execution.Id;
             task.ProcessDefinitionId = execution.ProcessDefinitionId;
+            task.TenantId ??= execution.TenantId;
             task.Execution = execution;
             _tasks[task.Id] = task;
         }
@@ -410,6 +411,65 @@ public sealed class InMemoryTaskManager : ITaskManager
                 _identityLinks
                     .Where(link => string.Equals(link.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
                     .ToList());
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask SetTaskVariableAsync(
+        TaskEntity task,
+        string name,
+        object? value,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        task.LocalVariables[name] = value;
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<object?> GetTaskVariableAsync(string taskId, string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        lock (_syncRoot)
+        {
+            var task = _tasks.GetValueOrDefault(taskId);
+            object? value = null;
+            var found = task is not null && task.LocalVariables.TryGetValue(name, out value);
+
+            return ValueTask.FromResult(found ? value : null);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IDictionary<string, object?>> GetTaskVariablesAsync(string taskId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+
+        lock (_syncRoot)
+        {
+            var task = _tasks.GetValueOrDefault(taskId);
+
+            return ValueTask.FromResult<IDictionary<string, object?>>(
+                task is null
+                    ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                    : new Dictionary<string, object?>(task.LocalVariables, StringComparer.Ordinal));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> RemoveTaskVariableAsync(string taskId, string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        lock (_syncRoot)
+        {
+            var task = _tasks.GetValueOrDefault(taskId);
+            return ValueTask.FromResult(task is not null && task.LocalVariables.Remove(name));
         }
     }
 

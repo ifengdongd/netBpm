@@ -104,7 +104,7 @@ public sealed class DifferentialEngine
         var history = new DapperHistoryManager(sessions, IdGenerator);
         Trace = new TraceRecordingHistoryManager(history);
         VariableInstances = new DapperVariableInstanceManager(sessions, IdGenerator, Trace);
-        TaskManager = new DapperTaskManager(sessions, IdGenerator, Trace);
+        TaskManager = new DapperTaskManager(sessions, IdGenerator, Trace, VariableInstances);
         Executions = new DapperExecutionManager(sessions, IdGenerator, TaskManager, VariableInstances, Trace);
         Definitions = new DapperProcessDefinitionStore(sessions, IdGenerator, new BpmnXmlConverter());
 

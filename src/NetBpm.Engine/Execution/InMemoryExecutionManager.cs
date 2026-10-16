@@ -74,7 +74,8 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         Process process,
         string processDefinitionId,
         string? businessKey,
-        string? startUserId)
+        string? startUserId,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
@@ -85,6 +86,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
             ProcessDefinitionId = processDefinitionId,
             BusinessKey = businessKey,
             StartUserId = startUserId,
+            TenantId = tenantId,
             StartTime = DateTime.UtcNow,
             // Activiti：process instance is always a scope for all child executions
             IsScope = true,
@@ -111,6 +113,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
             ProcessInstanceId = parent.ProcessInstanceId ?? parent.Id,
             RootProcessInstanceId = parent.RootProcessInstanceId ?? parent.ProcessInstanceId ?? parent.Id,
             ProcessDefinitionId = parent.ProcessDefinitionId,
+            TenantId = parent.TenantId,
             StartTime = DateTime.UtcNow,
             IsScope = false,
             IsActive = true,

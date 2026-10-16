@@ -31,10 +31,10 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 | 并行网关 | `parallelGateway`（分叉 / 同步合并） |
 | 包含网关 | `inclusiveGateway`（条件分叉 / 按入流数同步合并，含 `default` 默认流） |
 | 事件网关 | `eventBasedGateway`（**不可用**：可解析、可配置，部署期显式拒绝） |
-| 用户任务 | `userTask`（`assignee` / `candidateUsers` / `candidateGroups` / `formKey` / `dueDate` / `priority`） |
+| 用户任务 | `userTask`（`assignee` / `candidateUsers` / `candidateGroups` / `formKey` / `dueDate` / `priority`），支持 `multiInstanceLoopCharacteristics`（会签 / 串签） |
 | 服务任务 | `serviceTask`（`class` / `delegateExpression` / `expression` 统一路由） |
 | 手工任务 | `manualTask` |
-| 脚本任务 | `scriptTask`（**不可用**：可解析、可配置，运行期抛「二期实现」，见 §1.2） |
+| 脚本任务 | `scriptTask`（`scriptFormat="csharp"`，Roslyn C# Scripting 执行；其它 `scriptFormat` 部署被拒） |
 | 图形信息 | `bpmndi:BPMNDiagram` / `BPMNShape` / `BPMNEdge` |
 
 行为类规模：Activiti 58 个 → NetBpm 9 个 + 3 个基类。
@@ -100,18 +100,44 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - `priority`：**整数**（支持表达式，结果须可转 int），无上下限约束。
 - `skipExpression`：求值结果为布尔 true 时跳过任务。
 
+### 变量管理（B2.4）
+
+- **任务局部变量**：`SetTaskVariableAsync` / `GetTaskVariableAsync` / `GetTaskVariablesAsync` / `RemoveTaskVariableAsync`（REST：`/api/runtime/tasks/{id}/variables*`）。挂在 `ACT_RU_VARIABLE.TASK_ID_` 行上，随任务完成 / 删除而清理，**不写回流程实例作用域**（与 Activiti 的 `setVariableLocal` 同语义）。
+- **变量删除**：`RemoveVariableAsync(processInstanceId, name)`（REST：`DELETE .../variables/{name}`）沿作用域链查找并删除；longString 的字节行一并清理。
+- **历史语义（有意为之）**：`ACT_HI_VARINST` 行**只增不删**——删除运行状态不抹审计痕迹（与历史身份关系同一策略）；真库测试钉死该语义。
+- 支持 longString（> 4000 字符）与全部标量类型；删除顺序满足 `ACT_FK_VAR_BYTEARRAY`（RESTRICT）外键。
+
+### 多租户（B2.3）
+
+- `DeployAsync(..., tenantId: "acme")`：租户落到 `ACT_RE_DEPLOYMENT` / `ACT_RE_PROCDEF.TENANT_ID_`；同 key 在不同租户下**版本独立**（各自从 1 开始）。
+- 启动实例**自动继承定义的租户**（与 Activiti 一致，启动接口不单独收租户参数），逐层传递到执行（`ACT_RU_EXECUTION`）、任务（`ACT_RU_TASK`）与全部历史行（`ACT_HI_PROCINST` / `ACT_HI_ACTINST` / `ACT_HI_TASKINST`）。
+- `FindProcessDefinitionsAsync(tenantId)` 按租户过滤；REST 部署端点接受 `?tenantId=`；任务响应带 `tenantId`。
+- 变量行（`ACT_RU_VARIABLE` / `ACT_HI_VARINST`）本子集 DDL 无 `TENANT_ID_` 列，不携带租户（已登记偏差）；无租户部署全链路写 `''`，与 Activiti 行级一致（对拍通过）。
+
+### 多实例会签 / 串签（userTask 的 multiInstanceLoopCharacteristics）
+
+- **只支持用户任务上的多实例**；服务任务 / 手工任务 / 脚本任务配了多实例会被部署期拒绝（`multi-instance` 规则）。
+- 实例数来源**二选一**：`<loopCardinality>`（数字或表达式）或 `activiti:collection`（集合表达式）；`activiti:elementVariable` 把集合元素逐实例写入变量（如 `assignee="${approver}"`）。
+- `isSequential="true"` 为**串签**（一次一个任务，完成后再建下一个）；缺省为**并行会签**（N 个任务同时创建）。
+- `<completionCondition>`（如 `${nrOfCompletedInstances == 2}`）：每次实例完成后判定，为真即提前收口——剩余实例与待办被取消。
+- 循环变量（与 Activiti 同名，落在流程实例作用域）：`nrOfInstances` / `nrOfActiveInstances` / `nrOfCompletedInstances` / `loopCounter`（1 起）。
+- 与 Activiti 的已登记偏差：`ACT_HI_ACTINST` 每节点 1 行（非每实例 1 行）；并行模式下 `loopCounter` / `elementVariable` 变量只反映最后创建的实例（任务的办理人 / 名称在创建时逐实例求值，不受影响）；实例级 executionListener 不逐实例触发。多实例用户任务不支持 `activiti:skipExpression`（部署期拒绝）。
+
 ### 服务任务（ServiceTask）
 
 - 实现方式**三选一**：`activiti:class` / `activiti:delegateExpression` / `activiti:expression`，一个都不填部署失败；填多个不报错但按 class > delegateExpression > expression **静默取第一个**，建议只保留一个。
 - `activiti:class` 的含义是 **DI 容器中的注册名**（keyed service / 已注册委托），而非 Java 式反射加载类名 —— 必须在宿主 `IServiceProvider` 中注册后才能运行。
 - `activiti:resultVariableName` 可选，用于接收执行结果。
-- `activiti:field` 字段注入不支持，配置后部署被拒。
+- `activiti:field` 字段注入已支持（`stringValue` 字面量 / `expression` 每次执行时求值），注入到委托实例的同名**可写公共属性或公共字段**（区分大小写）；成员不存在 / 类型不兼容时运行期响亮失败。⚠️ 委托通常是 DI 单例——字段注入只应用于部署期常量，依赖执行上下文的值请在委托内部读流程变量。监听器上的字段注入仍不支持（部署期拒绝）。
 
 ### 脚本任务（ScriptTask）
 
-- 设计器可拖拽、属性面板可配置 `scriptFormat` / `script` / `resultVariableName` / `autoStoreVariables`，XML 可正常解析部署。
-- 但**引擎执行尚未实现**（计划二期用 Roslyn Scripting）：运行到脚本任务会直接抛「未实现」异常，脚本不会执行。
-- 设计器对没有脚本正文的脚本任务给出警告。**正式流程请暂勿使用**，可用服务任务（`expression` / `class`）替代。
+- 只支持 **`scriptFormat="csharp"`**（Roslyn C# Scripting 执行，编译结果按脚本原文缓存）；缺省或其它格式（如 `javascript`）**部署期显式拒绝**——Activiti 对缺省格式回退 JavaScript，本子集不内置 JS 引擎。
+- 脚本里可直接使用两个全局对象：
+  - `execution` —— 当前执行（完整引擎 API：`GetVariableAsync` / `SetVariableAsync` 等）；
+  - `vars` —— 进入脚本时的**流程变量快照**（dynamic，读成员取值；对 `vars.xxx` 赋值**不会**写回流程变量）。
+- 变量写回语义与 Activiti 对齐：脚本顶层声明的变量默认**不**写回；`activiti:autoStoreVariables="true"` 时全部存回；`activiti:resultVariable` 存脚本**最后一条顶层表达式的值**。
+- 部署期校验：脚本任务必须有 `<script>` 内容；与委托相同的约束 —— 脚本与流程同处一个命令事务，内部不得 await 外部系统 IO。
 
 ### BPMN XML 整体要求
 
@@ -139,7 +165,7 @@ NetBpm/
 │   └── NetBpm.Workflow/          # 审批流应用层：发起/环节/提交/历史 + Hosting 公共类
 ├── tests/
 │   ├── NetBpm.UnitTests/         # 单元测试
-│   ├── NetBpm.IntegrationTests/  # 集成测试（真实 MySQL / Testcontainers）
+│   ├── NetBpm.IntegrationTests/  # 集成测试（真实 MySQL + SqlServer 双库功能矩阵）
 │   ├── NetBpm.DifferentialTests/ # 差分对拍（与 Java 预言机逐维比对）
 │   └── corpus/                   # 自建语料与生成器（脚本生成，禁手改）
 ├── samples/
@@ -172,11 +198,13 @@ NetBpm/
 dotnet restore NetBpm.slnx
 dotnet build NetBpm.slnx -c Release
 
-# 单元测试
-dotnet test tests/NetBpm.UnitTests/NetBpm.UnitTests.csproj -c Release --no-build
-
-# 差分对拍（不依赖数据库）
-dotnet test tests/NetBpm.DifferentialTests/NetBpm.DifferentialTests.csproj -c Release --no-build
+# 单元测试 / 差分对拍（不依赖数据库）
+# ⚠️ 用 dotnet run（MTP 原生方式）：本仓库 dotnet test 会「运行了零个测试」（exit 5），
+#    两个入口执行的是同一个测试程序集，CI（.github/workflows/ci.yml）同样用 dotnet run
+# 单元测试含「全语料内存回归」（B1.3）：210 条对拍语料在纯内存宿主上跑通，约 0.5 秒，
+# 日常改引擎先跑它；行级真值仍由差分对拍裁决
+dotnet run --project tests/NetBpm.UnitTests -c Release --no-build
+dotnet run --project tests/NetBpm.DifferentialTests -c Release --no-build
 
 # 代码格式检查
 dotnet format NetBpm.slnx --verify-no-changes --no-restore
@@ -355,6 +383,10 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | POST | `/api/runtime/tasks/{taskId}/claim` | 签收任务 |
 | POST | `/api/runtime/tasks/{taskId}/complete` | 完成任务 |
 | GET | `/api/runtime/process-instances/{id}/variables` | 查询流程变量 |
+| DELETE | `/api/runtime/process-instances/{id}/variables/{name}` | 删除流程变量（历史行保留） |
+| GET | `/api/runtime/tasks/{taskId}/variables` | 查询任务局部变量 |
+| PUT | `/api/runtime/tasks/{taskId}/variables/{name}` | 写任务局部变量（请求体即 JSON 值） |
+| DELETE | `/api/runtime/tasks/{taskId}/variables/{name}` | 删除任务局部变量 |
 | GET | `/api/runtime/process-instances/{id}/diagram` | 获取流程图数据 |
 | GET | `/api/runtime/history/process-instances/{id}` | 历史流程实例 |
 | GET | `/api/runtime/history/process-instances/{id}/activities` | 历史活动 |
@@ -367,7 +399,7 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | 类型 | 说明 |
 |---|---|
 | 单元测试 | 转换器、校验、EL、行为类、调度 |
-| 集成测试 | 真实 MySQL 验证表结构与 ID 区块分配；无 MySQL 时自动跳过 |
+| 集成测试 | 真库验证表结构 / ID 区块 / 全部 B1·B2 功能：**MySQL（localhost）+ SqlServer（10.1.245.36，Windows 身份认证）双库功能矩阵**——库与表自动创建迁移；方言不可用时对应测试自动跳过（env：`NETBPM_MYSQL_CONNECTION` / `NETBPM_SQLSERVER_CONNECTION`） |
 | 差分对拍 | 与 `tools/Oracle` 的 Java 预言机逐维度比对，真值由 `<stem>.oracle.json` 提供 |
 | 语料漂移校验 | `dotnet run --project tests/corpus/generator -- --check`，语料必须由脚本生成 |
 

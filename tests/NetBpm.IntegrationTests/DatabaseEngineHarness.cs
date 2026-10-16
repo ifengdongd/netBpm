@@ -33,9 +33,19 @@ internal sealed record ExecutionSnapshot(string ActivityId, List<ExecutionRow> R
 /// </summary>
 internal sealed class DatabaseEngineHarness
 {
+    /// <summary>默认构造：MySQL（既有测试的直连语义不变）。</summary>
     public DatabaseEngineHarness()
+        : this(new TestDatabaseSpec(
+            DatabaseType.MySql,
+            MySqlTestDatabase.ConnectionString,
+            "MySQL(localhost)"))
     {
-        SessionFactory = MySqlTestDatabase.CreateSessionFactory();
+    }
+
+    /// <summary>按方言构造（双库功能矩阵用）。</summary>
+    public DatabaseEngineHarness(TestDatabaseSpec spec)
+    {
+        SessionFactory = TestDatabases.CreateSessionFactory(spec);
 
         var sessions = new CommandScopedDbSessionProvider(SessionFactory);
         Sessions = sessions;
@@ -45,7 +55,7 @@ internal sealed class DatabaseEngineHarness
         // 与 NetBpm.Runtime 的 DI 组合根保持同一张依赖图（含历史与变量）
         HistoryManager = new DapperHistoryManager(sessions, IdGenerator);
         VariableInstances = new DapperVariableInstanceManager(sessions, IdGenerator, HistoryManager);
-        TaskManager = new DapperTaskManager(sessions, IdGenerator, HistoryManager);
+        TaskManager = new DapperTaskManager(sessions, IdGenerator, HistoryManager, VariableInstances);
         Executions = new DapperExecutionManager(sessions, IdGenerator, TaskManager, VariableInstances, HistoryManager);
         Definitions = new DapperProcessDefinitionStore(sessions, IdGenerator, new BpmnXmlConverter());
         Recorder = new ExecutionSnapshotRecorder(sessions);
@@ -59,7 +69,7 @@ internal sealed class DatabaseEngineHarness
             new ExpressionManager(),
             IdGenerator,
             behaviorFactory,
-            new FixedDelegateResolver(Recorder),
+            new HarnessDelegateResolver(Delegates, Recorder),
             TaskManager,
             new ProcessDefinitionResolver(Definitions));
 
@@ -88,6 +98,13 @@ internal sealed class DatabaseEngineHarness
     public DapperProcessDefinitionStore Definitions { get; }
 
     public ExecutionSnapshotRecorder Recorder { get; }
+
+    /// <summary>
+    /// 按名字注册的自定义服务任务委托（字段注入等场景用）；
+    /// 未注册的名字沿用<b>快照委托</b>（既有测试的 delegateExpression 语义不变）。
+    /// </summary>
+    public IDictionary<string, IServiceTaskDelegate> Delegates { get; }
+        = new Dictionary<string, IServiceTaskDelegate>(StringComparer.Ordinal);
 
     public ICommandExecutor Executor { get; }
 
@@ -207,17 +224,24 @@ internal sealed class ExecutionSnapshotRecorder : IServiceTaskDelegate
 }
 
 /// <summary>把所有 <c>activiti:delegateExpression</c> 都解析到同一个委托实例。</summary>
-internal sealed class FixedDelegateResolver : IActivityDelegateResolver
+internal sealed class HarnessDelegateResolver : IActivityDelegateResolver
 {
-    private readonly IServiceTaskDelegate _serviceTaskDelegate;
+    private readonly IDictionary<string, IServiceTaskDelegate> _delegates;
+    private readonly IServiceTaskDelegate _fallback;
 
-    public FixedDelegateResolver(IServiceTaskDelegate serviceTaskDelegate)
+    public HarnessDelegateResolver(
+        IDictionary<string, IServiceTaskDelegate> delegates,
+        IServiceTaskDelegate fallback)
     {
-        ArgumentNullException.ThrowIfNull(serviceTaskDelegate);
-        _serviceTaskDelegate = serviceTaskDelegate;
+        ArgumentNullException.ThrowIfNull(delegates);
+        ArgumentNullException.ThrowIfNull(fallback);
+
+        _delegates = delegates;
+        _fallback = fallback;
     }
 
     public object? ResolveByClassName(string className) => null;
 
-    public object? ResolveByExpressionName(string name) => _serviceTaskDelegate;
+    public object? ResolveByExpressionName(string name) =>
+        _delegates.TryGetValue(name, out var registered) ? registered : _fallback;
 }

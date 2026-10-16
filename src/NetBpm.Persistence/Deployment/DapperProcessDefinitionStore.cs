@@ -44,6 +44,8 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         BpmnModel bpmnModel,
         string resourceName,
         string? deploymentName = null,
+        byte[]? rawResourceBytes = null,
+        string? tenantId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(bpmnModel);
@@ -62,18 +64,22 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         var session = lease.Session;
         var connection = session.Connection;
         var transaction = session.Transaction;
+        var tenant = tenantId ?? string.Empty;
 
-        // VERSION_ = 同一 KEY_ 下的 max(VERSION_) + 1（见 §7.4）
+        // VERSION_ = 同一 (KEY_, TENANT_ID_) 下的 max(VERSION_) + 1（见 §7.4；Activiti 同口径）
         var version = await connection.ExecuteScalarAsync<int>(
             NextVersionSql,
-            new { key },
+            new { key, tenantId = tenant },
             transaction).ConfigureAwait(false) + 1;
 
         var deploymentId = _idGenerator.NextId();
         var definitionId = ProcessDefinition.BuildId(key, version, _idGenerator.NextId());
         var engineVersion = EngineVersion;
         var deployTime = DateTime.UtcNow;
-        var xmlBytes = Encoding.UTF8.GetBytes(Serialize(bpmnModel));
+        // B2.5：调用方给原始字节就存原始字节（与 Activiti 一致）；内部路径退回重新序列化
+        var xmlBytes = rawResourceBytes is { Length: > 0 }
+            ? rawResourceBytes
+            : Encoding.UTF8.GetBytes(Serialize(bpmnModel));
 
         // 1) 部署
         // ⚠️ KEY_ / CATEGORY_ 必须为 null：Activiti 的部署默认不带 key（DeploymentBuilder.key 需显式设置）、
@@ -86,6 +92,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                 name = deploymentName,
                 category = (string?)null,
                 key = (string?)null,
+                tenantId = tenant,
                 deployTime,
                 engineVersion,
             },
@@ -113,6 +120,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                 resourceName,
                 hasGraphicalNotation = hasGraphicalNotation ? 1 : 0,
                 engineVersion,
+                tenantId = tenant,
             },
             transaction).ConfigureAwait(false);
 
@@ -152,15 +160,18 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
     }
 
     /// <inheritdoc />
-    public async ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(CancellationToken ct = default)
+    public async ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(
+        string? tenantId = null,
+        CancellationToken ct = default)
     {
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
         var rows = await session.Connection
             .QueryAsync(new CommandDefinition(
-                SelectAllSql,
-                transaction: session.Transaction,
+                tenantId is null ? SelectAllSql : SelectAllByTenantSql,
+                new { tenantId },
+                session.Transaction,
                 cancellationToken: ct))
             .ConfigureAwait(false);
 
@@ -178,7 +189,8 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                 Text(row, "NAME_"),
                 Number(row, "VERSION_"),
                 Text(row, "DEPLOYMENT_ID_")!,
-                deployTime));
+                deployTime,
+                Text(row, "TENANT_ID_")));
         }
 
         return result;
@@ -217,6 +229,24 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
             : _xmlConverter.ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(xml)));
     }
 
+    /// <inheritdoc />
+    public async ValueTask<string?> GetTenantIdAsync(
+        string processDefinitionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        return await session.Connection.ExecuteScalarAsync<string?>(
+            new CommandDefinition(
+                SelectTenantSql,
+                new { processDefinitionId },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
+    }
+
     private string Serialize(BpmnModel bpmnModel)
     {
         using var buffer = new MemoryStream();
@@ -243,13 +273,13 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
     // ─────────────────────────── SQL ───────────────────────────
 
     private const string NextVersionSql =
-        "select coalesce(max(VERSION_), 0) from ACT_RE_PROCDEF where KEY_ = @key";
+        "select coalesce(max(VERSION_), 0) from ACT_RE_PROCDEF where KEY_ = @key and TENANT_ID_ = @tenantId";
 
     private const string InsertDeploymentSql = """
         insert into ACT_RE_DEPLOYMENT (
             ID_, NAME_, CATEGORY_, KEY_, TENANT_ID_, DEPLOY_TIME_, ENGINE_VERSION_, VERSION_, PROJECT_RELEASE_VERSION_)
         values (
-            @deploymentId, @name, @category, @key, '', @deployTime, @engineVersion, 1, null)
+            @deploymentId, @name, @category, @key, @tenantId, @deployTime, @engineVersion, 1, null)
         """;
 
     private const string InsertByteArraySql = """
@@ -265,7 +295,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         values (
             @id, 1, @category, @name, @key, @version, @deploymentId, @resourceName,
             null, null, 0, @hasGraphicalNotation,
-            1, '', @engineVersion, null)
+            1, @tenantId, @engineVersion, null)
         """;
 
     private const string SelectByIdSql = """
@@ -274,9 +304,17 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         """;
 
     private const string SelectAllSql = """
-        select P.ID_, P.KEY_, P.NAME_, P.VERSION_, P.DEPLOYMENT_ID_, D.DEPLOY_TIME_
+        select P.ID_, P.KEY_, P.NAME_, P.VERSION_, P.DEPLOYMENT_ID_, D.DEPLOY_TIME_, P.TENANT_ID_
         from ACT_RE_PROCDEF P
         inner join ACT_RE_DEPLOYMENT D on D.ID_ = P.DEPLOYMENT_ID_
+        order by D.DEPLOY_TIME_ desc, P.KEY_, P.VERSION_ desc
+        """;
+
+    private const string SelectAllByTenantSql = """
+        select P.ID_, P.KEY_, P.NAME_, P.VERSION_, P.DEPLOYMENT_ID_, D.DEPLOY_TIME_, P.TENANT_ID_
+        from ACT_RE_PROCDEF P
+        inner join ACT_RE_DEPLOYMENT D on D.ID_ = P.DEPLOYMENT_ID_
+        where P.TENANT_ID_ = @tenantId
         order by D.DEPLOY_TIME_ desc, P.KEY_, P.VERSION_ desc
         """;
 
@@ -286,4 +324,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         inner join ACT_RE_PROCDEF P on P.DEPLOYMENT_ID_ = B.DEPLOYMENT_ID_
         where P.ID_ = @processDefinitionId and B.NAME_ = P.RESOURCE_NAME_
         """;
+
+    private const string SelectTenantSql =
+        "select TENANT_ID_ from ACT_RE_PROCDEF where ID_ = @processDefinitionId";
 }

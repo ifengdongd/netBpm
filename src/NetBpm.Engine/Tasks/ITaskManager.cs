@@ -95,4 +95,24 @@ public interface ITaskManager
     ValueTask<IList<IdentityLinkRecord>> FindIdentityLinksByProcessInstanceIdAsync(
         string processInstanceId,
         CancellationToken ct = default);
+
+    // ─────────────────────────── 任务局部变量（B2.4）───────────────────────────
+
+    /// <summary>
+    /// 写任务局部变量（<c>ACT_RU_VARIABLE.TASK_ID_</c> 行）。
+    /// <para>
+    /// 语义与 Activiti 的 <c>task.setVariableLocal</c> 一致：局部变量随任务存亡 ——
+    /// 任务完成 / 删除时随之清理（不写回流程实例作用域）。
+    /// </para>
+    /// </summary>
+    ValueTask SetTaskVariableAsync(TaskEntity task, string name, object? value, CancellationToken ct = default);
+
+    /// <summary>读单个任务局部变量，未命中返回 <see langword="null"/>（不沿作用域链上溯到流程实例）。</summary>
+    ValueTask<object?> GetTaskVariableAsync(string taskId, string name, CancellationToken ct = default);
+
+    /// <summary>读任务的全部局部变量（不含流程实例作用域的变量）。</summary>
+    ValueTask<IDictionary<string, object?>> GetTaskVariablesAsync(string taskId, CancellationToken ct = default);
+
+    /// <summary>删除单个任务局部变量；未命中返回 <see langword="false"/>。</summary>
+    ValueTask<bool> RemoveTaskVariableAsync(string taskId, string name, CancellationToken ct = default);
 }

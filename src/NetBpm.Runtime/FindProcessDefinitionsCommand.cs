@@ -9,12 +9,14 @@ namespace NetBpm.Runtime;
 internal sealed class FindProcessDefinitionsCommand : ICommand<IReadOnlyList<DeployedProcessDefinition>>
 {
     private readonly IProcessDefinitionStore _definitionStore;
+    private readonly string? _tenantId;
 
-    public FindProcessDefinitionsCommand(IProcessDefinitionStore definitionStore)
+    public FindProcessDefinitionsCommand(IProcessDefinitionStore definitionStore, string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(definitionStore);
 
         _definitionStore = definitionStore;
+        _tenantId = tenantId;
     }
 
     /// <inheritdoc />
@@ -24,6 +26,6 @@ internal sealed class FindProcessDefinitionsCommand : ICommand<IReadOnlyList<Dep
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return _definitionStore.FindAllAsync(ct);
+        return _definitionStore.FindAllAsync(_tenantId, ct);
     }
 }

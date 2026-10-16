@@ -44,6 +44,15 @@ internal static class RowValues
     public static string? Text(Dictionary<string, object?> row, string column) =>
         Raw(row, column) as string ?? Raw(row, column)?.ToString();
 
+    /// <summary>把 BLOB 列解码为 UTF-8 字符串（longString 字节行的断言用）。</summary>
+    public static string? TextFromBytes(Dictionary<string, object?> row, string column) =>
+        Raw(row, column) switch
+        {
+            byte[] bytes => System.Text.Encoding.UTF8.GetString(bytes),
+            { } other => other.ToString(),
+            _ => null,
+        };
+
     public static bool IsNull(Dictionary<string, object?> row, string column) => Raw(row, column) is null;
 
     public static int Int(Dictionary<string, object?> row, string column) =>

@@ -39,7 +39,9 @@ public sealed class ActivityBehaviorFactory : IActivityBehaviorFactory
             ParallelGateway => new ParallelGatewayActivityBehavior(services),
             InclusiveGateway => new InclusiveGatewayActivityBehavior(services),
 
-            // 任务
+            // 任务（用户任务带 multiInstanceLoopCharacteristics → 会签 / 串签，B1.2）
+            UserTask userTask when userTask.LoopCharacteristics is not null
+                => new MultiInstanceUserTaskBehavior(services),
             UserTask => new UserTaskActivityBehavior(services),
             ServiceTask => new ServiceTaskDelegateBehavior(services),
             ManualTask => new ManualTaskActivityBehavior(services),

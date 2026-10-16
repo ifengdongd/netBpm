@@ -281,7 +281,7 @@ public static class TaskCenterEndpoints
         CancellationToken ct)
     {
         var definitions = await engine
-            .FindProcessDefinitionsAsync(ct)
+            .FindProcessDefinitionsAsync(ct: ct)
             .ConfigureAwait(false);
 
         return definitions.ToDictionary(definition => definition.Id, definition => definition.Key);

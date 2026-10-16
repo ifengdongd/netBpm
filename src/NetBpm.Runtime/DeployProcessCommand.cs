@@ -19,12 +19,16 @@ internal sealed class DeployProcessCommand : ICommand<ProcessDefinition>
     private readonly BpmnModel _bpmnModel;
     private readonly string _resourceName;
     private readonly string? _deploymentName;
+    private readonly byte[]? _rawResourceBytes;
+    private readonly string? _tenantId;
 
     public DeployProcessCommand(
         IProcessDefinitionStore definitionStore,
         BpmnModel bpmnModel,
         string resourceName,
-        string? deploymentName)
+        string? deploymentName,
+        byte[]? rawResourceBytes = null,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(definitionStore);
         ArgumentNullException.ThrowIfNull(bpmnModel);
@@ -33,6 +37,8 @@ internal sealed class DeployProcessCommand : ICommand<ProcessDefinition>
         _bpmnModel = bpmnModel;
         _resourceName = resourceName;
         _deploymentName = deploymentName;
+        _rawResourceBytes = rawResourceBytes;
+        _tenantId = tenantId;
     }
 
     /// <inheritdoc />
@@ -43,7 +49,7 @@ internal sealed class DeployProcessCommand : ICommand<ProcessDefinition>
         ArgumentNullException.ThrowIfNull(context);
 
         return await _definitionStore
-            .DeployAsync(_bpmnModel, _resourceName, _deploymentName, ct)
+            .DeployAsync(_bpmnModel, _resourceName, _deploymentName, _rawResourceBytes, _tenantId, ct)
             .ConfigureAwait(false);
     }
 }

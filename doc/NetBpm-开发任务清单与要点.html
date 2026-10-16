@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetBpm 开发任务清单与要点</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --paper:#ffffff; --ink:#1a1d21; --ink-2:#4a5158; --ink-3:#7b848c;
+    --line:#e3e6ea; --line-2:#eef0f3; --brand:#c8102e; --brand-soft:#fdeef0;
+    --accent:#0b6bcb; --accent-soft:#eaf3fd; --ok:#1a7f4b; --ok-soft:#e8f6ee;
+    --warn:#b26a00; --warn-soft:#fdf3e3; --danger:#b3231f; --danger-soft:#fdeceb;
+    --code-bg:#f2f4f7;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px -12px rgba(16,24,40,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1216; --paper:#161a1f; --ink:#e8ecf1; --ink-2:#b6bfc9; --ink-3:#8b96a3;
+      --line:#2a3037; --line-2:#21262c; --brand:#ff5c72; --brand-soft:#2a161a;
+      --accent:#5aa9f7; --accent-soft:#12222f; --ok:#4cc98a; --ok-soft:#122319;
+      --warn:#e0a349; --warn-soft:#2a2113; --danger:#f4756f; --danger-soft:#2b1615;
+      --code-bg:#1c2229;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,-apple-system,sans-serif;
+    font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px 72px}
+  .hero{background:linear-gradient(135deg,#5a1f8f 0%,#7b2fc4 45%,#a05ad6 100%);color:#fff;padding:52px 0 46px;margin-bottom:34px}
+  .hero .wrap{padding-bottom:0}
+  .hero .kicker{font-size:12.5px;letter-spacing:.22em;text-transform:uppercase;opacity:.85;font-weight:600}
+  .hero h1{margin:12px 0 10px;font-size:33px;line-height:1.3;font-weight:700;letter-spacing:-.01em}
+  .hero p{margin:0 0 6px;opacity:.94;font-size:14.5px;max-width:920px}
+  .hero .meta{margin-top:20px;display:flex;flex-wrap:wrap;gap:10px}
+  .chip{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:5px 13px;font-size:12.5px}
+  section{margin:0 0 42px}
+  h2{font-size:22px;margin:0 0 6px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  h2 .no{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:30px;padding:0 7px;border-radius:8px;background:var(--brand);color:#fff;font-size:14px;font-weight:700;flex:none}
+  h3{font-size:16.5px;margin:26px 0 10px;font-weight:700;color:var(--ink);padding-left:11px;border-left:4px solid var(--brand)}
+  h4{font-size:14.5px;margin:20px 0 8px;font-weight:700;color:var(--ink-2)}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0;padding-left:24px}
+  li{margin:5px 0}
+  code{background:var(--code-bg);padding:2px 6px;border-radius:5px;font-family:"Cascadia Code",Consolas,monospace;font-size:12.8px}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:11px;padding:14px 16px;overflow-x:auto;margin:14px 0}
+  pre code{background:none;padding:0;font-size:12.6px;line-height:1.65}
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--paper);box-shadow:var(--shadow);margin:16px 0}
+  table{border-collapse:collapse;width:100%;font-size:13.6px;min-width:620px}
+  th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line-2);vertical-align:top}
+  th{background:var(--line-2);font-weight:700;font-size:12.6px;letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--accent-soft)}
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
+  .callout p:first-child{margin-top:0}
+  .callout p:last-child{margin-bottom:0}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:14px;margin:8px 0 18px}
+  .kpi{background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:16px 18px;box-shadow:var(--shadow)}
+  .kpi .v{font-size:25px;font-weight:700;line-height:1.15;letter-spacing:-.02em;color:var(--brand);font-variant-numeric:tabular-nums}
+  .kpi .l{font-size:12.5px;color:var(--ink-3);margin-top:4px}
+  footer{border-top:1px solid var(--line);margin-top:20px;padding-top:22px;color:var(--ink-3);font-size:12.6px}
+  hr{border:none;border-top:1px solid var(--line);margin:30px 0}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="kicker">Work Breakdown Structure · NetBpm V0.1.0</div>
+    <h1>NetBpm 开发任务清单与要点</h1>
+    <p><b>分析对象</b>：<code>E:\DataCode\NetBpm</code>（tag <code>V0.1.0</code>，41 次提交，2026-10-12 ~ 2026-10-15）</p><p><b>分析方式</b>：源码逐项目盘点（文件数 / 行数 / 类清单 / 测试数）+ 与《NetBpm-子集流程引擎-开发计划》§1–§15 交叉核对</p>
+    <div class="meta"><span class="chip">用途：① 交付清算与验收基线 ② 二次开发排期与交接 ③ 同类"照搬语义型"引擎的复用参考</span></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="kpis"><div class="kpi"><div class="v">163</div><div class="l">C# 源文件</div></div><div class="kpi"><div class="v">≈18,721</div><div class="l">行 C# 代码</div></div><div class="kpi"><div class="v">13</div><div class="l">张 ACT_* 表 ×2 方言</div></div><div class="kpi"><div class="v">9</div><div class="l">BPMN 行为类</div></div><div class="kpi"><div class="v">9</div><div class="l">部署期校验规则</div></div><div class="kpi"><div class="v">155</div><div class="l">测试用例方法</div></div><div class="kpi"><div class="v">13</div><div class="l">REST 端点</div></div><div class="kpi"><div class="v">99.59%</div><div class="l">Activiti 对拍一致率</div></div></div>
+  <hr>
+<h2>0. 一页结论</h2>
+<h3>0.1 做完了什么</h3>
+<div class="tw"><table><thead><tr><th>计划阶段</th><th>内容</th><th>状态</th></tr></thead><tbody><tr><td>P0 工程底座</td><td>SLNX 骨架 / CPM / 目录级构建属性 / 分析器红线 / 打包脚本</td><td>✅</td></tr><tr><td>P1 BPMN 模型层</td><td>11 文件 / 573 行 模型对象</td><td>✅</td></tr><tr><td>P2 BPMN 转换层</td><td>4 文件 / 1,293 行，XML ⇄ 模型 + DI + 反向导出</td><td>✅</td></tr><tr><td>P3 表达式语言</td><td>16 文件 / 2,358 行，JUEL 子集，223 条用例</td><td>✅</td></tr><tr><td>P4 校验层</td><td>5 文件 / 559 行，<b>9 条规则</b></td><td>✅</td></tr><tr><td>P5 持久化层</td><td>20 文件 / 3,771 行，<b>13 张 <code>ACT_*</code> 表</b> × 2 方言</td><td>✅</td></tr><tr><td><b>P6 引擎运行时</b></td><td>61 文件 / 4,583 行，Agenda + 4 Operation + 9 行为 + 6 命令</td><td>✅</td></tr><tr><td>P7 任务与身份</td><td>用户任务全生命周期 + 身份关系</td><td>✅</td></tr><tr><td>P8 设计器前端</td><td>bpmn-js + moddle 扩展 + 属性面板 + 即时校验</td><td>✅</td></tr><tr><td>P9 REST 宿主</td><td>13 个端点 + OpenAPI</td><td>✅</td></tr><tr><td><b>P10 对拍验证</b></td><td>Java 预言机 + 三维度比对，<b>整体一致率 99.59%</b>（门禁 99.5%）</td><td>✅</td></tr><tr><td>P11 硬化与文档</td><td>打包分发（nupkg × 9 + 离线 zip）、README、设计指引</td><td>🟡 部分</td></tr><tr><td>— 计划外新增</td><td><b><code>NetBpm.Workflow</code> 应用层 + 合并 Demo</b>（审批流公共能力）</td><td>✅</td></tr></tbody></table></div>
+<h3>0.2 三个"贵资产"（砍范围换来的红利，别再丢掉）</h3>
+<ol><li><b>沿用 <code>ACT_*</code> 表名与列名</b> → 库级行快照对拍能力。这是全项目最强的验证手段：能抓到 API 层看不出的执行树内部差异（标志位错、子执行多建/少建、Join 该删的没删）。</li><li><b>Java 预言机就是免费的权威 Oracle</b> → "判定正确的唯一客观标准 = 与 Activiti 输出一致"从口号变成可执行的 CI 门禁。</li><li><b><code>NetBpm.Workflow</code> 公共类</b> → 从"引擎"升维到"审批流产品"：宿主五步接入即获得发起 / 待办 / 审批 / 历史 / 流程图 / 改派 / 跳转全部能力，业务侧只实现 <code>IBusinessProcess</code>。</li></ol>
+<h3>0.3 五个已踩过并固化的坑（最值钱的部分）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>坑</th><th>一句话结论</th></tr></thead><tbody><tr><td>1</td><td><b>内存宿主与真库宿主行为分叉</b></td><td>嵌套 fork/join 时 <code>execution.Parent</code> 在真库宿主为 null（只带 <code>PARENT_ID_</code>）→ 必须走异步 <code>ResolveParentAsync</code>；<b>内存模式跑通 ≠ 正确</b></td></tr><tr><td>2</td><td><b>宿主"启动时读配置"不可用测试覆盖</b></td><td><code>ConfigureAppConfiguration</code> 对注册阶段已读的配置无效 → 集成测试必须用 <code>UseSetting</code>，且必须断言"库里真的有了行"</td></tr><tr><td>3</td><td><b>EL 语义与直觉大面积相反</b></td><td><code>"1"+"2"==3</code>、<code>5/2==2.5</code>、<code>"abc"==1 抛异常</code>、<code>null&lt;1 恒 false</code> —— 照搬错了会直接走错分支</td></tr><tr><td>4</td><td><b>Agenda 不能写成递归</b></td><td>递归在并行 Join 场景下受"谁先到达"时序影响产生错误结果；必须队列 + 单命令内排空</td></tr><tr><td>5</td><td><b>同一条历史语义被绑在两个端口上</b></td><td>"收口历史行"与"离开事件"必须拆成两个 API（<code>RecordActivityEndAsync</code> / <code>RecordActivityEndQuietlyAsync</code>），否则并行 Join 事件序列全错</td></tr></tbody></table></div>
+<h3>0.4 还剩什么</h3>
+<ul><li><b>必须补</b>（业务高频）：脚本任务执行（Roslyn）、多实例会签。</li><li><b>可以不做</b>（有意出界）：子流程 / 调用活动、边界事件、定时器与消息事件、泳道、动态流程修改、表单引擎、图形 PNG 生成、其余 6 方言。</li><li><b>工程硬化欠账</b>：并发压测数据、崩溃恢复演练、可观测性（指标/追踪）、CI 流水线落地。</li></ul>
+<hr>
+<h2>1. 现状盘点（实测数据）</h2>
+<h3>1.1 引擎与宿主源码（10 个项目 / 163 个 <code>.cs</code> / 约 18,700 行）</h3>
+<div class="tw"><table><thead><tr><th>模块</th><th>文件</th><th>行数</th><th>关键内容</th><th>对应阶段</th></tr></thead><tbody><tr><td><code>NetBpm.Bpmn.Model</code></td><td>11</td><td>573</td><td>元素树、网关族、扩展属性、DI 图形</td><td>P1</td></tr><tr><td><code>NetBpm.Bpmn.Converter</code></td><td>4</td><td>1,293</td><td>流式读取 / 元素转换器族 / 反向导出</td><td>P2</td></tr><tr><td><code>NetBpm.Bpmn.Validation</code></td><td>5</td><td>559</td><td>规则引擎 + 9 条红线 + 子集外显式拒绝</td><td>P4</td></tr><tr><td><code>NetBpm.El</code></td><td>16</td><td>2,358</td><td>扫描器 / 递归下降 / AST / 求值 / Java 形态格式化</td><td>P3</td></tr><tr><td><code>NetBpm.Engine</code></td><td>61</td><td>4,583</td><td>Agenda、4 Operation、9 行为、6 命令、执行树、历史</td><td><b>P6</b></td></tr><tr><td><code>NetBpm.Persistence</code></td><td>20</td><td>3,771</td><td>Dapper 仓储族、DbIdGenerator、迁移、清库</td><td>P5</td></tr><tr><td><code>NetBpm.Identity</code></td><td>2</td><td>78</td><td>用户/组/候选关系端口（可替换）</td><td>P7</td></tr><tr><td><code>NetBpm.Runtime</code></td><td>11</td><td>877</td><td>组合根、DI 扩展、委托注册与解析、<code>IProcessEngine</code></td><td>P9</td></tr><tr><td><code>NetBpm.Rest</code></td><td>6</td><td>662</td><td>13 个端点 + OpenAPI + 异常映射 + 变量边界还原</td><td>P9</td></tr><tr><td><code>NetBpm.Workflow</code></td><td>27</td><td>3,967</td><td>审批流应用层 + Hosting 公共类 + 自检 Guard</td><td>计划外</td></tr><tr><td><b>合计</b></td><td><b>163</b></td><td><b>≈18,721</b></td><td>对照 Java 基线约 11% 体量</td><td></td></tr></tbody></table></div>
+<h3>1.2 测试与语料</h3>
+<div class="tw"><table><thead><tr><th>工程</th><th>文件</th><th>行数</th><th>用例方法</th><th>说明</th></tr></thead><tbody><tr><td><code>NetBpm.UnitTests</code></td><td>16</td><td>3,229</td><td>109</td><td>转换器 / 校验 / EL（223 条展开用例）/ 行为 / 调度 / 应用层</td></tr><tr><td><code>NetBpm.IntegrationTests</code></td><td>11</td><td>1,330</td><td>19</td><td>真实 MySQL：表结构、ID 区块、行级断言</td></tr><tr><td><code>NetBpm.DifferentialTests</code></td><td>13</td><td>2,226</td><td>27</td><td>三分桶执行器 + 三维度比对器 + 报告</td></tr><tr><td><code>tests/corpus</code></td><td>210 个 BPMN</td><td>—</td><td>—</td><td>199 导入 + 自建，语料必须脚本生成</td></tr></tbody></table></div>
+<h3>1.3 关键实现清单（可核对）</h3>
+<ul><li><b>命令</b>：<code>StartProcessInstance</code> / <code>CompleteTask</code> / <code>ClaimTask</code> / <code>SetAssignee</code> / <code>MoveActivity</code> / <code>NoOp</code> + 3 拦截器（Log / Transaction / CommandContext）</li><li><b>操作</b>：<code>ContinueProcess</code> / <code>TakeOutgoingSequenceFlows</code> / <code>EndExecution</code> / <code>TriggerExecution</code></li><li><b>行为</b>：空开始 / 空结束 / 排他网关 / 并行网关 / 包含网关 / 用户任务 / 服务任务 / 手工任务 / 脚本任务（占位）</li><li><b>校验规则 9 条</b>：流程 id 必填、恰好一个开始事件、入出流完整性、id 全局唯一、排他网关默认流、并行网关默认流禁用、事件网关显式拒绝、监听器配置、子集外能力显式拒绝</li><li><b>数据库</b>：MySQL / SQL Server 各 <code>0001</code>–<code>0008</code>；引擎表恰好 <b>13 张</b></li><li><b>REST 端点 13 个</b> + <code>/health</code>，由 OpenAPI 存在性测试锁死</li><li><b>Demo</b>：单宿主承载 <code>order_process</code> + <code>leave_process</code>，七个页面</li></ul>
+<hr>
+<h2>2. 开发任务清单（WBS）</h2>
+<div class="callout"><p>编号规则：<code>WPn</code> 工作包 / <code>Tn.m</code> 任务。每个任务给出<b>交付物</b>与<b>要点</b>（要点 = 真正会卡住人的地方）。 「★」标记关键路径上的难点工作包。</p></div>
+<hr>
+<h3>WP1 工程底座（P0）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T1.1</td><td>解决方案骨架</td><td><code>NetBpm.slnx</code> + 10 src / 4 tests / 1 sample 分层</td><td>用 <code>.slnx</code>（新格式）；测试工程<b>排除</b> <code>TreatWarningsAsErrors</code>，否则语料/临时断言写不下去</td></tr><tr><td>T1.2</td><td>集中包与构建设置</td><td><code>Directory.Build.props</code> / <code>Directory.Packages.props</code> / <code>global.json</code></td><td><code>net10.0</code> + C# 14 + <code>Nullable</code>/<code>ImplicitUsings</code> 全开；SDK 用 <code>global.json</code> 锁死，避免机器漂移</td></tr><tr><td>T1.3</td><td>分析器红线</td><td><code>BannedApiAnalyzers</code> + <code>BannedSymbols.txt</code></td><td>把 <code>[ThreadStatic]</code> 变成<b>编译期错误</b> —— 异步续体间线程静态状态会丢或串号，这是 P6 的隐形杀手</td></tr><tr><td>T1.4</td><td>异常与约定</td><td><code>EngineException</code> / <code>EngineNotImplementedException(capability, planPhase, reason)</code></td><td>「未实现」必须<b>响亮失败</b>并把计划阶段写进消息，杜绝"看着能用其实没做"</td></tr><tr><td>T1.5</td><td>打包分发</td><td><code>tools/pack.ps1</code> → 9 个 nupkg + 离线 zip</td><td>接入入口只暴露 <code>NetBpm.Workflow</code>，依赖链自动带全；<code>Persistence</code> 包内含两方言脚本（<code>Content</code> 必须改 <code>None</code>，否则 NU5118）</td></tr></tbody></table></div>
+<h3>WP2 BPMN 模型层（P1）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T2.1</td><td>元素树基类</td><td><code>BaseElement</code> / <code>FlowElement</code> / <code>FlowNode</code> / <code>Activity</code> / <code>Process</code> / <code>BpmnModel</code></td><td>类名与属性名<b>逐条对齐 Activiti</b>（便于比对与查资料）；<code>CurrentFlowElement</code> 必须允许是 <code>SequenceFlow</code> 或 <code>FlowNode</code></td></tr><tr><td>T2.2</td><td>网关族</td><td><code>Gateway</code> / 排他 / 并行 / 包含 / 事件（声明为不可用）</td><td>不可用元素也要有模型类和友好错误，不能让它变成"解析到了但没人认识"</td></tr><tr><td>T2.3</td><td>扩展属性载体</td><td><code>FormProperty</code> / <code>EventListener</code> / 监听器契约</td><td><code>activiti:formProperty</code> 引擎<b>只透传不执行</b>，但模型必须保真以支撑设计器往返</td></tr><tr><td>T2.4</td><td>图形信息</td><td><code>GraphicInfo</code>、<code>BPMNShape</code>/<code>BPMNEdge</code>/<code>Bounds</code>/<code>waypoint</code></td><td>DI 可选（无也能部署），但<b>有则不可丢</b> —— 设计器往返与流程图着色都依赖它</td></tr></tbody></table></div>
+<h3>WP3 BPMN 转换层（P2）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T3.1</td><td>流式读取骨架</td><td><code>XmlReader</code> 驱动的主循环 + <code>BaseBpmnXmlConverter</code></td><td><b>必须流式</b>，不整树加载（大流程文件关键）；禁止 DTD</td></tr><tr><td>T3.2</td><td>元素转换器族</td><td>每元素一个 Converter（开始/结束/顺序流/三网关/用户/服务/手工/脚本）</td><td>一个元素一个 converter 的分层照搬 Activiti，别合并成"万能 if-else"</td></tr><tr><td>T3.3</td><td>扩展命名空间解析</td><td><code>http://activiti.org/bpmn</code> 下全部属性 + <code>humanPerformer</code>/<code>potentialOwner</code></td><td><b>BPMN 标准的 <code>&lt;humanPerformer&gt;</code> 才是很多真实语料的办理人来源</b>，只认 <code>activiti:assignee</code> 会漏一大片（对拍第一轮就栽在这）</td></tr><tr><td>T3.4</td><td>反向导出</td><td>模型 → XML（含 DI 回填 <code>targetNamespace</code>）</td><td>导出与解析必须构成<b>往返保真</b>；<code>isExecutable</code> 恒写真</td></tr><tr><td>T3.5</td><td>往返与语料回归</td><td><code>BpmnXmlConverterTests</code> + <code>DesignerRoundTripTests</code> + 199 语料解析</td><td>验收口径：XML → 模型 → XML <b>语义零丢失</b>（DI 坐标、扩展属性、默认流）</td></tr></tbody></table></div>
+<h3>WP4 表达式语言（P3）★</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T4.1</td><td>扫描器 + 递归下降</td><td><code>Scanner.cs</code> / <code>ElParser.cs</code></td><td>双模式（<code>${}</code> 与 <code>#{}</code> <b>不可混用</b>）；字符串转义<b>只允许</b> <code>\\</code> 与转义引号 —— <code>"\n"</code> 是词法错误</td></tr><tr><td>T4.2</td><td>AST 与求值</td><td><code>Ast/*</code> + <code>ExpressionManager</code></td><td>逻辑短路、三目<b>惰性且右结合</b>；整串<b>先 <code>trim</code> 再解析</b>（尾随空格会丢）</td></tr><tr><td>T4.3</td><td>类型转换与比较</td><td><code>TypeConverter</code> / <code>BooleanOperations</code> / <code>NumberOperations</code></td><td>数值提升顺序照搬：BigDecimal → Float/Double → BigInteger → 整数 → String → Comparable；遇 null 的比较<b>一律 false</b> 不抛</td></tr><tr><td>T4.4</td><td>解析器族</td><td><code>ElResolver</code>（变量作用域 / Map / List / Array / Bean）</td><td>属性名 .NET 与 Java 大小写不同 → <b>先精确匹配再忽略大小写</b>；<code>length()/size()/contains()/substring(a,b)</code> 必须做垫片</td></tr><tr><td>T4.5</td><td>JUEL 对拍用例</td><td>223 条（193 求值 + 30 响亮失败）</td><td>每条期望值注明取自 JUEL 哪个分支，尤其把<b>反直觉语义</b>单独成组钉死</td></tr></tbody></table></div>
+<div class="callout"><p><b>T4 的三条硬红线（写错必走错分支）</b></p>
+<ol><li><code>+</code> 从不拼字符串：<code>"1" + "2"</code> = <b>3</b>，<code>"a" + 1</code> <b>抛异常</b>。</li><li><code>/</code> 恒为浮点除：<code>5 / 2</code> = <b>2.5</b>，除零得 <code>Infinity</code>/<code>NaN</code> <b>不抛</b>。</li><li><code>"abc" == 1</code> <b>抛异常</b>而不是 false（整数分支排在字符串分支之前）。</li></ol></div>
+<h3>WP5 校验层（P4）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T5.1</td><td>规则引擎骨架</td><td><code>IProcessValidationRule</code> + <code>ProcessValidator</code> + <code>ValidationError</code></td><td>错误必须能定位到<b>元素 id</b>，否则设计器没法画红框</td></tr><tr><td>T5.2</td><td>九条红线</td><td><code>ProcessValidationRules</code></td><td>排他网关"全条件且无默认流"<b>保留为部署期硬拒</b>（Activiti 是运行期才抛，提前到部署期是有意严格）；无人办理的用户任务<b>放宽</b>为告警</td></tr><tr><td>T5.3</td><td>子集外显式拒绝</td><td>规则 9 + <code>EngineNotImplementedException</code></td><td>子集外元素<b>宁可拒部署也不静默忽略</b>；仅 <code>extensionElements</code>/<code>documentation</code>/<code>textAnnotation</code>/<code>association</code> 容忍</td></tr></tbody></table></div>
+<h3>WP6 持久化层（P5）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T6.1</td><td>双方言 DDL</td><td><code>db/{mysql,sqlserver}/0001..0008</code></td><td>引擎表<b>恰好 13 张</b> <code>ACT_*</code>；<code>0001</code> 不得出现被裁掉的 12 张表名（有测试守着）；表注释：MySQL 内联、SQL Server 用 <code>sp_addextendedproperty</code></td></tr><tr><td>T6.2</td><td>ID 区块生成器</td><td><code>DbIdGenerator</code></td><td>从 <code>ACT_GE_PROPERTY.next.dbid</code> <b>一次占 2500</b>、<code>REV_</code> 乐观锁更新、进程内自增发放；改成 UUID/自增会<b>让库级对拍全线失败</b></td></tr><tr><td>T6.3</td><td>仓储族</td><td><code>DapperExecutionManager</code> / <code>DapperTaskManager</code> / <code>DapperVariableInstanceManager</code> / <code>DapperHistoryManager</code> / <code>DapperProcessDefinitionStore</code></td><td><b>Dapper 不做下划线→驼峰映射</b> → 所有手工 SQL 显式 <code>as</code> 别名；保留字要反引号；别用 <code>select *</code></td></tr><tr><td>T6.4</td><td>变量类型映射</td><td><code>VariableTypeMapper</code></td><td>列布局：<code>string</code>→<code>TEXT_</code>；整数→<code>LONG_</code> <b>和</b> <code>TEXT_</code>；<code>double</code>→只 <code>DOUBLE_</code>；<code>bool</code>→只 <code>LONG_</code>；<code>date</code>→<code>LONG_</code>（UTC 毫秒）；<code>null</code>→<code>TYPE_='null'</code> 且值列全空。<code>TEXT2_</code> <b>不是</b>截断列，是 json 类型类全名辅助列。超 4000 字符串 / bytes / serializable <b>响亮失败，绝不截断</b></td></tr><tr><td>T6.5</td><td>会话与事务</td><td><code>DbSession</code> / <code>IDbSession</code> / <code>TransactionInterceptor</code></td><td>一个命令 = 一个事务；历史行<b>同事务内即时写</b>（与 Activiti 的一级缓存 flush 等效，提交后可见结果一致）</td></tr><tr><td>T6.6</td><td>迁移与校验工具</td><td><code>NetBpm.DbMigrate</code>（<code>migrate</code> / <code>check</code> / <code>probe</code> / <code>purge</code>）+ <code>DatabaseMigrator</code> / <code>EngineTableCleaner</code></td><td><b>无迁移记录表</b>：靠"<code>ACT_GE_PROPERTY</code> 是否存在 + <code>schema.version</code> 匹配"判幂等 ⇒ 已初始化的库不会再跑脚本，改动必须手工 <code>ALTER</code>。清库顺序：身份关系<b>先于</b>任务（外键约束）</td></tr></tbody></table></div>
+<h3>WP7 引擎运行时（P6）★★ 全部难点所在</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T7.1</td><td>执行树实体</td><td><code>ExecutionEntity</code> / <code>IExecutionEntity</code> / <code>IDelegateExecution</code></td><td><b>根执行</b>：<code>IS_SCOPE_=1</code>、<code>PARENT_ID_=null</code>、<code>ACT_ID_</code> 恒 null、<b>不参与推进</b>；另有一个子执行走完全流程。把根执行放进推进路径会让并行 Join 的"删除其余非活跃执行"<b>误删流程实例根执行</b></td></tr><tr><td>T7.2</td><td>三标志位</td><td><code>IsActive</code> / <code>IsConcurrent</code> / <code>IsScope</code></td><td><code>IS_CONCURRENT_</code> 在 Activiti 9 里<b>永远不会被置 1</b>（无调用点）—— 必须按"恒 false"实现，否则该列系统性差异。写"标志位不变量"断言（<code>IsConcurrent ⇒ ParentId != null</code>）</td></tr><tr><td>T7.3</td><td>Agenda 与 4 Operation</td><td><code>EngineAgenda</code> + <code>ContinueProcess</code> / <code>TakeOutgoingSequenceFlows</code> / <code>EndExecution</code> / <code>TriggerExecution</code></td><td><b>绝不写成递归</b>；一个命令一个事务、事务内<b>排空</b> Agenda；循环里不 <code>await</code> 外部 IO。分支产生：<b>第一条流出流复用当前执行</b>，其余每条新建子执行，全部建完才统一推进。结束判定 = <code>activeChildren == 0</code></td></tr><tr><td>T7.4</td><td>网关行为</td><td>排他 / 并行 / 包含</td><td>排他：取<b>第一个</b>条件为真且非 default 的流，<b>不加</b>"多真报错"。并行：先 <code>Inactivate()</code> → 找同活动 id 的非活动执行 → 判定<b>总数相等</b>（不是"每条流入过"）→ 出口 <code>evaluateConditions: false</code>。包含：条件分叉 + 按入流数同步</td></tr><tr><td>T7.5</td><td>任务行为</td><td>用户任务全生命周期 / 服务任务 / 手工任务 / 脚本任务占位</td><td>用户任务触发前置校验：执行上若还有未删任务 → 抛 <code>UserTask should not be signalled before complete</code>（<b>错误文案也参与对拍</b>）。候选值切分按 <code>[\s]*,[\s]*</code>，不是 <code>Split(',')+Trim</code></td></tr><tr><td>T7.6</td><td>变量作用域</td><td><code>VariableInstance</code> / <code>IVariableScope</code></td><td><code>setVariable(x,v)</code> 落在<b>最上层变量作用域</b>（本子集 = 流程实例根执行），否则并行兄弟分支互相看不见对方的变量；作用域首次访问<b>一次查全</b>再沿父上溯</td></tr><tr><td>T7.7</td><td>命令 + 拦截器链</td><td>6 命令 + Log / Transaction / CommandContext 拦截器</td><td><code>CommandContext</code> 用 <code>AsyncLocal</code> 而非 <code>ThreadLocal</code>；跨命令恢复等待型节点只带 <code>ACT_ID_</code> 字符串 ⇒ 必须靠 <code>IProcessDefinitionResolver</code> 端口回解析元素</td></tr><tr><td>T7.8</td><td>事件分发与监听器</td><td><code>EngineEventDispatcher</code> + <code>ListenerInvoker</code> + 执行/任务/事件监听器</td><td>三选一实现（<code>class</code> / <code>delegateExpression</code> / <code>expression</code>）；<code>throwOnFailure=true</code> 才让监听器抛错失败，缺省只记警告；<b>流程级执行监听器 = 全局观测</b>，任何节点的 start/end 与任何流的 take 都通知</td></tr><tr><td>T7.9</td><td>历史管理器</td><td><code>IHistoryManager</code> + 5 张历史表写入</td><td>见下方「历史语义 8 条」</td></tr></tbody></table></div>
+<div class="callout"><p><b>历史语义 8 条（对拍重灾区）</b></p>
+<ol><li>历史行 id = 运行行 id，<b>只有 <code>ACT_HI_ACTINST.ID_</code> 是新生成的</b>。</li><li><code>ACT_TYPE_</code> 取元素<b>类名首字母小写</b>，不是 <code>getProperty("type")</code>。</li><li><b>顺序流不产生活动行</b> —— 执行到流时收口的是<b>源节点</b>那一行。</li><li>历史身份关系<b>只增不删</b>：任务完成/实例结束后 <code>ACT_HI_IDENTITYLINK</code> 行保留。</li><li>历史变量行 <code>REV_</code> <b>恒 0</b>（DB 里的 1 是 INSERT 写死的；更新时 <code>REV_</code> 不动）。</li><li>任务落库后回填 <code>ACT_HI_ACTINST.TASK_ID_</code>；变更办理人后回填 <code>ASSIGNEE_</code>，都发生在建行之后。</li><li>"收口历史行"与"离开事件"必须拆成两个端口，并行网关每次到达<b>只收口不发事件</b>。</li><li>变量事件必须<b>早于</b> <code>PROCESS_STARTED</code>；<code>PROCESS_*</code>/<code>TASK_*</code> 事件不填 <code>activityId</code>。</li></ol></div>
+<h3>WP8 任务与身份（P7）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T8.1</td><td>任务实体与查询</td><td><code>TaskEntity</code> / <code>ITaskManager</code> / <code>TaskQuery</code></td><td>任务行<b>不做脏检查</b>（即时写）⇒ "只改了 <code>CLAIM_TIME_</code>"必须显式 <code>UpdateTaskAsync</code></td></tr><tr><td>T8.2</td><td>身份关系</td><td><code>IdentityLink</code>（人/组）、claim / 取消 claim</td><td>候选组展开需要 <code>IUserGroupManager</code>，<b>只有应用层做得了</b>，别塞进引擎</td></tr><tr><td>T8.3</td><td>身份端口可替换</td><td><code>EmptyUserGroupManager</code> / <code>IOrgDirectory</code> / <code>InMemoryOrgDirectory</code></td><td>端口设计要能被真库实现（Demo 的 <code>MySqlOrgDirectory</code> 是范例：部门/员工/审批组四张表）</td></tr></tbody></table></div>
+<h3>WP9 设计器前端（P8）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T9.1</td><td>bpmn-js 集成</td><td>Vite 6 + TS + bpmn-js 18 + Viewer</td><td>打包为可 iframe 嵌入的独立页；与后端契约只有 deploy / 回显两个接口，<b>不直接碰库</b></td></tr><tr><td>T9.2</td><td>moddle 扩展描述符</td><td><code>activiti-moddle.json</code></td><td><b>必须先行</b> —— 没有它，bpmn-js 往返会静默丢掉 <code>activiti:*</code> 全部属性</td></tr><tr><td>T9.3</td><td>调色板裁剪</td><td>只留开始/结束/三网关/用户/服务/手工任务 + 连线</td><td>子流程、边界事件、泳道等按钮<b>全部移除</b>，避免用户画出引擎不支持的图</td></tr><tr><td>T9.4</td><td>属性面板</td><td>按元素类型白名单渲染（流程/用户任务/服务任务/脚本任务/网关）</td><td>服务任务实现方式<b>三选一，选中即清空其余两项</b>；类型选择要用组件状态记住取值（切回来不能丢）</td></tr><tr><td>T9.5</td><td>即时校验</td><td>前端实时高亮 + 后端复校</td><td>前端校验<b>只是镜像</b>，以后端报错为准；两条有意严格项（缺 id、排他网关全条件）前端作警告</td></tr><tr><td>T9.6</td><td>只读实例视图</td><td>用 <code>ACT_HI_ACTINST</code> 给 Viewer 着色（走过的节点/线标红）</td><td>替代 Activiti 的 <code>image-generator</code>，省一个模块</td></tr><tr><td>T9.7</td><td>别踩的坑</td><td>依赖去重</td><td><b>双 preact 实例会让 hooks 直接崩页</b>（加监听器后页面无响应就是这个）</td></tr></tbody></table></div>
+<h3>WP10 REST 宿主与组合根（P9）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T10.1</td><td>组合根</td><td><code>AddNetBpm</code> / <code>NetBpmOptions</code> / <code>IProcessEngine</code></td><td>配置校验"响亮失败"：<code>EnableHistory + UseInMemoryExecutionTree</code> 组合直接拒（内存宿主没有变量仓储 ⇒ 不写变量历史）</td></tr><tr><td>T10.2</td><td>端点族</td><td>13 端点（部署/定义/启动/实例/变量/流程图/待办/claim/complete/历史三查）</td><td><b>未实现的能力返回 501 而不是空数组</b>，避免"看着能用其实没数据"</td></tr><tr><td>T10.3</td><td>JSON 边界还原</td><td><code>JsonVariableReader</code></td><td>System.Text.Json 会把 <code>object?</code> 反序列化成 <code>JsonElement</code> → 引擎报"类型不支持"。边界必须还原成 <code>string/long/double/bool/null</code>，<b>数值优先 <code>long</code></b>（否则 <code>{"days":3}</code> 落成 <code>DOUBLE_=3.0</code>）</td></tr><tr><td>T10.4</td><td>异常映射</td><td><code>GlobalExceptionHandler</code></td><td>引擎异常 → 4xx/5xx 的稳定形状</td></tr><tr><td>T10.5</td><td>委托注册与自检</td><td><code>AddServiceTaskDelegates</code> + <code>ServiceTaskDelegateGuard</code> + <code>ApprovalFormGuard</code></td><td><code>activiti:class</code> 是 <b>DI 容器注册名</b>，不是 Java 式反射类名。解析顺序：keyed 名 → 已注册委托的类型全名/短名。<code>[ServiceTaskName]</code> + 程序集扫描是<b>推荐写法</b></td></tr></tbody></table></div>
+<h3>WP11 对拍验证体系（P10）★★ 正确性的唯一客观标准</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T11.1</td><td>Java 预言机</td><td><code>tools/Oracle</code>（JDK 25 源码在 JDK 21 上编译 + 补 9 张表 + 绕开 MySQL 8 窗口函数）</td><td>9.0.0 不在任何仓库；4 个文件的 <code>IO.println</code>（JEP 512）全是日志 ⇒ 换 <code>System.out.println</code> 即可。<code>mysql.properties</code> 里硬编码 <code>ROW_NUMBER()</code> ⇒ 用 classpath 前置覆盖，<b>不动引擎语义</b></td></tr><tr><td>T11.2</td><td>语料接入</td><td><code>tests/corpus/importer</code>（四道闸门）+ 199 语料</td><td>口径修正：<b>"可直接对拍"是 199 个，不是 554</b> —— <code>serviceTask</code>/<code>scriptTask</code> 需要两端各有一份语义相同的实现，否则比的是"实现差异"不是"引擎语义差异"</td></tr><tr><td>T11.3</td><td>自建语料生成器</td><td><code>tests/corpus/generator</code> + <code>--check</code> 漂移校验</td><td><b>禁止手画</b>：组合覆盖要穷举而非"想起来的"；现成语料里"排他+并行"混合结构是 <b>0 个</b></td></tr><tr><td>T11.4</td><td>三维度比对器</td><td>API 返回值 / <code>ACT_*</code> 行快照 / 事件序列 + <code>SnapshotComparer</code> / <code>RowOrdering</code></td><td>忽略列：时间戳族、ID 具体值族、<code>ENGINE_VERSION_</code>、<code>BYTES_</code>（有意偏离）。规范化排序键必须<b>两侧统一 null 表达</b>（Java 省略 null 字段、C# 曾拼成 <code>COL=</code>）。比对器要取<b>两侧列并集</b>（absent ≡ null），否则被测侧独有列被静默跳过</td></tr><tr><td>T11.5</td><td>一致性门禁</td><td>报告 <code>artifacts/differential/report.md</code> + <code>known-issues.json</code></td><td>三分桶：跑通 / 跑不动（<b>算失败</b>）/ 不适用（必须列出来）。单例失败不中止整批</td></tr><tr><td>T11.6</td><td>差异收口纪律</td><td>888 → 81 条，全部<b>回写代码</b>而非记台账</td><td>达标线：整体 ≥99.5%，差异 100% 有结论</td></tr></tbody></table></div>
+<h3>WP12 应用层与 Demo（计划外，但价值最高的一块）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T12.1</td><td>应用层门面</td><td><code>IWorkflowService</code>：<code>StartAsync</code> / <code>FindInstanceAsync</code> / <code>SubmitAsync</code> / <code>FindHistoryAsync</code> / <code>ReassignTaskAsync</code> / <code>JumpToNodeAsync</code></td><td>只依赖 <code>Bpmn.Model</code>+<code>Engine</code>+<code>Runtime</code>，<b>不引 Hosting/REST</b>，保证可被任意宿主复用</td></tr><tr><td>T12.2</td><td>数据端口</td><td><code>IWorkflowDataStore</code>（五块数据：实例登记 / 审批结论 / 流程参数 / 审批记录 / <b>当前待办</b>）</td><td>端口要参考实现 <code>JsonWorkflowDataStore</code>（零落库跑通全链路），换真库时数据形状不变</td></tr><tr><td>T12.3</td><td><b>提交顺序契约</b></td><td><code>WorkflowService.SubmitAsync</code></td><td>三处顺序<b>不能调换</b>：① 先落业务数据再推进流程 ② 参数先于结论落盘 ③ 实例登记先于参数表。固定顺序：校验 → 写业务登记 → 写参数表 → 完成引擎任务 → 替换当前待办 → 记审批记录 → 回视图</td></tr><tr><td>T12.4</td><td>审批历史双源单出口</td><td><code>WorkflowHistoryBuilder</code></td><td><code>EngineHistory</code>（<code>ACT_HI_ACTINST</code>，权威）与 <code>BusinessApprovals</code>（业务记录 + 当前待办合成）；关联 <code>taskId</code> 优先 → 退化按 <code>ActivityName</code> <b>按序认领</b>。结论靠合成；<code>NextSteps</code> 由下一条流水反推 —— <b>引擎不认识审批意见</b></td></tr><tr><td>T12.5</td><td>流程变量契约</td><td><code>BaseModel</code>（7 个扁平变量）/ <code>ParaDict</code> / <code>VariableValues</code></td><td>申请人变量名是 <b><code>applyUser</code></b>（BPMN <code>assignee="${applyUser}"</code>），不是 <code>starter</code>；ParaDict 按 <b>key 覆盖</b>语义（未传不改 / 传值覆盖 / 传 null 置空）；与 BaseModel 重名 → 400</td></tr><tr><td>T12.6</td><td>表单契约</td><td><code>WorkflowFormMapper</code> + <code>ApprovalFormGuard</code></td><td><code>activiti:formProperty</code> 只透传不执行；「表单值 → 流程变量」由宿主按 <code>variable</code>（缺省 <code>id</code>）映射；枚举值须与 BPMN <code>&lt;activiti:value id&gt;</code> 一致，否则<b>拒绝启动</b></td></tr><tr><td>T12.7</td><td>Hosting 公共类</td><td><code>WorkflowEndpoints(+Options)</code> / <code>WorkflowProcessBootstrapper</code> / <code>WorkflowRuntimeContext</code> + <code>WorkflowNodeRegistry</code></td><td>多流程靠 <code>ProcessKey</code> / <code>ResourcePath</code> / <code>NodeRegistry</code>（按定义 id 分表缓存）参数化；宿主装饰器 <code>DecorateInstanceView/Summary</code> 为异步（<code>ValueTask</code>）</td></tr><tr><td>T12.8</td><td>端到端 Demo</td><td><code>samples/NetBpm.Demo</code>（单宿主两条流程、MySQL、七个页面）</td><td>三张业务表<b>关联键不同</b>：<code>instances</code> 用 <code>workflow_instance_id</code>、<code>instance_current_task</code>/<code>deal_history</code> 用 <code>apply_id</code>、<code>leave_bill</code> 用 <code>business_id</code>；业务单号必须正整数、留空自动发号</td></tr><tr><td>T12.9</td><td>新流程接入契约</td><td><code>IBusinessProcess</code> + <code>ConstField</code> + <code>workflow_type</code> 插行</td><td>新增一条流程 = <b>三步</b>：实现 <code>IBusinessProcess</code> → ConstField 加常量 → <code>workflow_type</code> 插行</td></tr></tbody></table></div>
+<h3>WP13 打包、文档与硬化（P11）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>交付物</th><th>要点</th></tr></thead><tbody><tr><td>T13.1</td><td>打包分发</td><td><code>tools/pack.ps1</code>（nupkg ×9 + <code>netbpm-&lt;版本&gt;.zip</code> + README.txt）</td><td>另产出 dll 目录（<code>dotnet publish NetBpm.Workflow</code> 的依赖闭包）供离线直接引用；剔除 publish 带入的重复建表脚本</td></tr><tr><td>T13.2</td><td>文档体系</td><td>README（定位/子集/红线/接入五步）+ <code>docs/process-design-guide.md</code> + <code>db/README.md</code> + Demo README</td><td>设计指引必须<b>前置</b>业务接入（模板：请假/订单）</td></tr><tr><td>T13.3</td><td>硬化欠账</td><td>压测 / 长流程性能 / 崩溃恢复 / 可观测性 / CI</td><td>目标：单实例 ≥500 流程实例/秒启动；P99 命令耗时可测；CI 跑 build+test+format+对拍</td></tr></tbody></table></div>
+<hr>
+<h2>3. 横切要点精要（20 条，按主题）</h2>
+<h3>3.1 执行树与调度</h3>
+<ol><li>根执行不参与推进；一旦放进去，并行 Join 会误删流程实例。</li><li><code>IS_CONCURRENT_</code> <b>恒 false</b>（Activiti 9 事实，与计划原文相反）。</li><li>Agenda 必须队列 + 排空，<b>不能递归</b>；一个命令一个事务，循环内不 await 外部 IO。</li><li>分支产生：第一条流出流<b>复用</b>当前执行，其余新建子执行；全部建完才统一推进。</li><li>实例结束判定 = <b>不存在 active 子执行</b>（这就是"合并"的本质）。</li></ol>
+<h3>3.2 网关语义</h3>
+<ol><li>排他 = 取<b>第一个</b>为真且非 default 的流；<b>不加</b>多真报错。</li><li>并行 = 先置非活动 → 按<b>入流条数总数相等</b>判定 → 出口<b>不校验条件</b>。</li><li>排他/包含网关"全条件且无默认流"在 NetBpm 是<b>部署期</b>拒（Activiti 是运行期抛）。</li></ol>
+<h3>3.3 表达式</h3>
+<ol><li><code>+</code> 不拼串、<code>/</code> 恒浮点除、<code>"abc"==1</code> 抛异常、null 比较恒 false —— 四条反直觉语义必须逐条对齐。</li><li>不用第三方表达式库：Flee / NCalc / DynamicExpresso 的隐式转换与 null 比较语义差异正好落在"流程分支出错的高发区"。</li></ol>
+<h3>3.4 持久化</h3>
+<ol><li>ID 生成器必须区块分配（2500）+ <code>REV_</code> 乐观锁，<b>否则库级对拍全线失败</b>。</li><li>变量列布局与类型映射要对齐到列（含 <code>null</code> 型、<code>date</code> 的 UTC 毫秒、<code>TEXT2_</code> 的真实含义）。</li><li><code>db 0001</code> 只建 13 张表，且<b>不得出现</b>被裁掉的 12 张表名（测试守着，注释也会被剥离后检查）。</li><li>无迁移记录表：已初始化的库不会重跑脚本 → 现网变更必须手工 <code>ALTER</code>。</li></ol>
+<h3>3.5 宿主与集成</h3>
+<ol><li>"启动时读配置"的宿主<b>无法用 <code>ConfigureAppConfiguration</code> 覆盖</b> → 集成测试用 <code>UseSetting</code>，并断言"库里真有行"。</li><li>内存宿主 ≠ 真库宿主：<code>Parent</code> 懒加载、变量历史写入等差异只在真库暴露，<b>内存模式跑通不代表正确</b>。</li><li>Dapper 不做下划线→驼峰映射：所有 SQL 显式别名，别用 <code>select *</code>。</li></ol>
+<h3>3.6 应用层</h3>
+<ol><li><code>SubmitAsync</code> 的落库顺序是契约（业务 → 参数 → 结论 → 实例登记 → 待办 → 流水）。</li><li>审批历史双源单出口：引擎侧权威，业务侧补意见；<code>taskId</code> 关联优先，退化按活动名<b>按序认领</b>。</li><li>服务任务委托只用一句：<code>_workflow.CompleteAsync(execution, WorkflowOutcomes.Approved, ct)</code>。</li></ol>
+<hr>
+<h2>4. 剩余任务清单（Backlog，按优先级）</h2>
+<h3>B1 建议尽快做（业务高频、成本可控）</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>依赖</th><th>要点</th></tr></thead><tbody><tr><td>B1.1</td><td><b>脚本任务执行</b>（Roslyn Scripting）</td><td>无</td><td>解析/设计器/落库已就绪，只差行为实现；<code>resultVariableName</code> 与 <code>autoStoreVariables</code> 语义要定清</td></tr><tr><td>B1.2</td><td><b>多实例会签 / 串签</b></td><td>引擎（执行树扩展）</td><td>审批场景最高频追加项；需回到 P6 一并设计（<code>multiInstanceLoopCharacteristics</code>），估算 +2.5 人月</td></tr><tr><td>B1.3</td><td>纯条件评测型测试（不改库）</td><td>无</td><td>把"组合正确性"从真库对拍里摘出来，降低回归成本</td></tr><tr><td>B1.4</td><td>CI 流水线</td><td>无</td><td>build + 单测 + 格式检查 + 对拍；对拍需要 MySQL 与 JDK，建议容器化</td></tr></tbody></table></div>
+<h3>B2 有条件再做</h3>
+<div class="tw"><table><thead><tr><th>#</th><th>任务</th><th>要点</th></tr></thead><tbody><tr><td>B2.1</td><td>服务任务字段注入 <code>activiti:field</code></td><td>当前<b>部署期直接拒绝</b>；实现后要同步放开规则 9</td></tr><tr><td>B2.2</td><td>表单引擎</td><td>现状是"只透传 + 宿主映射"，若要做渲染层需单独立项</td></tr><tr><td>B2.3</td><td>多租户</td><td><code>TENANT_ID_</code> 恒 <code>''</code>；只影响定义/实例隔离，改动面中等</td></tr><tr><td>B2.4</td><td>变量删除、任务局部变量、变量历史级联删除</td><td>已登记为未实现，需补历史语义</td></tr><tr><td>B2.5</td><td>部署接口接收原始字节</td><td>可消除 <code>ACT_GE_BYTEARRAY.BYTES_</code> 的有意偏离（当前存重新序列化的 XML）</td></tr><tr><td>B2.6</td><td>引擎侧"按实例 + 候选人"组合查询</td><td>当前显式抛"尚未实现"，建议补上以免调用方踩空</td></tr></tbody></table></div>
+<h3>B3 属于二期大版本（等于换赛道）</h3>
+<p>子流程 / 调用活动、边界事件、定时器与消息事件、事件子流程、异步作业与重试、泳道与协作池、动态流程修改、图形 PNG 生成、其余 6 种数据库方言。</p>
+<div class="callout"><p>这 12 项占 Activiti 全部复杂度 <b>70% 以上</b>。任何一项的追加都应走<b>变更评审并重算人月</b> —— 引擎项目最常见的死因是范围蔓延，不是技术。</p></div>
+<hr>
+<h2>5. 复现与验收命令</h2>
+<pre><code># 构建 + 单测 + 格式检查
+dotnet build NetBpm.slnx -c Release
+dotnet test tests/NetBpm.UnitTests/NetBpm.UnitTests.csproj -c Release --no-build
+dotnet format NetBpm.slnx --verify-no-changes --no-restore
+
+# 语料漂移校验（语料必须由脚本生成）
+dotnet run --project tests/corpus/generator -- --check
+
+# 建库（引擎侧 0001/0002）
+dotnet run --project tools/NetBpm.DbMigrate -- migrate --provider mysql \
+  --connection &quot;Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;&quot;
+
+# 设计器
+cd web/designer &amp;&amp; npm install &amp;&amp; npm run dev     # http://localhost:5273/?modelId=&lt;id&gt;
+
+# Demo（单宿主双流程）
+dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
+
+# 对拍（需 MySQL + JDK；先补 Activiti 需要的 9 张表，再生成真值，再比对）
+mvn -f tools/Oracle/pom.xml compile exec:java \
+  &quot;-Dexec.args=--corpus tests/corpus --connection jdbc:mysql://127.0.0.1:3306/netbpm_diff?useUnicode=true&amp;characterEncoding=utf8 --user root&quot;
+dotnet test tests/NetBpm.DifferentialTests/NetBpm.DifferentialTests.csproj</code></pre>
+<p><b>本地开发注意（会真的卡住）</b></p>
+<ul><li>常驻 <code>NetBpm.Rest</code> 会锁 <code>bin/</code> 目录并占 <b>5080</b> 端口，且它是集成测试工程的 <code>ProjectReference</code> → 构建报 MSB3021/MSB3027。绕行：只 build <code>src</code>，再把新 <code>NetBpm.*.dll</code> 覆盖到集成测试 <code>bin</code> 下直接跑 exe。</li><li><code>dotnet test</code> 在 .NET 10 SDK 上可能报"运行了零个测试" → 直接跑 <code>bin</code> 下测试 exe，并按类过滤。</li><li><b>集成测试绝不能不加类过滤全跑</b>：MySQL 用例的 <code>EngineTableCleaner.Purge</code> 会清库。</li><li>直接跑 <code>bin/Debug/net10.0/Xxx.exe</code> 时当前目录会成为 ContentRoot → 必须在项目目录下启动。</li></ul>
+<hr>
+<h2>6. 若要"照这个模式再做一个"的最小任务集</h2>
+<ol><li>冻结范围（书面签字）—— 12 条"不做"比 30 条"要做"更值钱。</li><li>找到<b>免费的预言机</b>（这里就是 Activiti 官方实现）。没有预言机的"照搬"退化为"自创"，验证成本高一个数量级。</li><li>沿用上游的<b>表名与列名</b> —— 这是库级对拍的唯一前提，事后再改等于放弃验证。</li><li>先做<b>表达式语言与执行树语义</b>，再谈功能数量。前 90 天不追功能，打穿两个最大风险。</li><li>差异<b>回写代码</b>，不进台账；门禁（一致率 + 差异结论率）写进 CI。</li><li>语言/线程模型差异处（<code>ThreadLocal</code> → <code>AsyncLocal</code>）用<b>分析器红线</b>锁死，不靠自觉。</li></ol>
+<hr>
+<p><i>本文数据来自 2026-10-15 对 <code>E:\DataCode\NetBpm</code>（tag V0.1.0）的实测盘点：10 个 src 项目 / 163 个 <code>.cs</code> / 约 18,721 行；4 个测试工程 / 155 个用例方法 / 210 个语料；13 张 <code>ACT_*</code> 表 × 2 方言；13 个 REST 端点。语义依据见《NetBpm-子集流程引擎-开发计划》§5 与 §15。</p>
+</div>
+
+</body>
+</html>

@@ -52,4 +52,10 @@ public class SimpleVariableScope : IVariableScope
 
         return ValueTask.CompletedTask;
     }
+
+    public ValueTask<bool> RemoveVariableAsync(string name, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return ValueTask.FromResult(_variables.Remove(name));
+    }
 }

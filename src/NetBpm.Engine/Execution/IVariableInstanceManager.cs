@@ -34,4 +34,21 @@ public interface IVariableInstanceManager
         string executionId,
         string name,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除变量行（B2.4）：longString 的字节行一并删除。
+    /// <para>
+    /// ⚠️ <b>历史语义（有意为之）</b>：<c>ACT_HI_VARINST</c> 行<b>保留</b>——历史账本只增不删
+    /// （与历史身份关系 <c>RecordIdentityLinkCreatedAsync</c> 的注释同一策略），删除运行状态不抹审计痕迹。
+    /// </para>
+    /// </summary>
+    ValueTask DeleteAsync(VariableInstance variable, CancellationToken ct = default);
+
+    /// <summary>查某任务的<b>任务局部变量</b>（<c>where TASK_ID_ = ?</c>）。</summary>
+    ValueTask<IReadOnlyList<VariableInstance>> FindByTaskIdAsync(
+        string taskId,
+        CancellationToken ct = default);
+
+    /// <summary>按任务删除其全部局部变量（运行行 + 字节行；历史行保留）。</summary>
+    ValueTask DeleteByTaskIdAsync(string taskId, CancellationToken ct = default);
 }

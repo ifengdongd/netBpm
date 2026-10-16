@@ -13,6 +13,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 脚本任务（scriptFormat="csharp"）用 Roslyn Scripting 执行（二期 §1.2） -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>

@@ -83,19 +83,25 @@ internal sealed class TestEngine
     }
 
     /// <summary>解析 XML → 启动流程实例 → 排空议程。</summary>
-    public async ValueTask<string> StartProcessAsync(string bpmnXml, IDictionary<string, object?>? variables = null)
+    public async ValueTask<string> StartProcessAsync(
+        string bpmnXml,
+        IDictionary<string, object?>? variables = null,
+        CancellationToken ct = default)
     {
         var model = new BpmnXmlConverter().ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(bpmnXml)));
         var process = model.GetMainProcess()!;
 
         Resolver.Register("test:1:1", process);
         var command = new StartProcessInstanceCommand(process, "test:1:1", "biz-key", "tester", variables);
-        return await CommandExecutor.ExecuteAsync(command).ConfigureAwait(false);
+        return await CommandExecutor.ExecuteAsync(command, ct).ConfigureAwait(false);
     }
 
     /// <summary>完成任务（走完整命令链路）。</summary>
-    public async ValueTask CompleteTaskAsync(string taskId, IDictionary<string, object?>? variables = null) =>
-        await CommandExecutor.ExecuteAsync(new CompleteTaskCommand(taskId, variables)).ConfigureAwait(false);
+    public async ValueTask CompleteTaskAsync(
+        string taskId,
+        IDictionary<string, object?>? variables = null,
+        CancellationToken ct = default) =>
+        await CommandExecutor.ExecuteAsync(new CompleteTaskCommand(taskId, variables), ct).ConfigureAwait(false);
 
     /// <summary>认领 / 取消认领任务。</summary>
     public async ValueTask ClaimTaskAsync(string taskId, string? userId) =>
@@ -267,6 +273,13 @@ internal sealed class TestDelegateResolver : IActivityDelegateResolver
     public TestDelegateResolver Register(string name)
     {
         _delegates[name] = new TestServiceTaskDelegate(name, _executed, _capturedVariables);
+        return this;
+    }
+
+    /// <summary>注册一个自定义委托实例（字段注入等需要真实类型的场景）。</summary>
+    public TestDelegateResolver Register(string name, IServiceTaskDelegate instance)
+    {
+        _delegates[name] = instance;
         return this;
     }
 

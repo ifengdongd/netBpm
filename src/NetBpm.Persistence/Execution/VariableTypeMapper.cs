@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using NetBpm.Engine;
 
 namespace NetBpm.Persistence.Execution;
@@ -9,12 +10,14 @@ namespace NetBpm.Persistence.Execution;
 /// <param name="DoubleValue"><c>DOUBLE_</c>。</param>
 /// <param name="TextValue"><c>TEXT_</c>。</param>
 /// <param name="TextValue2"><c>TEXT2_</c>（普通类型恒为 null，见类型说明）。</param>
+/// <param name="Bytes">超长值（longString）写入 <c>ACT_GE_BYTEARRAY.BYTES_</c> 的字节。</param>
 internal readonly record struct VariableColumns(
     string TypeName,
     long? LongValue,
     double? DoubleValue,
     string? TextValue,
-    string? TextValue2);
+    string? TextValue2,
+    byte[]? Bytes = null);
 
 /// <summary>
 /// 变量类型 ↔ CLR 类型 的映射。逐条对应 Activiti 的 <c>VariableType</c> 实现
@@ -36,9 +39,10 @@ internal readonly record struct VariableColumns(
 /// 本子集的类型全部为 null。
 /// </para>
 /// <para>
-/// ⚠️ <b>已登记的限制</b>：超长字符串（&gt; 4000）在 Activiti 会降级为 <c>longString</c> 并把字节写入
-/// <c>ACT_GE_BYTEARRAY</c>（Java 序列化布局），本子集<b>响亮失败</b>而不是截断；
-/// <c>bytes</c> / <c>serializable</c> / <c>json</c> 等类型同理未支持。
+/// ⚠️ <b>已登记的限制</b>：<c>bytes</c> / <c>serializable</c> / <c>json</c> 等类型未支持
+/// （需要 Java 序列化布局，跨语言不兼容）。
+/// 超长字符串（&gt; <see cref="MaxStringLength"/>）已支持：降级为 <c>longString</c>，
+/// UTF-8 字节写入 <c>ACT_GE_BYTEARRAY</c>（与 Activiti 的 <c>LongStringType</c> 同布局）。
 /// </para>
 /// </summary>
 internal static class VariableTypeMapper
@@ -50,6 +54,7 @@ internal static class VariableTypeMapper
     {
         public const string Null = "null";
         public const string String = "string";
+        public const string LongString = "longString";
         public const string Integer = "integer";
         public const string Long = "long";
         public const string Double = "double";
@@ -65,16 +70,18 @@ internal static class VariableTypeMapper
             case null:
                 return new VariableColumns(TypeNames.Null, null, null, null, null);
 
-            case string text:
-                if (text.Length > MaxStringLength)
-                {
-                    throw new EngineNotImplementedException(
-                        $"长度超过 {MaxStringLength} 的字符串变量（longString）",
-                        "P5 后续",
-                        "Activiti 会把超长字符串降级为 longString 并把字节写入 ACT_GE_BYTEARRAY（Java 序列化布局，"
-                        + "跨语言不兼容）。本实现拒绝写入以免静默截断数据。");
-                }
+            case string text when text.Length > MaxStringLength:
+                // 对应 Activiti 的 LongStringType：超长字符串降级为 longString，
+                // UTF-8 字节写入 ACT_GE_BYTEARRAY（BYTEARRAY_ID_ 由仓储层补齐）
+                return new VariableColumns(
+                    TypeNames.LongString,
+                    null,
+                    null,
+                    null,
+                    null,
+                    Encoding.UTF8.GetBytes(text));
 
+            case string text:
                 return new VariableColumns(TypeNames.String, null, null, text, null);
 
             case int intValue:
@@ -106,17 +113,23 @@ internal static class VariableTypeMapper
                 throw new EngineNotImplementedException(
                     $"变量类型 '{value.GetType().FullName}'",
                     "P5 后续",
-                    "本子集只支持 string / int / long / double / bool / DateTime / null。"
-                    + "其余类型在 Activiti 走 bytes / serializable / json 等类型，需要 ACT_GE_BYTEARRAY 参与。");
+                    "本子集只支持 string / longString / int / long / double / bool / DateTime / null。"
+                    + "其余类型在 Activiti 走 bytes / serializable / json 等类型，需要 Java 序列化布局参与。");
         }
     }
 
     /// <summary>把 <c>TYPE_</c> 与各值列解码回 CLR 值。</summary>
-    public static object? FromColumns(string? typeName, long? longValue, double? doubleValue, string? textValue) =>
+    public static object? FromColumns(
+        string? typeName,
+        long? longValue,
+        double? doubleValue,
+        string? textValue,
+        byte[]? bytes = null) =>
         typeName switch
         {
             null or TypeNames.Null => null,
             TypeNames.String => textValue,
+            TypeNames.LongString => bytes is { } raw ? Encoding.UTF8.GetString(raw) : null,
             TypeNames.Integer => longValue is { } integer ? (int)integer : null,
             TypeNames.Long => longValue,
             TypeNames.Double => doubleValue,
@@ -127,7 +140,7 @@ internal static class VariableTypeMapper
 
             _ => throw new EngineException(
                 $"未知的变量类型 '{typeName}'。本子集只支持 "
-                + $"{TypeNames.Null} / {TypeNames.String} / {TypeNames.Integer} / {TypeNames.Long} / "
+                + $"{TypeNames.Null} / {TypeNames.String} / {TypeNames.LongString} / {TypeNames.Integer} / {TypeNames.Long} / "
                 + $"{TypeNames.Double} / {TypeNames.Boolean} / {TypeNames.Date}。"),
         };
 

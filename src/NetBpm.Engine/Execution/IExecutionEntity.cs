@@ -29,6 +29,12 @@ public interface IExecutionEntity : IDelegateExecution
     string? Name { get; set; }
 
     /// <summary>
+    /// 租户（<c>TENANT_ID_</c>，B2.3）。随部署指定的租户逐层传递：
+    /// 定义 → 流程实例 → 子执行 → 任务；无租户时为 <see langword="null"/>（落库写 <c>''</c>）。
+    /// </summary>
+    string? TenantId { get; set; }
+
+    /// <summary>
     /// 根流程实例 id（<c>ROOT_PROC_INST_ID_</c>）。无调用活动时等于流程实例 id。
     /// </summary>
     string? RootProcessInstanceId { get; set; }

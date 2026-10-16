@@ -28,6 +28,7 @@ public static class DesignerEndpoints
 
     private static async Task<IResult> DeployAsync(
         HttpRequest request,
+        string? tenantId,
         IProcessEngine engine,
         CancellationToken ct)
     {
@@ -42,7 +43,12 @@ public static class DesignerEndpoints
         try
         {
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
-            var definition = await engine.DeployAsync(stream, "designer.bpmn20.xml", deploymentName: null, ct: ct)
+            var definition = await engine.DeployAsync(
+                    stream,
+                    "designer.bpmn20.xml",
+                    deploymentName: null,
+                    tenantId: tenantId,
+                    ct: ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new DeployResponse(
@@ -70,7 +76,7 @@ public static class DesignerEndpoints
         IProcessEngine engine,
         CancellationToken ct)
     {
-        var definitions = await engine.FindProcessDefinitionsAsync(ct).ConfigureAwait(false);
+        var definitions = await engine.FindProcessDefinitionsAsync(ct: ct).ConfigureAwait(false);
 
         return Results.Ok(definitions.Select(definition => new ProcessDefinitionResponse(
             definition.Id,

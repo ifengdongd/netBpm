@@ -559,6 +559,24 @@ public sealed class WorkflowServiceTests
     }
 
     [Fact]
+    public async Task FindTasks_ShouldCombineProcessInstanceWithCandidateUser()
+    {
+        // B2.6：「按实例 + 候选人」组合查询 —— 候选人语义与单独查询同口径
+        using var provider = BuildProvider(out _, new TestUserGroupManager());
+        await DeployAsync(provider);
+
+        var workflow = GetWorkflow(provider);
+        var view = await StartAsync(provider, "alice", "BIZ-COMBO", days: 2, reason: "年假");
+        await SubmitAsync(workflow, view, ("days", 2), ("reason", "年假"));
+
+        var combined = await workflow.FindTasksAsync(new TaskQuery(
+            ProcessInstanceId: view.ProcessInstanceId,
+            CandidateUser: "leader1"));
+
+        Assert.Equal("task_approve", Assert.Single(combined).DefinitionKey);
+    }
+
+    [Fact]
     public async Task FindInstances_ShouldSummarizeStatusFromOutcome()
     {
         using var provider = BuildProvider(out _);

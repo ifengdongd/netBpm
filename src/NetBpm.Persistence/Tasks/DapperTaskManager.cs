@@ -24,19 +24,23 @@ public sealed class DapperTaskManager : ITaskManager
     private readonly IDbSessionProvider _sessions;
     private readonly IIdGenerator _idGenerator;
     private readonly IHistoryManager _historyManager;
+    private readonly IVariableInstanceManager _variableInstances;
 
     public DapperTaskManager(
         IDbSessionProvider sessions,
         IIdGenerator idGenerator,
-        IHistoryManager historyManager)
+        IHistoryManager historyManager,
+        NetBpm.Engine.Execution.IVariableInstanceManager variableInstances)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(idGenerator);
         ArgumentNullException.ThrowIfNull(historyManager);
+        ArgumentNullException.ThrowIfNull(variableInstances);
 
         _sessions = sessions;
         _idGenerator = idGenerator;
         _historyManager = historyManager;
+        _variableInstances = variableInstances;
     }
 
     /// <inheritdoc />
@@ -66,7 +70,7 @@ public sealed class DapperTaskManager : ITaskManager
         }
 
         // 对应 insert(task, execution)：从执行上继承上下文
-        task.TenantId ??= null;
+        task.TenantId ??= execution.TenantId;
         task.ExecutionId = execution.Id;
         task.ProcessInstanceId = execution.ProcessInstanceId ?? execution.Id;
         task.ProcessDefinitionId = execution.ProcessDefinitionId;
@@ -353,12 +357,30 @@ public sealed class DapperTaskManager : ITaskManager
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
 
+        // 任务局部变量：先取字节行 id → 删变量行 → 按 id 删字节行（RESTRICT 外键）
+        var byteArrayIds = (await session.Connection.QueryAsync<string>(
+            new CommandDefinition(
+                "select BYTEARRAY_ID_ from ACT_RU_VARIABLE where TASK_ID_ = @taskId and BYTEARRAY_ID_ is not null",
+                new { taskId = task.Id },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
                 "delete from ACT_RU_VARIABLE where TASK_ID_ = @taskId",
                 new { taskId = task.Id },
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
+
+        if (byteArrayIds.Count > 0)
+        {
+            await session.Connection.ExecuteAsync(
+                new CommandDefinition(
+                    "delete from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null and ID_ in @ids",
+                    new { ids = byteArrayIds },
+                    session.Transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+        }
 
         // 对应 deleteTask：历史任务行收口（END_TIME_ / DURATION_ / DELETE_REASON_）
         // 注意历史身份关系行**不删**（Activiti 的 deleteIdentityLinksByTaskId 传 cascadeHistory=false）
@@ -413,12 +435,32 @@ public sealed class DapperTaskManager : ITaskManager
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
 
+        // 任务局部变量（按实例批量）：先取字节行 id → 删变量行 → 按 id 删字节行（RESTRICT 外键）
+        var byteArrayIds = (await session.Connection.QueryAsync<string>(
+            new CommandDefinition(
+                "select V.BYTEARRAY_ID_ from ACT_RU_VARIABLE V "
+                + "inner join ACT_RU_TASK T on T.ID_ = V.TASK_ID_ "
+                + "where T.PROC_INST_ID_ = @processInstanceId and V.BYTEARRAY_ID_ is not null",
+                new { processInstanceId },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
                 "delete from ACT_RU_VARIABLE where TASK_ID_ in (select ID_ from ACT_RU_TASK where PROC_INST_ID_ = @processInstanceId)",
                 new { processInstanceId },
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
+
+        if (byteArrayIds.Count > 0)
+        {
+            await session.Connection.ExecuteAsync(
+                new CommandDefinition(
+                    "delete from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null and ID_ in @ids",
+                    new { ids = byteArrayIds },
+                    session.Transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+        }
 
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
@@ -460,6 +502,84 @@ public sealed class DapperTaskManager : ITaskManager
             "from ACT_RU_IDENTITYLINK where PROC_INST_ID_ = @processInstanceId order by ID_",
             new { processInstanceId },
             ct).ConfigureAwait(false);
+    }
+
+    // ─────────────────────────── 任务局部变量（B2.4）───────────────────────────
+    //
+    // 借道 IVariableInstanceManager：任务局部变量就是 TASK_ID_ 非空的变量行，
+    // 类型映射 / longString 字节行 / 历史记录全部复用同一链路。
+
+    /// <inheritdoc />
+    public async ValueTask SetTaskVariableAsync(
+        TaskEntity task,
+        string name,
+        object? value,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(task.Id);
+
+        var existing = (await _variableInstances.FindByTaskIdAsync(task.Id, ct).ConfigureAwait(false))
+            .FirstOrDefault(variable => string.Equals(variable.Name, name, StringComparison.Ordinal));
+
+        if (existing is not null)
+        {
+            await _variableInstances.UpdateAsync(existing, value, ct).ConfigureAwait(false);
+            return;
+        }
+
+        var variable = _variableInstances.Create(
+            task.ExecutionId ?? throw new EngineException($"任务 '{task.Id}' 没有关联执行，无法写任务局部变量。"),
+            task.ProcessInstanceId ?? task.ExecutionId,
+            name,
+            value);
+        variable.TaskId = task.Id;
+
+        await _variableInstances.InsertAsync(variable, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<object?> GetTaskVariableAsync(string taskId, string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var variables = await _variableInstances.FindByTaskIdAsync(taskId, ct).ConfigureAwait(false);
+
+        return variables
+            .FirstOrDefault(variable => string.Equals(variable.Name, name, StringComparison.Ordinal))
+            ?.Value;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IDictionary<string, object?>> GetTaskVariablesAsync(
+        string taskId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+
+        var variables = await _variableInstances.FindByTaskIdAsync(taskId, ct).ConfigureAwait(false);
+
+        return variables.ToDictionary(variable => variable.Name, variable => variable.Value, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> RemoveTaskVariableAsync(string taskId, string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var existing = (await _variableInstances.FindByTaskIdAsync(taskId, ct).ConfigureAwait(false))
+            .FirstOrDefault(variable => string.Equals(variable.Name, name, StringComparison.Ordinal));
+
+        if (existing is null)
+        {
+            return false;
+        }
+
+        await _variableInstances.DeleteAsync(existing, ct).ConfigureAwait(false);
+        return true;
     }
 
     // ─────────────────────────── 内部实现 ───────────────────────────

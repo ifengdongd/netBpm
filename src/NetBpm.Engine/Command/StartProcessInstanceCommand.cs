@@ -26,13 +26,15 @@ public sealed class StartProcessInstanceCommand : ICommand<string>
     private readonly string? _businessKey;
     private readonly string? _startUserId;
     private readonly IDictionary<string, object?>? _variables;
+    private readonly string? _tenantId;
 
     public StartProcessInstanceCommand(
         Process process,
         string processDefinitionId,
         string? businessKey = null,
         string? startUserId = null,
-        IDictionary<string, object?>? variables = null)
+        IDictionary<string, object?>? variables = null,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
@@ -42,6 +44,7 @@ public sealed class StartProcessInstanceCommand : ICommand<string>
         _businessKey = businessKey;
         _startUserId = startUserId;
         _variables = variables;
+        _tenantId = tenantId;
     }
 
     /// <inheritdoc />
@@ -59,7 +62,8 @@ public sealed class StartProcessInstanceCommand : ICommand<string>
             _process,
             _processDefinitionId,
             _businessKey,
-            _startUserId);
+            _startUserId,
+            _tenantId);
 
         await services.ExecutionManager.InsertAsync(processInstance, ct).ConfigureAwait(false);
 

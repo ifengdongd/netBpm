@@ -78,7 +78,7 @@ public sealed class WorkflowService : IWorkflowService
         ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionKey);
 
         IReadOnlyList<DeployedProcessDefinition> definitions =
-            await _engine.FindProcessDefinitionsAsync(ct).ConfigureAwait(false);
+            await _engine.FindProcessDefinitionsAsync(ct: ct).ConfigureAwait(false);
 
         return definitions
             .Where(definition => string.Equals(definition.Key, processDefinitionKey, StringComparison.Ordinal))

@@ -335,6 +335,88 @@ public sealed class MySqlVariableAndHistoryTests
         Assert.Contains(instanceLevel, row => RowValues.Text(row, "USER_ID_") == "kermit");
     }
 
+    [Fact]
+    public async Task LongStringVariable_ShouldRoundTripThroughByteArray()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var harness = new DatabaseEngineHarness();
+        harness.Reset();
+
+        // > 4000 字符 ⇒ 降级为 longString（VariableTypeMapper 的降级阈值）
+        var longText = new string('长', 2500) + new string('x', 2000);
+        Assert.True(longText.Length > 4000);
+
+        var (_, processInstanceId) = await harness.DeployAndStartAsync(
+            ApprovalProcess(),
+            new Dictionary<string, object?> { ["memo"] = longText },
+            Ct);
+
+        string? byteArrayId;
+
+        using (var session = harness.SessionFactory.Create())
+        {
+            var rows = RowValues.Query(
+                session,
+                "select TYPE_, TEXT_, BYTEARRAY_ID_ from ACT_RU_VARIABLE");
+
+            var row = Assert.Single(rows);
+
+            Assert.Equal("longString", RowValues.Text(row, "TYPE_"));
+            Assert.True(RowValues.IsNull(row, "TEXT_"));
+
+            byteArrayId = RowValues.Text(row, "BYTEARRAY_ID_");
+            Assert.False(string.IsNullOrEmpty(byteArrayId));
+
+            // 字节行：DEPLOYMENT_ID_ 为 null（区别于部署资源），内容是 UTF-8 字节
+            var bytearrayRows = RowValues.Query(
+                session,
+                "select NAME_, DEPLOYMENT_ID_, BYTES_ from ACT_GE_BYTEARRAY where ID_ = '" + byteArrayId + "'");
+
+            var bytearrayRow = Assert.Single(bytearrayRows);
+            Assert.Equal("memo", RowValues.Text(bytearrayRow, "NAME_"));
+            Assert.True(RowValues.IsNull(bytearrayRow, "DEPLOYMENT_ID_"));
+            Assert.Equal(longText, RowValues.TextFromBytes(bytearrayRow, "BYTES_"));
+
+            // 历史变量行引用同一个字节行
+            var historyRows = RowValues.Query(
+                session,
+                "select VAR_TYPE_, BYTEARRAY_ID_ from ACT_HI_VARINST");
+
+            var historyRow = Assert.Single(historyRows);
+            Assert.Equal("longString", RowValues.Text(historyRow, "VAR_TYPE_"));
+            Assert.Equal(byteArrayId, RowValues.Text(historyRow, "BYTEARRAY_ID_"));
+        }
+
+        // 引擎 API 读回：跨命令取值正确（对应超长审批意见等真实业务场景）
+        var variables = await harness.VariableInstances
+            .FindByExecutionIdAsync(processInstanceId, Ct);
+
+        var memo = Assert.Single(variables);
+        Assert.Equal("memo", memo.Name);
+        Assert.Equal("longString", memo.TypeName);
+        Assert.Equal(longText, memo.Value);
+
+        // 更新为短字符串：类型回退 string，旧字节行被删除
+        await harness.VariableInstances.UpdateAsync(memo, "已批，同意。", Ct);
+
+        using (var session = harness.SessionFactory.Create())
+        {
+            var rows = RowValues.Query(
+                session,
+                "select TYPE_, TEXT_, BYTEARRAY_ID_ from ACT_RU_VARIABLE");
+
+            var row = Assert.Single(rows);
+
+            Assert.Equal("string", RowValues.Text(row, "TYPE_"));
+            Assert.Equal("已批，同意。", RowValues.Text(row, "TEXT_"));
+            Assert.True(RowValues.IsNull(row, "BYTEARRAY_ID_"));
+            Assert.Empty(RowValues.Query(
+                session,
+                "select ID_ from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null"));
+        }
+    }
+
     /// <summary>用户任务 → 排他网关（条件 ${approved} + 默认流）→ 两条手动任务 → 结束。</summary>
     private static string ApprovalProcess() => """
         <?xml version="1.0" encoding="UTF-8"?>

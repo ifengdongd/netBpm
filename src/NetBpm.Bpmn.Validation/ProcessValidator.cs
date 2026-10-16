@@ -10,7 +10,7 @@ public sealed class ProcessValidator : IProcessValidator
 {
     private readonly IReadOnlyList<IProcessValidationRule> _rules;
 
-    /// <summary>使用默认的 8 条规则构造。</summary>
+    /// <summary>使用默认的规则集构造（含脚本任务与多实例规则，共 14 条）。</summary>
     public ProcessValidator()
         : this(
         [
@@ -26,6 +26,8 @@ public sealed class ProcessValidator : IProcessValidator
             new RequiredAttributesRule(),
             new ListenerConfigurationRule(),
             new UnsupportedCapabilityRule(),
+            new ScriptTaskRule(),
+            new MultiInstanceRule(),
         ])
     {
     }

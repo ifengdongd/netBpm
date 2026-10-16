@@ -28,7 +28,8 @@ internal sealed record ExecutionState(
     string? RootProcessInstanceId,
     string? Name,
     DateTime? StartTime,
-    string? StartUserId)
+    string? StartUserId,
+    string? TenantId = null)
 {
     /// <summary>从实体快照出持久化状态（用于 INSERT / UPDATE 参数与脏检查）。</summary>
     public static ExecutionState From(IExecutionEntity execution)
@@ -52,7 +53,8 @@ internal sealed record ExecutionState(
             execution.RootProcessInstanceId,
             execution is ExecutionEntity entity ? entity.Name : null,
             execution.StartTime,
-            execution.StartUserId);
+            execution.StartUserId,
+            execution.TenantId);
     }
 
     /// <summary>映射为执行实体（不含 <see cref="IExecutionEntity.Children"/>，由上层按需装配）。</summary>
@@ -77,6 +79,7 @@ internal sealed record ExecutionState(
             Name = Name,
             StartTime = StartTime,
             StartUserId = StartUserId,
+            TenantId = TenantId,
         };
 
         return execution;
@@ -115,7 +118,8 @@ internal static class ExecutionColumns
             RootProcessInstanceId: Text(row, "ROOT_PROC_INST_ID_"),
             Name: Text(row, "NAME_"),
             StartTime: Time(row, "START_TIME_"),
-            StartUserId: Text(row, "START_USER_ID_"));
+            StartUserId: Text(row, "START_USER_ID_"),
+            TenantId: Text(row, "TENANT_ID_"));
     }
 
     private static object? Raw(IDictionary<string, object?> row, string column) =>

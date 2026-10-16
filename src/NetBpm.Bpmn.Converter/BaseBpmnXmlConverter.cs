@@ -320,6 +320,71 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         return field;
     }
 
+    // ─────────────────────────── 多实例（会签 / 串签，B1.2）───────────────────────────
+
+    /// <summary>
+    /// 读 <c>multiInstanceLoopCharacteristics</c> 子元素（任务转换器共用）。
+    /// <para>
+    /// 解析进模型（而非忽略）是为了「配置了但不支持」不被静默丢弃 —— 由
+    /// <c>MultiInstanceRule</c> 在部署期裁定支持与否。
+    /// </para>
+    /// </summary>
+    protected static MultiInstanceLoopCharacteristics? ReadMultiInstanceLoopCharacteristics(XmlReader reader)
+    {
+        var mi = new MultiInstanceLoopCharacteristics
+        {
+            IsSequential = string.Equals(Attr(reader, "isSequential"), "true", StringComparison.OrdinalIgnoreCase),
+            Collection = Attr(reader, BpmnConstants.AttributeCollection, BpmnConstants.ActivitiNamespace),
+            ElementVariable = Attr(reader, BpmnConstants.AttributeElementVariable, BpmnConstants.ActivitiNamespace),
+        };
+
+        ReadChildren(reader, child =>
+        {
+            switch (child.LocalName)
+            {
+                case "loopCardinality":
+                    mi.LoopCardinality = ReadElementText(child);
+                    break;
+
+                case "completionCondition":
+                    mi.CompletionCondition = ReadElementText(child);
+                    break;
+            }
+        });
+
+        return mi;
+    }
+
+    /// <summary>把 <c>multiInstanceLoopCharacteristics</c> 写回 XML（往返保真）。</summary>
+    protected static void WriteMultiInstanceLoopCharacteristics(XmlWriter writer, MultiInstanceLoopCharacteristics? mi)
+    {
+        if (mi is null)
+        {
+            return;
+        }
+
+        writer.WriteStartElement("multiInstanceLoopCharacteristics", BpmnConstants.BpmnNamespace);
+        writer.WriteAttributeString("isSequential", mi.IsSequential ? "true" : "false");
+        WriteActivitiAttribute(writer, BpmnConstants.AttributeCollection, mi.Collection);
+        WriteActivitiAttribute(writer, BpmnConstants.AttributeElementVariable, mi.ElementVariable);
+
+        if (!string.IsNullOrEmpty(mi.LoopCardinality))
+        {
+            writer.WriteStartElement("loopCardinality", BpmnConstants.BpmnNamespace);
+            writer.WriteString(mi.LoopCardinality);
+            writer.WriteEndElement();
+        }
+
+        if (!string.IsNullOrEmpty(mi.CompletionCondition))
+        {
+            writer.WriteStartElement("completionCondition", BpmnConstants.BpmnNamespace);
+            writer.WriteString(mi.CompletionCondition);
+            writer.WriteEndElement();
+        }
+
+        writer.WriteEndElement();
+    }
+
     // ─────────────────────────── 通用写入工具 ───────────────────────────
 
     protected static void WriteFlowElementAttributes(XmlWriter writer, FlowElement element)

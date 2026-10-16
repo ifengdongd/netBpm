@@ -76,6 +76,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                     startUserId = processInstance.StartUserId,
                     startActivityId,
                     name = processInstance.Name,
+                    tenantId = processInstance.TenantId ?? string.Empty,
                 },
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
@@ -146,6 +147,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                     activityName = (element as FlowElement)?.Name,
                     activityType = ActivityTypeOf(element),
                     startTime = DateTime.UtcNow,
+                    tenantId = execution.TenantId ?? string.Empty,
                 },
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
@@ -247,6 +249,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                     priority = task.Priority,
                     dueDate = task.DueDate,
                     category = task.Category,
+                    tenantId = task.TenantId ?? string.Empty,
                 },
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
@@ -379,6 +382,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                     // 因此历史行的 REV_ 恒为 0，与运行行无关（真值比对 2026-10-12：期望 0 / 实际 1）。
                     revision = 0,
                     type = columns.TypeName,
+                    bytearrayId = variable.ByteArrayId,
                     longValue = columns.LongValue,
                     doubleValue = columns.DoubleValue,
                     textValue = columns.TextValue,
@@ -408,6 +412,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                 {
                     id = variable.Id,
                     type = columns.TypeName,
+                    bytearrayId = variable.ByteArrayId,
                     longValue = columns.LongValue,
                     doubleValue = columns.DoubleValue,
                     textValue = columns.TextValue,
@@ -611,7 +616,7 @@ public sealed class DapperHistoryManager : IHistoryManager
         values (
             @id, @processInstanceId, @businessKey, @processDefinitionId, @startTime, null, null,
             @startUserId, @startActivityId, null, null, null,
-            '', @name)
+            @tenantId, @name)
         """;
 
     private const string SelectHistoricProcessInstanceStartTimeSql =
@@ -632,7 +637,7 @@ public sealed class DapperHistoryManager : IHistoryManager
             ACT_NAME_, ACT_TYPE_, ASSIGNEE_, START_TIME_, END_TIME_, DURATION_, DELETE_REASON_, TENANT_ID_)
         values (
             @id, @processDefinitionId, @processInstanceId, @executionId, @activityId, null, null,
-            @activityName, @activityType, null, @startTime, null, null, null, '')
+            @activityName, @activityType, null, @startTime, null, null, null, @tenantId)
         """;
 
     private const string SelectUnfinishedActivityStartTimeSql = """
@@ -666,7 +671,7 @@ public sealed class DapperHistoryManager : IHistoryManager
         values (
             @id, @processDefinitionId, @taskDefinitionKey, @processInstanceId, @executionId, @name, @parentTaskId,
             @description, @owner, @assignee, @startTime, @claimTime, null, null,
-            null, @priority, @dueDate, @formKey, @category, '')
+            null, @priority, @dueDate, @formKey, @category, @tenantId)
         """;
 
     private const string SelectHistoricTaskStartTimeSql =
@@ -700,13 +705,13 @@ public sealed class DapperHistoryManager : IHistoryManager
             BYTEARRAY_ID_, DOUBLE_, LONG_, TEXT_, TEXT2_, CREATE_TIME_, LAST_UPDATED_TIME_)
         values (
             @id, @processInstanceId, @executionId, @taskId, @name, @revision, @type,
-            null, @doubleValue, @longValue, @textValue, @textValue2, @createTime, @lastUpdatedTime)
+            @bytearrayId, @doubleValue, @longValue, @textValue, @textValue2, @createTime, @lastUpdatedTime)
         """;
 
     private const string UpdateHistoricVariableInstanceSql = """
         update ACT_HI_VARINST set
             VAR_TYPE_ = @type,
-            BYTEARRAY_ID_ = null,
+            BYTEARRAY_ID_ = @bytearrayId,
             DOUBLE_ = @doubleValue,
             LONG_ = @longValue,
             TEXT_ = @textValue,

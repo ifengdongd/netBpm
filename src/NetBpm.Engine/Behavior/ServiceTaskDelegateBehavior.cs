@@ -43,6 +43,20 @@ public sealed class ServiceTaskDelegateBehavior : FlowNodeActivityBehavior
         // activiti:expression 的结果：可能是委托本身，也可能只是要存入变量的值
         if (target is IServiceTaskDelegate serviceDelegate)
         {
+            // activiti:field 注入（B2.1）：委托执行前完成（字段可能带表达式）
+            if (serviceTask.Fields.Count > 0)
+            {
+                await ServiceTaskFieldInjector
+                    .InjectAsync(
+                        serviceDelegate,
+                        serviceTask.Fields,
+                        execution,
+                        Services.ExpressionManager,
+                        serviceTask.Id ?? execution.CurrentActivityId ?? "(未知)",
+                        ct)
+                    .ConfigureAwait(false);
+            }
+
             await serviceDelegate.ExecuteAsync(execution, ct).ConfigureAwait(false);
             await LeaveAsync(execution, ct).ConfigureAwait(false);
             return;

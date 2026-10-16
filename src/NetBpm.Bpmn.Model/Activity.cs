@@ -8,6 +8,37 @@ public abstract class Activity : FlowNode
 
     /// <summary>是否为补偿活动（本子集恒为 false）。</summary>
     public bool ForCompensation { get; set; }
+
+    /// <summary>
+    /// 多实例特性（<c>multiInstanceLoopCharacteristics</c>，会签 / 串签）。
+    /// <para>
+    /// 本子集只支持 <see cref="UserTask"/> 上的多实例（B1.2）；其它活动带多实例
+    /// 会被 <c>MultiInstanceRule</c> 在部署期拒绝 —— 解析进模型是为了「配置了但不支持」
+    /// 不被静默丢弃，从而能被发现。
+    /// </para>
+    /// </summary>
+    public MultiInstanceLoopCharacteristics? LoopCharacteristics { get; set; }
+}
+
+/// <summary>
+/// 多实例特性（<c>multiInstanceLoopCharacteristics</c>）。对应 Activiti 的 <c>MultiInstanceLoopCharacteristics</c>。
+/// </summary>
+public class MultiInstanceLoopCharacteristics
+{
+    /// <summary>是否串行（XML 属性 <c>isSequential</c>，缺省 false = 并行会签）。</summary>
+    public bool IsSequential { get; set; }
+
+    /// <summary>实例数（<c>&lt;loopCardinality&gt;</c> 文本，表达式或字面量）。</summary>
+    public string? LoopCardinality { get; set; }
+
+    /// <summary>集合表达式（<c>activiti:collection</c>，求值结果须为集合；集合元素数 = 实例数）。</summary>
+    public string? Collection { get; set; }
+
+    /// <summary>元素变量名（<c>activiti:elementVariable</c>，每个实例把集合元素写入该变量）。</summary>
+    public string? ElementVariable { get; set; }
+
+    /// <summary>完成条件（<c>&lt;completionCondition&gt;</c> 文本，如 ${nrOfCompletedInstances == 2}）。</summary>
+    public string? CompletionCondition { get; set; }
 }
 
 /// <summary>任务基类。对应 Activiti 的 <c>Task</c>。</summary>

@@ -316,15 +316,165 @@ public sealed class UnsupportedCapabilityRule : IProcessValidationRule
     {
         ArgumentNullException.ThrowIfNull(process);
 
+        // 服务任务的字段注入已支持（B2.1）；监听器的字段注入仍属未实现 ——
+        // 解析进模型但不执行，静默忽略是最危险的一类差异，这里在部署期显式拒绝
+        // （监听器可挂在任意元素上，逐元素扫执行监听器）
+        foreach (var element in process.FindFlowElementsOfType<FlowElement>())
+        {
+            foreach (var listener in element.ExecutionListeners)
+            {
+                if (listener.Fields.Count > 0)
+                {
+                    yield return new ValidationError(
+                        Name,
+                        element.Id,
+                        element.GetType().Name,
+                        $"执行监听器 '{Describe(listener)}' 的字段注入（activiti:field）尚未实现，拒绝部署。");
+                }
+            }
+        }
+
+        foreach (var userTask in process.FindFlowElementsOfType<UserTask>())
+        {
+            foreach (var listener in userTask.TaskListeners)
+            {
+                if (listener.Fields.Count > 0)
+                {
+                    yield return new ValidationError(
+                        Name,
+                        userTask.Id,
+                        nameof(UserTask),
+                        $"任务监听器 '{Describe(listener)}' 的字段注入（activiti:field）尚未实现，拒绝部署。");
+                }
+            }
+        }
+    }
+
+    private static string Describe(NetBpm.Bpmn.Model.ExecutionListener listener) =>
+        listener.Expression ?? listener.DelegateExpression ?? listener.ClassName ?? "(未配置实现)";
+}
+
+/// <summary>
+/// 规则 11：多实例（会签 / 串签）只允许配在用户任务上，且实例来源必须明确。
+/// <para>
+/// 原因：本子集的多实例语义按「审批会签」设计（<c>MultiInstanceUserTaskBehavior</c>）——
+/// 服务任务等多实例可以改用「委托循环 / 多条并行流」表达，部署期显式拒绝而不是静默按单实例执行。
+/// </para>
+/// </summary>
+public sealed class MultiInstanceRule : IProcessValidationRule
+{
+    public string Name => "multi-instance";
+
+    public IEnumerable<ValidationError> Validate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
         foreach (var serviceTask in process.FindFlowElementsOfType<ServiceTask>())
         {
-            if (serviceTask.Fields.Count > 0)
+            if (serviceTask.LoopCharacteristics is not null)
             {
                 yield return new ValidationError(
                     Name,
                     serviceTask.Id,
                     nameof(ServiceTask),
-                    "服务任务字段注入（activiti:field）尚未实现，为避免运行期静默跳过，这里拒绝部署。");
+                    "多实例（multiInstanceLoopCharacteristics）只支持用户任务。");
+            }
+        }
+
+        foreach (var scriptTask in process.FindFlowElementsOfType<ScriptTask>())
+        {
+            if (scriptTask.LoopCharacteristics is not null)
+            {
+                yield return new ValidationError(
+                    Name,
+                    scriptTask.Id,
+                    nameof(ScriptTask),
+                    "多实例（multiInstanceLoopCharacteristics）只支持用户任务。");
+            }
+        }
+
+        foreach (var manualTask in process.FindFlowElementsOfType<ManualTask>())
+        {
+            if (manualTask.LoopCharacteristics is not null)
+            {
+                yield return new ValidationError(
+                    Name,
+                    manualTask.Id,
+                    nameof(ManualTask),
+                    "多实例（multiInstanceLoopCharacteristics）只支持用户任务。");
+            }
+        }
+
+        foreach (var userTask in process.FindFlowElementsOfType<UserTask>())
+        {
+            var mi = userTask.LoopCharacteristics;
+
+            if (mi is null)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(mi.LoopCardinality) && string.IsNullOrWhiteSpace(mi.Collection))
+            {
+                yield return new ValidationError(
+                    Name,
+                    userTask.Id,
+                    nameof(UserTask),
+                    "多实例必须指定实例数来源：<loopCardinality> 或 activiti:collection 之一。");
+            }
+
+            if (!string.IsNullOrWhiteSpace(userTask.SkipExpression))
+            {
+                // skipExpression 会在单实例行为里「删任务 + 直接离开」，与多实例的实例计数冲突
+                yield return new ValidationError(
+                    Name,
+                    userTask.Id,
+                    nameof(UserTask),
+                    "多实例用户任务不支持 activiti:skipExpression（两者语义冲突），请去掉其一。");
+            }
+        }
+    }
+}
+
+/// <summary>
+/// 规则 10：脚本任务必须有脚本内容，且只支持 csharp 脚本格式（Roslyn Scripting）。
+/// <para>
+/// Activiti 对缺省 <c>scriptFormat</c> 回退到 JavaScript —— 本子集不内置 JS 引擎，
+/// 因此「缺省 / 其它格式」在<b>部署期</b>显式拒绝，而不是等运行期才发现跑不了。
+/// </para>
+/// </summary>
+public sealed class ScriptTaskRule : IProcessValidationRule
+{
+    public string Name => "script-task";
+
+    /// <summary>接受的大小写不敏感格式清单，与引擎侧 <c>ScriptTaskEngine.AcceptedFormats</c> 同源。</summary>
+    private static readonly string[] AcceptedFormats = ["csharp", "c#"];
+
+    public IEnumerable<ValidationError> Validate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        foreach (var scriptTask in process.FindFlowElementsOfType<ScriptTask>())
+        {
+            if (string.IsNullOrWhiteSpace(scriptTask.Script))
+            {
+                yield return new ValidationError(
+                    Name,
+                    scriptTask.Id,
+                    nameof(ScriptTask),
+                    "脚本任务缺少 <script> 脚本内容。");
+
+                continue;
+            }
+
+            if (scriptTask.ScriptFormat is null ||
+                !AcceptedFormats.Contains(scriptTask.ScriptFormat.Trim(), StringComparer.OrdinalIgnoreCase))
+            {
+                yield return new ValidationError(
+                    Name,
+                    scriptTask.Id,
+                    nameof(ScriptTask),
+                    $"脚本任务只支持 scriptFormat=\"csharp\"（实际：'{scriptTask.ScriptFormat ?? "(未指定)"}'）。");
             }
         }
     }

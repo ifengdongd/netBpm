@@ -42,6 +42,12 @@ public sealed class VariableInstance
     /// <summary><c>TASK_ID_</c>（任务局部变量）。</summary>
     public string? TaskId { get; set; }
 
+    /// <summary>
+    /// <c>BYTEARRAY_ID_</c>：超长值（<c>longString</c>）指向 <c>ACT_GE_BYTEARRAY</c> 的行；
+    /// 普通类型为 null。
+    /// </summary>
+    public string? ByteArrayId { get; set; }
+
     public override string ToString() =>
         $"{Name}={Value ?? "null"} ({TypeName}, execution={ExecutionId}, rev={Revision})";
 }

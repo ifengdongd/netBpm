@@ -287,7 +287,7 @@ public static class WorkflowEndpoints
         WorkflowEndpointOptions options,
         CancellationToken ct)
     {
-        var definitions = await engine.FindProcessDefinitionsAsync(ct).ConfigureAwait(false);
+        var definitions = await engine.FindProcessDefinitionsAsync(ct: ct).ConfigureAwait(false);
         var processKey = options.ProcessKey(http.RequestServices);
 
         string? resolvedId;
@@ -389,7 +389,7 @@ public static class WorkflowEndpoints
         CancellationToken ct)
     {
         var processKey = options.ProcessKey(http.RequestServices);
-        var definitions = await engine.FindProcessDefinitionsAsync(ct).ConfigureAwait(false);
+        var definitions = await engine.FindProcessDefinitionsAsync(ct: ct).ConfigureAwait(false);
 
         // 同 key 取版本最高者为「当前生效」；其余是历史版本
         var currentId = definitions

@@ -60,6 +60,12 @@ public static class BpmnConstants
     /// <summary>Activiti 属性：跳过表达式。</summary>
     public const string AttributeSkipExpression = "skipExpression";
 
+    /// <summary>Activiti 属性：多实例集合表达式（<c>multiInstanceLoopCharacteristics/@collection</c>）。</summary>
+    public const string AttributeCollection = "collection";
+
+    /// <summary>Activiti 属性：多实例元素变量名（<c>multiInstanceLoopCharacteristics/@elementVariable</c>）。</summary>
+    public const string AttributeElementVariable = "elementVariable";
+
     /// <summary>Activiti 元素：执行监听器。</summary>
     public const string ElementExecutionListener = "executionListener";
 

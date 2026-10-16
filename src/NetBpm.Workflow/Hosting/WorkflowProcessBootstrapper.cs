@@ -81,7 +81,7 @@ public static class WorkflowProcessBootstrapper
         await using var stream = File.OpenRead(path);
 
         var definition = await engine
-            .DeployAsync(stream, Path.GetFileName(path), options.DeploymentName, ct)
+            .DeployAsync(stream, Path.GetFileName(path), options.DeploymentName, ct: ct)
             .ConfigureAwait(false);
 
         logger.LogInformation(

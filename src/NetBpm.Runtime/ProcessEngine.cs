@@ -61,11 +61,19 @@ public sealed class ProcessEngine : IProcessEngine
         Stream bpmnXml,
         string resourceName,
         string? deploymentName = null,
+        string? tenantId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(bpmnXml);
 
-        var bpmnModel = _xmlConverter.ConvertToBpmnModel(bpmnXml);
+        // B2.5：先截下原始字节 —— ACT_GE_BYTEARRAY.BYTES_ 存调用方给的原文
+        // （与 Activiti 一致），而不是重新序列化的 XML（解析 / 校验仍走模型）
+        using var rawBuffer = new MemoryStream();
+        await bpmnXml.CopyToAsync(rawBuffer, ct).ConfigureAwait(false);
+        var rawBytes = rawBuffer.ToArray();
+
+        using var parseStream = new MemoryStream(rawBytes);
+        var bpmnModel = _xmlConverter.ConvertToBpmnModel(parseStream);
 
         var process = bpmnModel.GetMainProcess()
             ?? throw new NetBpm.Engine.EngineException("部署失败：BPMN 文件中没有流程定义。");
@@ -74,7 +82,14 @@ public sealed class ProcessEngine : IProcessEngine
         _validator.ValidateAndThrow(process);
 
         // 落库必须在一个命令（= 一个事务）内完成，避免中途失败留下孤儿部署行
-        var command = new DeployProcessCommand(_definitionStore, bpmnModel, resourceName, deploymentName);
+        var command = new DeployProcessCommand(
+            _definitionStore,
+            bpmnModel,
+            resourceName,
+            deploymentName,
+            rawBytes,
+            tenantId);
+
         return await _commandExecutor.ExecuteAsync(command, ct).ConfigureAwait(false);
     }
 
@@ -94,7 +109,17 @@ public sealed class ProcessEngine : IProcessEngine
         var process = bpmnModel.GetMainProcess()
             ?? throw new NetBpm.Engine.EngineException($"流程定义 '{processDefinitionId}' 中没有流程。");
 
-        var command = new StartProcessInstanceCommand(process, processDefinitionId, businessKey, startUserId, variables);
+        // B2.3：实例继承定义的租户（与 Activiti 一致，启动接口不单独收租户参数）
+        var tenantId = await _definitionStore.GetTenantIdAsync(processDefinitionId, ct).ConfigureAwait(false);
+
+        var command = new StartProcessInstanceCommand(
+            process,
+            processDefinitionId,
+            businessKey,
+            startUserId,
+            variables,
+            tenantId);
+
         return await _commandExecutor.ExecuteAsync(command, ct).ConfigureAwait(false);
     }
 
@@ -103,8 +128,10 @@ public sealed class ProcessEngine : IProcessEngine
         _definitionStore.GetResourceXmlAsync(processDefinitionId, ct);
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindProcessDefinitionsAsync(CancellationToken ct = default) =>
-        _commandExecutor.ExecuteAsync(new FindProcessDefinitionsCommand(_definitionStore), ct);
+    public ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindProcessDefinitionsAsync(
+        string? tenantId = null,
+        CancellationToken ct = default) =>
+        _commandExecutor.ExecuteAsync(new FindProcessDefinitionsCommand(_definitionStore, tenantId), ct);
 
     /// <inheritdoc />
     public ValueTask<BpmnModel?> GetBpmnModelAsync(string processDefinitionId, CancellationToken ct = default) =>
@@ -130,11 +157,23 @@ public sealed class ProcessEngine : IProcessEngine
                 .FindTasksByProcessInstanceIdAsync(query.ProcessInstanceId, ct)
                 .ConfigureAwait(false);
 
+            // 「按实例 + 候选人」组合：两个已有查询取交集。
+            // 候选人语义与单独查询同口径 —— 候选人 / 所属组可认领且未签收（ASSIGNEE_ is null）
             if (!string.IsNullOrWhiteSpace(query.CandidateUser))
             {
-                throw new EngineException(
-                    "「按流程实例 + 候选人」的组合查询尚未实现：请分别用 processInstanceId 或 candidateUser 查询。"
-                    + "（候选人要展开用户所属组，组合语义需要额外确认，不猜。）");
+                var instanceGroupIds = await _userGroupManager
+                    .FindGroupIdsByUserAsync(query.CandidateUser, ct)
+                    .ConfigureAwait(false);
+
+                var instanceCandidateTasks = await _taskManager
+                    .FindTasksByCandidateUserAsync(query.CandidateUser, instanceGroupIds, ct)
+                    .ConfigureAwait(false);
+
+                var candidateTaskIds = instanceCandidateTasks
+                    .Select(task => task.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                tasks = [.. tasks.Where(task => candidateTaskIds.Contains(task.Id))];
             }
 
             // 办理人条件在内存求交（本子集不给任务表做任意组合 SQL）
@@ -223,6 +262,66 @@ public sealed class ProcessEngine : IProcessEngine
         var variables = await processInstance.GetVariablesAsync(ct).ConfigureAwait(false);
 
         return new Dictionary<string, object?>(variables, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> RemoveVariableAsync(string processInstanceId, string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        return _commandExecutor.ExecuteAsync(new DeleteVariableCommand(processInstanceId, name), ct);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask SetTaskVariableAsync(
+        string taskId,
+        string name,
+        object? value,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        await _commandExecutor
+            .ExecuteAsync(new SetTaskVariableCommand(taskId, name, value), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<object?> GetTaskVariableAsync(string taskId, string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var task = await _taskManager.FindTaskByIdAsync(taskId, ct).ConfigureAwait(false)
+            ?? throw new EngineException($"任务 '{taskId}' 不存在（可能已完成或流程已推进）。");
+
+        return await _taskManager.GetTaskVariableAsync(taskId, name, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyDictionary<string, object?>> GetTaskVariablesAsync(
+        string taskId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+
+        var task = await _taskManager.FindTaskByIdAsync(taskId, ct).ConfigureAwait(false)
+            ?? throw new EngineException($"任务 '{taskId}' 不存在（可能已完成或流程已推进）。");
+
+        var variables = await _taskManager.GetTaskVariablesAsync(taskId, ct).ConfigureAwait(false);
+
+        return new Dictionary<string, object?>(variables, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> RemoveTaskVariableAsync(string taskId, string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        return _commandExecutor.ExecuteAsync(new RemoveTaskVariableCommand(taskId, name), ct);
     }
 
     /// <inheritdoc />

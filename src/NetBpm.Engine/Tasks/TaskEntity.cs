@@ -104,6 +104,13 @@ public sealed class TaskEntity
     /// </summary>
     public IExecutionEntity? Execution { get; set; }
 
+    /// <summary>
+    /// 任务局部变量（B2.4）。<b>仅内存宿主使用</b>（<c>InMemoryTaskManager</c> 的载体）；
+    /// 数据库宿主的真身在 <c>ACT_RU_VARIABLE.TASK_ID_</c> 行，本字典不参与持久化。
+    /// </summary>
+    public IDictionary<string, object?> LocalVariables { get; } =
+        new Dictionary<string, object?>(StringComparer.Ordinal);
+
     /// <summary>写入 <c>DELEGATION_</c> 的字符串形式。</summary>
     public string? DelegationStateText => DelegationState switch
     {

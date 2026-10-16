@@ -1,3 +1,4 @@
+using System.Text.Json;
 using NetBpm.Engine;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Tasks;
@@ -29,8 +30,14 @@ public static class RuntimeEndpoints
         group.MapPost("/tasks/{taskId}/claim", ClaimTaskAsync);
         group.MapPost("/tasks/{taskId}/complete", CompleteTaskAsync);
 
-        // 变量（P5 后半段）
+        // 变量（P5 后半段 + B2.4 删除）
         group.MapGet("/process-instances/{processInstanceId}/variables", GetVariablesAsync);
+        group.MapDelete("/process-instances/{processInstanceId}/variables/{name}", RemoveVariableAsync);
+
+        // 任务局部变量（B2.4）：随任务存亡，不写回流程实例作用域
+        group.MapGet("/tasks/{taskId}/variables", GetTaskVariablesAsync);
+        group.MapPut("/tasks/{taskId}/variables/{name}", SetTaskVariableAsync);
+        group.MapDelete("/tasks/{taskId}/variables/{name}", RemoveTaskVariableAsync);
 
         // 流程图数据（P9 交付项：BPMN XML + 活动高亮）
         group.MapGet("/process-instances/{processInstanceId}/diagram", GetDiagramAsync).Produces<DiagramResponse>();
@@ -174,6 +181,89 @@ public static class RuntimeEndpoints
         }
     }
 
+    /// <summary>删除流程实例作用域上的变量（B2.4）：沿作用域链查找，历史行保留。</summary>
+    private static async Task<IResult> RemoveVariableAsync(
+        string processInstanceId,
+        string name,
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await engine.RemoveVariableAsync(processInstanceId, name, ct).ConfigureAwait(false)
+                ? Results.NoContent()
+                : Results.NotFound(new ErrorResponse($"变量 '{name}' 不存在。"));
+        }
+        catch (EngineException ex)
+        {
+            return Results.NotFound(new ErrorResponse(ex.Message));
+        }
+    }
+
+    // ─────────────────────────── 任务局部变量（B2.4）───────────────────────────
+
+    private static async Task<IResult> GetTaskVariablesAsync(
+        string taskId,
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        try
+        {
+            var variables = await engine.GetTaskVariablesAsync(taskId, ct).ConfigureAwait(false);
+            return Results.Ok(variables);
+        }
+        catch (EngineException ex)
+        {
+            return Results.NotFound(new ErrorResponse(ex.Message));
+        }
+    }
+
+    /// <summary>写任务局部变量。请求体即变量值（JSON 原文，走 <see cref="JsonVariableReader"/> 同一套类型映射）。</summary>
+    private static async Task<IResult> SetTaskVariableAsync(
+        string taskId,
+        string name,
+        JsonElement? value,
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        if (value is null || value.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return Results.BadRequest(new ErrorResponse("请求体不能为空（不支持写入 null 变量）。"));
+        }
+
+        try
+        {
+            var variables = JsonVariableReader.Read(new Dictionary<string, JsonElement> { [name] = value.Value });
+
+            await engine.SetTaskVariableAsync(taskId, name, variables?.GetValueOrDefault(name), ct)
+                .ConfigureAwait(false);
+
+            return Results.NoContent();
+        }
+        catch (EngineException ex)
+        {
+            return Results.BadRequest(new ErrorResponse(ex.Message));
+        }
+    }
+
+    private static async Task<IResult> RemoveTaskVariableAsync(
+        string taskId,
+        string name,
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await engine.RemoveTaskVariableAsync(taskId, name, ct).ConfigureAwait(false)
+                ? Results.NoContent()
+                : Results.NotFound(new ErrorResponse($"任务局部变量 '{name}' 不存在。"));
+        }
+        catch (EngineException ex)
+        {
+            return Results.NotFound(new ErrorResponse(ex.Message));
+        }
+    }
+
     /// <summary>
     /// 流程图着色数据（§6.2 第 5 项）：<c>END_TIME_</c> 为空表示该节点正在执行。
     /// </summary>
@@ -247,6 +337,7 @@ public static class RuntimeEndpoints
 /// <param name="CreateTime">创建时间。</param>
 /// <param name="DueDate">到期时间。</param>
 /// <param name="ClaimTime">认领时间。</param>
+/// <param name="TenantId">租户（B2.3）。</param>
 public sealed record TaskResponse(
     string Id,
     string? Name,
@@ -259,7 +350,8 @@ public sealed record TaskResponse(
     int Priority,
     DateTime? CreateTime,
     DateTime? DueDate,
-    DateTime? ClaimTime)
+    DateTime? ClaimTime,
+    string? TenantId = null)
 {
     /// <summary>从任务实体映射。</summary>
     public static TaskResponse From(TaskEntity task)
@@ -278,6 +370,7 @@ public sealed record TaskResponse(
             task.Priority,
             task.CreateTime,
             task.DueDate,
-            task.ClaimTime);
+            task.ClaimTime,
+            task.TenantId);
     }
 }

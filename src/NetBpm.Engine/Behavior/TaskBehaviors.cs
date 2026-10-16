@@ -4,6 +4,7 @@ using NetBpm.Bpmn.Model;
 using NetBpm.El;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Services;
+using NetBpm.Engine.Script;
 using NetBpm.Engine.Tasks;
 
 namespace NetBpm.Engine.Behavior;
@@ -367,7 +368,12 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
 }
 
 /// <summary>
-/// 脚本任务行为（Roslyn Scripting）。按计划为<b>二期</b>（§1.2）。
+/// 脚本任务行为。对应 Activiti 的 <c>ScriptTaskActivityBehavior</c>（JS 引擎 → 本方案 Roslyn）。
+/// <para>
+/// 只支持 <c>scriptFormat="csharp"</c>；脚本顶层可直接用 <c>execution</c>（当前执行）与
+/// <c>vars</c>（流程变量快照），语义详见 <see cref="Script.ScriptTaskGlobals"/>。
+/// 与委托相同的约束：脚本与流程同处一个命令事务（§5.3），内部不得 await 外部系统 IO。
+/// </para>
 /// </summary>
 public sealed class ScriptTaskActivityBehavior : FlowNodeActivityBehavior
 {
@@ -377,14 +383,21 @@ public sealed class ScriptTaskActivityBehavior : FlowNodeActivityBehavior
     }
 
     /// <inheritdoc />
-    public override ValueTask ExecuteAsync(
+    public override async ValueTask ExecuteAsync(
         IDelegateExecution execution,
         CancellationToken ct = default)
     {
-        var scriptTask = execution.CurrentFlowElement as ScriptTask;
-        throw new EngineNotImplementedException(
-            $"脚本任务 '{scriptTask?.Id ?? execution.CurrentActivityId}'",
-            "二期",
-            "scriptTask 属可选能力，计划在二期用 Roslyn Scripting 实现（见 §1.2）");
+        ArgumentNullException.ThrowIfNull(execution);
+
+        var scriptTask = execution.CurrentFlowElement as ScriptTask
+            ?? throw new EngineException(
+                "Programmatic error: script task behaviour can only be applied to a ScriptTask instance, " +
+                $"but got an instance of {execution.CurrentFlowElement}");
+
+        await ScriptTaskEngine
+            .ExecuteAsync(scriptTask, execution, ct)
+            .ConfigureAwait(false);
+
+        await LeaveAsync(execution, ct).ConfigureAwait(false);
     }
 }

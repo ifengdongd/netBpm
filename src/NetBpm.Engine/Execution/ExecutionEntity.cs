@@ -48,6 +48,9 @@ public class ExecutionEntity : IExecutionEntity
     public string? Name { get; set; }
 
     /// <inheritdoc />
+    public string? TenantId { get; set; }
+
+    /// <inheritdoc />
     public bool IsActive { get; set; } = true;
 
     /// <inheritdoc />
@@ -255,6 +258,29 @@ public class ExecutionEntity : IExecutionEntity
         {
             await SetVariableAsync(key, value, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> RemoveVariableAsync(string name, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        await EnsureVariablesLoadedAsync(ct).ConfigureAwait(false);
+
+        if (_variables.Remove(name, out var removed))
+        {
+            if (VariableInstanceManager is not null)
+            {
+                // 历史账本「只增不删」（与 ACT_HI_IDENTITYLINK 同策略）：只删运行行 + 字节行
+                await VariableInstanceManager.DeleteAsync(removed, ct).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+
+        // 作用域链上溯：变量可能在更高的作用域上
+        var parent = await ResolveParentAsync(ct).ConfigureAwait(false);
+        return parent is not null && await parent.RemoveVariableAsync(name, ct).ConfigureAwait(false);
     }
 
     /// <summary>

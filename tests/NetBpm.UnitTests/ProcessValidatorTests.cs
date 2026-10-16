@@ -194,8 +194,10 @@ public sealed class ProcessValidatorTests
     }
 
     [Fact]
-    public void ServiceTaskFieldInjection_ShouldBeRejectedInsteadOfSilentlyIgnored()
+    public void ServiceTaskFieldInjection_ShouldBeAcceptedNowSupported()
     {
+        // B2.1：服务任务字段注入已实现（ServiceTaskFieldInjector），部署期放开；
+        // 监听器的字段注入仍被 unsupported-capability 拒绝（见 ServiceTaskFieldInjectionTests）
         const string xml = """
             <?xml version="1.0" encoding="UTF-8"?>
             <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -217,7 +219,7 @@ public sealed class ProcessValidatorTests
 
         var errors = Validator.Validate(Parse(xml));
 
-        Assert.Contains(errors, error => error.ElementId == "svc" && error.Rule == "unsupported-capability");
+        Assert.DoesNotContain(errors, error => error.ElementId == "svc");
     }
 
     [Fact]

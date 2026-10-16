@@ -15,11 +15,15 @@ public interface IProcessEngine
     /// <summary>执行任意命令（一个命令 = 一个事务）。</summary>
     ValueTask<TResult> ExecuteAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default);
 
-    /// <summary>部署流程定义（解析 → 校验 → 落库）。</summary>
+    /// <summary>
+    /// 部署流程定义（解析 → 校验 → 落库）。
+    /// <paramref name="tenantId"/> 为部署租户（B2.3）；<see langword="null"/> 表示无租户。
+    /// </summary>
     ValueTask<ProcessDefinition> DeployAsync(
         Stream bpmnXml,
         string resourceName,
         string? deploymentName = null,
+        string? tenantId = null,
         CancellationToken ct = default);
 
     /// <summary>启动流程实例，返回流程实例 id（= 根执行 id）。</summary>
@@ -33,8 +37,13 @@ public interface IProcessEngine
     /// <summary>取流程定义的 BPMN XML（设计器回显契约，见 §6.3）。</summary>
     ValueTask<string?> GetProcessDefinitionXmlAsync(string processDefinitionId, CancellationToken ct = default);
 
-    /// <summary>查全部已部署的流程定义（流程部署列表数据源，按部署时间倒序）。</summary>
-    ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindProcessDefinitionsAsync(CancellationToken ct = default);
+    /// <summary>
+    /// 查全部已部署的流程定义（流程部署列表数据源，按部署时间倒序）；
+    /// <paramref name="tenantId"/> 非空时按租户过滤（B2.3）。
+    /// </summary>
+    ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindProcessDefinitionsAsync(
+        string? tenantId = null,
+        CancellationToken ct = default);
 
     /// <summary>取流程模型（校验 / 查询用）。</summary>
     ValueTask<BpmnModel?> GetBpmnModelAsync(string processDefinitionId, CancellationToken ct = default);
@@ -48,6 +57,32 @@ public interface IProcessEngine
     ValueTask<IReadOnlyDictionary<string, object?>> GetVariablesAsync(
         string processInstanceId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除流程实例作用域上的变量（B2.4）：沿作用域链查找并删除，
+    /// longString 的字节行一并清理；历史行保留（历史账本只增不删）。
+    /// </summary>
+    /// <returns>变量是否存在并被删除。</returns>
+    ValueTask<bool> RemoveVariableAsync(string processInstanceId, string name, CancellationToken ct = default);
+
+    /// <summary>
+    /// 写任务局部变量（B2.4）：变量挂在 <c>ACT_RU_VARIABLE.TASK_ID_</c> 行上，
+    /// 随任务完成 / 删除而清理，不写回流程实例作用域。
+    /// </summary>
+    ValueTask SetTaskVariableAsync(
+        string taskId,
+        string name,
+        object? value,
+        CancellationToken ct = default);
+
+    /// <summary>读单个任务局部变量（B2.4）；未命中返回 <see langword="null"/>（不上溯到流程实例作用域）。</summary>
+    ValueTask<object?> GetTaskVariableAsync(string taskId, string name, CancellationToken ct = default);
+
+    /// <summary>读任务的全部局部变量（B2.4，不含流程实例作用域的变量）。</summary>
+    ValueTask<IReadOnlyDictionary<string, object?>> GetTaskVariablesAsync(string taskId, CancellationToken ct = default);
+
+    /// <summary>删除单个任务局部变量（B2.4）；未命中返回 <see langword="false"/>。</summary>
+    ValueTask<bool> RemoveTaskVariableAsync(string taskId, string name, CancellationToken ct = default);
 
     /// <summary>查流程实例的历史活动（流程图着色数据源，§6.2 第 5 项）。</summary>
     ValueTask<IReadOnlyList<HistoricActivityInstance>> FindHistoricActivitiesAsync(
