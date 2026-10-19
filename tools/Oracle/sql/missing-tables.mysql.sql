@@ -1,6 +1,6 @@
 -- 预言机（tools/Oracle）所需的"补表"脚本（由 Activiti 9.0.0 的 DDL 原样抽取生成）。
 --
--- 背景：NetBpm 的 schema（db/mysql/0001_create_schema.sql）按开发计划 §1.3 裁掉了这些表，
+-- 背景：NetBpm 的 schema（db/mysql/0001_create_engine_schema.sql）按开发计划 §1.3 裁掉了这些表，
 -- 而**真 Activiti 引擎初始化时就要查它们**（例如 ACT_RU_TIMER_JOB）。维度②的比对只导固定的
 -- 12 张表，因此这些表建出来也只会一直是空的，不影响任何快照。
 --

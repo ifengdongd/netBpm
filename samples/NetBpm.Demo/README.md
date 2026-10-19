@@ -22,7 +22,7 @@ dotnet run --project samples/NetBpm.Demo
 ⚠️ 数据库连接要求 **TLS 1.2 及以上**：MySQL 客户端已锁定 `TlsVersion=TLS 1.2, TLS 1.3`（连接串显式写 1.0/1.1 会启动失败）；
 SQL Server 请使用支持 TLS 1.2+ 的实例（只支持 TLS 1.0 的老实例会产生「非安全协议」告警并建议淘汰）。
 
-前置脚本（按序执行，现由启动序列自动执行）：`db/<dialect>/0001 → 0002 → … → 0008`。
+前置脚本（按序执行，现由启动序列自动执行）：`db/<dialect>/0001 → 0002 → … → 0005`。
 
 ## 流程设计
 
@@ -65,7 +65,7 @@ SQL Server 请使用支持 TLS 1.2+ 的实例（只支持 TLS 1.0 的老实例�
 `ViewUrl`（审批结束后业务单查看地址，含 `{businessId}` 占位符）、`ApproveUrl`（审批页地址，含 `{taskId}` 占位符）。
 端点 `GET /api/processes` 暴露给前端。
 
-**数据源是 `workflow_type` 表（0008）**：系统启动时由
+**数据源是 `workflow_type` 表（0002）**：系统启动时由
 `WorkflowTypeLoader`（方言随 `NetBpm:DatabaseType`）加载进 `ProcessInfoEnum` ——
 **新增流程 = 表里插一行**，不用改代码。
 表不存在 / 加载失败（如 JSON 演示模式）回退内置默认清单；`name` 必须与 BPMN 流程 key 一致；
@@ -123,8 +123,8 @@ Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；
 | `instances` | 实例登记：申请人 / 业务单 / 状态 / 当前环节 / `workflow_type_id` |
 | `instance_current_task` | 当前待办（每到达一个环节整体替换） |
 | `deal_history` | 审批流水（每次提交追加；`deal_result`=BPMN 选项 id） |
-| `workflow_parameters` | 流程参数（0007 新增：「实例 × 参数名」键值表，两条流程共用） |
-| `workflow_type` | 流程类型表（0008：ProcessInfoEnum 的数据源，启动时加载） |
+| `workflow_parameters` | 流程参数（0003 新增：「实例 × 参数名」键值表，两条流程共用） |
+| `workflow_type` | 流程类型表（0002：ProcessInfoEnum 的数据源，启动时加载） |
 | `order_bill` | 订单业务行（`status` 随审批回写） |
 | `ACT_*` | 引擎 13 张表（执行树 / 任务 / 变量 / 历史 / 部署） |
 

@@ -21,6 +21,7 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/NetBpm.DbMigrate/NetBpm.DbMigrate.csproj" />
+    <Project Path="tools/NetBpm.DbInit/NetBpm.DbInit.csproj" />
     <!-- §9.3：自建语料必须由脚本生成（放在 tests/corpus/generator 便于语料与生成器同处一地） -->
     <Project Path="tests/corpus/generator/NetBpm.CorpusGenerator.csproj" />
     <!-- §9.3：现成语料（Activiti 测试资源）由导入器收录，脚本自动生成 -->

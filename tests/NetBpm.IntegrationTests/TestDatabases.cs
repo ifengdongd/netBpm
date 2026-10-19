@@ -232,6 +232,9 @@ internal static class TestDatabases
 
     private static void EnsureSqlServerSchema(TestDatabaseSpec spec)
     {
+        // 库名从连接串读取（支持 netbpm_demo 等自定义库），否则用默认 netbpm
+        var databaseName = ResolveSqlServerDatabaseName(spec.ConnectionString);
+
         // 建库（若缺）—— 连 master 执行
         var bootstrapBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(spec.ConnectionString)
         {
@@ -241,17 +244,25 @@ internal static class TestDatabases
         using (var bootstrap = new Microsoft.Data.SqlClient.SqlConnection(bootstrapBuilder.ConnectionString))
         {
             bootstrap.Open();
-            bootstrap.Execute($"if db_id('{DatabaseName}') is null create database [{DatabaseName}]");
+            bootstrap.Execute($"if db_id('{databaseName}') is null create database [{databaseName}]");
         }
 
         var targetBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(spec.ConnectionString)
         {
-            InitialCatalog = DatabaseName,
+            InitialCatalog = databaseName,
         };
 
         new DatabaseMigrator(
             new DbSessionFactory(new DbConnectionFactory(DatabaseType.SqlServer, targetBuilder.ConnectionString)),
             DatabaseScripts.ResolveDirectory(DatabaseType.SqlServer)).Migrate();
+    }
+
+    /// <summary>SqlServer 测试库名：优先取连接串的 <c>InitialCatalog</c>（如 <c>netbpm_demo</c>），否则用默认库。</summary>
+    private static string ResolveSqlServerDatabaseName(string connectionString)
+    {
+        var initialCatalog = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString).InitialCatalog;
+
+        return string.IsNullOrWhiteSpace(initialCatalog) ? DatabaseName : initialCatalog;
     }
 
     private static bool HasEngineTables(IDbSession session) =>

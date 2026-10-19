@@ -33,7 +33,7 @@ public sealed class DifferentialRunner
     /// <list type="bullet">
     ///   <item><description>同一节点上多个同 key 待办 ⇒ 脚本无法确定性挑选；</description></item>
     ///   <item><description>值超出 <c>ACT_*</c> 列宽（如名称 &gt; 255）⇒ MySQL 严格模式下两端都跑不了
-    ///   （我们的 DDL 列宽与 Activiti 一致，见 <c>db/mysql/0001_create_schema.sql</c>）。</description></item>
+    ///   （我们的 DDL 列宽与 Activiti 一致，见 <c>db/mysql/0001_create_engine_schema.sql</c>）。</description></item>
     /// </list>
     /// </summary>
     public static bool IsInapplicable(Exception exception)

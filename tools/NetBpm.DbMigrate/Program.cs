@@ -285,16 +285,16 @@ internal sealed class CommandLineOptions
 
     public static void PrintUsage()
     {
-        Console.WriteLine("用法：NetBpm.DbMigrate <probe|migrate|check|purge> --provider <mysql|sqlserver> --connection \"<连接字符串>\"");
+        Console.WriteLine("用法：NetBpm.DbMigrate <probe|migrate|check|purge|apply> --provider <mysql|sqlserver> --connection \"<连接字符串>\"");
         Console.WriteLine("命令：");
         Console.WriteLine("  probe    列出可访问的库");
         Console.WriteLine("  migrate  执行建表脚本并校验 schema.version");
         Console.WriteLine("  check    仅校验 schema.version");
         Console.WriteLine("  purge    清空引擎表数据（保留结构；勿在生产库执行）");
+        Console.WriteLine("  apply    执行单个 SQL 脚本（--script <文件>；幂等性由脚本保证）");
         Console.WriteLine("选项：");
         Console.WriteLine("  --create-database    migrate 前按需创建数据库（库名取自连接字符串的 Database）");
         Console.WriteLine("  --script-dir <目录>  指定脚本目录（默认自动定位 db/<dialect>）");
-        Console.WriteLine("  apply    执行单个 SQL 脚本（--script <文件>；幂等性由脚本保证）");
         Console.WriteLine("  --script <文件>      apply 命令的脚本文件路径");
 
     }

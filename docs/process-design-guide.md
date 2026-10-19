@@ -972,9 +972,8 @@ dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
 | `src/NetBpm.Workflow/Hosting/WorkflowRuntimeContext.cs` | 部署后运行期上下文（流程定义 id + 环节名 → id 对照表） |
 `src/NetBpm.Engine/Behavior/ListenerContracts.cs` + `ListenerInvoker.cs` + `Services/EngineEventDispatcher.cs` | 监听器契约（IExecutionListener / ITaskListener / IEngineEventListener）、触发与事件分发 |
 | `src/NetBpm.Identity/IdentityContracts.cs` | 身份模块端口（`FindUserIdsByGroupAsync` 是候选组展开的入口） |
-| `db/mysql/0003_create_process_instance_tables.sql` | 三张业务表（`instances` / `instance_current_task` / `deal_history`）的建表脚本 |
-| `db/mysql/0004_create_leave_bill.sql` | 请假单表（`days` / `reason` 真列 + `ext_params` JSON 列） |
-| `db/mysql/0006_create_order_bill.sql` / `0007_create_workflow_parameters.sql` / `0008_create_workflow_type.sql` | 订单单表 / 流程参数键值表 / 流程类型表（`ProcessInfoEnum` 数据源） |
+| `db/mysql/0002_create_business_tables.sql` | 流程实例表（`instances` / `instance_current_task` / `deal_history`）+ 流程类型表（`workflow_type`）的建表脚本 |
+| `db/mysql/0003_create_demo_tables.sql` | Demo 业务表：请假单（`leave_bill`，`days` / `reason` 真列 + `ext_params` JSON 列）、订单单（`order_bill`）、流程参数键值表（`workflow_parameters`）、组织架构（`sys_*`） |
 | `samples/NetBpm.Demo/Program.cs` | 组合根：`AddNetBpmWorkflow` + 委托扫描注册 + 身份模块替换 + 存储/流程信息切换 + 启动即部署 |
 | `samples/NetBpm.Demo/Common/ProcessInfo.cs` | **流程信息枚举**（id/name/describe/viewUrl/approveUrl；数据源 `workflow_type` 表） |
 | `samples/NetBpm.Demo/Common/WorkflowTypeLoader.cs` | 启动时从 `workflow_type` 表加载流程信息（失败回退内置默认） |

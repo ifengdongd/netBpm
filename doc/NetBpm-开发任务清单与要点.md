@@ -84,7 +84,7 @@
 - **操作**：`ContinueProcess` / `TakeOutgoingSequenceFlows` / `EndExecution` / `TriggerExecution`
 - **行为**：空开始 / 空结束 / 排他网关 / 并行网关 / 包含网关 / 用户任务 / 服务任务 / 手工任务 / 脚本任务（占位）
 - **校验规则 9 条**：流程 id 必填、恰好一个开始事件、入出流完整性、id 全局唯一、排他网关默认流、并行网关默认流禁用、事件网关显式拒绝、监听器配置、子集外能力显式拒绝
-- **数据库**：MySQL / SQL Server 各 `0001`–`0008`；引擎表恰好 **13 张**
+- **数据库**：MySQL / SQL Server 各 `0001`–`0005`；引擎表恰好 **13 张**
 - **REST 端点 13 个** + `/health`，由 OpenAPI 存在性测试锁死
 - **Demo**：单宿主承载 `order_process` + `leave_process`，七个页面
 
@@ -153,7 +153,7 @@
 
 | # | 任务 | 交付物 | 要点 |
 |---|---|---|---|
-| T6.1 | 双方言 DDL | `db/{mysql,sqlserver}/0001..0008` | 引擎表**恰好 13 张** `ACT_*`；`0001` 不得出现被裁掉的 12 张表名（有测试守着）；表注释：MySQL 内联、SQL Server 用 `sp_addextendedproperty` |
+| T6.1 | 双方言 DDL | `db/{mysql,sqlserver}/0001..0005` | 引擎表**恰好 13 张** `ACT_*`；`0001` 不得出现被裁掉的 12 张表名（有测试守着）；表注释：MySQL 内联、SQL Server 用 `sp_addextendedproperty` |
 | T6.2 | ID 区块生成器 | `DbIdGenerator` | 从 `ACT_GE_PROPERTY.next.dbid` **一次占 2500**、`REV_` 乐观锁更新、进程内自增发放；改成 UUID/自增会**让库级对拍全线失败** |
 | T6.3 | 仓储族 | `DapperExecutionManager` / `DapperTaskManager` / `DapperVariableInstanceManager` / `DapperHistoryManager` / `DapperProcessDefinitionStore` | **Dapper 不做下划线→驼峰映射** → 所有手工 SQL 显式 `as` 别名；保留字要反引号；别用 `select *` |
 | T6.4 | 变量类型映射 | `VariableTypeMapper` | 列布局：`string`→`TEXT_`；整数→`LONG_` **和** `TEXT_`；`double`→只 `DOUBLE_`；`bool`→只 `LONG_`；`date`→`LONG_`（UTC 毫秒）；`null`→`TYPE_='null'` 且值列全空。`TEXT2_` **不是**截断列，是 json 类型类全名辅助列。超 4000 字符串 / bytes / serializable **响亮失败，绝不截断** |
@@ -294,7 +294,7 @@
 | B1.1 | ~~**脚本任务执行**（Roslyn Scripting）~~ ✅ 已完成（2026-10-16） | 无 | `ScriptTaskEngine`（`src/NetBpm.Engine/Script/`）：只支持 `scriptFormat="csharp"`（缺省/其它格式部署期拒绝）；脚本顶层可用 `execution`（当前执行）与 `vars`（变量快照，赋值不写回）；`autoStoreVariables` 存脚本顶层变量、`resultVariable` 存最后一条顶层表达式的值；编译结果按脚本原文缓存 |
 | B1.2 | ~~**多实例会签 / 串签**~~ ✅ 已完成（2026-10-16，无 DDL 变更） | 引擎（执行树扩展） | 仅 `userTask` 支持（其它活动部署期拒绝，含解析进模型防静默丢弃）；串行 = 主执行逐实例建任务，并行 = N 个子执行各挂一任务（复用并行网关收口机制）；循环变量走流程变量跨命令恢复；`completionCondition` 为真时取消剩余实例。**已登记偏差**：ACT_HI_ACTINST 每节点 1 行（Activiti 每实例 1 行）、并行模式共享作用域的 loopCounter/elementVariable 只反映最后实例、实例级监听器不逐实例触发、多实例与 skipExpression 互斥 |
 | B1.3 | ~~纯条件评测型测试（不改库）~~ ✅ 已完成（2026-10-16，`CorpusInMemoryTests`） | 无 | 全部 210 条对拍语料在**纯内存宿主**（TestEngine）上跑通操作脚本（动作语义与 `DifferentialRunner.ApplyAsync` 逐条对齐：completeAnyTask 确定性挑选 / completeTask 唯一性 / completeAllTasks+limit），0.4 秒回归不依赖 MySQL；断言部署校验干净 + 脚本可执行 + 执行树一致。**分工**：内存套件答「跑得动 + 推进正确」，差分对拍答「与 Activiti 行级一致」；语料脚本歧义（同 key 多待办）与差分执行器同口径跳过。语料读取为最小副本（避免测试工程互引导致 xunit 入口重复） |
-| B1.4 | ~~CI 流水线~~ ✅ 已完成（2026-10-16，`.github/workflows/ci.yml`） | 无 | build + 单测 + MySQL 服务容器跑集成测试（`DbMigrate --create-database` 建表）；⚠️ 测试执行用 `dotnet run --project`（MTP 原生）而非 `dotnet test`——后者会「运行了零个测试」（exit 5）；对拍 Job 需 JDK + 预言机产物，暂未开启。**双库功能矩阵（2026-10-16）**：B1/B2 全部功能 × MySQL（localhost）与 SqlServer（10.1.245.36，Windows 认证）各跑一遍（`DualDatabaseFeatureMatrixTests`，10 项功能 × 2 方言 = 20 行，库表自动创建迁移，方言不可用动态跳过；SqlServer 侧默认由 Testcontainers 拉起 `mssql/server:2022`（2026-10-19 起，此前默认连内网 10.1.245.36；仍可用 `NETBPM_SQLSERVER_CONNECTION` 指到已有实例；Docker 不可用则动态跳过） |
+| B1.4 | ~~CI 流水线~~ ✅ 已完成（2026-10-16，`.github/workflows/ci.yml`） | 无 | build + 单测 + MySQL 服务容器跑集成测试（`DbMigrate --create-database` 建表）；⚠️ 测试执行用 `dotnet run --project`（MTP 原生）；`dotnet test` 亦可用，但不要带 `--nologo`（MTP 透传后拒绝 → 「运行了零个测试」/exit 5）；对拍 Job 需 JDK + 预言机产物，暂未开启。**双库功能矩阵（2026-10-16）**：B1/B2 全部功能 × MySQL（localhost）与 SqlServer（10.1.245.36，Windows 认证）各跑一遍（`DualDatabaseFeatureMatrixTests`，10 项功能 × 2 方言 = 20 行，库表自动创建迁移，方言不可用动态跳过；SqlServer 侧默认由 Testcontainers 拉起 `mssql/server:2022`（2026-10-19 起，此前默认连内网 10.1.245.36；仍可用 `NETBPM_SQLSERVER_CONNECTION` 指到已有实例；Docker 不可用则动态跳过） |
 
 ### B2 有条件再做
 
@@ -307,7 +307,7 @@
 | B2.5 | ~~部署接口接收原始字节~~ ✅ 已完成（2026-10-16） | `ProcessEngine.DeployAsync` 先截下原始字节随命令透传；`IProcessDefinitionStore.DeployAsync` 增加 `rawResourceBytes` 参数（null 时退回重序列化，兼容内存仓储）；`BYTES_` 现存调用方原文，「有意偏离」消除 |
 | B2.6 | ~~引擎侧"按实例 + 候选人"组合查询~~ ✅ 已完成（2026-10-16） | `ProcessEngine.FindTasksAsync`：实例查询 ∩ 候选人查询（组经 `IUserGroupManager` 展开），候选人语义与单独查询同口径（候选人/所属组可认领且未签收） |
 | B2.7 | ~~REST API 产品化补齐（P0）~~ ✅ 已完成（2026-10-19） | 引擎新增：运行实例列表 `IExecutionManager.FindProcessInstancesAsync`、历史实例/跨实例历史任务/历史变量查询端口、候选组查询 `FindTaskCandidateGroup`、运行期写变量 `SetVariablesCommand`。门面新增 `FindProcessInstancesAsync` / `FindHistoricProcessInstancesAsync` / `FindHistoricVariablesAsync` / `SetVariable(s)Async` / `GetTaskAsync` / `FindTaskIdentityLinksAsync` / `ProcessDefinitionQuery`；`HistoricTaskQuery` 解除「实例 id 必填」（保留「至少一个条件」防全表扫描）。REST 新增 11 个端点：实例列表、任务详情、身份关系、转办、跳转、变量单写/批写、历史实例列表、跨实例已办、历史变量、定义分页/版本。列表统一 `firstResult/maxResults`（默认 20 / 上限 200）+ `X-Total-Count`。**顺带修复**：`JsonVariableReader` 条件表达式把 `long` 提升为 `double`，导致整数变量落库为 `VAR_TYPE_='double'` |
-| B2.10 | ~~REST API 产品化补齐（P2 收尾）~~ ✅ 已完成（2026-10-19） | 鉴权：可选 `NetBpm:Security:ApiKey`（`X-Api-Key` / Bearer），`X-User-Id` / `X-Tenant-Id` 进入 `RequestContext`，启动实例 / 认领 / 列表默认租户与操作人回落到上下文（`RequestContext` + `AuthenticationMiddleware`）。用户级 JWT：`NetBpm:Security:Jwt:SigningKey`（HS256，≥32 字节，可选 `Issuer` / `Audience`），`Authorization: Bearer <jwt>`，`sub` → 操作人、`tenant` / `tenant_id` → 租户；与 API Key 并存，JWT 模式忽略身份请求头（防提权），幂等哈希改用解析后的身份（跨用户同 key 返回 409 而非回放）。幂等：`Idempotency-Key` 中间件，内存 / `ACT_IDEMPOTENCY` 双实现（新增 `0010_create_idempotency.sql`，MySQL + SqlServer），同键同请求回放、不同请求 409、5xx 删除占位；`IIdempotencyStore` 在组合根按宿主注册。分页：新增 `PagedResponse<T>` 与 `?envelope=true`，列表统一默认 20 / 上限 200（含 `/tasks`），保留裸数组 + `X-Total-Count` 兼容。测试：`SecurityAndIdempotencyTests` 覆盖 401/200、租户隔离、请求头认领、幂等回放/冲突、信封与钳制；`JwtAuthenticationTests` 覆盖伪造签名 / 过期 / 错受众 401、声明透传与请求头防伪、API Key 并存、幂等按身份隔离。**未做**：完整 OIDC 发现（JWKS / RS256，需外部 IdP）与事件订阅（需 outbox） |
+| B2.10 | ~~REST API 产品化补齐（P2 收尾）~~ ✅ 已完成（2026-10-19） | 鉴权：可选 `NetBpm:Security:ApiKey`（`X-Api-Key` / Bearer），`X-User-Id` / `X-Tenant-Id` 进入 `RequestContext`，启动实例 / 认领 / 列表默认租户与操作人回落到上下文（`RequestContext` + `AuthenticationMiddleware`）。用户级 JWT：`NetBpm:Security:Jwt:SigningKey`（HS256，≥32 字节，可选 `Issuer` / `Audience`），`Authorization: Bearer <jwt>`，`sub` → 操作人、`tenant` / `tenant_id` → 租户；与 API Key 并存，JWT 模式忽略身份请求头（防提权），幂等哈希改用解析后的身份（跨用户同 key 返回 409 而非回放）。幂等：`Idempotency-Key` 中间件，内存 / `ACT_IDEMPOTENCY` 双实现（新增 `0005_create_idempotency.sql`，MySQL + SqlServer），同键同请求回放、不同请求 409、5xx 删除占位；`IIdempotencyStore` 在组合根按宿主注册。分页：新增 `PagedResponse<T>` 与 `?envelope=true`，列表统一默认 20 / 上限 200（含 `/tasks`），保留裸数组 + `X-Total-Count` 兼容。测试：`SecurityAndIdempotencyTests` 覆盖 401/200、租户隔离、请求头认领、幂等回放/冲突、信封与钳制；`JwtAuthenticationTests` 覆盖伪造签名 / 过期 / 错受众 401、声明透传与请求头防伪、API Key 并存、幂等按身份隔离。**未做**：完整 OIDC 发现（JWKS / RS256，需外部 IdP）与事件订阅（需 outbox） |
 | B2.16 | ~~**变量读写的参与人校验**~~ ✅ 已完成（2026-10-19） | 新增 `VariableAuthorization`：JWT 下流程实例变量要求发起人，或实例运行中任务的办理人 / 所有者 / 候选人（含候选组）；任务局部变量要求该任务参与人，或实例发起人；`netbpm.admin` 可越过。`EnsureInstanceAccessAsync` 改为返回已校验实例（避免重复查询），`TaskAuthorization.IsParticipantAsync` 复用候选人判定。7 个变量端点（实例读 / 单写 / 批写 / 删，任务读 / 写 / 删）全部接入。API Key 保持可信服务语义。测试 `VariableAccess_ShouldRequireInstanceParticipantOrAdmin` 覆盖发起人 / 办理人 / 候选用户 / 非参与人 403 / 管理员 / API Key |
 | B2.15 | ~~**API Key 服务作用域（AllowedTenants + 租户隔离）**~~ ✅ 已完成（2026-10-19） | 配置 `NetBpm:Security:ApiKeyTenants`（数组）后，服务密钥被限定在白名单租户：`RequestContext.AllowedTenants` + `EffectiveTenantId`（单租户自动回落）；`RequestIdentity.Tenant` 对部署 / 启动 / 列表校验（多租户必须显式、越界 403）；`AuthenticationMiddleware` 校验 `X-Tenant-Id` 必须在白名单（修复用请求头「自证」租户、绕过按 id 隔离的漏洞）；`TenantGuard` 对实例 / 任务 / 历史 / 部署按生效租户返回 404。留空保持「可信服务可跨租户」旧行为。测试 `ApiKeyScopeTests`（7 例）：单租户默认回落、多租户强制显式、跨租户读写 404、越界请求头 403、作用域内头部过滤、任务更新 / 改派 / 删除实例 |
 | B2.14 | ~~时间契约与幂等表清理~~ ✅ 已完成（2026-10-19） | `UtcDateTimeJsonConverter` 统一把响应时间按 UTC 序列化（`Kind=Unspecified` 视为 UTC），修复 MySQL/SqlServer 读回时间缺 `Z`、浏览器按本地时区解析的问题；集成测试 `Timestamps_ShouldSerializeWithUtcDesignator` 锁定。新增 `IdempotencyCleanupService`（BackgroundService，启动后 1 分钟首轮、每小时一次）调用已存在但无人调用的 `PurgeExpiredAsync`，避免 `ACT_IDEMPOTENCY` 无限增长 |
@@ -336,7 +336,7 @@ dotnet format NetBpm.slnx --verify-no-changes --no-restore
 # 语料漂移校验（语料必须由脚本生成）
 dotnet run --project tests/corpus/generator -- --check
 
-# 建库（引擎侧 0001/0002）
+# 建库（引擎侧 0001）
 dotnet run --project tools/NetBpm.DbMigrate -- migrate --provider mysql \
   --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;"
 
@@ -355,7 +355,7 @@ dotnet test tests/NetBpm.DifferentialTests/NetBpm.DifferentialTests.csproj
 **本地开发注意（会真的卡住）**
 
 - 常驻 `NetBpm.Rest` 会锁 `bin/` 目录并占 **5080** 端口，且它是集成测试工程的 `ProjectReference` → 构建报 MSB3021/MSB3027。绕行：只 build `src`，再把新 `NetBpm.*.dll` 覆盖到集成测试 `bin` 下直接跑 exe。
-- `dotnet test` 在 .NET 10 SDK 上可能报"运行了零个测试" → 直接跑 `bin` 下测试 exe，并按类过滤。
+- `dotnet test` 报「运行了零个测试」（exit 5）通常是带了 `--nologo`：MTP 会把它透传给测试宿主并被拒绝，去掉即可；按类过滤用 `--filter "FullyQualifiedName~类名"`。
 - **集成测试绝不能不加类过滤全跑**：MySQL 用例的 `EngineTableCleaner.Purge` 会清库。
 - 直接跑 `bin/Debug/net10.0/Xxx.exe` 时当前目录会成为 ContentRoot → 必须在项目目录下启动。
 

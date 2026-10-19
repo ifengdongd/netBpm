@@ -422,11 +422,9 @@ public sealed class RestEndToEndTests : IClassFixture<RestEngineFactory>
         Assert.Equal(JsonValueKind.Null, resolved.GetProperty("owner").ValueKind);
         Assert.Equal("RESOLVED", resolved.GetProperty("delegationState").GetString());
 
-        // 候选关系只对「未签收」的任务可见：先取消认领
-        using (var unclaim = await client.PostAsJsonAsync(
-            new Uri($"/api/runtime/tasks/{taskId}/claim", UriKind.Relative),
-            new { userId = (string?)null },
-            Ct))
+        // 候选关系只对「未签收」的任务可见：先取消认领（显式 /unclaim 端点）
+        using (var unclaim = await client.PostAsync(
+            new Uri($"/api/runtime/tasks/{taskId}/unclaim", UriKind.Relative), null, Ct))
         {
             Assert.True(unclaim.IsSuccessStatusCode, $"取消认领失败：{unclaim.StatusCode}");
         }

@@ -49,7 +49,7 @@ public sealed partial class DatabaseScriptTests
     [InlineData("mysql")]
     public void SchemaScript_ShouldCreateExactlyTheKeptTables(string dialect)
     {
-        var script = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_schema.sql"));
+        var script = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_engine_schema.sql"));
 
         var created = CreateTableRegex()
             .Matches(script)
@@ -67,7 +67,7 @@ public sealed partial class DatabaseScriptTests
     public void SchemaScript_ShouldNotReferenceRemovedTables(string dialect)
     {
         // 只看 DDL 语句本身：脚本头部的注释会逐一列出被裁剪的表名（那是文档，不是建表）
-        var script = StripComments(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_schema.sql")));
+        var script = StripComments(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_engine_schema.sql")));
 
         foreach (var removed in RemovedTables)
         {
@@ -80,18 +80,18 @@ public sealed partial class DatabaseScriptTests
     [InlineData("mysql")]
     public void SchemaScript_ShouldAlignWithEngineExpectations(string dialect)
     {
-        var schemaScript = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_schema.sql"));
-        var initScript = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0002_init_data.sql"));
+        // 初值与建表已合并到同一脚本（原 0001 + 0002）
+        var schemaScript = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_engine_schema.sql"));
 
         // schema.version 必须与 DatabaseSchemaChecker 的期望值一致，否则引擎启动即失败
         Assert.Contains(
             $"'{DatabaseSchemaChecker.ExpectedSchemaVersion}'",
-            initScript,
+            schemaScript,
             StringComparison.Ordinal);
 
         // §7.3：ID 生成器的区块游标初值
-        Assert.Contains($"'{DbIdGenerator.NextDbIdPropertyName}'", initScript, StringComparison.Ordinal);
-        Assert.Contains("'schema.history'", initScript, StringComparison.Ordinal);
+        Assert.Contains($"'{DbIdGenerator.NextDbIdPropertyName}'", schemaScript, StringComparison.Ordinal);
+        Assert.Contains("'schema.history'", schemaScript, StringComparison.Ordinal);
 
         // ROOT_PROC_INST_ID_ 的索引名在 MySQL 上游脚本里就是 ACT_IDC_EXEC_ROOT（保持原样）
         Assert.Contains("ROOT_PROC_INST_ID_", schemaScript, StringComparison.Ordinal);

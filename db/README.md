@@ -1,40 +1,53 @@
 ﻿# NetBpm 数据库脚本
 
-两套方言（`mysql/` 与 `sqlserver/`）脚本编号一一对应、同步维护。
+两套方言（`mysql/` 与 `sqlserver/`）由**单一数据源**生成，编号一一对应、结构严格一致，差异仅为方言语法。
+
+## 单一数据源与生成
+
+脚本**请勿手改**。真正的定义只在一处：
+
+- `tools/NetBpm.DbInit/Schema/SchemaCatalog.cs` —— 表 / 列 / 索引 / 外键 / 注释 / 种子数据（方言无关）
+- `tools/NetBpm.DbInit/Schema/SqlGenerator.cs` —— 按方言渲染出 MySQL / SQL Server 两套 `.sql`
+
+```bash
+# 只重新生成 db/mysql 与 db/sqlserver（不连库）
+dotnet run --project tools/NetBpm.DbInit -- --generate-only
+
+# 一步初始化：生成脚本 → 初始化结构 + 种子数据 → 校验 schema.version（幂等）
+dotnet run --project tools/NetBpm.DbInit -- \
+  --provider mysql --connection "<连接串>" --create-database
+```
+
+生成的脚本仍然签入版本库（运行时 `DatabaseMigrator` 直接读 `db/<dialect>/*.sql`，不依赖生成器）。
 
 ## 脚本分层
 
 | 编号 | 脚本 | 层 | 说明 |
 |---|---|---|---|
-| 0001 | `0001_create_schema.sql` | **引擎基础表** | Activiti 子集 13 张 ACT_* 表（执行树 / 任务 / 变量 / 历史 / 部署）+ 索引外键 |
-| 0002 | `0002_init_data.sql` | **引擎基础表** | `schema.version` / `next.dbid` 等初值（引擎启动校验依赖） |
-| 0003 | `0003_create_process_instance_tables.sql` | **流程实例业务表** | `instances` / `instance_current_task` / `deal_history`（`workflow_type_id` 存流程类型 id） |
-| 0008 | `0008_create_workflow_type.sql` | **流程实例业务表** | `workflow_type` 流程类型表（`ProcessInfoEnum` 数据源，启动时加载） |
-| 0009 | `0009_perf_indexes.sql` | **性能增强** | 运行期查询索引（执行树 / 任务 / 变量 / 关系）；幂等，可对已有库单独执行 |
-| 0010 | `0010_create_idempotency.sql` | **应用层（REST）** | `ACT_IDEMPOTENCY` HTTP 幂等键表；仅 REST 宿主使用，不属于 Activiti 13 张引擎表 |
-| 0004 | `0004_create_leave_bill.sql` | Demo 业务表 | 请假单（`days` / `reason` 真列） |
-| 0006 | `0006_create_order_bill.sql` | Demo 业务表 | 订单单（`status` 随审批回写 100 / -1） |
-| 0007 | `0007_create_workflow_parameters.sql` | Demo 业务表 | 流程参数键值表（「实例 × 参数名」） |
-| 0005 | `0005_create_org_tables.sql` | Demo 业务表 | 组织架构（`sys_*` 四张：部门 / 员工 / 审批组） |
+| 0001 | `0001_create_engine_schema.sql` | **引擎基础表** | Activiti 子集 13 张 ACT_* 表（执行树 / 任务 / 变量 / 历史 / 部署）+ 索引外键 + `schema.version` / `next.dbid` 等初值 |
+| 0002 | `0002_create_business_tables.sql` | **流程实例业务表** | `instances` / `instance_current_task` / `deal_history` + `workflow_type` 流程类型表（`ProcessInfoEnum` 数据源，启动时加载） |
+| 0003 | `0003_create_demo_tables.sql` | **Demo 业务表** | 请假单（`leave_bill`）、订单单（`order_bill`）、流程参数键值表（`workflow_parameters`）、组织架构（`sys_*` 四张：部门 / 员工 / 审批组） |
+| 0004 | `0004_perf_indexes.sql` | **性能增强** | 运行期查询索引（执行树 / 任务 / 变量 / 关系）；幂等，可对已有库单独执行 |
+| 0005 | `0005_create_idempotency.sql` | **应用层（REST）** | `ACT_IDEMPOTENCY` HTTP 幂等键表；仅 REST 宿主使用，不属于 Activiti 13 张引擎表 |
 
-> **其它 .NET 项目接入引擎**：必跑 0001 → 0002 → 0003 → 0008（引擎 + 流程实例 + 流程类型）；
-> 0004 / 0005 / 0006 / 0007 是 Demo 业务表，按需取舍。
+> **其它 .NET 项目接入引擎**：必跑 0001 → 0002（引擎基础 + 流程实例/流程类型）；
+> 0003 是 Demo 业务表，按需取舍。
 
 ## 执行顺序
 
-`0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010`
+`0001 → 0002 → 0003 → 0004 → 0005`
 
 > **已初始化的库升级索引**：`migrate` 检测到 `ACT_GE_PROPERTY` 后会跳过全部脚本（结构版本不变），
-> 因此 `0009` 需要用 `apply` 单独执行（脚本幂等，可重复跑）：
+> 因此 `0004` 需要用 `apply` 单独执行（脚本幂等，可重复跑）：
 >
 > ```bash
 > dotnet run --project tools/NetBpm.DbMigrate -- apply \
->   --provider mysql --connection "<连接串>" --script db/mysql/0009_perf_indexes.sql
+>   --provider mysql --connection "<连接串>" --script db/mysql/0004_perf_indexes.sql
 > ```
 >
-> 新库直接 `migrate` 即可，`0009` / `0010` 会随其它脚本一起执行。
+> 新库直接 `migrate` 即可，`0004` / `0005` 会随其它脚本一起执行。
 >
-> `0010` 同样可用 `apply` 单独执行（`create table if not exists`，幂等）；REST 宿主启用
+> `0005` 同样可用 `apply` 单独执行（`create table if not exists`，幂等）；REST 宿主启用
 > `Idempotency-Key` 前必须确保该表存在，否则幂等中间件会在首次写入时报错。
 
 - MySQL：`mysql -u<user> -p <database> < db/mysql/000x_*.sql`（库示例 `netbpm_demo`）；
@@ -43,6 +56,22 @@
 ## 方言差异
 
 - MySQL：`utf8mb4`（业务表）/ `utf8`（引擎表，与上游 Activiti 一致）、`comment` 列注释；
-- SQL Server：`nvarchar`、命名约束（`pk_*` / `ix_*`）、`go` 批分隔、
-  `if not exists` 保护的索引创建；
-- 列结构两方言一一对应（0003 / 0008 等头注释含来源与差异说明）。
+- SQL Server：`nvarchar`、命名约束（`pk_*` / `df_*` / `ix_*`）、`go` 批分隔、
+  `if not exists` 保护的索引与种子创建；
+- 列结构两方言一一对应（0001 / 0002 / 0003 等头注释含来源与差异说明）。
+
+## 对齐决策清单
+
+合并前两套脚本是「按方言各自手写、结构互有出入」。合并为单一数据源时做了以下对齐，
+**对齐原则：表 / 列 / 索引 / 外键 / 注释两方言最终一一对应，仅保留方言语法差异；对齐结果不低于原任一方言。**
+
+| 项 | 决策 |
+|---|---|
+| 引擎表类型 | `SUSPENSION_STATE_`（`ACT_RE_PROCDEF` / `ACT_RU_EXECUTION`）SQL Server 原为 `tinyint`，统一为 `int`（与 MySQL / 上游一致） |
+| 默认值 | `ACT_RE_DEPLOYMENT.VERSION_`、`workflow_type.sort_order` / `enabled` 的默认值（`1` / `0` / `1`）补齐到 SQL Server |
+| 时间类型 | 引擎表 `datetime(3)` / `timestamp(3)` → SQL Server `datetime`；幂等表 → `datetime2(3)` |
+| 索引 | `0001_create_engine_schema.sql` = 上游 Activiti MySQL 的 22 个索引（两方言一致，`ACT_IDC_EXEC_ROOT` 保留上游拼写）；`0004_perf_indexes.sql` = 两方言运行期索引并集 16 个（SQL Server 原引擎脚本的 12 个额外索引移入 0004，并补齐 MySQL 缺失；`ACT_IDX_IDENT_LNK_TASK` 去掉 INCLUDE 使定义一致） |
+| 外键 | 14 个外键两方言一致；新增 `ACT_FK_EXE_PROCINST`（`PROC_INST_ID_` 自引用）到 SQL Server。自引用执行树 FK：MySQL 渲染 `on delete cascade`（`ACT_FK_EXE_PROCINST` 另含 `on update cascade`），SQL Server 因「多重级联路径」限制渲染为 NO ACTION；引擎删除本身先子后父，不依赖 DB 级联 |
+| 注释 | SQL Server 补齐业务表（`workflow_type` / `leave_bill` / `sys_*` / `order_bill` / `workflow_parameters`）的表与列 `MS_Description`（原缺失），与 MySQL `comment` 一一对应 |
+| 约束命名 | SQL Server 统一 `pk_<table>` / `df_<table>_<column>`（原流程实例表的 `PK_instances` / `pk__xxx` 自动名统一为小写命名） |
+| 幂等策略 | `0001` / `0002` 及 `0003` 的业务表单（`leave_bill` / `order_bill` / `workflow_parameters`）一次性执行；`0003` 的组织架构（`sys_*`）、`0004` / `0005` 幂等可重复（`apply` 单独执行用） |

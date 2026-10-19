@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NetBpm.DbInit</RootNamespace>
+    <AssemblyName>NetBpm.DbInit</AssemblyName>
+    <!-- 控制台初始化工具，不需要测试项目那套引用约定 -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NetBpm.Persistence\NetBpm.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

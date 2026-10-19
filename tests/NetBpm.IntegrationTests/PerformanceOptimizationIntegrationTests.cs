@@ -12,7 +12,7 @@ namespace NetBpm.IntegrationTests;
 /// <summary>
 /// P1 数据库与性能改动的回归（MySQL + SqlServer）：
 /// <list type="bullet">
-///   <item><description>运行期查询索引确实存在（0009_perf_indexes.sql）；</description></item>
+///   <item><description>运行期查询索引确实存在（0004_perf_indexes.sql）；</description></item>
 ///   <item><description>流程定义模型按 id 缓存，多次启动只解析一次 XML；</description></item>
 ///   <item><description>候选关系批量写入（20 人 = 20 候选 + 20 参与者，一次多行插入）；</description></item>
 ///   <item><description>历史行收口复用内存起始时间后，耗时列仍然正确。</description></item>
@@ -51,7 +51,7 @@ public sealed class PerformanceOptimizationIntegrationTests
 
             Assert.True(
                 exists > 0,
-                $"缺少索引 {index}。已初始化的库请执行 db/{provider}/0009_perf_indexes.sql 后再跑本用例。");
+                $"缺少索引 {index}。已初始化的库请执行 db/{provider}/0004_perf_indexes.sql 后再跑本用例。");
         }
     }
 

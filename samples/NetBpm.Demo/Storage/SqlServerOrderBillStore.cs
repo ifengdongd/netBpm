@@ -11,7 +11,7 @@ namespace NetBpm.Demo.Storage;
 /// <remarks>
 /// CRUD 全部委托 <see cref="IDataAccessor{TEntity}"/>（<see cref="SqlServerDataAccessor{TEntity}"/>：
 /// 方括号引用、top 行数上限；<c>wf</c> schema 前缀在访问器里拼在表名前），
-/// 本类只给出落点展示名。表结构见 db/sqlserver/0006_create_order_bill.sql。
+/// 本类只给出落点展示名。表结构见 db/sqlserver/0003_create_demo_tables.sql。
 /// </remarks>
 public sealed class SqlServerOrderBillStore : OrderBillStoreBase
 {

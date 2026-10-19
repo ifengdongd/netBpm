@@ -1,9 +1,9 @@
 # NetBpm CI（任务清单 B1.4）
 #
-# ⚠️ 测试执行用 `dotnet run --project`（MTP 原生方式）而不是 `dotnet test`：
-# xunit.v3 + Microsoft.Testing.Platform 组合下，本仓库的 `dotnet test` 会
-# 「运行了零个测试」（exit code 5），直接运行测试程序集则完全正常 ——
-# 两个入口执行的是同一个测试程序集，CI 选用可靠的那个。
+# 测试执行用 `dotnet run --project`（MTP 原生方式）；`dotnet test` 同样可用。
+# ⚠️ `dotnet test` 不要带 `--nologo`：那是 VSTest 时代的参数，MTP 会透传给测试宿主并被
+# 「unknown option」拒绝，表现为「运行了零个测试」（exit code 5）—— 去掉即可正常。
+# 两个入口执行的是同一个测试程序集。
 #
 # 差分对拍（NetBpm.DifferentialTests）需要 JDK + Activiti 预言机（tools/Oracle），
 # 先在 CI 外准备好预言机产物后再开启该 Job；此处暂不执行（见任务清单 B1.4 的容器化备注）。

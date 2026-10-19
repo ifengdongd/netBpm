@@ -63,8 +63,8 @@ NetBpm 流程引擎 · 发行包（$version）
   db\      两方言建表脚本（引擎基础表 + 流程实例业务表 + 流程类型表 + Demo 业务表）
 
 二、其它 .NET 项目接入步骤
-  1. 建库并执行 db 脚本（必跑 0001 → 0002 → 0003 → 0008；其余按需）：
-     mysql  : mysql -u<user> -p <db> < db\mysql\0001_create_schema.sql （逐个执行）
+  1. 建库并执行 db 脚本（必跑 0001 → 0002；Demo 业务表 0003 按需）：
+     mysql  : mysql -u<user> -p <db> < db\mysql\0001_create_engine_schema.sql （逐个执行）
      sqlserver: 逐个执行 db\sqlserver\000x_*.sql（统一 dbo schema）
   2. 引擎引用（任选其一）：
      - NuGet 包（推荐）：本地源 dotnet nuget add source "<本目录绝对路径>\nuget" -n netbpm；

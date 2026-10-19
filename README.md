@@ -177,12 +177,13 @@ NetBpm/
 │   └── NetBpm.Demo/              # 合并审批 Demo（订单 + 请假；公共应用层 + 通用端点的完整接入示例）
 ├── web/designer/                 # 流程设计器（bpmn-js 18 + Vite 6 + TS）
 ├── db/
-│   ├── mysql/                    # 0001 引擎表 / 0002 初始数据 / 0003 流程实例业务表 / 0004-0008 业务表
-│   └── sqlserver/                # 同上（两套方言同步维护）
+│   ├── mysql/                    # 0001-0010 建表 + 种子脚本（单一数据源生成，请勿手改）
+│   └── sqlserver/                # 同上（两方言结构一一对应，仅语法差异）
 ├── docs/
 │   └── process-design-guide.md   # 流程设计操作指引（以请假 / 订单流程为例）
 ├── tools/
-│   ├── NetBpm.DbMigrate/         # 建库 / 迁移 / 校验 / 清库命令行工具
+│   ├── NetBpm.DbInit/            # 数据库初始化器（生成脚本 → 初始化结构 + 数据 → 校验）
+│   ├── NetBpm.DbMigrate/         # 数据库运维工具（migrate / check / probe / purge / apply）
 │   └── Oracle/                   # Java 预言机（产生对拍真值）
 └── doc/                          # 开发计划（.md / .html）
 ```
@@ -204,12 +205,13 @@ dotnet restore NetBpm.slnx
 dotnet build NetBpm.slnx -c Release
 
 # 单元测试 / 差分对拍（不依赖数据库）
-# ⚠️ 用 dotnet run（MTP 原生方式）：本仓库 dotnet test 会「运行了零个测试」（exit 5），
-#    两个入口执行的是同一个测试程序集，CI（.github/workflows/ci.yml）同样用 dotnet run
+# 推荐 dotnet test（标准方式）；dotnet run --project 是原生控制台入口，执行同一测试程序集。
+# ⚠️ dotnet test 不要带 --nologo：那是 VSTest 时代的参数，MTP 会把它透传给测试宿主并以
+#    「unknown option」拒绝，表现为「运行了零个测试」（exit code 5）—— 去掉即可正常。
 # 单元测试含「全语料内存回归」（B1.3）：210 条对拍语料在纯内存宿主上跑通，约 0.5 秒，
 # 日常改引擎先跑它；行级真值仍由差分对拍裁决
-dotnet run --project tests/NetBpm.UnitTests -c Release --no-build
-dotnet run --project tests/NetBpm.DifferentialTests -c Release --no-build
+dotnet test tests/NetBpm.UnitTests -c Release
+dotnet test tests/NetBpm.DifferentialTests -c Release
 
 # 代码格式检查
 dotnet format NetBpm.slnx --verify-no-changes --no-restore
@@ -218,12 +220,16 @@ dotnet format NetBpm.slnx --verify-no-changes --no-restore
 ### 初始化数据库
 
 ```bash
-dotnet run --project tools/NetBpm.DbMigrate -- \
-  migrate --provider mysql \
-  --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;"
+# 一步初始化：生成脚本 → 建结构 → 灌种子数据 → 校验 schema.version（幂等）
+dotnet run --project tools/NetBpm.DbInit -- \
+  --provider mysql \
+  --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;" \
+  --create-database
 ```
 
-支持 `migrate` / `check` / `probe` / `purge` 四个子命令，`--provider` 可选 `mysql` 或 `sqlserver`。建表脚本为 13 张 `ACT_*` 表，与 Activiti 表结构对齐。
+脚本由单一数据源 `tools/NetBpm.DbInit/Schema/SchemaCatalog.cs` 生成（分层见 [`db/README.md`](db/README.md)），
+引擎表为 13 张 `ACT_*` 表，与 Activiti 表结构对齐。运维动作（探库 / 清库 / 校验 / 单脚本执行）用
+`NetBpm.DbMigrate` 的 `probe` / `purge` / `check` / `apply` 子命令，`--provider` 可选 `mysql` 或 `sqlserver`。
 
 ### 启动 REST 服务
 
@@ -315,7 +321,7 @@ API Key 模式代表可信服务，不做任务级校验。令牌支持 `groups`
 ```bash
 dotnet run --project tools/NetBpm.DbMigrate -- apply --provider mysql \
   --connection "Server=127.0.0.1;Database=netbpm;User ID=root;Password=;" \
-  --script db/mysql/0010_create_idempotency.sql
+  --script db/mysql/0005_create_idempotency.sql
 ```
 
 **分页信封**：列表端点默认返回裸数组 + `X-Total-Count`；加 `?envelope=true` 返回
@@ -339,8 +345,8 @@ npm test         # 设计器单元测试
 ### 引擎启动步骤（其它 .NET 项目接入）
 
 1. **建库**：执行 `db/mysql/` 或 `db/sqlserver/` 建表脚本（分层与顺序见 [`db/README.md`](db/README.md)；
-   引擎必跑 `0001 → 0002`，流程实例业务表 `0003` 与流程类型表 `0008` 按需；
-   REST 宿主启用 HTTP 幂等时还需 `0010_create_idempotency.sql`）；
+   引擎必跑 `0001 → 0002`（引擎基础表 + 流程实例/流程类型表），Demo 业务表 `0003` 按需；
+   REST 宿主启用 HTTP 幂等时还需 `0005_create_idempotency.sql`）；
 2. **引用引擎包**：`dotnet pack` 产出见下节「打包分发」，或直接引用 `src/` 各项目；
 3. **组合根注册**（详见 [`samples/NetBpm.Demo/README.md`](samples/NetBpm.Demo/README.md)）：
 
