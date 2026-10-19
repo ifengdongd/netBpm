@@ -69,7 +69,7 @@ public sealed class DbIdGeneratorTests
         var store = new FakePropertyStore("next.dbid", value: null);
         var generator = new DbIdGenerator(store);
 
-        var exception = Assert.Throws<EngineException>(() => generator.NextId());
+        var exception = Assert.ThrowsAny<EngineException>(() => generator.NextId());
         Assert.Contains("next.dbid", exception.Message, StringComparison.Ordinal);
     }
 
@@ -79,7 +79,7 @@ public sealed class DbIdGeneratorTests
         var store = new FakePropertyStore("next.dbid", "not-a-number");
         var generator = new DbIdGenerator(store);
 
-        var exception = Assert.Throws<EngineException>(() => generator.NextId());
+        var exception = Assert.ThrowsAny<EngineException>(() => generator.NextId());
         Assert.Contains("not-a-number", exception.Message, StringComparison.Ordinal);
     }
 

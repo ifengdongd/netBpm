@@ -202,7 +202,7 @@ public static class TaskCenterEndpoints
         IOrderBillStore orderBills,
         CancellationToken ct)
     {
-        var summaries = await workflow.FindInstancesAsync(ct).ConfigureAwait(false);
+        var summaries = await workflow.FindInstancesAsync(ct: ct).ConfigureAwait(false);
         var definitionKeys = await GetDefinitionKeysAsync(engine, ct).ConfigureAwait(false);
 
         var items = new List<InstanceListItem>(summaries.Count);

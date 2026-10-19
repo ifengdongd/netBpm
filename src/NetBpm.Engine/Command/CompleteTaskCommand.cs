@@ -24,13 +24,18 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
 {
     private readonly string _taskId;
     private readonly IDictionary<string, object?>? _variables;
+    private readonly int? _expectedRevision;
 
-    public CompleteTaskCommand(string taskId, IDictionary<string, object?>? variables = null)
+    public CompleteTaskCommand(
+        string taskId,
+        IDictionary<string, object?>? variables = null,
+        int? expectedRevision = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
 
         _taskId = taskId;
         _variables = variables;
+        _expectedRevision = expectedRevision;
     }
 
     /// <inheritdoc />
@@ -46,16 +51,22 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
                 "宿主必须注册任务管理器实现");
 
         var task = await taskManager.FindTaskByIdAsync(_taskId, ct).ConfigureAwait(false)
-            ?? throw new EngineException($"任务 '{_taskId}' 不存在（可能已完成或已被删除）。");
+            ?? throw new EngineObjectNotFoundException($"任务 '{_taskId}' 不存在（可能已完成或已被删除）。");
+
+        if (_expectedRevision is { } expectedRevision && task.Revision != expectedRevision)
+        {
+            throw new OptimisticLockingException(
+                $"任务 '{_taskId}' 已被修改（期望版本 {expectedRevision}，实际 {task.Revision}），请刷新后重试。");
+        }
 
         if (task.SuspensionState != TaskEntity.ActiveSuspensionState)
         {
-            throw new EngineException("Cannot complete a suspended task");
+            throw new EngineConflictException("Cannot complete a suspended task");
         }
 
         if (task.DelegationState == DelegationState.Pending)
         {
-            throw new EngineException("A delegated task cannot be completed, but should be resolved instead.");
+            throw new EngineConflictException("A delegated task cannot be completed, but should be resolved instead.");
         }
 
         IExecutionEntity? execution = null;
@@ -63,7 +74,7 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
         if (task.ExecutionId is not null)
         {
             execution = await services.ExecutionManager.FindByIdAsync(task.ExecutionId, ct).ConfigureAwait(false)
-                ?? throw new EngineException(
+                ?? throw new EngineObjectNotFoundException(
                     $"任务 '{task.Id}' 关联的执行 '{task.ExecutionId}' 不存在，无法继续流程。");
         }
 

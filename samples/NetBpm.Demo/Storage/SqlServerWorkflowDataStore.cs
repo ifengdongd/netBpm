@@ -1,4 +1,4 @@
-﻿using NetBpm.Demo.Common;
+using NetBpm.Demo.Common;
 using NetBpm.Persistence;
 using NetBpm.Workflow;
 

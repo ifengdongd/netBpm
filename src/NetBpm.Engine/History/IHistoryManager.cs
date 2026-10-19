@@ -129,6 +129,31 @@ public interface IHistoryManager
         string processInstanceId,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// 查<b>全部</b>历史流程实例（实例列表 / 已办结检索的数据源）。
+    /// <para>
+    /// ⚠️ 条件过滤与分页由门面（<c>ProcessEngine</c>）在内存完成，与待办查询同一口径；
+    /// 本端口只负责把行取回来。历史未启用时返回空集合。
+    /// </para>
+    /// </summary>
+    ValueTask<IReadOnlyList<HistoricProcessInstance>> FindProcessInstancesAsync(
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 查<b>全部</b>历史任务（跨实例的已办列表数据源）。
+    /// <para>按实例查询请用 <see cref="FindTaskInstancesAsync"/>，避免把整表读进内存。</para>
+    /// </summary>
+    ValueTask<IReadOnlyList<HistoricTaskInstance>> FindAllTaskInstancesAsync(
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 查某流程实例的历史变量（<c>ACT_HI_VARINST</c>）。
+    /// <para>长字符串（<c>longString</c>）会连同 <c>ACT_GE_BYTEARRAY.BYTES_</c> 一起解码。</para>
+    /// </summary>
+    ValueTask<IReadOnlyList<HistoricVariableInstance>> FindVariableInstancesAsync(
+        string processInstanceId,
+        CancellationToken ct = default);
+
     /// <summary>记录历史身份关系（<c>ACT_HI_IDENTITYLINK</c>）。仅流程实例级 / 任务级会被记录。</summary>
     /// <remarks>
     /// 只增不删：Activiti 的 <c>deleteIdentityLinksByTaskId</c> 传的是
@@ -217,6 +242,19 @@ public sealed class NullHistoryManager : IHistoryManager
         string processInstanceId,
         CancellationToken ct = default) =>
         ValueTask.FromResult<IReadOnlyList<HistoricTaskInstance>>([]);
+
+    public ValueTask<IReadOnlyList<HistoricProcessInstance>> FindProcessInstancesAsync(
+        CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<HistoricProcessInstance>>([]);
+
+    public ValueTask<IReadOnlyList<HistoricTaskInstance>> FindAllTaskInstancesAsync(
+        CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<HistoricTaskInstance>>([]);
+
+    public ValueTask<IReadOnlyList<HistoricVariableInstance>> FindVariableInstancesAsync(
+        string processInstanceId,
+        CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<HistoricVariableInstance>>([]);
 
     /// <summary>顺序流不产生任何历史行（§15.4 H4），因此空实现。</summary>
     public ValueTask RecordSequenceFlowTakenAsync(IExecutionEntity execution, CancellationToken ct = default) =>

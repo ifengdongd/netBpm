@@ -44,6 +44,15 @@ public interface ITaskManager
         CancellationToken ct = default);
 
     /// <summary>
+    /// 查候选组待办（对应 <c>TaskQuery.taskCandidateGroup</c>）：
+    /// 未分配 + 任务级身份关系里存在该组（<c>TYPE_ = 'candidate'</c>）。
+    /// <para>不做用户组展开 —— 调用方已经拿到了组 id。</para>
+    /// </summary>
+    ValueTask<IList<TaskEntity>> FindTasksByCandidateGroupAsync(
+        string groupId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// 更新任务行（乐观锁）。
     /// <para>
     /// ⚠️ Activiti 靠 <c>DbSqlSession</c> 的脏检查在 flush 时统一写库；本实现不做任务级脏检查，
@@ -69,6 +78,21 @@ public interface ITaskManager
     ValueTask AddCandidateGroupsAsync(TaskEntity task, IEnumerable<string> candidateGroups, CancellationToken ct = default);
 
     /// <summary>
+    /// 移除候选用户（仅删任务级 <c>'candidate'</c> 行）。
+    /// <para>流程实例级 <c>'participant'</c> 行保留：参与者是审计信息，不随候选关系撤销。</para>
+    /// </summary>
+    ValueTask RemoveCandidateUsersAsync(
+        TaskEntity task,
+        IEnumerable<string> candidateUsers,
+        CancellationToken ct = default);
+
+    /// <summary>移除候选组（仅删任务级 <c>'candidate'</c> 行）。</summary>
+    ValueTask RemoveCandidateGroupsAsync(
+        TaskEntity task,
+        IEnumerable<string> candidateGroups,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// 插入一条身份关系。对应 <c>addIdentityLink</c> 的两个重载
     /// （传 <paramref name="task"/> 为任务级，<paramref name="task"/> 为 <see langword="null"/> 且给
     /// <paramref name="processInstanceId"/> 为流程实例级）。
@@ -86,7 +110,43 @@ public interface ITaskManager
     /// <c>ExecutionEntityManagerImpl</c> 中对 <c>PROC_INST_ID_</c> 身份关系的清理。
     /// <para>流程实例结束时由执行树管理器调用（否则两个宿主会留下不同的残留数据）。</para>
     /// </summary>
-    ValueTask DeleteTasksByProcessInstanceAsync(string processInstanceId, CancellationToken ct = default);
+    /// <param name="processInstanceId">流程实例 id。</param>
+    /// <param name="deleteReason">
+    /// 删除原因，写进每个任务的历史行（<c>ACT_HI_TASKINST.DELETE_REASON_</c>）。
+    /// 正常结束传 <see langword="null"/>；删除流程实例时传同一原因（Activiti 的
+    /// <c>deleteTasksByProcessInstanceId(id, deleteReason)</c> 就是这么传的）。
+    /// </param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask DeleteTasksByProcessInstanceAsync(
+        string processInstanceId,
+        string? deleteReason = null,
+        CancellationToken ct = default);
+
+    // ─────────────────────────── 挂起 / 激活 ───────────────────────────
+
+    /// <summary>
+    /// 把某流程实例下所有任务置为挂起 / 激活（<c>ACT_RU_TASK.SUSPENSION_STATE_</c>）。
+    /// <para>
+    /// 对应 Activiti <c>TaskEntityManager.updateTaskSuspensionState</c>：挂起的任务
+    /// <b>不能完成、不能认领</b>（<c>CompleteTaskCommand</c> / <c>ClaimTaskCommand</c> 会抛
+    /// "Cannot complete/claim a suspended task"），但仍在待办查询里可见。
+    /// </para>
+    /// </summary>
+    /// <returns>受影响的任务行数。</returns>
+    ValueTask<int> UpdateSuspensionStateByProcessInstanceIdAsync(
+        string processInstanceId,
+        bool suspended,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 把某流程定义下所有任务置为挂起 / 激活。
+    /// 对应 <c>suspendProcessDefinitionById(id, suspendProcessInstances=true)</c> 中批量挂起实例的配套动作。
+    /// </summary>
+    /// <returns>受影响的任务行数。</returns>
+    ValueTask<int> UpdateSuspensionStateByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default);
 
     /// <summary>查任务的身份关系（测试与诊断用）。</summary>
     ValueTask<IList<IdentityLinkRecord>> FindIdentityLinksByTaskIdAsync(string taskId, CancellationToken ct = default);

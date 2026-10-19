@@ -18,6 +18,7 @@ namespace NetBpm.Engine.History;
 /// <param name="EndTime"><c>END_TIME_</c>；为空表示任务仍未结束。</param>
 /// <param name="DurationInMillis"><c>DURATION_</c>。</param>
 /// <param name="DeleteReason"><c>DELETE_REASON_</c>。</param>
+/// <param name="TenantId"><c>TENANT_ID_</c>；为空表示无租户（B2.3）。</param>
 public sealed record HistoricTaskInstance(
     string Id,
     string? ProcessDefinitionId,
@@ -32,7 +33,8 @@ public sealed record HistoricTaskInstance(
     DateTime? StartTime,
     DateTime? EndTime,
     long? DurationInMillis,
-    string? DeleteReason)
+    string? DeleteReason,
+    string? TenantId = null)
 {
     /// <summary>是否仍未结束。</summary>
     public bool IsOpen => EndTime is null;

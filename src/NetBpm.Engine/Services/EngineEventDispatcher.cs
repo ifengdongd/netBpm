@@ -72,7 +72,8 @@ public static class EngineEventDispatcher
                     services, execution, process.Id ?? "?", "事件监听器", eventType,
                     listener.ClassName, listener.DelegateExpression, listener.Expression, ct).ConfigureAwait(false);
 
-                await target.OnEventAsync(new WorkflowEngineEvent(eventType, entityId, execution), ct).ConfigureAwait(false);            }
+                await target.OnEventAsync(new WorkflowEngineEvent(eventType, entityId, execution), ct).ConfigureAwait(false);
+            }
             catch (Exception exception) when (listener.ThrowOnFailure != true)
             {
                 services.Logger?.LogWarning(

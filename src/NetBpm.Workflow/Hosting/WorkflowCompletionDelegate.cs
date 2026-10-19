@@ -1,4 +1,4 @@
-﻿using NetBpm.Engine.Behavior;
+using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
 
 namespace NetBpm.Workflow.Hosting;

@@ -36,6 +36,9 @@ public sealed class TaskEntity
     /// <summary>激活状态（<c>SUSPENSION_STATE_</c>）。</summary>
     public const int ActiveSuspensionState = 1;
 
+    /// <summary>挂起状态（<c>SUSPENSION_STATE_</c>，与 Activiti <c>SuspensionState.SUSPENDED</c> 一致）。</summary>
+    public const int SuspendedSuspensionState = 2;
+
     /// <summary><c>ID_</c>。</summary>
     public string Id { get; set; } = string.Empty;
 

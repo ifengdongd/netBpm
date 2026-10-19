@@ -2,6 +2,7 @@ using System.Text;
 using Dapper;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Model;
+using NetBpm.Bpmn.Validation;
 using NetBpm.El;
 using NetBpm.Engine;
 using NetBpm.Engine.Behavior;
@@ -10,12 +11,14 @@ using NetBpm.Engine.Command.Interceptors;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
 using NetBpm.Engine.Services;
+using NetBpm.Identity;
 using NetBpm.Persistence;
 using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
 using NetBpm.Persistence.Tasks;
+using NetBpm.Runtime;
 
 // BPMN 模型里也有 Task 类型，会与 System.Threading.Tasks.Task 冲突
 using Task = System.Threading.Tasks.Task;
@@ -43,8 +46,18 @@ internal sealed class DatabaseEngineHarness
     }
 
     /// <summary>按方言构造（双库功能矩阵用）。</summary>
-    public DatabaseEngineHarness(TestDatabaseSpec spec)
+    /// <param name="spec">目标库。</param>
+    /// <param name="retryPolicy">重试策略；缺省用引擎默认（3 次）。并发用例可抬高上限。</param>
+    /// <param name="xmlConverter">XML 转换器；缺省用真实实现，性能用例可注入计数器。</param>
+    public DatabaseEngineHarness(
+        TestDatabaseSpec spec,
+        CommandRetryPolicy? retryPolicy = null,
+        IBpmnXmlConverter? xmlConverter = null)
     {
+        // 与生产组合根同策略：乐观锁 + 数据库死锁/锁等待超时
+        var effectivePolicy = (retryPolicy ?? TransientDatabaseErrors.CreateRetryPolicy())
+            .WithOnRetry((_, _) => Interlocked.Increment(ref _retryCount));
+
         SessionFactory = TestDatabases.CreateSessionFactory(spec);
 
         var sessions = new CommandScopedDbSessionProvider(SessionFactory);
@@ -57,7 +70,8 @@ internal sealed class DatabaseEngineHarness
         VariableInstances = new DapperVariableInstanceManager(sessions, IdGenerator, HistoryManager);
         TaskManager = new DapperTaskManager(sessions, IdGenerator, HistoryManager, VariableInstances);
         Executions = new DapperExecutionManager(sessions, IdGenerator, TaskManager, VariableInstances, HistoryManager);
-        Definitions = new DapperProcessDefinitionStore(sessions, IdGenerator, new BpmnXmlConverter());
+        XmlConverter = xmlConverter ?? new BpmnXmlConverter();
+        Definitions = new DapperProcessDefinitionStore(sessions, IdGenerator, XmlConverter);
         Recorder = new ExecutionSnapshotRecorder(sessions);
 
         IEngineServices? holder = null;
@@ -75,11 +89,22 @@ internal sealed class DatabaseEngineHarness
 
         holder = services;
 
-        // 与生产同序：Transaction 在外、CommandContext（排空议程）在内
+        // 与生产同序：Retry 在最外（重试换新会话）、Transaction 其次、CommandContext（排空议程）在内
         Executor = new CommandExecutor(
-            [new TransactionInterceptor(), new CommandContextInterceptor()],
-            () => new CommandContext(services, SessionFactory.Create()));
+            [
+                new RetryInterceptor(effectivePolicy),
+                new TransactionInterceptor(),
+                new CommandContextInterceptor(),
+            ],
+            () => new CommandContext(services, transactionFactory: () => SessionFactory.Create()));
     }
+
+    private int _retryCount;
+
+    /// <summary>本 harness 内实际发生的重试次数（并发用例取证：证明真的撞过锁）。</summary>
+    public int RetryCount => Volatile.Read(ref _retryCount);
+
+    public IBpmnXmlConverter XmlConverter { get; }
 
     public IDbSessionFactory SessionFactory { get; }
 
@@ -107,6 +132,25 @@ internal sealed class DatabaseEngineHarness
         = new Dictionary<string, IServiceTaskDelegate>(StringComparer.Ordinal);
 
     public ICommandExecutor Executor { get; }
+
+    /// <summary>
+    /// 与 harness 共用同一套 manager / executor 的引擎门面。
+    /// <para>
+    /// 用于验收「门面层语义」（挂起 / 激活、删除部署、历史分页）：它们都在门面里组合多个 manager，
+    /// 只测 manager 会漏掉组合逻辑（例如挂起时漏改任务表）。
+    /// </para>
+    /// </summary>
+    public IProcessEngine Engine => _engine ??= new ProcessEngine(
+        Executor,
+        XmlConverter,
+        new ProcessValidator(),
+        Definitions,
+        TaskManager,
+        new EmptyUserGroupManager(),
+        Executions,
+        HistoryManager);
+
+    private ProcessEngine? _engine;
 
     public void Reset()
     {
@@ -153,7 +197,7 @@ internal sealed class DatabaseEngineHarness
         IDictionary<string, object?>? variables,
         CancellationToken ct = default)
     {
-        var model = new BpmnXmlConverter().ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(bpmnXml)));
+        var model = XmlConverter.ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(bpmnXml)));
         var process = model.GetMainProcess()!;
 
         var definition = await Definitions.DeployAsync(model, "test.bpmn20.xml", ct: ct).ConfigureAwait(false);

@@ -31,8 +31,7 @@
           <div class="hint">留空提交 = 退回未分配（候选人/组重新可见）</div>
         </div>
         <div class="field">
-          <label for="reason">转办原因 <span class="hint">审计用，随任务历史记录</span></label>
-          <textarea id="reason" placeholder="例如：审批人休假，转交同事处理"></textarea>
+          <div class="hint">引擎的 setAssignee 不存备注：转办原因请记录在业务侧，接口不再收 reason。</div>
         </div>
         <div class="row">
           <button id="transfer-btn">确认转办</button>
@@ -168,7 +167,6 @@ async function doTransfer(withUser) {
 
   const body = {
     userId: withUser ? ($('#new-assignee').value || null) : null,
-    reason: $('#reason').value.trim() || null,
   };
 
   if (withUser && !body.userId) { toast('请选择新审批人（或用「退回未分配」）。'); return; }

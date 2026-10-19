@@ -161,7 +161,7 @@ public sealed class UserTaskTests
     {
         var engine = TestEngine.Create();
 
-        var exception = await Assert.ThrowsAsync<EngineException>(async () =>
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(async () =>
         {
             await engine.CompleteTaskAsync("no-such-task");
         });
@@ -194,7 +194,7 @@ public sealed class UserTaskTests
         await engine.StartProcessAsync(UserTaskProcess(assignee: "kermit"));
         var task = Assert.Single(engine.TaskManager.Tasks);
 
-        var exception = await Assert.ThrowsAsync<EngineException>(async () =>
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(async () =>
         {
             await engine.ClaimTaskAsync(task.Id, "dave");
         });
@@ -231,7 +231,7 @@ public sealed class UserTaskTests
 
         engine.Services.Agenda.PlanTriggerExecutionOperation(execution);
 
-        var exception = await Assert.ThrowsAsync<EngineException>(async () =>
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(async () =>
         {
             await engine.Services.Agenda.DrainAsync(Ct);
         });

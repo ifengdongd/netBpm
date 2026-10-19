@@ -18,8 +18,9 @@ public sealed class CommandContextInterceptor : ICommandInterceptor
     {
         var result = await nextHandler(ct).ConfigureAwait(false);
 
-        // 排空议程：把命令期间"规划"的操作全部执行掉（仍在同一事务内）
-        await context.Services.Agenda.DrainAsync(ct).ConfigureAwait(false);
+        // 排空议程：把命令期间"规划"的操作全部执行掉（仍在同一事务内）。
+        // 用上下文自己的议程 —— 并发命令各排各的队列，互不串扰。
+        await context.Agenda.DrainAsync(ct).ConfigureAwait(false);
 
         return result;
     }

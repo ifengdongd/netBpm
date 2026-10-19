@@ -201,6 +201,29 @@ public sealed class InMemoryTaskManager : ITaskManager
     }
 
     /// <inheritdoc />
+    public ValueTask<IList<TaskEntity>> FindTasksByCandidateGroupAsync(
+        string groupId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupId);
+
+        lock (_syncRoot)
+        {
+            var candidateTaskIds = _identityLinks
+                .Where(link => string.Equals(link.Type, IdentityLinkType.Candidate, StringComparison.Ordinal)
+                    && link.TaskId is not null
+                    && string.Equals(link.GroupId, groupId, StringComparison.Ordinal))
+                .Select(link => link.TaskId!)
+                .ToHashSet(StringComparer.Ordinal);
+
+            return ValueTask.FromResult<IList<TaskEntity>>(
+                _tasks.Values
+                    .Where(task => task.Assignee is null && candidateTaskIds.Contains(task.Id))
+                    .ToList());
+        }
+    }
+
+    /// <inheritdoc />
     public async ValueTask UpdateTaskAsync(TaskEntity task, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(task);
@@ -326,6 +349,53 @@ public sealed class InMemoryTaskManager : ITaskManager
     }
 
     /// <inheritdoc />
+    public ValueTask RemoveCandidateUsersAsync(
+        TaskEntity task,
+        IEnumerable<string> candidateUsers,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(candidateUsers);
+
+        var users = candidateUsers.ToHashSet(StringComparer.Ordinal);
+
+        lock (_syncRoot)
+        {
+            // 只删任务级 candidate 行；流程实例级 participant 行是审计信息，保留
+            _identityLinks.RemoveAll(link =>
+                string.Equals(link.TaskId, task.Id, StringComparison.Ordinal)
+                && string.Equals(link.Type, IdentityLinkType.Candidate, StringComparison.Ordinal)
+                && link.UserId is not null
+                && users.Contains(link.UserId));
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask RemoveCandidateGroupsAsync(
+        TaskEntity task,
+        IEnumerable<string> candidateGroups,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(candidateGroups);
+
+        var groups = candidateGroups.ToHashSet(StringComparer.Ordinal);
+
+        lock (_syncRoot)
+        {
+            _identityLinks.RemoveAll(link =>
+                string.Equals(link.TaskId, task.Id, StringComparison.Ordinal)
+                && string.Equals(link.Type, IdentityLinkType.Candidate, StringComparison.Ordinal)
+                && link.GroupId is not null
+                && groups.Contains(link.GroupId));
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public async ValueTask AddIdentityLinkAsync(IdentityLinkRecord link, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(link);
@@ -356,6 +426,7 @@ public sealed class InMemoryTaskManager : ITaskManager
     /// <inheritdoc />
     public async ValueTask DeleteTasksByProcessInstanceAsync(
         string processInstanceId,
+        string? deleteReason = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
@@ -371,7 +442,8 @@ public sealed class InMemoryTaskManager : ITaskManager
 
         foreach (var task in tasks)
         {
-            await DeleteTaskAsync(task, null, ct).ConfigureAwait(false);
+            // 删除原因要顺着传到任务历史：删除实例时它是「为什么被删」，正常结束时才是 null
+            await DeleteTaskAsync(task, deleteReason, ct).ConfigureAwait(false);
         }
 
         // 任务删完后，清掉挂在流程实例上的 'participant' 等残留关系
@@ -379,6 +451,56 @@ public sealed class InMemoryTaskManager : ITaskManager
         {
             _identityLinks.RemoveAll(link =>
                 string.Equals(link.ProcessInstanceId, processInstanceId, StringComparison.Ordinal));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<int> UpdateSuspensionStateByProcessInstanceIdAsync(
+        string processInstanceId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        var state = suspended ? TaskEntity.SuspendedSuspensionState : TaskEntity.ActiveSuspensionState;
+
+        lock (_syncRoot)
+        {
+            var tasks = _tasks.Values
+                .Where(task => string.Equals(task.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
+                .ToList();
+
+            foreach (var task in tasks)
+            {
+                task.SuspensionState = state;
+            }
+
+            return ValueTask.FromResult(tasks.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<int> UpdateSuspensionStateByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        var state = suspended ? TaskEntity.SuspendedSuspensionState : TaskEntity.ActiveSuspensionState;
+
+        lock (_syncRoot)
+        {
+            var tasks = _tasks.Values
+                .Where(task => string.Equals(task.ProcessDefinitionId, processDefinitionId, StringComparison.Ordinal))
+                .ToList();
+
+            foreach (var task in tasks)
+            {
+                task.SuspensionState = state;
+            }
+
+            return ValueTask.FromResult(tasks.Count);
         }
     }
 

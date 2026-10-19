@@ -296,7 +296,9 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
 
         // 与 Dapper 实现保持同一顺序：先清任务与流程实例级身份关系，再删执行树
-        await _taskManager.DeleteTasksByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+        await _taskManager
+            .DeleteTasksByProcessInstanceAsync(processInstanceId, deleteReason, ct)
+            .ConfigureAwait(false);
 
         List<IExecutionEntity> toDelete;
 
@@ -327,6 +329,109 @@ public sealed class InMemoryExecutionManager : IExecutionManager
             .RecordProcessInstanceEndAsync(processInstanceId, deleteReason, currentFlowElementId, ct)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public ValueTask<int> UpdateSuspensionStateByProcessInstanceIdAsync(
+        string processInstanceId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        var state = suspended ? SuspendedState : ActiveState;
+
+        lock (_syncRoot)
+        {
+            var executions = _executions.Values
+                .Where(execution => string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
+                .ToList();
+
+            if (executions.Count == 0)
+            {
+                return ValueTask.FromResult(0);
+            }
+
+            foreach (var execution in executions)
+            {
+                execution.SuspensionState = state;
+            }
+
+            return ValueTask.FromResult(1);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<int> UpdateSuspensionStateByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        var state = suspended ? SuspendedState : ActiveState;
+
+        lock (_syncRoot)
+        {
+            // 根执行用来定位实例，但库里 SUSPENSION_STATE_ 是逐行存的，
+            // 因此子执行也要一起改（否则重新加载子执行时会读到「激活」）
+            var roots = _executions.Values
+                .Where(execution => execution.ParentId is null
+                    && string.Equals(execution.ProcessDefinitionId, processDefinitionId, StringComparison.Ordinal))
+                .ToList();
+
+            foreach (var root in roots)
+            {
+                foreach (var execution in _executions.Values
+                    .Where(execution => string.Equals(execution.ProcessInstanceId, root.Id, StringComparison.Ordinal)))
+                {
+                    execution.SuspensionState = state;
+                }
+            }
+
+            return ValueTask.FromResult(roots.Count);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<string>> FindProcessInstanceIdsByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        lock (_syncRoot)
+        {
+            IReadOnlyList<string> ids =
+            [
+                .. _executions.Values
+                    .Where(execution => execution.ParentId is null
+                        && string.Equals(execution.ProcessDefinitionId, processDefinitionId, StringComparison.Ordinal))
+                    .Select(execution => execution.Id),
+            ];
+
+            return ValueTask.FromResult(ids);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<IExecutionEntity>> FindProcessInstancesAsync(CancellationToken ct = default)
+    {
+        lock (_syncRoot)
+        {
+            IReadOnlyList<IExecutionEntity> result =
+            [
+                .. _executions.Values.Where(execution => execution.ParentId is null),
+            ];
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    /// <summary>与 <c>ACT_RU_EXECUTION.SUSPENSION_STATE_</c> 的取值一致（1 = 激活，2 = 挂起）。</summary>
+    private const int ActiveState = 1;
+
+    /// <summary>挂起态。</summary>
+    private const int SuspendedState = 2;
 
     private void DeleteRecursive(IExecutionEntity execution)
     {

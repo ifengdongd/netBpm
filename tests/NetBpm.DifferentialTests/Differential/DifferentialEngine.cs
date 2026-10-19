@@ -124,8 +124,12 @@ public sealed class DifferentialEngine
         holder = services;
 
         Executor = new CommandExecutor(
-            [new TransactionInterceptor(), new CommandContextInterceptor()],
-            () => new CommandContext(services, SessionFactory.Create()));
+            [
+                new RetryInterceptor(TransientDatabaseErrors.CreateRetryPolicy()),
+                new TransactionInterceptor(),
+                new CommandContextInterceptor(),
+            ],
+            () => new CommandContext(services, transactionFactory: () => SessionFactory.Create()));
 
         Engine = new ProcessEngine(
             Executor,

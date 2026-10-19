@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using NetBpm.Persistence;
 
 namespace NetBpm.Demo.Common;

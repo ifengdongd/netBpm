@@ -300,30 +300,18 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
 
         using var lease = _sessions.Acquire();
         var session = lease.Session;
-        var cache = GetCache(session);
 
+        // 先 flush：本命令内新建/激活的执行必须计入
         await FlushAsync(session, ct).ConfigureAwait(false);
 
-        // 对应 getNumberOfActiveChildExecutionsForProcessInstance：
-        // findChildExecutionsByProcessInstanceId → 内存里过滤 isActive 且 id != processInstanceId
-        var states = await QueryStatesAsync(
-            session,
-            SelectChildExecutionsOfProcessInstanceSql,
-            new { processInstanceId },
-            ct).ConfigureAwait(false);
-
-        var active = 0;
-
-        foreach (var state in states)
-        {
-            if (state.IsActive && !string.Equals(state.Id, processInstanceId, StringComparison.Ordinal))
-            {
-                active++;
-                Materialize(cache, state);
-            }
-        }
-
-        return active;
+        // 对应 getNumberOfActiveChildExecutionsForProcessInstance。
+        // 只取计数，不再把整棵执行树查回来物化 —— Join / 结束判定每次都会调用它。
+        return await session.Connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                CountActiveChildrenOfProcessInstanceSql,
+                new { processInstanceId },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -335,23 +323,17 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
 
         using var lease = _sessions.Acquire();
         var session = lease.Session;
-        var cache = GetCache(session);
 
         await FlushAsync(session, ct).ConfigureAwait(false);
 
-        // 对应 findChildExecutionsByParentExecutionId + 过滤 BoundaryEvent（子集无边界事件）
-        var states = await QueryStatesAsync(
-            session,
-            SelectChildrenSql,
-            new { parentExecutionId },
-            ct).ConfigureAwait(false);
-
-        foreach (var state in states)
-        {
-            Materialize(cache, state);
-        }
-
-        return states.Count;
+        // 对应 findChildExecutionsByParentExecutionId + 过滤 BoundaryEvent（子集无边界事件）。
+        // 只取计数，避免为了一次判断把所有子执行读进内存。
+        return await session.Connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(
+                CountChildrenSql,
+                new { parentExecutionId },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
     }
 
     // ─────────────────────────── 删 ───────────────────────────
@@ -419,7 +401,9 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
 
         // 流程实例级联清理：先摘掉挂在流程实例上的外部引用（这些外键在 DDL 里没有级联删除）
         // 任务与流程实例级身份关系的清理交给任务管理器（对应 TaskEntityManagerImpl.deleteTasksByProcessInstanceId）
-        await _taskManager.DeleteTasksByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+        await _taskManager
+            .DeleteTasksByProcessInstanceAsync(processInstanceId, deleteReason, ct)
+            .ConfigureAwait(false);
 
         // 变量行 → 字节行（ACT_FK_VAR_BYTEARRAY 为 RESTRICT，先取 id 再删）
         await DeleteVariablesAndByteArraysAsync(
@@ -458,6 +442,148 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         await _historyManager
             .RecordProcessInstanceEndAsync(processInstanceId, deleteReason, currentFlowElementId, ct)
             .ConfigureAwait(false);
+    }
+
+    // ─────────────────────────── 挂起 / 激活 ───────────────────────────
+
+    /// <inheritdoc />
+    public async ValueTask<int> UpdateSuspensionStateByProcessInstanceIdAsync(
+        string processInstanceId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        // 先落库会话内待写的变化：否则 UPDATE 之后 flush 会用实体上的旧状态覆盖回去
+        await FlushAsync(session, ct).ConfigureAwait(false);
+
+        var state = suspended ? SuspendedState : ActiveState;
+
+        var affected = await session.Connection.ExecuteAsync(
+            new CommandDefinition(
+                UpdateSuspensionStateByProcessInstanceIdSql,
+                new { processInstanceId, state },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
+
+        if (affected == 0)
+        {
+            return 0;
+        }
+
+        // 同步一级缓存里的实体与脏检查基线，避免同一命令内后续 flush 把旧状态写回去
+        SyncSuspensionState(GetCache(session), state, execution =>
+            string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal));
+
+        return 1;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> UpdateSuspensionStateByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        await FlushAsync(session, ct).ConfigureAwait(false);
+
+        var state = suspended ? SuspendedState : ActiveState;
+
+        // 实例数 = 根执行数（子执行是同一实例的一部分，不能重复计数）
+        var instanceIds = await QueryStringListAsync(
+            session,
+            SelectProcessInstanceIdsByProcessDefinitionIdSql,
+            new { processDefinitionId },
+            ct).ConfigureAwait(false);
+
+        if (instanceIds.Count == 0)
+        {
+            return 0;
+        }
+
+        await session.Connection.ExecuteAsync(
+            new CommandDefinition(
+                UpdateSuspensionStateByProcessDefinitionIdSql,
+                new { processDefinitionId, state },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
+
+        SyncSuspensionState(GetCache(session), state, execution =>
+            string.Equals(execution.ProcessDefinitionId, processDefinitionId, StringComparison.Ordinal));
+
+        return instanceIds.Count;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<string>> FindProcessInstanceIdsByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var ids = await QueryStringListAsync(
+            session,
+            SelectProcessInstanceIdsByProcessDefinitionIdSql,
+            new { processDefinitionId },
+            ct).ConfigureAwait(false);
+
+        return [.. ids];
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<IExecutionEntity>> FindProcessInstancesAsync(
+        CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var cache = GetCache(session);
+
+        // 与其它查询一致：先 flush，保证本命令内新建的实例也能被列出
+        await FlushAsync(session, ct).ConfigureAwait(false);
+
+        var states = await QueryStatesAsync(session, SelectProcessInstancesSql, null, ct).ConfigureAwait(false);
+
+        return states.Select(state => (IExecutionEntity)Materialize(cache, state)).ToList();
+    }
+
+    /// <summary>把会话内已跟踪实体的挂起状态与脏检查基线一起改写。</summary>
+    private static void SyncSuspensionState(
+        SessionCache cache,
+        int state,
+        Func<IExecutionEntity, bool> predicate)
+    {
+        foreach (var execution in cache.Entities.Values.Where(predicate))
+        {
+            execution.SuspensionState = state;
+
+            if (cache.Persisted.TryGetValue(execution.Id, out var persisted))
+            {
+                cache.Persisted[execution.Id] = persisted with { SuspensionState = state };
+            }
+        }
+    }
+
+    private static async Task<List<string>> QueryStringListAsync(
+        IDbSession session,
+        string sql,
+        object parameters,
+        CancellationToken ct)
+    {
+        var rows = await session.Connection
+            .QueryAsync<string>(new CommandDefinition(sql, parameters, session.Transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        return [.. rows];
     }
 
     // ─────────────────────────── flush ───────────────────────────
@@ -847,11 +973,45 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
     private const string DeleteSql =
         "delete from ACT_RU_EXECUTION where ID_ = @id and REV_ = @revision";
 
+    /// <summary><c>ACT_RU_EXECUTION.SUSPENSION_STATE_</c> 的取值（与 Activiti <c>SuspensionState</c> 一致）。</summary>
+    private const int ActiveState = 1;
+
+    /// <summary>挂起态。</summary>
+    private const int SuspendedState = 2;
+
+    /// <summary>对应 Activiti <c>updateProcessInstanceSuspensionStateByProcessInstanceId</c>（按实例）。</summary>
+    private const string UpdateSuspensionStateByProcessInstanceIdSql =
+        "update ACT_RU_EXECUTION set SUSPENSION_STATE_ = @state where PROC_INST_ID_ = @processInstanceId";
+
+    /// <summary>对应 Activiti <c>updateProcessInstanceSuspensionStateByProcessDefinitionId</c>（按定义）。</summary>
+    private const string UpdateSuspensionStateByProcessDefinitionIdSql =
+        "update ACT_RU_EXECUTION set SUSPENSION_STATE_ = @state where PROC_DEF_ID_ = @processDefinitionId";
+
+    /// <summary>运行中的流程实例根执行（<c>PARENT_ID_ is null</c> 排除子执行）。</summary>
+    private const string SelectProcessInstanceIdsByProcessDefinitionIdSql =
+        "select ID_ from ACT_RU_EXECUTION where PROC_DEF_ID_ = @processDefinitionId and PARENT_ID_ is null";
+
+    /// <summary>全部运行中的流程实例（根执行）。</summary>
+    private const string SelectProcessInstancesSql =
+        "select " + ExecutionColumns.All + " from ACT_RU_EXECUTION where PARENT_ID_ is null";
+
     private const string SelectByIdSql =
         "select " + ExecutionColumns.All + " from ACT_RU_EXECUTION where ID_ = @executionId";
 
     private const string SelectChildrenSql =
         "select " + ExecutionColumns.All + " from ACT_RU_EXECUTION where PARENT_ID_ = @parentExecutionId";
+
+    /// <summary>与 <see cref="SelectChildrenSql"/> 同口径，只取数量。</summary>
+    private const string CountChildrenSql =
+        "select count(*) from ACT_RU_EXECUTION where PARENT_ID_ = @parentExecutionId";
+
+    /// <summary>
+    /// 与「按流程实例取子执行后过滤 IS_ACTIVE_ 且排除根执行」同口径，只取数量。
+    /// 根执行的 PARENT_ID_ 为 null，因此 PARENT_ID_ is not null 已排除根。
+    /// </summary>
+    private const string CountActiveChildrenOfProcessInstanceSql =
+        "select count(*) from ACT_RU_EXECUTION " +
+        "where PROC_INST_ID_ = @processInstanceId and PARENT_ID_ is not null and IS_ACTIVE_ = 1";
 
     private const string SelectChildExecutionsOfProcessInstanceSql =
         "select " + ExecutionColumns.All +

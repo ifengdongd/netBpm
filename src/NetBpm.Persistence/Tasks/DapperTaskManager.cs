@@ -1,3 +1,4 @@
+using System.Text;
 using Dapper;
 using NetBpm.Engine;
 using NetBpm.Engine.Execution;
@@ -21,6 +22,9 @@ namespace NetBpm.Persistence.Tasks;
 /// </summary>
 public sealed class DapperTaskManager : ITaskManager
 {
+    /// <summary>单条多行 INSERT 的关系行数上限（8 列 × 50 = 400 个参数，远低于两方言上限）。</summary>
+    private const int MaxIdentityLinksPerStatement = 50;
+
     private readonly IDbSessionProvider _sessions;
     private readonly IIdGenerator _idGenerator;
     private readonly IHistoryManager _historyManager;
@@ -190,6 +194,33 @@ public sealed class DapperTaskManager : ITaskManager
     }
 
     /// <inheritdoc />
+    public async ValueTask<IList<TaskEntity>> FindTasksByCandidateGroupAsync(
+        string groupId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        // 与候选人口径一致：只取未签收的任务；候选组只存在任务级身份关系里
+        const string sql = """
+            select T.* from ACT_RU_TASK T
+            where T.ASSIGNEE_ is null
+              and exists (
+                select 1 from ACT_RU_IDENTITYLINK L
+                where L.TASK_ID_ = T.ID_
+                  and L.TYPE_ = 'candidate'
+                  and L.GROUP_ID_ = @groupId
+              )
+            """;
+
+        var states = await QueryTasksAsync(session, sql, new { groupId }, ct).ConfigureAwait(false);
+
+        return states.Select(state => state.ToEntity()).ToList();
+    }
+
+    /// <inheritdoc />
     public async ValueTask UpdateTaskAsync(TaskEntity task, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(task);
@@ -283,27 +314,52 @@ public sealed class DapperTaskManager : ITaskManager
         ArgumentNullException.ThrowIfNull(task);
         ArgumentNullException.ThrowIfNull(candidateUsers);
 
+        var users = candidateUsers as IReadOnlyList<string> ?? candidateUsers.ToList();
+
+        if (users.Count == 0)
+        {
+            return;
+        }
+
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
-        foreach (var candidateUser in candidateUsers)
-        {
-            await AddIdentityLinkInternalAsync(
-                session,
-                new IdentityLinkRecord
-                {
-                    Type = IdentityLinkType.Candidate,
-                    UserId = candidateUser,
-                    TaskId = task.Id,
-                },
-                ct).ConfigureAwait(false);
-
-            if (task.ProcessInstanceId is not null)
+        // 候选关系一次多行插入（原来每人一条 insert）
+        await AddIdentityLinksInternalAsync(
+            session,
+            users.Select(user => new IdentityLinkRecord
             {
-                await InvolveUserAsync(session, task.ProcessInstanceId, candidateUser, task.ProcessDefinitionId, ct)
-                    .ConfigureAwait(false);
-            }
+                Type = IdentityLinkType.Candidate,
+                UserId = user,
+                TaskId = task.Id,
+            }).ToList(),
+            ct).ConfigureAwait(false);
+
+        if (task.ProcessInstanceId is null)
+        {
+            return;
         }
+
+        // participant 查重从「每用户一次 count(*)」降为一次 in 查询，再批量补插
+        var distinctUsers = users.Distinct(StringComparer.Ordinal).ToList();
+        var existing = await QueryExistingParticipantUserIdsAsync(
+            session,
+            task.ProcessInstanceId,
+            distinctUsers,
+            ct).ConfigureAwait(false);
+
+        var participants = distinctUsers
+            .Where(user => !existing.Contains(user))
+            .Select(user => new IdentityLinkRecord
+            {
+                Type = IdentityLinkType.Participant,
+                UserId = user,
+                ProcessInstanceId = task.ProcessInstanceId,
+                ProcessDefinitionId = task.ProcessDefinitionId,
+            })
+            .ToList();
+
+        await AddIdentityLinksInternalAsync(session, participants, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -315,21 +371,76 @@ public sealed class DapperTaskManager : ITaskManager
         ArgumentNullException.ThrowIfNull(task);
         ArgumentNullException.ThrowIfNull(candidateGroups);
 
-        using var lease = _sessions.Acquire();
-        var session = lease.Session;
+        var groups = candidateGroups as IReadOnlyList<string> ?? candidateGroups.ToList();
 
-        foreach (var candidateGroup in candidateGroups)
+        if (groups.Count == 0)
         {
-            await AddIdentityLinkInternalAsync(
-                session,
-                new IdentityLinkRecord
-                {
-                    Type = IdentityLinkType.Candidate,
-                    GroupId = candidateGroup,
-                    TaskId = task.Id,
-                },
-                ct).ConfigureAwait(false);
+            return;
         }
+
+        using var lease = _sessions.Acquire();
+
+        await AddIdentityLinksInternalAsync(
+            lease.Session,
+            groups.Select(group => new IdentityLinkRecord
+            {
+                Type = IdentityLinkType.Candidate,
+                GroupId = group,
+                TaskId = task.Id,
+            }).ToList(),
+            ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask RemoveCandidateUsersAsync(
+        TaskEntity task,
+        IEnumerable<string> candidateUsers,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(candidateUsers);
+
+        var users = candidateUsers.Distinct(StringComparer.Ordinal).ToList();
+
+        if (users.Count == 0)
+        {
+            return;
+        }
+
+        using var lease = _sessions.Acquire();
+
+        await lease.Session.Connection.ExecuteAsync(
+            new CommandDefinition(
+                DeleteCandidateUsersSql,
+                new { taskId = task.Id, userIds = users },
+                lease.Session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask RemoveCandidateGroupsAsync(
+        TaskEntity task,
+        IEnumerable<string> candidateGroups,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(candidateGroups);
+
+        var groups = candidateGroups.Distinct(StringComparer.Ordinal).ToList();
+
+        if (groups.Count == 0)
+        {
+            return;
+        }
+
+        using var lease = _sessions.Acquire();
+
+        await lease.Session.Connection.ExecuteAsync(
+            new CommandDefinition(
+                DeleteCandidateGroupsSql,
+                new { taskId = task.Id, groupIds = groups },
+                lease.Session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -407,6 +518,7 @@ public sealed class DapperTaskManager : ITaskManager
     /// <inheritdoc />
     public async ValueTask DeleteTasksByProcessInstanceAsync(
         string processInstanceId,
+        string? deleteReason = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
@@ -424,7 +536,8 @@ public sealed class DapperTaskManager : ITaskManager
 
         foreach (var state in taskStates)
         {
-            await DeleteTaskAsync(state.ToEntity(), null, ct).ConfigureAwait(false);
+            // 删除原因顺着传到任务历史（ACT_HI_TASKINST.DELETE_REASON_）
+            await DeleteTaskAsync(state.ToEntity(), deleteReason, ct).ConfigureAwait(false);
         }
 
         // 顺序受 ACT_FK_TSKASS_TASK 约束：身份关系 → 任务
@@ -469,6 +582,49 @@ public sealed class DapperTaskManager : ITaskManager
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async ValueTask<int> UpdateSuspensionStateByProcessInstanceIdAsync(
+        string processInstanceId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        // 批量 UPDATE 不碰 REV_（与 Activiti 的 updateTaskSuspensionState 批量路径一致）：
+        // 挂起是运维动作，不应让并发的任务更新因版本号漂移而失败
+        return await session.Connection.ExecuteAsync(
+            new CommandDefinition(
+                UpdateSuspensionStateByProcessInstanceIdSql,
+                new { processInstanceId, state = SuspensionStateOf(suspended) },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> UpdateSuspensionStateByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        return await session.Connection.ExecuteAsync(
+            new CommandDefinition(
+                UpdateSuspensionStateByProcessDefinitionIdSql,
+                new { processDefinitionId, state = SuspensionStateOf(suspended) },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    private static int SuspensionStateOf(bool suspended) =>
+        suspended ? TaskEntity.SuspendedSuspensionState : TaskEntity.ActiveSuspensionState;
 
     /// <inheritdoc />
     public async ValueTask<IList<IdentityLinkRecord>> FindIdentityLinksByTaskIdAsync(
@@ -604,33 +760,94 @@ public sealed class DapperTaskManager : ITaskManager
         task.Revision = revision + 1;
     }
 
-    private async ValueTask AddIdentityLinkInternalAsync(
+    private ValueTask AddIdentityLinkInternalAsync(
         IDbSession session,
         IdentityLinkRecord link,
+        CancellationToken ct) =>
+        AddIdentityLinksInternalAsync(session, new[] { link }, ct);
+
+    /// <summary>
+    /// 批量写入关系行：一次多行 INSERT（每 50 行一条语句），再逐条记历史。
+    /// 对应 Activiti 的 <c>IdentityLinkEntityManagerImpl.insert</c>，
+    /// 但把「每个候选人一次 insert」合并为一条语句（P1 性能项：候选关系 N+1）。
+    /// </summary>
+    private async ValueTask AddIdentityLinksInternalAsync(
+        IDbSession session,
+        IReadOnlyList<IdentityLinkRecord> links,
         CancellationToken ct)
     {
-        var id = string.IsNullOrEmpty(link.Id) ? _idGenerator.NextId() : link.Id;
+        if (links.Count == 0)
+        {
+            return;
+        }
 
-        await session.Connection.ExecuteAsync(
+        var persisted = new List<IdentityLinkRecord>(links.Count);
+
+        foreach (var link in links)
+        {
+            persisted.Add(string.IsNullOrEmpty(link.Id) ? link with { Id = _idGenerator.NextId() } : link);
+        }
+
+        for (var offset = 0; offset < persisted.Count; offset += MaxIdentityLinksPerStatement)
+        {
+            var count = Math.Min(MaxIdentityLinksPerStatement, persisted.Count - offset);
+            var sql = new StringBuilder(InsertIdentityLinksSqlPrefix, 64 + (count * 96));
+            var parameters = new DynamicParameters();
+
+            for (var i = 0; i < count; i++)
+            {
+                var link = persisted[offset + i];
+
+                sql.Append(i == 0 ? "\n(" : ",\n(");
+                sql.Append("@id").Append(i)
+                    .Append(", 1, @type").Append(i)
+                    .Append(", @userId").Append(i)
+                    .Append(", @groupId").Append(i)
+                    .Append(", @taskId").Append(i)
+                    .Append(", @processInstanceId").Append(i)
+                    .Append(", @processDefinitionId").Append(i)
+                    .Append(", null)");
+
+                parameters.Add($"id{i}", link.Id);
+                parameters.Add($"type{i}", link.Type);
+                parameters.Add($"userId{i}", link.UserId);
+                parameters.Add($"groupId{i}", link.GroupId);
+                parameters.Add($"taskId{i}", link.TaskId);
+                parameters.Add($"processInstanceId{i}", link.ProcessInstanceId);
+                parameters.Add($"processDefinitionId{i}", link.ProcessDefinitionId);
+            }
+
+            sql.Append(';');
+
+            await session.Connection.ExecuteAsync(
+                new CommandDefinition(sql.ToString(), parameters, session.Transaction, cancellationToken: ct))
+                .ConfigureAwait(false);
+        }
+
+        // 对应 IdentityLinkEntityManagerImpl.insert → recordIdentityLinkCreated
+        foreach (var link in persisted)
+        {
+            await _historyManager.RecordIdentityLinkCreatedAsync(link, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>一次查出这些用户在流程实例上已有的关系（原来每人一次 count(*)）。</summary>
+    private static async Task<HashSet<string>> QueryExistingParticipantUserIdsAsync(
+        IDbSession session,
+        string processInstanceId,
+        IReadOnlyList<string> userIds,
+        CancellationToken ct)
+    {
+        var rows = await session.Connection.QueryAsync<string>(
             new CommandDefinition(
-                InsertIdentityLinkSql,
-                new
-                {
-                    id,
-                    type = link.Type,
-                    userId = link.UserId,
-                    groupId = link.GroupId,
-                    taskId = link.TaskId,
-                    processInstanceId = link.ProcessInstanceId,
-                    processDefinitionId = link.ProcessDefinitionId,
-                },
+                SelectExistingParticipantUserIdsSql,
+                new { processInstanceId, userIds },
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
 
-        // 对应 IdentityLinkEntityManagerImpl.insert → recordIdentityLinkCreated
-        await _historyManager
-            .RecordIdentityLinkCreatedAsync(link with { Id = id }, ct)
-            .ConfigureAwait(false);
+        return rows
+            .Where(userId => !string.IsNullOrEmpty(userId))
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>对应 <c>involveUser</c>：同一用户在同一流程实例上只保留一条 <c>'participant'</c> 关系。</summary>
@@ -774,6 +991,14 @@ public sealed class DapperTaskManager : ITaskManager
 
     // ─────────────────────────── SQL（对应 Task.xml / IdentityLink.xml）───────────────────────────
 
+    /// <summary>对应 Activiti <c>updateTaskSuspensionState</c> 的「按流程实例」批量形态。</summary>
+    private const string UpdateSuspensionStateByProcessInstanceIdSql =
+        "update ACT_RU_TASK set SUSPENSION_STATE_ = @state where PROC_INST_ID_ = @processInstanceId";
+
+    /// <summary>挂起流程定义时批量挂起该定义下全部任务的配套语句。</summary>
+    private const string UpdateSuspensionStateByProcessDefinitionIdSql =
+        "update ACT_RU_TASK set SUSPENSION_STATE_ = @state where PROC_DEF_ID_ = @processDefinitionId";
+
     private const string InsertTaskSql = """
         insert into ACT_RU_TASK (
             ID_, REV_, NAME_, BUSINESS_KEY_, PARENT_TASK_ID_, DESCRIPTION_, PRIORITY_, CREATE_TIME_, OWNER_,
@@ -810,9 +1035,24 @@ public sealed class DapperTaskManager : ITaskManager
 
     private const string DeleteTaskSql = "delete from ACT_RU_TASK where ID_ = @id and REV_ = @revision";
 
-    private const string InsertIdentityLinkSql = """
-        insert into ACT_RU_IDENTITYLINK (ID_, REV_, TYPE_, USER_ID_, GROUP_ID_, TASK_ID_, PROC_INST_ID_, PROC_DEF_ID_, DETAILS_)
-        values (@id, 1, @type, @userId, @groupId, @taskId, @processInstanceId, @processDefinitionId, null)
+    /// <summary>只删任务级候选行；流程实例级 participant 行是审计信息，保留。</summary>
+    private const string DeleteCandidateUsersSql = """
+        delete from ACT_RU_IDENTITYLINK
+        where TASK_ID_ = @taskId and TYPE_ = 'candidate' and USER_ID_ in @userIds
+        """;
+
+    private const string DeleteCandidateGroupsSql = """
+        delete from ACT_RU_IDENTITYLINK
+        where TASK_ID_ = @taskId and TYPE_ = 'candidate' and GROUP_ID_ in @groupIds
+        """;
+
+    private const string InsertIdentityLinksSqlPrefix = """
+        insert into ACT_RU_IDENTITYLINK (ID_, REV_, TYPE_, USER_ID_, GROUP_ID_, TASK_ID_, PROC_INST_ID_, PROC_DEF_ID_, DETAILS_) values
+        """;
+
+    private const string SelectExistingParticipantUserIdsSql = """
+        select USER_ID_ from ACT_RU_IDENTITYLINK
+        where PROC_INST_ID_ = @processInstanceId and USER_ID_ in @userIds
         """;
 
     private const string SelectByIdSql =

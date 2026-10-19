@@ -1,4 +1,4 @@
-﻿using NetBpm.Demo.Common;
+using NetBpm.Demo.Common;
 using NetBpm.Demo.Order;
 using NetBpm.Demo.Storage.DataAccess;
 using NetBpm.Persistence;

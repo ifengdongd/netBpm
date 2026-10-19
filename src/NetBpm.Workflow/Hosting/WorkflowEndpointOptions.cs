@@ -39,4 +39,4 @@ public sealed class WorkflowEndpointOptions
     /// <summary>构造标准错误响应（400/404 共用的内容形状）。</summary>
     internal object? Error(string message, IReadOnlyList<string>? errors = null) =>
         ErrorResponseFactory(message, errors is { Count: > 0 } ? errors : null);
-    }
+}

@@ -93,4 +93,57 @@ public interface IExecutionManager
         string? deleteReason = null,
         bool cancel = false,
         CancellationToken ct = default);
+
+    // ─────────────────────────── 挂起 / 激活 ───────────────────────────
+
+    /// <summary>
+    /// 挂起 / 激活单个流程实例的执行树（对应 Activiti 的
+    /// <c>SuspendProcessInstanceCmd</c> → <c>updateProcessInstanceSuspensionStateByProcessInstanceId</c>）。
+    /// <para>
+    /// 只写 <c>ACT_RU_EXECUTION.SUSPENSION_STATE_</c>；任务行由
+    /// <see cref="Tasks.ITaskManager.UpdateSuspensionStateByProcessInstanceIdAsync"/> 一起更新 ——
+    /// 只挂执行不挂任务会出现「实例已挂起、待办却能完成」的漏洞
+    /// （<c>CompleteTaskCommand</c> 的挂起检查读的正是任务行）。
+    /// </para>
+    /// <para>
+    /// ⚠️ 与 Activiti 一致，<c>IS_ACTIVE_</c> <b>不</b>改动 —— 挂起是「暂停受理」，
+    /// 不是「节点失效」，流程图着色与并行 Join 判定都不受影响。
+    /// </para>
+    /// </summary>
+    /// <returns>受影响的流程实例数（0 = 实例不存在）。</returns>
+    ValueTask<int> UpdateSuspensionStateByProcessInstanceIdAsync(
+        string processInstanceId,
+        bool suspended,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 挂起 / 激活某流程定义下的<b>全部运行实例</b>（只改执行行，任务行同理由任务管理器更新）。
+    /// 对应 Activiti <c>suspendProcessDefinitionById(id, suspendProcessInstances=true)</c> 里
+    /// 「按流程定义批量更新」的那一步。
+    /// </summary>
+    /// <returns>受影响的流程实例数（按根执行计数）。</returns>
+    ValueTask<int> UpdateSuspensionStateByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 查某流程定义下<b>运行中</b>的流程实例 id（根执行，按活跃顺序无保证）。
+    /// <para>
+    /// 部署级联删除用它先收口运行态；<c>PARENT_ID_ is null</c> 已排除子执行。
+    /// </para>
+    /// </summary>
+    ValueTask<IReadOnlyList<string>> FindProcessInstanceIdsByProcessDefinitionIdAsync(
+        string processDefinitionId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 查<b>全部运行中的流程实例</b>（根执行，<c>PARENT_ID_ is null</c>）。
+    /// <para>
+    /// 条件过滤与分页由门面在内存完成（与待办查询同一口径）。返回的执行只带根行字段，
+    /// <c>Children</c> 不为实例列表预加载 —— 需要执行树请按 id 查 <see cref="FindByIdAsync"/>。
+    /// </para>
+    /// </summary>
+    ValueTask<IReadOnlyList<IExecutionEntity>> FindProcessInstancesAsync(
+        CancellationToken ct = default);
 }

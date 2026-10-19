@@ -282,7 +282,12 @@ internal static class Program
         }
 
         var process = model.Processes[0];
-        var errors = new ProcessValidator().Validate(process);
+
+        // 提示级问题不阻断部署（Activiti 的 isWarning() 语义），只有阻断级问题才跳过该语料
+        var errors = new ProcessValidator()
+            .Validate(process)
+            .Where(result => result.IsError)
+            .ToList();
 
         if (errors.Count > 0)
         {

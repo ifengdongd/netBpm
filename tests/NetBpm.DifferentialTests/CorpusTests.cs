@@ -45,7 +45,8 @@ public sealed class CorpusTests
             var process = model.GetMainProcess()
                 ?? throw new InvalidOperationException($"语料 '{entry.FullName}' 没有主流程。");
 
-            var errors = validator.Validate(process);
+            // 只有阻断级问题才算「未通过校验」：提示级（孤立节点 / 无人办理等）Activiti 照常部署
+            var errors = validator.Validate(process).Where(result => result.IsError).ToList();
 
             Assert.True(
                 errors.Count == 0,

@@ -120,7 +120,7 @@ public sealed class EngineCommandTests
 
         var engine = TestEngine.Create();
 
-        var exception = await Assert.ThrowsAsync<EngineException>(async () =>
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(async () =>
         {
             await engine.StartProcessAsync(xml, new Dictionary<string, object?> { ["approved"] = false });
         });

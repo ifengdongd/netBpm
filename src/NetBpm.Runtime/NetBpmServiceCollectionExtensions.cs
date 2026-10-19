@@ -18,6 +18,7 @@ using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
+using NetBpm.Persistence.Idempotency;
 using NetBpm.Persistence.Tasks;
 
 namespace NetBpm.Runtime;
@@ -66,6 +67,16 @@ public static class NetBpmServiceCollectionExtensions
         // ── P5：持久化（按模式切换内存 / 数据库）──────────────────────
         RegisterPersistence(services, options);
 
+        // ── HTTP 幂等：内存宿主单进程去重，数据库宿主跨实例去重 ─────────
+        if (options.UsesDatabase)
+        {
+            services.AddSingleton<IIdempotencyStore, DapperIdempotencyStore>();
+        }
+        else
+        {
+            services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
+        }
+
         // ── P6：引擎服务与议程 ──────────────────────────────────────
         services.AddSingleton<IActivityDelegateResolver, ServiceProviderActivityDelegateResolver>();
 
@@ -85,7 +96,17 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetService<ILoggerFactory>()?.CreateLogger("NetBpm.Engine")));
 
         // ── 命令与拦截器 ────────────────────────────────────────────
+        // 链序：Log → Retry → Transaction → CommandContext
+        // Retry 必须在 Transaction 之外：一次重试 = 一个全新的 DbSession（新一级缓存）。
+        // 数据库宿主还要把「死锁 / 锁等待超时」纳入重试 —— 并行 Join 与会签计数都会真实撞上。
+        services.AddSingleton(
+            options.UsesDatabase
+                ? TransientDatabaseErrors.CreateRetryPolicy()
+                : new CommandRetryPolicy());
         services.AddSingleton<ICommandInterceptor, LogInterceptor>();
+        services.AddSingleton<ICommandInterceptor>(provider => new RetryInterceptor(
+            provider.GetRequiredService<CommandRetryPolicy>(),
+            provider.GetService<ILoggerFactory>()?.CreateLogger<RetryInterceptor>()));
         services.AddSingleton<ICommandInterceptor, TransactionInterceptor>();
         services.AddSingleton<ICommandInterceptor, CommandContextInterceptor>();
         services.AddSingleton<ICommandExecutor, CommandExecutor>();
@@ -197,12 +218,16 @@ public static class NetBpmServiceCollectionExtensions
         services.AddSingleton<IProcessDefinitionStore, DapperProcessDefinitionStore>();
         services.AddSingleton<ITaskManager, DapperTaskManager>();
 
-        // 每个命令一个 DbSession（= 一个事务 + 一份一级缓存）
+        // 每个命令一个 DbSession（= 一个事务 + 一份一级缓存）。
+        // 传工厂而不是实例：重试时要能整体换掉会话（旧会话的脏实体不得复用）。
         services.AddSingleton<Func<CommandContext>>(provider => () =>
         {
             var engineServices = provider.GetRequiredService<IEngineServices>();
-            var session = provider.GetRequiredService<IDbSessionFactory>().Create();
-            return new CommandContext(engineServices, session);
+            var sessionFactory = provider.GetRequiredService<IDbSessionFactory>();
+
+            return new CommandContext(
+                engineServices,
+                transactionFactory: () => sessionFactory.Create());
         });
 
         RegisterDefinitionResolver(services);

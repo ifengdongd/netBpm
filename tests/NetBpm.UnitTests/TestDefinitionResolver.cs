@@ -1,4 +1,4 @@
-﻿using NetBpm.Bpmn.Model;
+using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Services;
 
 namespace NetBpm.UnitTests;

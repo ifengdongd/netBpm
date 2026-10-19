@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using NetBpm.Demo.Common;
 using NetBpm.Demo.Workflow;
 using NetBpm.Workflow;

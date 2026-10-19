@@ -1,4 +1,4 @@
-﻿using NetBpm.Engine.Tasks;
+using NetBpm.Engine.Tasks;
 
 namespace NetBpm.Engine.Command;
 
@@ -51,7 +51,7 @@ public sealed class SetAssigneeCommand : ICommand<Unit>
                 "宿主必须注册任务管理器实现");
 
         var task = await taskManager.FindTaskByIdAsync(_taskId, ct).ConfigureAwait(false)
-            ?? throw new EngineException($"任务 '{_taskId}' 不存在（可能已完成或已被删除）。");
+            ?? throw new EngineObjectNotFoundException($"任务 '{_taskId}' 不存在（可能已完成或已被删除）。");
 
         if (task.SuspensionState != TaskEntity.ActiveSuspensionState)
         {

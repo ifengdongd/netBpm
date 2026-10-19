@@ -64,7 +64,7 @@ public sealed class VariableDeletionAndTenantTests
     {
         var engine = TestEngine.Create();
 
-        await Assert.ThrowsAsync<EngineException>(
+        await Assert.ThrowsAnyAsync<EngineException>(
             () => engine.CommandExecutor
                 .ExecuteAsync(new DeleteVariableCommand("no-such-instance", "days"), Ct)
                 .AsTask());

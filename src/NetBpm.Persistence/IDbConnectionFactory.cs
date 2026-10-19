@@ -25,7 +25,8 @@ public sealed class DbConnectionFactory : IDbConnectionFactory
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         DatabaseType = databaseType;
-        _connectionString = connectionString;
+        // 所有引擎连接的唯一入口：在这里锁定 TLS 1.2+，避免协商到 TLS 1.0/1.1
+        _connectionString = SecureConnectionString.Normalize(databaseType, connectionString);
     }
 
     /// <inheritdoc />

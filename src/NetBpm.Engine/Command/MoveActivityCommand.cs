@@ -1,4 +1,4 @@
-﻿using NetBpm.Engine.Execution;
+using NetBpm.Engine.Execution;
 using NetBpm.Engine.Tasks;
 
 namespace NetBpm.Engine.Command;
@@ -60,7 +60,7 @@ public sealed class MoveActivityCommand : ICommand<Unit>
 
         // 1. 实例必须还在运行（实例结束 = 根执行已被删除）
         var instance = await executionManager.FindByIdAsync(_processInstanceId, ct).ConfigureAwait(false)
-            ?? throw new EngineException($"流程实例 '{_processInstanceId}' 不存在或已结束，无法跳转。");
+            ?? throw new EngineObjectNotFoundException($"流程实例 '{_processInstanceId}' 不存在或已结束，无法跳转。");
 
         // 2. 目标节点必须存在于流程定义中
         var target = await resolver
@@ -100,6 +100,16 @@ public sealed class MoveActivityCommand : ICommand<Unit>
         {
             throw new EngineException(
                 $"流程实例 '{instance.Id}' 停在 {executions.Count} 个并行分支上，暂不支持跳转。");
+        }
+
+        // 有任务却定位不到执行（EXECUTION_ID_ 为空 / 执行已被并发删除）：
+        // 必须显式失败，否则下面的取下标会抛 ArgumentOutOfRangeException，
+        // 调用方拿到的是一个看不出原因的内部异常
+        if (executions.Count == 0)
+        {
+            throw new EngineException(
+                $"流程实例 '{instance.Id}' 有 {tasks.Count} 个待办，但都无法定位到等待中的执行" +
+                "（任务未关联执行或执行已结束），无法跳转。");
         }
 
         var current = executions[0];

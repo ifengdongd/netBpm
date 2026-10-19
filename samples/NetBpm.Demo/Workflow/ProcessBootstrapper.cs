@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using NetBpm.Demo.Common;
 using NetBpm.Runtime;
 using NetBpm.Workflow;

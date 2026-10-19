@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using Microsoft.Data.SqlClient;
 using MySqlConnector;
 using NetBpm.Persistence;
@@ -68,7 +68,9 @@ public static class DemoSchemaInitializer
     /// <summary>MySQL：摘掉库名直连服务器建库（若缺）。</summary>
     private static void EnsureMySqlDatabase(string connectionString)
     {
-        var builder = new MySqlConnectionStringBuilder(connectionString);
+        // 与 DbConnectionFactory 同一套 TLS 策略：启动期建库连接也不允许降级到 TLS 1.0/1.1
+        var builder = new MySqlConnectionStringBuilder(
+            SecureConnectionString.Normalize(DatabaseType.MySql, connectionString));
 
         var database = builder.Database;
         if (string.IsNullOrWhiteSpace(database))

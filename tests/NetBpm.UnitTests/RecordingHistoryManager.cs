@@ -11,6 +11,7 @@ namespace NetBpm.UnitTests;
 internal sealed class RecordingHistoryManager : IHistoryManager
 {
     private readonly List<string> _calls = [];
+    private readonly List<HistoricTaskInstance> _tasks = [];
 
     /// <summary>已记录的调用，形如 <c>ActivityStart:approve</c>。</summary>
     public IReadOnlyList<string> Calls => _calls;
@@ -79,6 +80,25 @@ internal sealed class RecordingHistoryManager : IHistoryManager
         CancellationToken ct = default)
     {
         _calls.Add($"TaskCreated:{task.Id}");
+
+        // 顺带存一份最小历史，供「历史任务查询 / 分页」的门面测试使用
+        // （真库行内容由集成测试验证，这里只保证读回的形状与真库一致）
+        _tasks.Add(new HistoricTaskInstance(
+            task.Id,
+            task.ProcessDefinitionId,
+            task.TaskDefinitionKey,
+            task.ProcessInstanceId,
+            task.ExecutionId,
+            task.Name,
+            task.Assignee,
+            task.Owner,
+            task.Priority,
+            task.FormKey,
+            task.CreateTime ?? DateTime.UtcNow,
+            null,
+            null,
+            null));
+
         return ValueTask.CompletedTask;
     }
 
@@ -91,6 +111,14 @@ internal sealed class RecordingHistoryManager : IHistoryManager
     public ValueTask RecordTaskAssignmentAsync(TaskEntity task, CancellationToken ct = default)
     {
         _calls.Add($"TaskAssignment:{task.Id}:{task.Assignee}");
+
+        // 办理人是在任务创建之后才写进历史行的（ACT_HI_TASKINST.ASSIGNEE_ 随认领 / 改派更新）
+        var index = _tasks.FindIndex(item => string.Equals(item.Id, task.Id, StringComparison.Ordinal));
+        if (index >= 0)
+        {
+            _tasks[index] = _tasks[index] with { Assignee = task.Assignee, Owner = task.Owner };
+        }
+
         return ValueTask.CompletedTask;
     }
 
@@ -103,6 +131,17 @@ internal sealed class RecordingHistoryManager : IHistoryManager
     public ValueTask RecordTaskEndAsync(string taskId, string? deleteReason, CancellationToken ct = default)
     {
         _calls.Add($"TaskEnd:{taskId}");
+
+        var index = _tasks.FindIndex(task => string.Equals(task.Id, taskId, StringComparison.Ordinal));
+        if (index >= 0)
+        {
+            _tasks[index] = _tasks[index] with
+            {
+                EndTime = DateTime.UtcNow,
+                DeleteReason = deleteReason,
+            };
+        }
+
         return ValueTask.CompletedTask;
     }
 
@@ -138,5 +177,19 @@ internal sealed class RecordingHistoryManager : IHistoryManager
     public ValueTask<IReadOnlyList<HistoricTaskInstance>> FindTaskInstancesAsync(
         string processInstanceId,
         CancellationToken ct = default) =>
-        ValueTask.FromResult<IReadOnlyList<HistoricTaskInstance>>([]);
+        ValueTask.FromResult<IReadOnlyList<HistoricTaskInstance>>(
+            [.. _tasks.Where(task => string.Equals(task.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))]);
+
+    public ValueTask<IReadOnlyList<HistoricProcessInstance>> FindProcessInstancesAsync(
+        CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<HistoricProcessInstance>>([]);
+
+    public ValueTask<IReadOnlyList<HistoricTaskInstance>> FindAllTaskInstancesAsync(
+        CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<HistoricTaskInstance>>([.. _tasks]);
+
+    public ValueTask<IReadOnlyList<HistoricVariableInstance>> FindVariableInstancesAsync(
+        string processInstanceId,
+        CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<HistoricVariableInstance>>([]);
 }

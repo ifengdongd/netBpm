@@ -1,4 +1,4 @@
-﻿using NetBpm.Engine.Execution;
+using NetBpm.Engine.Execution;
 using NetBpm.Runtime;
 
 namespace NetBpm.Workflow;
@@ -87,17 +87,35 @@ public interface IWorkflowService
     /// <returns>历史视图；引擎与业务侧都查不到该实例时返回 <see langword="null"/>。</returns>
     ValueTask<WorkflowHistoryView?> FindHistoryAsync(string processInstanceId, CancellationToken ct = default);
 
-    /// <summary>查业务登记列表（新的在前），列表页用。</summary>
+    /// <summary>
+    /// 查业务登记列表（新的在前），列表页用。
+    /// <para>分页参数：<paramref name="firstResult"/>（跳过条数，默认 0）、<paramref name="maxResults"/>
+    /// （最多返回条数，默认 200）；总条数用 <see cref="CountInstancesAsync"/>。</para>
+    /// </summary>
+    /// <param name="firstResult">跳过的条数。</param>
+    /// <param name="maxResults">最多返回的条数。</param>
     /// <param name="ct">取消标记。</param>
-    ValueTask<IReadOnlyList<WorkflowInstanceSummary>> FindInstancesAsync(CancellationToken ct = default);
+    ValueTask<IReadOnlyList<WorkflowInstanceSummary>> FindInstancesAsync(
+        int firstResult = 0,
+        int maxResults = 200,
+        CancellationToken ct = default);
+
+    /// <summary>数业务登记总数（<see cref="FindInstancesAsync"/> 的配套查询）。</summary>
+    /// <param name="ct">取消标记。</param>
+    ValueTask<int> CountInstancesAsync(CancellationToken ct = default);
 
     /// <summary>
     /// <b>改派待办</b>（转办）：把当前环节的审批人直接改为指定用户（管理动作）。
     /// </summary>
-    /// <remarks>不产生审批记录 —— 转办不是审批结论；受影响的只有当前待办的审批人与业务侧登记。</remarks>
+    /// <remarks>
+    /// 不产生审批记录 —— 转办不是审批结论；受影响的只有当前待办的审批人与业务侧登记。
+    /// <para>
+    /// 引擎的 <c>setAssignee</c> 没有备注列：原先的 <c>reason</c> 参数接受后被丢弃，
+    /// 已删除以免形成「写入历史」的假承诺。需要留痕请由宿主写业务侧记录。
+    /// </para>
+    /// </remarks>
     /// <param name="taskId">待办任务 id。</param>
     /// <param name="userId">新审批人（域账号 / 用户 id）；<see langword="null"/> 表示退回未分配（候选人/组重新可见）。</param>
-    /// <param name="reason">改派原因（审计用，随任务历史记录）。</param>
     /// <param name="ct">取消标记。</param>
     /// <returns>改派后的实例视图（当前待办的审批人已更新）。</returns>
     /// <exception cref="WorkflowNotFoundException">任务不存在（可能已完成）。</exception>
@@ -105,7 +123,6 @@ public interface IWorkflowService
     ValueTask<WorkflowInstanceView?> ReassignTaskAsync(
         string taskId,
         string? userId,
-        string? reason = null,
         CancellationToken ct = default);
 
     /// <summary>

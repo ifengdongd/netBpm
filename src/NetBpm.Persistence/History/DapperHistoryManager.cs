@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Dapper;
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine;
@@ -38,6 +39,13 @@ public sealed class DapperHistoryManager : IHistoryManager
     private readonly IDbSessionProvider _sessions;
     private readonly IIdGenerator _idGenerator;
 
+    /// <summary>
+    /// 命令内已写入的起始时间。收口历史行（结束时间/耗时）本来要先 SELECT 一次取 START_TIME_，
+    /// 对于「同一命令内创建、同一命令内结束」的行（绝大多数活动与任务），这里直接命中内存，
+    /// 省掉每次收口的一次查询；跨命令的行仍回落到 SELECT。
+    /// </summary>
+    private readonly ConditionalWeakTable<IDbSession, HistoryTimings> _timings = new();
+
     public DapperHistoryManager(IDbSessionProvider sessions, IIdGenerator idGenerator)
     {
         ArgumentNullException.ThrowIfNull(sessions);
@@ -46,6 +54,18 @@ public sealed class DapperHistoryManager : IHistoryManager
         _sessions = sessions;
         _idGenerator = idGenerator;
     }
+
+    private sealed class HistoryTimings
+    {
+        public Dictionary<string, DateTime> ProcessInstanceStarts { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, DateTime> ActivityStarts { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, DateTime> TaskStarts { get; } = new(StringComparer.Ordinal);
+    }
+
+    private static string ActivityStartKey(string executionId, string? activityId) =>
+        string.Concat(executionId, "\u001f", activityId ?? string.Empty);
 
     /// <inheritdoc />
     public bool IsHistoryEnabled => true;
@@ -63,6 +83,9 @@ public sealed class DapperHistoryManager : IHistoryManager
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
+        var startTime = processInstance.StartTime ?? DateTime.UtcNow;
+        _timings.GetOrCreateValue(session).ProcessInstanceStarts[processInstance.Id] = startTime;
+
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
                 InsertHistoricProcessInstanceSql,
@@ -72,7 +95,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                     processInstanceId = processInstance.Id,
                     businessKey = processInstance.BusinessKey,
                     processDefinitionId = processInstance.ProcessDefinitionId,
-                    startTime = processInstance.StartTime ?? DateTime.UtcNow,
+                    startTime,
                     startUserId = processInstance.StartUserId,
                     startActivityId,
                     name = processInstance.Name,
@@ -93,13 +116,24 @@ public sealed class DapperHistoryManager : IHistoryManager
 
         using var lease = _sessions.Acquire();
         var session = lease.Session;
+        var timings = _timings.GetOrCreateValue(session);
 
-        var startTime = await session.Connection.ExecuteScalarAsync<DateTime?>(
-            new CommandDefinition(
-                SelectHistoricProcessInstanceStartTimeSql,
-                new { processInstanceId },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false);
+        DateTime? startTime;
+
+        if (timings.ProcessInstanceStarts.TryGetValue(processInstanceId, out var remembered))
+        {
+            startTime = remembered;
+            timings.ProcessInstanceStarts.Remove(processInstanceId);
+        }
+        else
+        {
+            startTime = await session.Connection.ExecuteScalarAsync<DateTime?>(
+                new CommandDefinition(
+                    SelectHistoricProcessInstanceStartTimeSql,
+                    new { processInstanceId },
+                    session.Transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+        }
 
         var endTime = DateTime.UtcNow;
 
@@ -134,6 +168,9 @@ public sealed class DapperHistoryManager : IHistoryManager
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
+        var startTime = DateTime.UtcNow;
+        _timings.GetOrCreateValue(session).ActivityStarts[ActivityStartKey(execution.Id, element.Id)] = startTime;
+
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
                 InsertHistoricActivityInstanceSql,
@@ -146,7 +183,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                     activityId = element.Id,
                     activityName = (element as FlowElement)?.Name,
                     activityType = ActivityTypeOf(element),
-                    startTime = DateTime.UtcNow,
+                    startTime,
                     tenantId = execution.TenantId ?? string.Empty,
                 },
                 session.Transaction,
@@ -188,13 +225,25 @@ public sealed class DapperHistoryManager : IHistoryManager
 
         using var lease = _sessions.Acquire();
         var session = lease.Session;
+        var timings = _timings.GetOrCreateValue(session);
+        var key = ActivityStartKey(execution.Id, activityId);
 
-        var startTime = await session.Connection.ExecuteScalarAsync<DateTime?>(
-            new CommandDefinition(
-                SelectUnfinishedActivityStartTimeSql,
-                new { executionId = execution.Id, activityId },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false);
+        DateTime? startTime;
+
+        if (timings.ActivityStarts.TryGetValue(key, out var remembered))
+        {
+            startTime = remembered;
+            timings.ActivityStarts.Remove(key);
+        }
+        else
+        {
+            startTime = await session.Connection.ExecuteScalarAsync<DateTime?>(
+                new CommandDefinition(
+                    SelectUnfinishedActivityStartTimeSql,
+                    new { executionId = execution.Id, activityId },
+                    session.Transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+        }
 
         var endTime = DateTime.UtcNow;
 
@@ -227,6 +276,9 @@ public sealed class DapperHistoryManager : IHistoryManager
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
+        var startTime = DateTime.UtcNow;
+        _timings.GetOrCreateValue(session).TaskStarts[task.Id] = startTime;
+
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
                 InsertHistoricTaskInstanceSql,
@@ -242,7 +294,7 @@ public sealed class DapperHistoryManager : IHistoryManager
                     description = task.Description,
                     owner = task.Owner,
                     assignee = task.Assignee,
-                    startTime = DateTime.UtcNow,
+                    startTime,
                     claimTime = task.ClaimTime,
                     taskDefinitionKey = task.TaskDefinitionKey,
                     formKey = task.FormKey,
@@ -332,10 +384,21 @@ public sealed class DapperHistoryManager : IHistoryManager
 
         using var lease = _sessions.Acquire();
         var session = lease.Session;
+        var timings = _timings.GetOrCreateValue(session);
 
-        var startTime = await session.Connection.ExecuteScalarAsync<DateTime?>(
-            new CommandDefinition(SelectHistoricTaskStartTimeSql, new { taskId }, session.Transaction, cancellationToken: ct))
-            .ConfigureAwait(false);
+        DateTime? startTime;
+
+        if (timings.TaskStarts.TryGetValue(taskId, out var remembered))
+        {
+            startTime = remembered;
+            timings.TaskStarts.Remove(taskId);
+        }
+        else
+        {
+            startTime = await session.Connection.ExecuteScalarAsync<DateTime?>(
+                new CommandDefinition(SelectHistoricTaskStartTimeSql, new { taskId }, session.Transaction, cancellationToken: ct))
+                .ConfigureAwait(false);
+        }
 
         var endTime = DateTime.UtcNow;
 
@@ -509,25 +572,134 @@ public sealed class DapperHistoryManager : IHistoryManager
 
         foreach (IDictionary<string, object> row in rows)
         {
-            result.Add(new HistoricTaskInstance(
-                Text(row, "ID_")!,
-                Text(row, "PROC_DEF_ID_"),
-                Text(row, "TASK_DEF_KEY_"),
-                Text(row, "PROC_INST_ID_"),
-                Text(row, "EXECUTION_ID_"),
-                Text(row, "NAME_"),
-                Text(row, "ASSIGNEE_"),
-                Text(row, "OWNER_"),
-                (int?)Number(row, "PRIORITY_"),
-                Text(row, "FORM_KEY_"),
-                Date(row, "START_TIME_"),
-                Date(row, "END_TIME_"),
-                Number(row, "DURATION_"),
-                Text(row, "DELETE_REASON_")));
+            result.Add(MapTaskInstance(row));
         }
 
         return result;
     }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<HistoricProcessInstance>> FindProcessInstancesAsync(
+        CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(SelectAllHistoricProcessInstancesSql, null, session.Transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var result = new List<HistoricProcessInstance>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            result.Add(MapProcessInstance(row));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<HistoricTaskInstance>> FindAllTaskInstancesAsync(
+        CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(SelectAllHistoricTaskInstancesSql, null, session.Transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var result = new List<HistoricTaskInstance>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            result.Add(MapTaskInstance(row));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<HistoricVariableInstance>> FindVariableInstancesAsync(
+        string processInstanceId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(
+                SelectHistoricVariableInstancesSql,
+                new { processInstanceId },
+                session.Transaction,
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var result = new List<HistoricVariableInstance>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            var typeName = Text(row, "VAR_TYPE_");
+            var value = VariableTypeMapper.FromColumns(
+                typeName,
+                Number(row, "LONG_"),
+                Double(row, "DOUBLE_"),
+                Text(row, "TEXT_"),
+                Bytes(row, "BYTES_"));
+
+            result.Add(new HistoricVariableInstance(
+                Text(row, "ID_")!,
+                Text(row, "PROC_INST_ID_"),
+                Text(row, "EXECUTION_ID_"),
+                Text(row, "TASK_ID_"),
+                Text(row, "NAME_")!,
+                value,
+                typeName,
+                Date(row, "CREATE_TIME_"),
+                Date(row, "LAST_UPDATED_TIME_")));
+        }
+
+        return result;
+    }
+
+    // ─────────────────────────── 行映射 ───────────────────────────
+
+    private static HistoricProcessInstance MapProcessInstance(IDictionary<string, object> row) =>
+        new(
+            Text(row, "ID_")!,
+            Text(row, "PROC_INST_ID_")!,
+            Text(row, "BUSINESS_KEY_"),
+            Text(row, "PROC_DEF_ID_")!,
+            Date(row, "START_TIME_"),
+            Date(row, "END_TIME_"),
+            Number(row, "DURATION_"),
+            Text(row, "START_USER_ID_"),
+            Text(row, "START_ACT_ID_"),
+            Text(row, "END_ACT_ID_"),
+            Text(row, "DELETE_REASON_"),
+            Text(row, "NAME_"),
+            TenantId: Text(row, "TENANT_ID_"));
+
+    private static HistoricTaskInstance MapTaskInstance(IDictionary<string, object> row) =>
+        new(
+            Text(row, "ID_")!,
+            Text(row, "PROC_DEF_ID_"),
+            Text(row, "TASK_DEF_KEY_"),
+            Text(row, "PROC_INST_ID_"),
+            Text(row, "EXECUTION_ID_"),
+            Text(row, "NAME_"),
+            Text(row, "ASSIGNEE_"),
+            Text(row, "OWNER_"),
+            (int?)Number(row, "PRIORITY_"),
+            Text(row, "FORM_KEY_"),
+            Date(row, "START_TIME_"),
+            Date(row, "END_TIME_"),
+            Number(row, "DURATION_"),
+            Text(row, "DELETE_REASON_"),
+            TenantId: Text(row, "TENANT_ID_"));
 
     // ─────────────────────────── ACT_HI_IDENTITYLINK ───────────────────────────
 
@@ -593,6 +765,14 @@ public sealed class DapperHistoryManager : IHistoryManager
         row.TryGetValue(column, out var value) && value is not DBNull && value is not null
             ? Convert.ToInt64(value, CultureInfo.InvariantCulture)
             : null;
+
+    private static double? Double(IDictionary<string, object> row, string column) =>
+        row.TryGetValue(column, out var value) && value is not DBNull && value is not null
+            ? Convert.ToDouble(value, CultureInfo.InvariantCulture)
+            : null;
+
+    private static byte[]? Bytes(IDictionary<string, object> row, string column) =>
+        row.TryGetValue(column, out var value) && value is not DBNull ? value as byte[] : null;
 
     /// <summary>
     /// <c>ACT_TYPE_</c> = 元素类名首字母小写（对应 <c>DefaultHistoryManager.parseActivityType</c>）。
@@ -730,17 +910,45 @@ public sealed class DapperHistoryManager : IHistoryManager
 
     private const string SelectHistoricProcessInstanceSql = """
         select ID_, PROC_INST_ID_, BUSINESS_KEY_, PROC_DEF_ID_, START_TIME_, END_TIME_, DURATION_,
-               START_USER_ID_, START_ACT_ID_, END_ACT_ID_, DELETE_REASON_, NAME_
+               START_USER_ID_, START_ACT_ID_, END_ACT_ID_, DELETE_REASON_, NAME_, TENANT_ID_
         from ACT_HI_PROCINST
         where PROC_INST_ID_ = @processInstanceId
         """;
 
     private const string SelectHistoricTaskInstancesSql = """
         select ID_, PROC_DEF_ID_, TASK_DEF_KEY_, PROC_INST_ID_, EXECUTION_ID_, NAME_, ASSIGNEE_, OWNER_,
-               PRIORITY_, FORM_KEY_, START_TIME_, END_TIME_, DURATION_, DELETE_REASON_
+               PRIORITY_, FORM_KEY_, START_TIME_, END_TIME_, DURATION_, DELETE_REASON_, TENANT_ID_
         from ACT_HI_TASKINST
         where PROC_INST_ID_ = @processInstanceId
         order by START_TIME_, ID_
+        """;
+
+    /// <summary>实例列表：按开始时间倒序（门面还会再排序 / 分页，这里先给稳定顺序）。</summary>
+    private const string SelectAllHistoricProcessInstancesSql = """
+        select ID_, PROC_INST_ID_, BUSINESS_KEY_, PROC_DEF_ID_, START_TIME_, END_TIME_, DURATION_,
+               START_USER_ID_, START_ACT_ID_, END_ACT_ID_, DELETE_REASON_, NAME_, TENANT_ID_
+        from ACT_HI_PROCINST
+        order by START_TIME_ desc, ID_
+        """;
+
+    /// <summary>跨实例已办列表：按开始时间升序，与单实例查询同口径。</summary>
+    private const string SelectAllHistoricTaskInstancesSql = """
+        select ID_, PROC_DEF_ID_, TASK_DEF_KEY_, PROC_INST_ID_, EXECUTION_ID_, NAME_, ASSIGNEE_, OWNER_,
+               PRIORITY_, FORM_KEY_, START_TIME_, END_TIME_, DURATION_, DELETE_REASON_, TENANT_ID_
+        from ACT_HI_TASKINST
+        order by START_TIME_, ID_
+        """;
+
+    /// <summary>
+    /// 历史变量：<c>longString</c> 的值在 <c>ACT_GE_BYTEARRAY.BYTES_</c>，必须 LEFT JOIN 才能解码。
+    /// </summary>
+    private const string SelectHistoricVariableInstancesSql = """
+        select V.ID_, V.PROC_INST_ID_, V.EXECUTION_ID_, V.TASK_ID_, V.NAME_, V.VAR_TYPE_,
+               V.LONG_, V.DOUBLE_, V.TEXT_, V.CREATE_TIME_, V.LAST_UPDATED_TIME_, B.BYTES_
+        from ACT_HI_VARINST V
+        left join ACT_GE_BYTEARRAY B on B.ID_ = V.BYTEARRAY_ID_
+        where V.PROC_INST_ID_ = @processInstanceId
+        order by V.NAME_, V.ID_
         """;
 
     private const string InsertHistoricIdentityLinkSql = """

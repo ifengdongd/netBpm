@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Services;
 
@@ -11,19 +10,24 @@ namespace NetBpm.Persistence.Deployment;
 /// <c>{key}:{version}:{id}</c>），因此同一个 id 的模型不会变化。
 /// </para>
 /// <para>
-/// ⚠️ 缓存上限：条目数等于部署过的流程定义数。若长期运行且频繁重部署，
-/// 应在 P11 换成带容量的 LRU —— 这里刻意不提前引入复杂度。
+/// 缓存按容量做 LRU 淘汰：长期运行 + 频繁重部署时，条目数不再随部署次数无界增长。
 /// </para>
 /// </summary>
 public sealed class ProcessDefinitionResolver : IProcessDefinitionResolver
 {
-    private readonly IProcessDefinitionStore _definitionStore;
-    private readonly ConcurrentDictionary<string, Process?> _processCache = new(StringComparer.Ordinal);
+    private const int DefaultCacheCapacity = 256;
 
-    public ProcessDefinitionResolver(IProcessDefinitionStore definitionStore)
+    private readonly IProcessDefinitionStore _definitionStore;
+    private readonly BoundedCache<string, Process?> _processCache;
+
+    public ProcessDefinitionResolver(
+        IProcessDefinitionStore definitionStore,
+        int cacheCapacity = DefaultCacheCapacity)
     {
         ArgumentNullException.ThrowIfNull(definitionStore);
+
         _definitionStore = definitionStore;
+        _processCache = new BoundedCache<string, Process?>(cacheCapacity, StringComparer.Ordinal);
     }
 
     /// <inheritdoc />
@@ -57,7 +61,7 @@ public sealed class ProcessDefinitionResolver : IProcessDefinitionResolver
 
     private async ValueTask<Process?> GetProcessAsync(string processDefinitionId, CancellationToken ct)
     {
-        if (_processCache.TryGetValue(processDefinitionId, out var cached))
+        if (_processCache.TryGet(processDefinitionId, out var cached))
         {
             return cached;
         }
@@ -65,7 +69,7 @@ public sealed class ProcessDefinitionResolver : IProcessDefinitionResolver
         var model = await _definitionStore.GetBpmnModelAsync(processDefinitionId, ct).ConfigureAwait(false);
         var process = model?.GetMainProcess();
 
-        _processCache[processDefinitionId] = process;
+        _processCache.Set(processDefinitionId, process);
         return process;
     }
 }

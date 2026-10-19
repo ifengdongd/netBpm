@@ -1,17 +1,18 @@
-﻿using System.Text;
+using System.Text;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Engine;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Execution;
 using NetBpm.Persistence;
+using NetBpm.Runtime;
 
 namespace NetBpm.IntegrationTests;
 
 /// <summary>
 /// <b>B1/B2 功能矩阵 × 双库</b>：把任务清单 B1/B2 的全部功能在 MySQL（localhost）与
-/// SqlServer（10.1.245.36，Windows 身份认证）上各跑一遍 —— 同一组用例、同一套断言，
-/// 差异只来自 <see cref="TestDatabaseSpec"/>。
+/// SqlServer（Testcontainers 的 2022 镜像，或 <c>NETBPM_SQLSERVER_CONNECTION</c> 指向的实例）
+/// 上各跑一遍 —— 同一组用例、同一套断言，差异只来自 <see cref="TestDatabaseSpec"/>。
 /// <para>
 /// 每个方言不可用时对应行<b>动态跳过</b>。行级语义的细粒度真值仍由
 /// 既有 MySQL 专项测试 + 差分对拍负责；本套件回答「每个功能在两种真库上都成立」。
@@ -354,6 +355,228 @@ public sealed class DualDatabaseFeatureMatrixTests
         Assert.All(activities, row => Assert.NotNull(RowValues.Raw(row, "END_TIME_")));
     }
 
+    // ─────────────────────────── 流程定义：最新版本 / 挂起 ───────────────────────────
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task Definition_LatestVersionAndSuspension_ShouldPersist(string provider)
+    {
+        var harness = Setup(provider);
+
+        // 同一 KEY_ 部署两次 = 两个版本
+        var (v1, _) = await harness.DeployAndStartAsync(UserTaskProcess(), ct: Ct);
+        var (v2, _) = await harness.DeployAndStartAsync(UserTaskProcess(), ct: Ct);
+
+        Assert.True(v2.Version > v1.Version);
+
+        // max(VERSION_) 子查询必须是两方言通用写法（不能用 limit / top）
+        var latest = await harness.Definitions.FindLatestByKeyAsync(v1.Key, ct: Ct);
+        Assert.Equal(v2.Id, latest!.Id);
+
+        // 挂起位落库：换会话读回（ACT_RE_PROCDEF.SUSPENSION_STATE_ = 2）
+        Assert.True(await harness.Definitions.SetSuspensionStateAsync(v2.Id, suspended: true, Ct));
+        Assert.True(await harness.Definitions.IsSuspendedAsync(v2.Id, Ct));
+
+        var listed = (await harness.Definitions.FindAllAsync(ct: Ct)).Single(row => row.Id == v2.Id);
+        Assert.True(listed.IsSuspended);
+
+        // 定义级挂起：旧版本不受影响
+        Assert.False(await harness.Definitions.IsSuspendedAsync(v1.Id, Ct));
+
+        // 激活后就恢复
+        Assert.True(await harness.Definitions.SetSuspensionStateAsync(v2.Id, suspended: false, Ct));
+        Assert.False(await harness.Definitions.IsSuspendedAsync(v2.Id, Ct));
+
+        // 不存在的定义：返回 false（由门面转成 EngineException），不能静默成功
+        Assert.False(await harness.Definitions.SetSuspensionStateAsync("no-such-definition", true, Ct));
+    }
+
+    // ─────────────────────────── 删除流程实例 ───────────────────────────
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task DeleteProcessInstance_ShouldPurgeRuntimeAndKeepHistory(string provider)
+    {
+        var harness = Setup(provider);
+        var (_, processInstanceId) = await harness.DeployAndStartAsync(UserTaskProcess(), ct: Ct);
+
+        await harness.Executor.ExecuteAsync(
+            new DeleteProcessInstanceCommand(processInstanceId, "双库删除验收"), Ct);
+
+        // 运行态：执行树与待办清空；历史仍在
+        Assert.Equal(0, harness.CountRows("ACT_RU_EXECUTION"));
+        Assert.Equal(0, harness.CountRows("ACT_RU_TASK"));
+
+        using var session = harness.SessionFactory.Create();
+
+        var instance = Assert.Single(RowValues.Query(
+            session, "select DELETE_REASON_, END_ACT_ID_ from ACT_HI_PROCINST"));
+        Assert.Equal("双库删除验收", RowValues.Text(instance, "DELETE_REASON_"));
+
+        // Activiti 的删除命令传 currentFlowElementId = null ⇒ END_ACT_ID_ 为空
+        Assert.Null(RowValues.Raw(instance, "END_ACT_ID_"));
+
+        // 被删待办的历史行同样带删除原因
+        var taskReasons = RowValues.Column(
+            RowValues.Query(session, "select DELETE_REASON_ from ACT_HI_TASKINST"),
+            "DELETE_REASON_");
+        Assert.Contains("双库删除验收", taskReasons);
+    }
+
+    // ─────────────────────────── 实例级挂起 / 定义挂起带实例 ───────────────────────────
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task ProcessInstanceSuspension_ShouldSuspendExecutionAndTaskRows(string provider)
+    {
+        var harness = Setup(provider);
+        var (_, instanceId) = await harness.DeployAndStartAsync(UserTaskProcess(), ct: Ct);
+
+        await harness.Engine.SuspendProcessInstanceAsync(instanceId, Ct);
+
+        string taskId;
+
+        using (var session = harness.SessionFactory.Create())
+        {
+            // 执行树与任务行都必须挂起（漏一张表就是「实例已挂起、待办却能完成」）
+            var executions = RowValues.Query(session, "select SUSPENSION_STATE_ from ACT_RU_EXECUTION");
+            Assert.NotEmpty(executions);
+            Assert.All(executions, row => Assert.Equal(2, RowValues.Int(row, "SUSPENSION_STATE_")));
+
+            var task = Assert.Single(RowValues.Query(session, "select ID_, SUSPENSION_STATE_ from ACT_RU_TASK"));
+            Assert.Equal(2, RowValues.Int(task, "SUSPENSION_STATE_"));
+            taskId = RowValues.Text(task, "ID_")!;
+        }
+
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => harness.CompleteTaskAsync(taskId, ct: Ct));
+        Assert.Contains("Cannot complete a suspended task", exception.Message, StringComparison.Ordinal);
+
+        await harness.Engine.ActivateProcessInstanceAsync(instanceId, Ct);
+        await harness.CompleteTaskAsync(taskId, ct: Ct);
+
+        Assert.Equal(0, harness.CountRows("ACT_RU_TASK"));
+        Assert.Equal(0, harness.CountRows("ACT_RU_EXECUTION"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task SuspendDefinition_WithInstances_ShouldBlockStartAndCompletion(string provider)
+    {
+        var harness = Setup(provider);
+        var (definition, _) = await harness.DeployAndStartAsync(UserTaskProcess(), ct: Ct);
+
+        await harness.Engine.SuspendProcessDefinitionAsync(definition.Id, suspendProcessInstances: true, Ct);
+
+        using (var session = harness.SessionFactory.Create())
+        {
+            var definitionRow = Assert.Single(RowValues.Query(
+                session, "select SUSPENSION_STATE_ from ACT_RE_PROCDEF"));
+            Assert.Equal(2, RowValues.Int(definitionRow, "SUSPENSION_STATE_"));
+
+            var taskRow = Assert.Single(RowValues.Query(session, "select SUSPENSION_STATE_ from ACT_RU_TASK"));
+            Assert.Equal(2, RowValues.Int(taskRow, "SUSPENSION_STATE_"));
+        }
+
+        // 定义挂起后不能再按 key 启动
+        var startException = await Assert.ThrowsAnyAsync<EngineException>(
+            () => harness.Engine.StartProcessInstanceByKeyAsync(definition.Key, ct: Ct).AsTask());
+        Assert.Contains("已挂起", startException.Message, StringComparison.Ordinal);
+
+        await harness.Engine.ActivateProcessDefinitionAsync(definition.Id, activateProcessInstances: true, Ct);
+
+        string taskId;
+
+        using (var session = harness.SessionFactory.Create())
+        {
+            var taskRow = Assert.Single(RowValues.Query(session, "select ID_, SUSPENSION_STATE_ from ACT_RU_TASK"));
+            Assert.Equal(1, RowValues.Int(taskRow, "SUSPENSION_STATE_"));
+            taskId = RowValues.Text(taskRow, "ID_")!;
+        }
+
+        await harness.CompleteTaskAsync(taskId, ct: Ct);
+        Assert.Equal(0, harness.CountRows("ACT_RU_TASK"));
+    }
+
+    // ─────────────────────────── 删除部署 ───────────────────────────
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task DeleteDeployment_WithoutCascade_ShouldRefuse_WithCascade_ShouldPurge(string provider)
+    {
+        var harness = Setup(provider);
+        var (definition, _) = await harness.DeployAndStartAsync(UserTaskProcess(), ct: Ct);
+
+        // 先预热模型缓存：验证删除部署时缓存被清（否则按已删 id 启动会命中缓存、最终撞外键）
+        Assert.NotNull(await harness.Definitions.GetBpmnModelAsync(definition.Id, Ct));
+
+        // 非级联：仍有运行实例 → 拒绝，且不能有副作用
+        var refuse = await Assert.ThrowsAnyAsync<EngineException>(
+            () => harness.Engine.DeleteDeploymentAsync(definition.DeploymentId, ct: Ct).AsTask());
+        Assert.Contains("cascade=true", refuse.Message, StringComparison.Ordinal);
+        Assert.Equal(1, harness.CountRows("ACT_RE_PROCDEF"));
+
+        await harness.Engine.DeleteDeploymentAsync(definition.DeploymentId, cascade: true, Ct);
+
+        Assert.Equal(0, harness.CountRows("ACT_RE_PROCDEF"));
+        Assert.Equal(0, harness.CountRows("ACT_RE_DEPLOYMENT"));
+        Assert.Equal(0, harness.CountRows("ACT_GE_BYTEARRAY"));
+        Assert.Equal(0, harness.CountRows("ACT_RU_EXECUTION"));
+        Assert.Equal(0, harness.CountRows("ACT_RU_TASK"));
+
+        // 历史保留（与 Activiti 的有意差异）：实例行带删除原因
+        using (var session = harness.SessionFactory.Create())
+        {
+            var instance = Assert.Single(RowValues.Query(session, "select DELETE_REASON_ from ACT_HI_PROCINST"));
+            Assert.Equal("删除部署", RowValues.Text(instance, "DELETE_REASON_"));
+        }
+
+        // 已删的定义不能再启动（缓存已清 → 报「不存在」而不是外键错误）
+        var startException = await Assert.ThrowsAnyAsync<EngineException>(
+            () => harness.Engine.StartProcessInstanceAsync(definition.Id, ct: Ct).AsTask());
+        Assert.Contains("不存在", startException.Message, StringComparison.Ordinal);
+
+        // 再删一次 → 专门的「不存在」异常（REST 映射 404 的依据）
+        await Assert.ThrowsAsync<EngineObjectNotFoundException>(
+            () => harness.Engine.DeleteDeploymentAsync(definition.DeploymentId, ct: Ct).AsTask());
+    }
+
+    // ─────────────────────────── 历史任务分页 ───────────────────────────
+
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task HistoricTasks_ShouldPageAndFilter(string provider)
+    {
+        var harness = Setup(provider);
+        var (_, instanceId) = await harness.DeployAndStartAsync(UserTaskProcess(), ct: Ct);
+
+        string taskId;
+
+        using (var session = harness.SessionFactory.Create())
+        {
+            taskId = RowValues.Text(Assert.Single(RowValues.Query(session, "select ID_ from ACT_RU_TASK")), "ID_")!;
+        }
+
+        await harness.CompleteTaskAsync(taskId, ct: Ct);
+
+        var all = await harness.Engine.FindHistoricTasksAsync(new HistoricTaskQuery(instanceId), Ct);
+        Assert.Equal(taskId, Assert.Single(all).Id);
+
+        var finished = await harness.Engine.FindHistoricTasksAsync(
+            new HistoricTaskQuery(instanceId, OnlyFinished: true), Ct);
+        Assert.NotNull(Assert.Single(finished).EndTime);
+
+        Assert.Equal(1, await harness.Engine.CountHistoricTasksAsync(new HistoricTaskQuery(instanceId), Ct));
+
+        // 越界页返回空；办理人过滤按历史行取值
+        Assert.Empty(await harness.Engine.FindHistoricTasksAsync(
+            new HistoricTaskQuery(instanceId, FirstResult: 1), Ct));
+        Assert.Single(await harness.Engine.FindHistoricTasksAsync(
+            new HistoricTaskQuery(instanceId, Assignee: "kermit"), Ct));
+        Assert.Empty(await harness.Engine.FindHistoricTasksAsync(
+            new HistoricTaskQuery(instanceId, Assignee: "someone-else"), Ct));
+    }
+
     // ─────────────────────────── 辅助 ───────────────────────────
 
     private static DatabaseEngineHarness Setup(string provider)
@@ -362,7 +585,8 @@ public sealed class DualDatabaseFeatureMatrixTests
         Assert.SkipUnless(
             spec is not null,
             $"方言 {provider} 不可用（NETBPM_MYSQL_CONNECTION / NETBPM_SQLSERVER_CONNECTION 或默认目标："
-            + "MySQL=localhost，SqlServer=10.1.245.36 Windows 认证）。库与表会自动创建。");
+            + "MySQL=localhost，SqlServer=Testcontainers mssql/server:2022；需要 Docker 正在运行）。"
+            + "库与表会自动创建。");
 
         var harness = new DatabaseEngineHarness(spec!);
         harness.Reset();

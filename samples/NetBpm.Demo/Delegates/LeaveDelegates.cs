@@ -1,4 +1,4 @@
-﻿using NetBpm.Runtime;
+using NetBpm.Runtime;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
 

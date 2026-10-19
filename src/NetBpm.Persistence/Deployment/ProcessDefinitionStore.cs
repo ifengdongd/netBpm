@@ -33,6 +33,12 @@ public sealed record ProcessDefinition(
 /// <param name="Version">版本号。</param>
 /// <param name="DeploymentId">部署 id。</param>
 /// <param name="DeployTime">部署时间（UTC）。</param>
+/// <param name="TenantId">租户 id（无租户为 <see langword="null"/>）。</param>
+/// <param name="IsSuspended">
+/// 是否已挂起（<c>ACT_RE_PROCDEF.SUSPENSION_STATE_ = 2</c>）。
+/// 挂起后不能再启动新实例；运行中的实例是否也挂起，取决于挂起时传的
+/// <c>suspendProcessInstances</c>（见 <see cref="IProcessDefinitionStore.SetSuspensionStateAsync"/>）。
+/// </param>
 public sealed record DeployedProcessDefinition(
     string Id,
     string Key,
@@ -40,7 +46,10 @@ public sealed record DeployedProcessDefinition(
     int Version,
     string DeploymentId,
     DateTime? DeployTime,
-    string? TenantId = null);
+    string? TenantId = null,
+    bool IsSuspended = false,
+    string? ResourceName = null,
+    string? DeploymentName = null);
 
 /// <summary>
 /// 流程定义仓储（部署 / 回显）。
@@ -70,6 +79,21 @@ public interface IProcessDefinitionStore
 
     ValueTask<ProcessDefinition?> FindByIdAsync(string processDefinitionId, CancellationToken ct = default);
 
+    /// <summary>
+    /// 按 key 查<b>最新版本</b>的流程定义（同一 <c>KEY_</c> + <c>TENANT_ID_</c> 下 <c>VERSION_</c> 最大者）。
+    /// <para>
+    /// 对应 Activiti <c>runtimeService.startProcessInstanceByKey(key)</c> 的「key → 最新版本」解析。
+    /// </para>
+    /// <para>
+    /// <paramref name="tenantId"/> 为 <see langword="null"/> 表示<b>无租户</b>（<c>TENANT_ID_ = ''</c>），
+    /// 不是「跨租户」—— 与启动接口的租户口径一致。
+    /// </para>
+    /// </summary>
+    ValueTask<ProcessDefinition?> FindLatestByKeyAsync(
+        string processDefinitionKey,
+        string? tenantId = null,
+        CancellationToken ct = default);
+
     /// <summary>查全部已部署的流程定义（每个部署一行，按部署时间倒序）；<paramref name="tenantId"/> 过滤可选。</summary>
     ValueTask<IReadOnlyList<DeployedProcessDefinition>> FindAllAsync(
         string? tenantId = null,
@@ -81,6 +105,49 @@ public interface IProcessDefinitionStore
 
     /// <summary>查流程定义的租户（B2.3，启动实例时继承）；定义不存在返回 <see langword="null"/>。</summary>
     ValueTask<string?> GetTenantIdAsync(string processDefinitionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 挂起 / 激活流程定义（<c>ACT_RE_PROCDEF.SUSPENSION_STATE_</c> 1=激活、2=挂起）。
+    /// <para>
+    /// 对应 Activiti <c>repositoryService.suspendProcessDefinitionById</c> /
+    /// <c>activateProcessDefinitionById</c> 的<b>定义级</b>语义：挂起后不能再启动新实例。
+    /// </para>
+    /// <para>
+    /// 至于「在跑的实例是否一起挂起」，由调用方用
+    /// <c>suspendProcessInstances</c> 决定（对应 Activiti 的第二个布尔参数）：
+    /// 需要额外调用 <see cref="Engine.Execution.IExecutionManager.UpdateSuspensionStateByProcessDefinitionIdAsync"/>
+    /// 与 <see cref="Engine.Tasks.ITaskManager.UpdateSuspensionStateByProcessDefinitionIdAsync"/>。
+    /// </para>
+    /// </summary>
+    /// <returns>定义是否存在（不存在返回 <see langword="false"/>，不做任何修改）。</returns>
+    ValueTask<bool> SetSuspensionStateAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default);
+
+    /// <summary>流程定义是否已挂起；定义不存在返回 <see langword="false"/>（存在性由调用方另行判定）。</summary>
+    ValueTask<bool> IsSuspendedAsync(string processDefinitionId, CancellationToken ct = default);
+
+    /// <summary>查某次部署下的全部流程定义（一个部署可以带多个 <c>process</c>）。</summary>
+    ValueTask<IReadOnlyList<ProcessDefinition>> FindByDeploymentIdAsync(
+        string deploymentId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除部署及其流程定义与资源（<c>ACT_RE_DEPLOYMENT</c> + <c>ACT_RE_PROCDEF</c> +
+    /// <c>ACT_GE_BYTEARRAY</c>，对应 Activiti <c>deleteDeployment</c>）。
+    /// <para>
+    /// ⚠️ <b>本方法不做级联</b>：调用方必须先清掉该部署下的运行实例
+    /// （有 <c>PROC_DEF_ID_</c> 外键约束，且删定义会让运行实例变成孤儿）。
+    /// 运行态清理见 <c>IProcessEngine.DeleteDeploymentAsync(cascade)</c>。
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>历史保留</b>：<c>ACT_HI_*</c> 的表行不删（本项目的账本只增不删），
+    /// 这与 Activiti 的 <c>deleteDeployment(cascade=true)</c> 会连历史一起删<b>有意不同</b>。
+    /// </para>
+    /// </summary>
+    /// <returns>部署是否存在（不存在返回 <see langword="false"/>）。</returns>
+    ValueTask<bool> DeleteDeploymentAsync(string deploymentId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -96,7 +163,9 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
     private readonly Dictionary<string, BpmnModel> _models = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _resources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTime> _deployTimes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _deploymentNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string?> Tenants = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _suspended = new(StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
 
     public InMemoryProcessDefinitionStore(IIdGenerator idGenerator, IBpmnXmlConverter xmlConverter)
@@ -154,6 +223,7 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
                 ? System.Text.Encoding.UTF8.GetString(raw)
                 : Serialize(bpmnModel);
             _deployTimes[deploymentId] = DateTime.UtcNow;
+            _deploymentNames[deploymentId] = deploymentName;
             Tenants[definitionId] = tenantId;
 
             return ValueTask.FromResult(definition);
@@ -168,6 +238,26 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
         lock (_syncRoot)
         {
             return ValueTask.FromResult(_definitions.GetValueOrDefault(processDefinitionId));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<ProcessDefinition?> FindLatestByKeyAsync(
+        string processDefinitionKey,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionKey);
+
+        lock (_syncRoot)
+        {
+            var latest = _definitions.Values
+                .Where(definition => string.Equals(definition.Key, processDefinitionKey, StringComparison.Ordinal)
+                    && string.Equals(Tenants.GetValueOrDefault(definition.Id), tenantId, StringComparison.Ordinal))
+                .OrderByDescending(definition => definition.Version)
+                .FirstOrDefault();
+
+            return ValueTask.FromResult(latest);
         }
     }
 
@@ -188,7 +278,10 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
                     definition.Version,
                     definition.DeploymentId,
                     _deployTimes.GetValueOrDefault(definition.DeploymentId),
-                    Tenants.GetValueOrDefault(definition.Id)))
+                    Tenants.GetValueOrDefault(definition.Id),
+                    _suspended.Contains(definition.Id),
+                    definition.ResourceName,
+                    _deploymentNames.GetValueOrDefault(definition.DeploymentId)))
                 .OrderByDescending(definition => definition.DeployTime ?? DateTime.MinValue)
                 .ToList();
 
@@ -226,6 +319,96 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
         lock (_syncRoot)
         {
             return ValueTask.FromResult(Tenants.GetValueOrDefault(processDefinitionId));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> SetSuspensionStateAsync(
+        string processDefinitionId,
+        bool suspended,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        lock (_syncRoot)
+        {
+            if (!_definitions.ContainsKey(processDefinitionId))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            if (suspended)
+            {
+                _suspended.Add(processDefinitionId);
+            }
+            else
+            {
+                _suspended.Remove(processDefinitionId);
+            }
+
+            return ValueTask.FromResult(true);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> IsSuspendedAsync(string processDefinitionId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processDefinitionId);
+
+        lock (_syncRoot)
+        {
+            return ValueTask.FromResult(_suspended.Contains(processDefinitionId));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<ProcessDefinition>> FindByDeploymentIdAsync(
+        string deploymentId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deploymentId);
+
+        lock (_syncRoot)
+        {
+            IReadOnlyList<ProcessDefinition> definitions =
+            [
+                .. _definitions.Values
+                    .Where(definition => string.Equals(definition.DeploymentId, deploymentId, StringComparison.Ordinal)),
+            ];
+
+            return ValueTask.FromResult(definitions);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DeleteDeploymentAsync(string deploymentId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deploymentId);
+
+        lock (_syncRoot)
+        {
+            if (!_deployTimes.ContainsKey(deploymentId))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            var definitionIds = _definitions.Values
+                .Where(definition => string.Equals(definition.DeploymentId, deploymentId, StringComparison.Ordinal))
+                .Select(definition => definition.Id)
+                .ToList();
+
+            foreach (var definitionId in definitionIds)
+            {
+                _definitions.Remove(definitionId);
+                _models.Remove(definitionId);
+                _resources.Remove(definitionId);
+                _suspended.Remove(definitionId);
+                Tenants.Remove(definitionId);
+            }
+
+            _deployTimes.Remove(deploymentId);
+
+            return ValueTask.FromResult(true);
         }
     }
 

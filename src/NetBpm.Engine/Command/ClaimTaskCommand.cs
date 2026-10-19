@@ -19,13 +19,15 @@ public sealed class ClaimTaskCommand : ICommand<Unit>
 {
     private readonly string _taskId;
     private readonly string? _userId;
+    private readonly int? _expectedRevision;
 
-    public ClaimTaskCommand(string taskId, string? userId)
+    public ClaimTaskCommand(string taskId, string? userId, int? expectedRevision = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
 
         _taskId = taskId;
         _userId = userId;
+        _expectedRevision = expectedRevision;
     }
 
     /// <inheritdoc />
@@ -41,7 +43,13 @@ public sealed class ClaimTaskCommand : ICommand<Unit>
                 "宿主必须注册任务管理器实现");
 
         var task = await taskManager.FindTaskByIdAsync(_taskId, ct).ConfigureAwait(false)
-            ?? throw new EngineException($"任务 '{_taskId}' 不存在（可能已完成或已被删除）。");
+            ?? throw new EngineObjectNotFoundException($"任务 '{_taskId}' 不存在（可能已完成或已被删除）。");
+
+        if (_expectedRevision is { } expectedRevision && task.Revision != expectedRevision)
+        {
+            throw new OptimisticLockingException(
+                $"任务 '{_taskId}' 已被修改（期望版本 {expectedRevision}，实际 {task.Revision}），请刷新后重试。");
+        }
 
         if (task.SuspensionState != TaskEntity.ActiveSuspensionState)
         {
@@ -63,7 +71,7 @@ public sealed class ClaimTaskCommand : ICommand<Unit>
             if (previousAssignee is not null && !string.Equals(previousAssignee, _userId, StringComparison.Ordinal))
             {
                 // 被他人认领：报错（等于自己则视为已满足后置条件，静默通过）
-                throw new EngineException(
+                throw new EngineConflictException(
                     $"Task '{task.Id}' is already claimed by '{previousAssignee}'");
             }
         }

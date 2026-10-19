@@ -63,10 +63,14 @@ public sealed class CorpusInMemoryTests
 
         var engine = TestEngine.Create();
 
-        // 1) 部署期校验必须干净（与差分执行器的部署前置一致）
+        // 1) 部署期校验的**阻断级**问题必须为零（与差分执行器的部署前置一致）；
+        //    提示级问题（孤立节点、无人办理的任务等）不阻断部署，Activiti 同样能跑
         var model = new BpmnXmlConverter()
             .ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(entry.BpmnXml)));
-        var errors = new ProcessValidator().Validate(model.GetMainProcess()!);
+        var errors = new ProcessValidator()
+            .Validate(model.GetMainProcess()!)
+            .Where(result => result.IsError)
+            .ToList();
 
         Assert.True(errors.Count == 0, $"语料 '{entry.FullName}' 部署校验失败：{string.Join("; ", errors)}");
 
@@ -105,66 +109,66 @@ public sealed class CorpusInMemoryTests
         switch (action.Kind)
         {
             case "completeAnyTask":
-            {
-                var open = await engine.TaskManager
-                    .FindTasksByProcessInstanceIdAsync(processInstanceId, Ct)
-                    .ConfigureAwait(false);
-
-                if (open.Count == 0)
                 {
-                    return;
+                    var open = await engine.TaskManager
+                        .FindTasksByProcessInstanceIdAsync(processInstanceId, Ct)
+                        .ConfigureAwait(false);
+
+                    if (open.Count == 0)
+                    {
+                        return;
+                    }
+
+                    var ordered = open
+                        .OrderBy(task => task.TaskDefinitionKey, StringComparer.Ordinal)
+                        .ThenBy(task => task.Assignee, StringComparer.Ordinal)
+                        .ToList();
+
+                    if (ordered.Count > 1
+                        && string.Equals(ordered[0].TaskDefinitionKey, ordered[1].TaskDefinitionKey, StringComparison.Ordinal))
+                    {
+                        // 与差分执行器同口径：语料脚本歧义（同 key 多待办无法确定性挑选）在差分侧
+                        // 记为「执行失败」并进差异清单裁决，这里跳过而不是红
+                        Assert.Skip(
+                            $"语料脚本歧义：流程实例上有 {ordered.Count} 个同 key（'{ordered[0].TaskDefinitionKey}'）的待办。");
+                    }
+
+                    await engine.CompleteTaskAsync(ordered[0].Id, action.Variables, Ct)
+                        .ConfigureAwait(false);
+
+                    break;
                 }
-
-                var ordered = open
-                    .OrderBy(task => task.TaskDefinitionKey, StringComparer.Ordinal)
-                    .ThenBy(task => task.Assignee, StringComparer.Ordinal)
-                    .ToList();
-
-                if (ordered.Count > 1
-                    && string.Equals(ordered[0].TaskDefinitionKey, ordered[1].TaskDefinitionKey, StringComparison.Ordinal))
-                {
-                    // 与差分执行器同口径：语料脚本歧义（同 key 多待办无法确定性挑选）在差分侧
-                    // 记为「执行失败」并进差异清单裁决，这里跳过而不是红
-                    Assert.Skip(
-                        $"语料脚本歧义：流程实例上有 {ordered.Count} 个同 key（'{ordered[0].TaskDefinitionKey}'）的待办。");
-                }
-
-                await engine.CompleteTaskAsync(ordered[0].Id, action.Variables, Ct)
-                    .ConfigureAwait(false);
-
-                break;
-            }
 
             case "completeTask":
-            {
-                var task = await ResolveSingleTaskAsync(engine, action, processInstanceId).ConfigureAwait(false);
-                await engine.CompleteTaskAsync(task.Id, action.Variables, Ct)
-                    .ConfigureAwait(false);
-
-                break;
-            }
-
-            case "completeAllTasks":
-            {
-                var tasks = await FindTasksAsync(engine, action, processInstanceId).ConfigureAwait(false);
-
-                IEnumerable<NetBpm.Engine.Tasks.TaskEntity> ordered = tasks
-                    .OrderBy(task => task.TaskDefinitionKey, StringComparer.Ordinal)
-                    .ThenBy(task => task.Id, StringComparer.Ordinal);
-
-                if (action.Limit is { } limit)
                 {
-                    ordered = ordered.Take(limit);
-                }
-
-                foreach (var task in ordered)
-                {
+                    var task = await ResolveSingleTaskAsync(engine, action, processInstanceId).ConfigureAwait(false);
                     await engine.CompleteTaskAsync(task.Id, action.Variables, Ct)
                         .ConfigureAwait(false);
+
+                    break;
                 }
 
-                break;
-            }
+            case "completeAllTasks":
+                {
+                    var tasks = await FindTasksAsync(engine, action, processInstanceId).ConfigureAwait(false);
+
+                    IEnumerable<NetBpm.Engine.Tasks.TaskEntity> ordered = tasks
+                        .OrderBy(task => task.TaskDefinitionKey, StringComparer.Ordinal)
+                        .ThenBy(task => task.Id, StringComparer.Ordinal);
+
+                    if (action.Limit is { } limit)
+                    {
+                        ordered = ordered.Take(limit);
+                    }
+
+                    foreach (var task in ordered)
+                    {
+                        await engine.CompleteTaskAsync(task.Id, action.Variables, Ct)
+                            .ConfigureAwait(false);
+                    }
+
+                    break;
+                }
 
             default:
                 Assert.Fail($"未知的操作脚本动作 '{action.Kind}'（支持 completeAnyTask / completeTask / completeAllTasks）。");

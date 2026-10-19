@@ -28,7 +28,8 @@ public sealed class TransactionInterceptor : ICommandInterceptor
             return await nextHandler(ct).ConfigureAwait(false);
         }
 
-        // 嵌套命令加入外层事务：不新开、不提交（Activiti 同样由最外层命令定事务边界）
+        // 嵌套命令与重试共用同一上下文：已有活动事务时不新开、不提交
+        // （Activiti 同样由最外层命令定事务边界）
         if (transaction.IsActive)
         {
             return await nextHandler(ct).ConfigureAwait(false);
@@ -36,19 +37,21 @@ public sealed class TransactionInterceptor : ICommandInterceptor
 
         transaction.Begin();
 
-        TResult result;
         try
         {
-            result = await nextHandler(ct).ConfigureAwait(false);
+            var result = await nextHandler(ct).ConfigureAwait(false);
+
+            // CommitAsync 内部必须先 flush 一级缓存（DbSession.CommitAsync 的契约）。
+            // flush 时同样可能撞乐观锁，因此提交也必须在 try 内 —— 失败要立刻回滚，
+            // 不能让半提交状态带着未释放的事务传给重试拦截器。
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+            return result;
         }
         catch
         {
             transaction.Rollback();
             throw;
         }
-
-        // CommitAsync 内部必须先 flush 一级缓存（DbSession.CommitAsync 的契约）
-        await transaction.CommitAsync(ct).ConfigureAwait(false);
-        return result;
     }
 }

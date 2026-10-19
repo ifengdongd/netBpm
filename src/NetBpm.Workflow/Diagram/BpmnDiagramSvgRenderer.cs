@@ -149,11 +149,14 @@ public static class BpmnDiagramSvgRenderer
                     continue;
                 }
 
-                nodes[bpmnElement] = node with { Bounds = new RectModel(
+                nodes[bpmnElement] = node with
+                {
+                    Bounds = new RectModel(
                     (double?)bounds.Attribute("x") ?? 0,
                     (double?)bounds.Attribute("y") ?? 0,
                     (double?)bounds.Attribute("width") ?? 0,
-                    (double?)bounds.Attribute("height") ?? 0) };
+                    (double?)bounds.Attribute("height") ?? 0)
+                };
             }
 
             foreach (var edge in plane.Elements().Where(e => e.Name.LocalName == "BPMNEdge"))
@@ -239,50 +242,50 @@ public static class BpmnDiagramSvgRenderer
             case "intermediateCatchEvent":
             case "intermediateThrowEvent":
             case "boundaryEvent":
-            {
-                var cx = bounds.X + bounds.Width / 2;
-                var cy = bounds.Y + bounds.Height / 2;
-                var radius = Math.Min(bounds.Width, bounds.Height) / 2;
-                var strokeWidthOfEvent = node.LocalType == "endEvent" ? 4 : 2;
-                svg.Append(CultureInfo.InvariantCulture, $"<circle cx=\"{Round(cx)}\" cy=\"{Round(cy)}\" r=\"{Round(radius)}\" fill=\"{fill}\" ")
-                   .Append(CultureInfo.InvariantCulture, $"stroke=\"{stroke}\" stroke-width=\"{(highlighted ? strokeWidth : strokeWidthOfEvent)}\"/>");
-                if (node.LocalType is "startEvent" or "endEvent")
                 {
-                    Label(svg, cx, bounds.Y + bounds.Height + 14, label, highlighted);
-                }
+                    var cx = bounds.X + bounds.Width / 2;
+                    var cy = bounds.Y + bounds.Height / 2;
+                    var radius = Math.Min(bounds.Width, bounds.Height) / 2;
+                    var strokeWidthOfEvent = node.LocalType == "endEvent" ? 4 : 2;
+                    svg.Append(CultureInfo.InvariantCulture, $"<circle cx=\"{Round(cx)}\" cy=\"{Round(cy)}\" r=\"{Round(radius)}\" fill=\"{fill}\" ")
+                       .Append(CultureInfo.InvariantCulture, $"stroke=\"{stroke}\" stroke-width=\"{(highlighted ? strokeWidth : strokeWidthOfEvent)}\"/>");
+                    if (node.LocalType is "startEvent" or "endEvent")
+                    {
+                        Label(svg, cx, bounds.Y + bounds.Height + 14, label, highlighted);
+                    }
 
-                break;
-            }
+                    break;
+                }
 
             case "exclusiveGateway":
             case "parallelGateway":
             case "inclusiveGateway":
             case "eventGateway":
-            {
-                var cx = bounds.X + bounds.Width / 2;
-                var cy = bounds.Y + bounds.Height / 2;
-                var half = Math.Min(bounds.Width, bounds.Height) / 2;
-                svg.Append(CultureInfo.InvariantCulture, $"<polygon points=\"{Round(cx)},{Round(cy - half)} {Round(cx + half)},{Round(cy)} {Round(cx)},{Round(cy + half)} {Round(cx - half)},{Round(cy)}\" ")
-                   .Append(CultureInfo.InvariantCulture, $"fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{strokeWidth}\"/>");
-                if (node.LocalType == "exclusiveGateway")
                 {
-                    var inner = half * 0.4;
-                    svg.Append(CultureInfo.InvariantCulture, $"<path d=\"M{Round(cx - inner)},{Round(cy - inner)} L{Round(cx + inner)},{Round(cy + inner)} M{Round(cx - inner)},{Round(cy + inner)} L{Round(cx + inner)},{Round(cy - inner)}\" ")
-                       .Append(CultureInfo.InvariantCulture, $"stroke=\"{stroke}\" stroke-width=\"2\" fill=\"none\"/>");
+                    var cx = bounds.X + bounds.Width / 2;
+                    var cy = bounds.Y + bounds.Height / 2;
+                    var half = Math.Min(bounds.Width, bounds.Height) / 2;
+                    svg.Append(CultureInfo.InvariantCulture, $"<polygon points=\"{Round(cx)},{Round(cy - half)} {Round(cx + half)},{Round(cy)} {Round(cx)},{Round(cy + half)} {Round(cx - half)},{Round(cy)}\" ")
+                       .Append(CultureInfo.InvariantCulture, $"fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{strokeWidth}\"/>");
+                    if (node.LocalType == "exclusiveGateway")
+                    {
+                        var inner = half * 0.4;
+                        svg.Append(CultureInfo.InvariantCulture, $"<path d=\"M{Round(cx - inner)},{Round(cy - inner)} L{Round(cx + inner)},{Round(cy + inner)} M{Round(cx - inner)},{Round(cy + inner)} L{Round(cx + inner)},{Round(cy - inner)}\" ")
+                           .Append(CultureInfo.InvariantCulture, $"stroke=\"{stroke}\" stroke-width=\"2\" fill=\"none\"/>");
+                    }
+
+                    Label(svg, cx, bounds.Y + bounds.Height + 14, label, highlighted);
+                    break;
                 }
 
-                Label(svg, cx, bounds.Y + bounds.Height + 14, label, highlighted);
-                break;
-            }
-
             default:
-            {
-                // 任务类（userTask / serviceTask / task / …）与其余节点：圆角矩形
-                svg.Append(CultureInfo.InvariantCulture, $"<rect x=\"{Round(bounds.X)}\" y=\"{Round(bounds.Y)}\" width=\"{Round(bounds.Width)}\" height=\"{Round(bounds.Height)}\" rx=\"10\" ")
-                   .Append(CultureInfo.InvariantCulture, $"fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{strokeWidth}\"/>");
-                Label(svg, bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2 + 4, label, highlighted);
-                break;
-            }
+                {
+                    // 任务类（userTask / serviceTask / task / …）与其余节点：圆角矩形
+                    svg.Append(CultureInfo.InvariantCulture, $"<rect x=\"{Round(bounds.X)}\" y=\"{Round(bounds.Y)}\" width=\"{Round(bounds.Width)}\" height=\"{Round(bounds.Height)}\" rx=\"10\" ")
+                       .Append(CultureInfo.InvariantCulture, $"fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{strokeWidth}\"/>");
+                    Label(svg, bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2 + 4, label, highlighted);
+                    break;
+                }
         }
     }
 

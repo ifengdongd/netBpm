@@ -50,7 +50,9 @@ internal sealed class TestEngine
     /// <summary>已执行的服务任务名，按执行顺序记录。</summary>
     public IReadOnlyList<string> ExecutedDelegates => DelegateResolver.Executed;
 
-    public static TestEngine Create(IHistoryManager? historyManager = null)
+    public static TestEngine Create(
+        IHistoryManager? historyManager = null,
+        CommandRetryPolicy? retryPolicy = null)
     {
         IEngineServices? holder = null;
         var history = historyManager ?? new NullHistoryManager();
@@ -76,7 +78,11 @@ internal sealed class TestEngine
         holder = services;
 
         var executor = new CommandExecutor(
-            [new TransactionInterceptor(), new CommandContextInterceptor()],
+            [
+                new RetryInterceptor(retryPolicy),
+                new TransactionInterceptor(),
+                new CommandContextInterceptor(),
+            ],
             () => new CommandContext(services));
 
         return new TestEngine(executor, services, executionManager, taskManager, delegateResolver, definitionResolver);

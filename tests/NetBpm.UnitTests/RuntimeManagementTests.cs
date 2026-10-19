@@ -1,4 +1,4 @@
-﻿using NetBpm.Engine;
+using NetBpm.Engine;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Tasks;
 
@@ -69,7 +69,7 @@ public class RuntimeManagementTests
         var engine = TestEngine.Create();
         await engine.StartProcessAsync(TwoStepProcess);
 
-        var exception = await Assert.ThrowsAsync<EngineException>(
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
             (() => engine.SetAssigneeAsync("no-such-task", "leader1").AsTask()));
 
         Assert.Contains("不存在", exception.Message, StringComparison.Ordinal);
@@ -131,7 +131,7 @@ public class RuntimeManagementTests
         var engine = TestEngine.Create();
         var instanceId = await engine.StartProcessAsync(TwoStepProcess);
 
-        var exception = await Assert.ThrowsAsync<EngineException>(
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
             (() => engine.MoveActivityToAsync(instanceId, "no_such_node").AsTask()));
 
         Assert.Contains("不在流程定义", exception.Message, StringComparison.Ordinal);
@@ -143,7 +143,7 @@ public class RuntimeManagementTests
         var engine = TestEngine.Create();
         var instanceId = await engine.StartProcessAsync(TwoStepProcess);
 
-        var exception = await Assert.ThrowsAsync<EngineException>(
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine.MoveActivityToAsync(instanceId, "leader_approve").AsTask());
 
         Assert.Contains("已停在目标节点", exception.Message, StringComparison.Ordinal);
@@ -157,9 +157,25 @@ public class RuntimeManagementTests
 
         await engine.MoveActivityToAsync(instanceId, "end_approved");
 
-        var exception = await Assert.ThrowsAsync<EngineException>(
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine.MoveActivityToAsync(instanceId, "leader_approve").AsTask());
 
         Assert.Contains("不存在或已结束", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Jump_TaskWithoutExecution_ShouldThrowInsteadOfIndexOutOfRange()
+    {
+        // 回归用例：任务存在、但 EXECUTION_ID_ 为空（历史脏数据 / 并发删除执行）时，
+        // 旧实现会走到 executions[0] 抛 ArgumentOutOfRangeException —— 必须是可读的 EngineException
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        engine.TaskManager.Tasks.Single().ExecutionId = null;
+
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => engine.MoveActivityToAsync(instanceId, "manager_approve").AsTask());
+
+        Assert.Contains("无法定位到等待中的执行", exception.Message, StringComparison.Ordinal);
     }
 }

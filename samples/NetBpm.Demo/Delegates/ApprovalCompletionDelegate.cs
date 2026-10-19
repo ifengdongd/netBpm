@@ -1,4 +1,4 @@
-﻿using NetBpm.Demo.Workflow;
+using NetBpm.Demo.Workflow;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
 using NetBpm.Runtime;

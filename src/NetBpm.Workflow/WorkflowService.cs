@@ -1,4 +1,4 @@
-﻿using NetBpm.Bpmn.Model;
+using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
@@ -289,12 +289,18 @@ public sealed class WorkflowService : IWorkflowService
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyList<WorkflowInstanceSummary>> FindInstancesAsync(
+        int firstResult = 0,
+        int maxResults = 200,
         CancellationToken ct = default)
     {
-        var records = await _store.FindInstancesAsync(ct).ConfigureAwait(false);
-        var summaries = new List<WorkflowInstanceSummary>(records.Count);
+        ArgumentOutOfRangeException.ThrowIfNegative(firstResult);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxResults);
 
-        foreach (var record in records)
+        var records = await _store.FindInstancesAsync(ct).ConfigureAwait(false);
+        var page = records.Skip(firstResult).Take(maxResults);
+        var summaries = new List<WorkflowInstanceSummary>();
+
+        foreach (var record in page)
         {
             var result = await _store.FindResultAsync(record.ProcessInstanceId, ct).ConfigureAwait(false);
             var parameters = await _store.FindParametersAsync(record.ProcessInstanceId, ct).ConfigureAwait(false);
@@ -312,10 +318,17 @@ public sealed class WorkflowService : IWorkflowService
     }
 
     /// <inheritdoc />
+    public async ValueTask<int> CountInstancesAsync(CancellationToken ct = default)
+    {
+        var records = await _store.FindInstancesAsync(ct).ConfigureAwait(false);
+
+        return records.Count;
+    }
+
+    /// <inheritdoc />
     public async ValueTask<WorkflowInstanceView?> ReassignTaskAsync(
         string taskId,
         string? userId,
-        string? reason = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);

@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -65,7 +66,7 @@ public static class WorkflowEndpoints
         group.MapPost("/tasks/{taskId}/assignee", (string taskId, ReassignTaskRequest? request, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
             ReassignTaskAsync(taskId, request, http, workflow, options, ct)).Produces<object>();
         group.MapPost("/instances/{processInstanceId}/jump", (string processInstanceId, JumpToNodeRequest? request, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
-            JumpToNodeAsync(processInstanceId, request, http, workflow, options, ct)).Produces<object>();        group.MapGet("/process-definition", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
+            JumpToNodeAsync(processInstanceId, request, http, workflow, options, ct)).Produces<object>(); group.MapGet("/process-definition", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
             GetProcessDefinitionAsync(http, engine, workflow, options, ct));
 
         // 流程图图片：发布（部署）后的定义渲染成 SVG —— 浏览器直接当图片显示，可另存。
@@ -136,16 +137,25 @@ public static class WorkflowEndpoints
         }
     }
 
-    /// <summary>业务登记列表（新的在前），列表页用。</summary>
+    /// <summary>
+    /// 业务登记列表（新的在前），列表页用。
+    /// <para>分页 <c>firstResult</c> / <c>maxResults</c>（默认 20、上限 200），总数放 <c>X-Total-Count</c>。</para>
+    /// </summary>
     private static async Task<IResult> FindInstancesAsync(
         HttpContext http,
         IWorkflowService workflow,
         WorkflowEndpointOptions options,
         CancellationToken ct)
     {
-        var summaries = await workflow.FindInstancesAsync(ct).ConfigureAwait(false);
+        var first = ParseInt(http.Request.Query["firstResult"], 0);
+        var size = Math.Clamp(ParseInt(http.Request.Query["maxResults"], 20), 1, 200);
 
-                var decorated = new List<object?>(summaries.Count);
+        var summaries = await workflow.FindInstancesAsync(first, size, ct).ConfigureAwait(false);
+        var total = await workflow.CountInstancesAsync(ct).ConfigureAwait(false);
+
+        http.Response.Headers["X-Total-Count"] = total.ToString(CultureInfo.InvariantCulture);
+
+        var decorated = new List<object?>(summaries.Count);
 
         foreach (var summary in summaries)
         {
@@ -483,7 +493,6 @@ public static class WorkflowEndpoints
             var view = await workflow.ReassignTaskAsync(
                 taskId,
                 request?.UserId,
-                request?.Reason,
                 ct).ConfigureAwait(false);
 
             return view is null
@@ -546,15 +555,22 @@ public static class WorkflowEndpoints
         }
     }
 
-/// <summary>改派待办请求。</summary>
-/// <param name="UserId">新审批人；空表示退回未分配（候选人/组重新可见）。</param>
-/// <param name="Reason">改派原因（审计用）。</param>
-public sealed record ReassignTaskRequest(string? UserId, string? Reason);
+    /// <summary>改派待办请求。</summary>
+    /// <param name="UserId">新审批人；空表示退回未分配（候选人/组重新可见）。</param>
+    public sealed record ReassignTaskRequest(string? UserId);
 
-/// <summary>流程跳转请求。</summary>
-/// <param name="TargetActivityId">目标节点 id（节点 / 网关 / 结束事件）。</param>
-/// <param name="Reason">跳转原因（审计用）。</param>
-public sealed record JumpToNodeRequest(string? TargetActivityId, string? Reason);    // ─────────────────────────── 工具 ───────────────────────────
+    /// <summary>流程跳转请求。</summary>
+    /// <param name="TargetActivityId">目标节点 id（节点 / 网关 / 结束事件）。</param>
+    /// <param name="Reason">跳转原因（审计用）。</param>
+    public sealed record JumpToNodeRequest(string? TargetActivityId, string? Reason);
+
+    // ─────────────────────────── 工具 ───────────────────────────
+
+    /// <summary>解析查询参数的整数，非法或缺省回退到 <paramref name="fallback"/>。</summary>
+    private static int ParseInt(string? value, int fallback) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : fallback;
 
     private static async ValueTask<object?> Decorate<TView>(
         IServiceProvider services,

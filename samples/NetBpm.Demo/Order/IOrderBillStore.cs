@@ -1,4 +1,4 @@
-﻿namespace NetBpm.Demo.Order;
+namespace NetBpm.Demo.Order;
 
 /// <summary>
 /// 订单业务数据的端口：提交申请写入（status=1）、审批结束回写（100 / -1）、列表与详情读取。

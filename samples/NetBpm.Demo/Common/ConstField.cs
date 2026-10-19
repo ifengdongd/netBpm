@@ -1,4 +1,4 @@
-﻿namespace NetBpm.Demo.Common;
+namespace NetBpm.Demo.Common;
 
 /// <summary>
 /// 流程相关的统一常量 —— ProcessKey、BPMN 资源、部署名、API 前缀、流程图目录与配置键。

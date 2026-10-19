@@ -1,4 +1,4 @@
-﻿namespace NetBpm.Demo.Storage;
+namespace NetBpm.Demo.Storage;
 
 /// <summary>
 /// 业务存储的方言层：SQL 常量 + 展示名。

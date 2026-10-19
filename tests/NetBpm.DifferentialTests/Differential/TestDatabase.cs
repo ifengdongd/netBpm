@@ -30,11 +30,13 @@ internal static class TestDatabase
     private static readonly Lock SyncRoot = new();
     private static bool _schemaReady;
 
-    /// <summary>连接串：优先环境变量，便于在其它机器/容器上跑。</summary>
+    /// <summary>连接串：优先环境变量，便于在其它机器/容器上跑；TLS 版本与引擎侧同策略（1.2+）。</summary>
     internal static string ConnectionString =>
-        Environment.GetEnvironmentVariable("NETBPM_DIFF_CONNECTION") is { Length: > 0 } fromEnvironment
-            ? fromEnvironment
-            : DefaultConnectionString;
+        SecureConnectionString.Normalize(
+            DatabaseType.MySql,
+            Environment.GetEnvironmentVariable("NETBPM_DIFF_CONNECTION") is { Length: > 0 } fromEnvironment
+                ? fromEnvironment
+                : DefaultConnectionString);
 
     internal static bool IsAvailable => Available.Value;
 

@@ -106,6 +106,11 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - **变量删除**：`RemoveVariableAsync(processInstanceId, name)`（REST：`DELETE .../variables/{name}`）沿作用域链查找并删除；longString 的字节行一并清理。
 - **历史语义（有意为之）**：`ACT_HI_VARINST` 行**只增不删**——删除运行状态不抹审计痕迹（与历史身份关系同一策略）；真库测试钉死该语义。
 - 支持 longString（> 4000 字符）与全部标量类型；删除顺序满足 `ACT_FK_VAR_BYTEARRAY`（RESTRICT）外键。
+- **REST 写入的类型保真**：裸标量按 `string / number(long→double) / boolean` 推断；需要显式类型
+  （尤其是 `date`）时写成 `{"type":"date","value":"2026-10-19T00:00:00Z"}`，支持
+  `string / integer / long / double / boolean / date`。
+- **null 语义（统一）**：`null` 不是可写变量值 —— 启动 / 完成 / 批量写 / 单写的所有入口都忽略 null
+  （单写返回 400），删除变量请用 `DELETE`。这样避免用 null 值制造空变量行。
 
 ### 多租户（B2.3）
 
@@ -237,12 +242,84 @@ dotnet run --project src/NetBpm.Rest
     "EnableHistory": false,
     "UseInMemoryExecutionTree": true,
     "AutoMigrate": false,
-    "ValidateSchemaOnStartup": true
+    "ValidateSchemaOnStartup": true,
+    "Security": {
+      "ApiKey": "",
+      "ApiKeyTenants": [],
+      "Jwt": {
+        "SigningKey": "",
+        "Issuer": "",
+        "Audience": ""
+      }
+    }
   }
 }
 ```
 
 `ConnectionString` 留空即内存模式，无需数据库即可体验。OpenAPI 文档：`/openapi/v1.json`。
+
+**数据库传输安全**：MySQL 连接在未显式关闭 TLS（`SslMode != None/Disabled`）时由客户端锁定
+`TlsVersion=TLS 1.2, TLS 1.3`；连接串里显式写 `TLS 1.0/1.1` 会在启动时直接报错。
+SQL Server 由 SqlClient 负责（4.0 起已移除 TLS 1.0/1.1 支持），请使用支持 TLS 1.2+ 的实例 ——
+只协商 TLS 1.0 的旧实例会触发 .NET「非安全协议」告警，属于应淘汰的部署。
+服务器侧同样应收敛协议（MySQL 5.7 默认仍允许 TLSv1/1.1，可在 `my.cnf` 设 `tls_version=TLSv1.2,TLSv1.3`，
+不支持 1.3 的版本只写 `TLSv1.2`）。
+
+**时间契约**：响应里的时间字段统一按 UTC 序列化（带 `Z`）。引擎写入的是 UTC，数据库读回
+`DateTimeKind` 为 `Unspecified` 时会由 `UtcDateTimeJsonConverter` 补齐，避免浏览器按本地时区解析。
+
+**鉴权**：两种方式可单独或同时启用，任一非空后所有 `/api/**` 请求都必须通过校验，否则 401。
+
+- 服务间：`NetBpm:Security:ApiKey`，请求带 `X-Api-Key: <key>`（未启用 JWT 时也兼容 `Authorization: Bearer <key>`）。
+  调用方用 `X-User-Id` / `X-Tenant-Id` 声明操作人与租户：启动实例、认领任务、定义/实例列表会优先使用请求体，
+  缺省时回落到这两个头。默认代表可信服务、可跨租户管理；配置 `ApiKeyTenants` 后收敛为服务作用域。
+- 用户级：`NetBpm:Security:Jwt:SigningKey`（HS256，至少 32 字节），请求带 `Authorization: Bearer <jwt>`。
+  操作人取 `sub`，租户取 `tenant` / `tenant_id`；配置了 `Issuer` / `Audience` 时一并校验，过期令牌一律 401。
+  JWT 模式下忽略 `X-User-Id` / `X-Tenant-Id`，身份只来自签名令牌。
+
+**JWT 下的租户与身份边界**：请求体 / 查询参数里的 `startUserId`、`tenantId` 与令牌不一致一律 **403**
+（不允许用请求参数冒充他人或跨租户读写）；按 id 访问实例、任务、历史、部署时按令牌租户校验，
+不属于本租户的一律 **404**，避免用 403 探测对象是否存在。
+
+**API Key 服务作用域**：`NetBpm:Security:ApiKeyTenants`（字符串数组）非空时，该密钥只能在列出的租户内读写：
+
+- 部署 / 启动实例 / 各类列表的 `tenantId`（请求体或查询参数）必须命中白名单，越界返回 **403**；
+  白名单只有一个租户时可省略并自动落到它，列出多个时必须显式指定（避免「全租户」查询）。
+- `X-Tenant-Id` 同样必须在白名单内，否则 **403** —— 请求头不能被用来「自证」属于目标租户。
+- 按 id 访问实例、任务、历史、部署时，不属于生效租户的一律 **404**。
+- 留空保持旧行为：可信服务，可跨租户管理。
+
+**任务级授权**：JWT 用户「完成 / 认领 / 取消认领 / 委派 / 解决委派」时，必须是当前办理人、
+候选人（`groups` 声明匹配候选组）或持有 `netbpm.admin` scope，否则 **403**；
+「转办 / 修改任务字段 / 增删候选关系」时，必须是当前办理人、所有者或流程实例发起人（或管理员）——
+这些动作会改变办理人 / 候选关系，若不校验就能把别人待办改给自己后以办理人身份完成，从而绕过上面的边界。
+API Key 模式代表可信服务，不做任务级校验。令牌支持 `groups` / `group`（空格、逗号或 JSON 数组）与
+`scope` / `scp` 声明。
+
+**变量读写授权**：JWT 用户读写**流程实例变量**时，必须是发起人，或该实例运行中任务的办理人 / 所有者 /
+候选人（含候选组）；读写**任务局部变量**时，必须是该任务的办理人 / 所有者 / 候选人，或流程实例发起人。
+不满足一律 **403**。`netbpm.admin` scope 可越过；API Key 模式不做参与人校验。
+
+两者都留空则保持开放（仅限开发环境，此时请求头声明的身份被直接信任）。
+
+**错误码约定**：`400` 参数 / 业务规则拒绝、`403` 身份或租户与令牌不一致、`404` 对象不存在（含跨租户）、
+`409` 状态冲突（已认领 / 仍有运行实例 / 乐观锁失败）、`501` 明确未实现、`500` 只返回 traceId，
+不回传异常原文。错误体带机器可读 `code`（`validation_error` / `forbidden` / `not_found` /
+`optimistic_lock_conflict` / `conflict` / `engine_rule_violation` / `internal_error` …），
+调用方应按 `code` 程序化分支，而不是匹配中文文案。
+
+**幂等**：改变状态的请求可带 `Idempotency-Key`。同键同请求回放首次响应（`Idempotency-Replayed: true`），
+同键不同请求返回 409。数据库宿主使用 `ACT_IDEMPOTENCY` 表跨实例去重；过期记录由宿主每小时清理一次
+（`IdempotencyCleanupService`，启动后延迟 1 分钟首轮执行）。已初始化的库需执行：
+
+```bash
+dotnet run --project tools/NetBpm.DbMigrate -- apply --provider mysql \
+  --connection "Server=127.0.0.1;Database=netbpm;User ID=root;Password=;" \
+  --script db/mysql/0010_create_idempotency.sql
+```
+
+**分页信封**：列表端点默认返回裸数组 + `X-Total-Count`；加 `?envelope=true` 返回
+`{ items, total, firstResult, maxResults }`。`maxResults` 统一默认 20、上限 200。
 
 ### 启动设计器
 
@@ -262,7 +339,8 @@ npm test         # 设计器单元测试
 ### 引擎启动步骤（其它 .NET 项目接入）
 
 1. **建库**：执行 `db/mysql/` 或 `db/sqlserver/` 建表脚本（分层与顺序见 [`db/README.md`](db/README.md)；
-   引擎必跑 `0001 → 0002`，流程实例业务表 `0003` 与流程类型表 `0008` 按需）；
+   引擎必跑 `0001 → 0002`，流程实例业务表 `0003` 与流程类型表 `0008` 按需；
+   REST 宿主启用 HTTP 幂等时还需 `0010_create_idempotency.sql`）；
 2. **引用引擎包**：`dotnet pack` 产出见下节「打包分发」，或直接引用 `src/` 各项目；
 3. **组合根注册**（详见 [`samples/NetBpm.Demo/README.md`](samples/NetBpm.Demo/README.md)）：
 
@@ -375,22 +453,67 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/health` | 健康检查 |
-| POST | `/api/designer/deploy` | 部署 BPMN XML 定义 |
+| GET | `/health/live` | 存活探针（只判断进程） |
+| GET | `/health/ready` | 就绪探针（数据库不可用返回 503） |
+| GET | `/api/admin/info` | 运维信息（版本 / 方言 / 历史开关 / 结构版本 / 运行时长） |
+| GET | `/openapi/v1.json` | OpenAPI 文档 |
+| POST | `/api/designer/deploy` | 部署 BPMN XML 定义（`?resourceName=` / `?deploymentName=` / `?tenantId=`） |
+| POST | `/api/designer/validate` | 试校验 BPMN XML（不落库，返回 errors / warnings） |
+| GET | `/api/designer/definitions` | 定义列表（`tenantId`/`key` 过滤 + 分页） |
+| GET | `/api/designer/definitions/{key}/versions` | 按 key 查全部版本（版本倒序） |
+| GET | `/api/designer/deployments` | 部署列表（按部署聚合定义，`tenantId` 过滤） |
+| GET | `/api/designer/deployments/{deploymentId}/resources` | 部署资源清单（资源名 → 定义 id） |
 | GET | `/api/designer/definition/{id}/xml` | 获取定义 XML |
+| POST | `/api/designer/definitions/{id}/suspend` | 挂起定义（`?suspendProcessInstances=`） |
+| POST | `/api/designer/definitions/{id}/activate` | 激活定义（`?activateProcessInstances=`） |
+| DELETE | `/api/designer/deployments/{deploymentId}` | 删除部署（`?cascade=`） |
 | POST | `/api/runtime/process-instances` | 启动流程实例 |
+| GET | `/api/runtime/process-instances` | 运行中实例列表（业务主键 / 定义 / 发起人 / 时间过滤 + 分页） |
 | GET | `/api/runtime/process-instances/{id}` | 查询流程实例 |
-| GET | `/api/runtime/tasks` | 查询任务列表 |
-| POST | `/api/runtime/tasks/{taskId}/claim` | 签收任务 |
+| DELETE | `/api/runtime/process-instances/{id}` | 删除（撤销）实例 |
+| POST | `/api/runtime/process-instances/{id}/suspend` `/activate` | 挂起 / 激活实例 |
+| POST | `/api/runtime/process-instances/{id}/jump` | 跳转到指定节点（管理动作） |
+| GET | `/api/runtime/tasks` | 查询任务列表（`assignee`/`candidateUser`/`candidateGroup`/实例 + 分页） |
+| GET | `/api/runtime/tasks/{taskId}` | 任务详情（含描述 / 分类 / 业务主键 / 委派状态 / 身份关系） |
+| GET | `/api/runtime/tasks/{taskId}/identity-links` | 任务身份关系（候选人 / 候选组） |
+| PATCH | `/api/runtime/tasks/{taskId}` | 修改任务字段（名称 / 描述 / 优先级 / 到期 / 分类 / 所有者；`clearDueDate` / `clearDescription` 显式清空） |
+| POST | `/api/runtime/tasks/{taskId}/assignee` | 转办 / 退回未分配 |
+| POST | `/api/runtime/tasks/{taskId}/candidate-users` | 加候选用户 |
+| DELETE | `/api/runtime/tasks/{taskId}/candidate-users/{userId}` | 移除候选用户 |
+| POST | `/api/runtime/tasks/{taskId}/candidate-groups` | 加候选组 |
+| DELETE | `/api/runtime/tasks/{taskId}/candidate-groups/{groupId}` | 移除候选组 |
+| POST | `/api/runtime/tasks/{taskId}/delegate` | 委派（PENDING，期间不能完成） |
+| POST | `/api/runtime/tasks/{taskId}/resolve` | 解决委派（回到原办理人） |
+| GET | `/api/runtime/tasks/{taskId}/form` | 表单元数据（`formKey` + `formProperty`，只读） |
+| POST | `/api/runtime/tasks/{taskId}/claim` | 签收任务（认领人取自 JWT `sub` / `X-User-Id` / 请求体 `userId`；解析不出 → 400） |
+| POST | `/api/runtime/tasks/{taskId}/unclaim` | 取消签收（显式端点；`claim` 的 `{"unclaim":true}` 兼容旧客户端） |
 | POST | `/api/runtime/tasks/{taskId}/complete` | 完成任务 |
+| GET | `/api/runtime/tasks/stats` | 待办统计（总数 / 逾期 / 今天到期 / 按流程 key 分组；`timeZoneOffsetMinutes` 指定「今天」的时区） |
+| POST | `/api/runtime/tasks/batch/assignee` | 批量转办（逐项结果，非原子） |
+| POST | `/api/runtime/process-instances/batch/delete` | 批量删除实例（逐项结果，非原子） |
 | GET | `/api/runtime/process-instances/{id}/variables` | 查询流程变量 |
+| PUT | `/api/runtime/process-instances/{id}/variables/{name}` | 写流程变量（请求体即 JSON 值） |
+| PUT | `/api/runtime/process-instances/{id}/variables` | 批量写流程变量（同一事务） |
 | DELETE | `/api/runtime/process-instances/{id}/variables/{name}` | 删除流程变量（历史行保留） |
 | GET | `/api/runtime/tasks/{taskId}/variables` | 查询任务局部变量 |
 | PUT | `/api/runtime/tasks/{taskId}/variables/{name}` | 写任务局部变量（请求体即 JSON 值） |
 | DELETE | `/api/runtime/tasks/{taskId}/variables/{name}` | 删除任务局部变量 |
 | GET | `/api/runtime/process-instances/{id}/diagram` | 获取流程图数据 |
+| GET | `/api/runtime/history/process-instances` | 历史实例列表（业务主键 / 定义 / 发起人 / 时间 / 结束状态 + 分页） |
 | GET | `/api/runtime/history/process-instances/{id}` | 历史流程实例 |
 | GET | `/api/runtime/history/process-instances/{id}/activities` | 历史活动 |
 | GET | `/api/runtime/history/process-instances/{id}/tasks` | 历史任务 |
+| GET | `/api/runtime/history/process-instances/{id}/variables` | 历史变量（含已删除的运行态变量） |
+| GET | `/api/runtime/history/tasks` | 跨实例已办（`assignee` / 定义 / 节点 / 时间过滤 + 分页） |
+| GET | `/api/identity/users/{userId}/groups` | 用户所属组（只读，依赖 `IUserGroupManager`） |
+| GET | `/api/identity/groups/{groupId}` | 组信息（未接入身份源时 404） |
+| GET | `/api/identity/groups/{groupId}/users` | 组成员 id（空集是合法结果） |
+
+列表端点统一使用 `firstResult` / `maxResults`（默认 20、上限 200），总数放在 `X-Total-Count` 响应头；
+加 `?envelope=true` 则返回 `{ items, total, firstResult, maxResults }`。
+历史表只增不删：运行态变量删除后，`/history/.../variables` 仍能查到最后一次的值。
+任务详情返回 `revision`；完成 / 认领时可带 `expectedRevision`，版本不一致返回 **409 Conflict**（防止重复提交）。
+改变状态的请求可带 `Idempotency-Key` 做重试去重（见「启动 REST 服务」）。
 
 ---
 
@@ -399,7 +522,7 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | 类型 | 说明 |
 |---|---|
 | 单元测试 | 转换器、校验、EL、行为类、调度 |
-| 集成测试 | 真库验证表结构 / ID 区块 / 全部 B1·B2 功能：**MySQL（localhost）+ SqlServer（10.1.245.36，Windows 身份认证）双库功能矩阵**——库与表自动创建迁移；方言不可用时对应测试自动跳过（env：`NETBPM_MYSQL_CONNECTION` / `NETBPM_SQLSERVER_CONNECTION`） |
+| 集成测试 | 真库验证表结构 / ID 区块 / 全部 B1·B2 功能：**MySQL（localhost）+ SqlServer（Testcontainers `mssql/server:2022`，可用 `NETBPM_SQLSERVER_CONNECTION` 改指已有实例）双库功能矩阵**——库与表自动创建迁移；方言不可用（Docker 未运行 / 实例连不上）时对应测试自动跳过（env：`NETBPM_MYSQL_CONNECTION` / `NETBPM_SQLSERVER_CONNECTION`） |
 | 差分对拍 | 与 `tools/Oracle` 的 Java 预言机逐维度比对，真值由 `<stem>.oracle.json` 提供 |
 | 语料漂移校验 | `dotnet run --project tests/corpus/generator -- --check`，语料必须由脚本生成 |
 

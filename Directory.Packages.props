@@ -31,6 +31,8 @@
 
   <ItemGroup Label="AspnetCore">
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <!-- 可选 JWT 鉴权（HS256）：与服务间 API Key 并存 -->
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.16.0" />
   </ItemGroup>
 
   <ItemGroup Label="Testing">

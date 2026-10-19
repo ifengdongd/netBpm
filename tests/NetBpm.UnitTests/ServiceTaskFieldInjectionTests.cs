@@ -39,7 +39,7 @@ public sealed class ServiceTaskFieldInjectionTests
         var engine = TestEngine.Create();
         engine.DelegateResolver.Register("injectable", new InjectableDelegate());
 
-        var error = await Assert.ThrowsAsync<EngineException>(
+        var error = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine
                 .StartProcessAsync(FieldInjectionProcess(unknownFieldName: true), ct: Ct)
                 .AsTask());
@@ -53,7 +53,7 @@ public sealed class ServiceTaskFieldInjectionTests
         var engine = TestEngine.Create();
         engine.DelegateResolver.Register("injectable", new InjectableDelegate());
 
-        var error = await Assert.ThrowsAsync<EngineException>(
+        var error = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine
                 .StartProcessAsync(FieldInjectionProcess(missingValue: true), ct: Ct)
                 .AsTask());

@@ -778,7 +778,12 @@ Activiti 9 默认使用 **`DbIdGenerator`**（`ProcessEngineConfigurationImpl.in
 
 ### 15.5 P9 实施记录（REST 宿主与端到端）
 
-**端点清单（13 个，全部有 OpenAPI 描述，由 `RestEndToEndTests.OpenApi_ShouldExposeEveryEndpoint` 锁死）**
+**端点清单（P9 原始 13 个；2026-10-19 的 B2.7 又补齐 11 个产品化端点，见任务清单与 README 的完整清单）**
+> 全部端点都有 OpenAPI 描述，由 `RestEndToEndTests.OpenApi_ShouldExposeEveryEndpoint` 锁死。
+> 新增部分：实例列表 / 任务详情 / 身份关系 / 转办 / 跳转 / 变量单写与批写 / 历史实例列表 / 跨实例已办 / 历史变量 / 定义分页与版本 / 候选组查询；
+> 以及 P1 批次：任务字段修改 / 候选用户与候选组增删 / 委派与解决 / 表单元数据 / BPMN 试校验 / 身份只读查询；
+> 以及 P2：部署列表与资源 / 待办统计 / 批量转办与批量删除 / live+ready 探针 / 运维信息 / `expectedRevision` 乐观并发（409）/
+> API Key 鉴权与身份租户透传 / `Idempotency-Key`（内存 + `ACT_IDEMPOTENCY`）/ `?envelope=true` 分页信封。
 
 | 端点 | 说明 |
 |---|---|

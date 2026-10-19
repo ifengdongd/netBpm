@@ -33,6 +33,8 @@ jobs:
 
   integration-tests:
     # 真库测试：MySQL 服务容器 + DbMigrate 建表；
+    # SqlServer 由测试自己用 Testcontainers 拉起 mssql/server:2022（runner 自带 Docker），
+    # 也可用 NETBPM_SQLSERVER_CONNECTION 指到已有实例；
     # 数据库不可用时测试会动态跳过（不会假绿，也不会误红）
     runs-on: ubuntu-latest
     services:

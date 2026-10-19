@@ -10,6 +10,8 @@
 | 0002 | `0002_init_data.sql` | **引擎基础表** | `schema.version` / `next.dbid` 等初值（引擎启动校验依赖） |
 | 0003 | `0003_create_process_instance_tables.sql` | **流程实例业务表** | `instances` / `instance_current_task` / `deal_history`（`workflow_type_id` 存流程类型 id） |
 | 0008 | `0008_create_workflow_type.sql` | **流程实例业务表** | `workflow_type` 流程类型表（`ProcessInfoEnum` 数据源，启动时加载） |
+| 0009 | `0009_perf_indexes.sql` | **性能增强** | 运行期查询索引（执行树 / 任务 / 变量 / 关系）；幂等，可对已有库单独执行 |
+| 0010 | `0010_create_idempotency.sql` | **应用层（REST）** | `ACT_IDEMPOTENCY` HTTP 幂等键表；仅 REST 宿主使用，不属于 Activiti 13 张引擎表 |
 | 0004 | `0004_create_leave_bill.sql` | Demo 业务表 | 请假单（`days` / `reason` 真列） |
 | 0006 | `0006_create_order_bill.sql` | Demo 业务表 | 订单单（`status` 随审批回写 100 / -1） |
 | 0007 | `0007_create_workflow_parameters.sql` | Demo 业务表 | 流程参数键值表（「实例 × 参数名」） |
@@ -20,7 +22,20 @@
 
 ## 执行顺序
 
-`0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008`
+`0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010`
+
+> **已初始化的库升级索引**：`migrate` 检测到 `ACT_GE_PROPERTY` 后会跳过全部脚本（结构版本不变），
+> 因此 `0009` 需要用 `apply` 单独执行（脚本幂等，可重复跑）：
+>
+> ```bash
+> dotnet run --project tools/NetBpm.DbMigrate -- apply \
+>   --provider mysql --connection "<连接串>" --script db/mysql/0009_perf_indexes.sql
+> ```
+>
+> 新库直接 `migrate` 即可，`0009` / `0010` 会随其它脚本一起执行。
+>
+> `0010` 同样可用 `apply` 单独执行（`create table if not exists`，幂等）；REST 宿主启用
+> `Idempotency-Key` 前必须确保该表存在，否则幂等中间件会在首次写入时报错。
 
 - MySQL：`mysql -u<user> -p <database> < db/mysql/000x_*.sql`（库示例 `netbpm_demo`）；
 - SQL Server：脚本统一落 `dbo`（与引擎 ACT_* 表同 schema），先建库后逐个执行。

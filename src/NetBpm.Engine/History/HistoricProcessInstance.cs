@@ -19,6 +19,7 @@ namespace NetBpm.Engine.History;
 /// <param name="EndActivityId"><c>END_ACT_ID_</c>（结束时所在节点 id）。</param>
 /// <param name="DeleteReason"><c>DELETE_REASON_</c>；正常结束为 <see langword="null"/>。</param>
 /// <param name="Name"><c>NAME_</c>。</param>
+/// <param name="TenantId"><c>TENANT_ID_</c>；为空表示无租户（B2.3）。</param>
 public sealed record HistoricProcessInstance(
     string Id,
     string ProcessInstanceId,
@@ -31,7 +32,8 @@ public sealed record HistoricProcessInstance(
     string? StartActivityId,
     string? EndActivityId,
     string? DeleteReason,
-    string? Name)
+    string? Name,
+    string? TenantId = null)
 {
     /// <summary>是否仍在运行（对应 Activiti <c>HistoricProcessInstance.getEndTime() == null</c>）。</summary>
     public bool IsRunning => EndTime is null;

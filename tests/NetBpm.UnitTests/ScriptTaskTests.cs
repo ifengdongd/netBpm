@@ -106,7 +106,7 @@ public sealed class ScriptTaskTests
         // 本子集不内置 JavaScript 引擎 —— 未知 / 缺省格式必须响亮失败，不能静默跳过
         var engine = TestEngine.Create();
 
-        var error = await Assert.ThrowsAsync<EngineException>(
+        var error = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine.StartProcessAsync(ScriptProcess("1 + 1", scriptFormat: "javascript"), ct: Ct).AsTask());
 
         Assert.Contains("scriptFormat", error.Message);
@@ -117,7 +117,7 @@ public sealed class ScriptTaskTests
     {
         var engine = TestEngine.Create();
 
-        var error = await Assert.ThrowsAsync<EngineException>(
+        var error = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine.StartProcessAsync(ScriptProcess(string.Empty), ct: Ct).AsTask());
 
         Assert.Contains("没有脚本内容", error.Message);
@@ -128,7 +128,7 @@ public sealed class ScriptTaskTests
     {
         var engine = TestEngine.Create();
 
-        var error = await Assert.ThrowsAsync<EngineException>(
+        var error = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine.StartProcessAsync(ScriptProcess("int x = ;"), ct: Ct).AsTask());
 
         Assert.Contains("编译失败", error.Message);
@@ -139,7 +139,7 @@ public sealed class ScriptTaskTests
     {
         var engine = TestEngine.Create();
 
-        var error = await Assert.ThrowsAsync<EngineException>(
+        var error = await Assert.ThrowsAnyAsync<EngineException>(
             () => engine.StartProcessAsync(ScriptProcess("""throw new InvalidOperationException("boom");"""), ct: Ct).AsTask());
 
         Assert.Contains("执行失败", error.Message);

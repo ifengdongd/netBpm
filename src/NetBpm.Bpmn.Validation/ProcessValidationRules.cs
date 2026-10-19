@@ -67,7 +67,13 @@ public sealed class ExclusiveGatewayHasSelectableFlowRule : IProcessValidationRu
     }
 }
 
-/// <summary>规则 3：不允许孤立节点（非开始事件必须有入流）。</summary>
+/// <summary>
+/// 规则 3：不允许孤立节点（非开始事件必须有入流）。
+/// <para>
+/// <b>提示级</b>：孤立节点永远不会被到达，但<b>不影响</b>其余路径的执行 ——
+/// Activiti 也照常部署这种模型。因此这里只提示"可能画漏了连线"，不阻断。
+/// </para>
+/// </summary>
 public sealed class NoOrphanNodeRule : IProcessValidationRule
 {
     public string Name => "no-orphan-node";
@@ -87,7 +93,8 @@ public sealed class NoOrphanNodeRule : IProcessValidationRule
                 Name,
                 node.Id,
                 node.GetType().Name,
-                "节点没有任何入流，属于孤立节点。");
+                "节点没有任何入流，属于孤立节点（永远不会被执行）。",
+                ValidationSeverity.Warning);
         }
     }
 }
@@ -222,17 +229,26 @@ public sealed class ParallelGatewayFlowCountRule : IProcessValidationRule
 
             if (gateway.DefaultFlow is not null)
             {
+                // 提示级：Activiti 会解析出 default 属性但并行网关取道时根本不看条件，
+                // 因此这条 default 是"写了也不生效"的冗余配置 —— 不影响执行，不阻断部署
                 yield return new ValidationError(
                     Name,
                     gateway.Id,
                     nameof(ParallelGateway),
-                    "并行网关不支持默认流 —— 其出口不校验条件（见 §5.4 之二）。");
+                    "并行网关不支持默认流 —— 其出口不校验条件，该 default 属性不会生效（见 §5.4 之二）。",
+                    ValidationSeverity.Warning);
             }
         }
     }
 }
 
-/// <summary>规则 6：流程必须恰好有一个开始事件，且至少有一个结束事件。</summary>
+/// <summary>
+/// 规则 6：流程必须恰好有一个开始事件（阻断），且至少有一个结束事件（提示）。
+/// <para>
+/// 结束事件的检查降为提示：Activiti 允许没有结束事件的流程（实例只能靠删除收口），
+/// 真正会「跑不下去」的情形（终端节点没有出流）已由 <see cref="NodeHasOutgoingFlowRule"/> 阻断。
+/// </para>
+/// </summary>
 public sealed class StartAndEndEventRule : IProcessValidationRule
 {
     public string Name => "start-and-end-event";
@@ -263,7 +279,12 @@ public sealed class StartAndEndEventRule : IProcessValidationRule
 
         if (endEvents.Count == 0)
         {
-            yield return new ValidationError(Name, process.Id, nameof(Process), "流程没有结束事件。");
+            yield return new ValidationError(
+                Name,
+                process.Id,
+                nameof(Process),
+                "流程没有结束事件：实例不会自然结束（Activiti 允许这种模型，此处只提示）。",
+                ValidationSeverity.Warning);
         }
     }
 }
@@ -513,6 +534,54 @@ public sealed class RequiredAttributesRule : IProcessValidationRule
                     nameof(ServiceTask),
                     "服务任务必须指定 activiti:class / activiti:delegateExpression / activiti:expression 之一。");
             }
+        }
+    }
+}
+
+/// <summary>
+/// 规则 12：用户任务没有任何办理人来源（<b>提示级</b>）。
+/// <para>
+/// 与已移除的「用户任务必须指定办理人」硬性规则不同：Activiti 允许无人办理的任务
+/// （任务照常创建、只是没人认领），本引擎同样能执行，因此这里<b>只提示</b>。
+/// </para>
+/// <para>
+/// 提示的价值在于可发现性：没有 assignee / candidateUsers / candidateGroups 时，
+/// 任务只能通过 <c>TaskQuery.processInstanceId</c> 查到 —— 按办理人 / 候选人查询永远查不到，
+/// 这通常是设计时漏配，而不是有意为之。
+/// </para>
+/// <para>
+/// 多实例任务不检查：实例的办理人由 <c>collection</c> / <c>loopCardinality</c> 决定（见 <c>MultiInstanceRule</c>）。
+/// </para>
+/// </summary>
+public sealed class UserTaskAssignmentRule : IProcessValidationRule
+{
+    public string Name => "user-task-assignment";
+
+    public IEnumerable<ValidationError> Validate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        foreach (var userTask in process.FindFlowElementsOfType<UserTask>())
+        {
+            if (userTask.LoopCharacteristics is not null)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(userTask.Assignee)
+                || userTask.CandidateUsers.Count > 0
+                || userTask.CandidateGroups.Count > 0)
+            {
+                continue;
+            }
+
+            yield return new ValidationError(
+                Name,
+                userTask.Id,
+                nameof(UserTask),
+                "用户任务没有指定办理人（activiti:assignee）或候选人 / 候选组：" +
+                "任务仍会创建（Activiti 同语义），但按办理人 / 候选人查不到，只能按流程实例查。",
+                ValidationSeverity.Warning);
         }
     }
 }

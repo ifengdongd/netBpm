@@ -223,6 +223,85 @@ public sealed class ProcessValidatorTests
     }
 
     [Fact]
+    public void UserTaskWithoutAssignment_ShouldBeWarningNotBlocking()
+    {
+        // 「无人办理的用户任务」在 Activiti 里是合法模型 —— 这里只能是提示，不能阻断部署
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="http://netbpm/test">
+              <process id="p8" isExecutable="true">
+                <startEvent id="start" />
+                <userTask id="approve" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="approve" />
+                <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml);
+        var warning = Assert.Single(Validator.Validate(process));
+
+        Assert.Equal("user-task-assignment", warning.Rule);
+        Assert.Equal("approve", warning.ElementId);
+        Assert.Equal(ValidationSeverity.Warning, warning.Severity);
+        Assert.False(warning.IsError);
+
+        // 只有提示级问题时 ValidateAndThrow 不抛异常，并把这些提示交回调用方
+        var warnings = Validator.ValidateAndThrow(process);
+        Assert.Single(warnings);
+    }
+
+    [Fact]
+    public void OrphanNode_ShouldBeWarningNotError()
+    {
+        // 孤立节点永远不会被执行，但不影响其余路径 —— Activiti 照常部署
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="http://netbpm/test">
+              <process id="p9" isExecutable="true">
+                <startEvent id="start" />
+                <endEvent id="end" />
+                <userTask id="lost" activiti:assignee="kermit"
+                          xmlns:activiti="http://activiti.org/bpmn" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+                <sequenceFlow id="f2" sourceRef="lost" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var results = Validator.Validate(Parse(xml));
+
+        Assert.Contains(results, result => result.ElementId == "lost"
+            && result.Rule == "no-orphan-node"
+            && result.Severity == ValidationSeverity.Warning);
+        Assert.DoesNotContain(results, result => result.Severity == ValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void ValidateAndThrow_ShouldThrowOnlyErrorSeverity()
+    {
+        // 服务任务缺实现方式 = 运行期必然失败 ⇒ 阻断级
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="http://netbpm/test">
+              <process id="p10" isExecutable="true">
+                <startEvent id="start" />
+                <serviceTask id="svc" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="svc" />
+                <sequenceFlow id="f2" sourceRef="svc" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var exception = Assert.Throws<ProcessValidationException>(() => Validator.ValidateAndThrow(Parse(xml)));
+
+        Assert.All(exception.Errors, error => Assert.Equal(ValidationSeverity.Error, error.Severity));
+        Assert.Contains(exception.Errors, error => error.Rule == "required-attributes");
+    }
+
+    [Fact]
     public void ValidateAndThrow_ShouldThrowWithAllErrors()
     {
         const string xml = """
@@ -236,7 +315,11 @@ public sealed class ProcessValidatorTests
 
         var exception = Assert.Throws<ProcessValidationException>(() => Validator.ValidateAndThrow(Parse(xml)));
 
-        Assert.True(exception.Errors.Count >= 3);
+        // 没有开始事件 + 节点没有出流 = 2 处阻断级问题；
+        // 「没有结束事件」「孤立节点」已降为提示级，不再出现在 Errors 里
+        Assert.True(exception.Errors.Count >= 2);
+        Assert.Contains(exception.Errors, error => error.Rule == "start-and-end-event");
+        Assert.Contains(exception.Errors, error => error.Rule == "node-has-outgoing-flow");
     }
 
     private static Bpmn.Model.Process Parse(string xml) =>

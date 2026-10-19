@@ -199,6 +199,16 @@ public sealed class TraceRecordingHistoryManager : IHistoryManager
         string processInstanceId,
         CancellationToken ct = default) => _inner.FindTaskInstancesAsync(processInstanceId, ct);
 
+    public ValueTask<IReadOnlyList<HistoricProcessInstance>> FindProcessInstancesAsync(
+        CancellationToken ct = default) => _inner.FindProcessInstancesAsync(ct);
+
+    public ValueTask<IReadOnlyList<HistoricTaskInstance>> FindAllTaskInstancesAsync(
+        CancellationToken ct = default) => _inner.FindAllTaskInstancesAsync(ct);
+
+    public ValueTask<IReadOnlyList<HistoricVariableInstance>> FindVariableInstancesAsync(
+        string processInstanceId,
+        CancellationToken ct = default) => _inner.FindVariableInstancesAsync(processInstanceId, ct);
+
     private void Add(TraceEvent traceEvent)
     {
         lock (_syncRoot)
