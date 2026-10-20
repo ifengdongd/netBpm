@@ -89,7 +89,7 @@ export default function ProcessTypesPage() {
       message.success('排序已保存');
     } catch (error) {
       message.error(`保存排序失败：${(error as Error).message}`);
-      await typesQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: PROCESS_TYPES_KEY });
     } finally {
       setReordering(false);
     }
@@ -150,7 +150,7 @@ export default function ProcessTypesPage() {
       }
 
       setEditor({ open: false, editing: null });
-      await typesQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: PROCESS_TYPES_KEY });
     } catch (error) {
       message.error(`保存失败：${(error as Error).message}`);
     } finally {
@@ -162,7 +162,7 @@ export default function ProcessTypesPage() {
     try {
       await processTypesApi.remove(id);
       message.success(`已删除：${name}`);
-      await typesQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: PROCESS_TYPES_KEY });
     } catch (error) {
       message.error(`删除失败：${(error as Error).message}`);
     }

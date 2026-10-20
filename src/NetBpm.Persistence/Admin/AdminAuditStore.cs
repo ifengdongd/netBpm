@@ -551,6 +551,12 @@ public static class AdminAuditActions
     /// <summary>删除任务局部变量。</summary>
     public const string TaskVariableDelete = "task_variable.delete";
 
+    /// <summary>删除流程模型（连同版本历史，不影响已部署定义）。</summary>
+    public const string ModelDelete = "model.delete";
+
+    /// <summary>发布模型（用当前 XML 走引擎部署）。</summary>
+    public const string ModelPublish = "model.publish";
+
     /// <summary>清理模型历史（按保留版本数删除）。</summary>
     public const string ModelHistoryPrune = "model.history_prune";
 

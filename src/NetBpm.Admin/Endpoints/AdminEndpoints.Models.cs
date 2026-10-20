@@ -94,13 +94,27 @@ public static partial class AdminEndpoints
         return Results.Ok(new SaveBpmnModelResponse(id, revision, errors, warnings));
     }
 
+    /// <summary>删除模型（连同版本历史；已部署的定义不受影响）。删除写审计 model.delete。</summary>
     private static async Task<IResult> DeleteModelAsync(
         string id,
+        RequestContext requestContext,
         BpmnModelStore store,
-        CancellationToken ct) =>
-        await store.DeleteAsync(id, ct).ConfigureAwait(false)
-            ? Results.NoContent()
-            : Results.NotFound();
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        var removed = await WithAuditTrailAsync(
+            requestContext,
+            auditor,
+            AdminAuditActions.ModelDelete,
+            AdminAuditTargets.Model,
+            ResolveTenant(null, requestContext),
+            failureDetail: () => new { modelId = id },
+            successDetail: removed => new { modelId = id, removed },
+            operation: async token => await store.DeleteAsync(id, token).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
+
+        return removed ? Results.NoContent() : Results.NotFound();
+    }
 
     private static async Task<IReadOnlyList<BpmnModelRevisionSummary>> ListModelHistoryAsync(
         string id,
@@ -159,11 +173,16 @@ public static partial class AdminEndpoints
         return Results.Ok(new ModelHistoryPruneResponse(removed, id, keep));
     }
 
-    /// <summary>发布模型：用当前 XML 走引擎部署（校验/版本递增与设计器部署完全一致）。</summary>
+    /// <summary>
+    /// 发布模型：用当前 XML 走引擎部署（校验/版本递增与设计器部署完全一致）。
+    /// 发布属高危管理动作，写审计 model.publish；模型不存在时 404 且不留审计。
+    /// </summary>
     private static async Task<IResult> PublishModelAsync(
         string id,
+        RequestContext requestContext,
         BpmnModelStore store,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         var model = await store.GetAsync(id, ct).ConfigureAwait(false);
@@ -173,15 +192,34 @@ public static partial class AdminEndpoints
             return Results.NotFound();
         }
 
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(model.BpmnXml));
+        var definition = await WithAuditTrailAsync(
+            requestContext,
+            auditor,
+            AdminAuditActions.ModelPublish,
+            AdminAuditTargets.Model,
+            ResolveTenant(null, requestContext),
+            failureDetail: () => new { modelId = id, processKey = model.ProcessKey },
+            successDetail: deployed => new
+            {
+                modelId = id,
+                processKey = model.ProcessKey,
+                definitionId = deployed.Id,
+                version = deployed.Version,
+                deploymentId = deployed.DeploymentId,
+            },
+            operation: async token =>
+            {
+                using var stream = new MemoryStream(Encoding.UTF8.GetBytes(model.BpmnXml));
 
-        var definition = await engine
-            .DeployAsync(
-                stream,
-                $"{model.Id}.bpmn20.xml",
-                $"模型发布：{model.Name}",
-                ct: ct)
-            .ConfigureAwait(false);
+                return await engine
+                    .DeployAsync(
+                        stream,
+                        $"{model.Id}.bpmn20.xml",
+                        $"模型发布：{model.Name}",
+                        ct: token)
+                    .ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         return Results.Ok(new DeployResponse(
             definition.Id,

@@ -26,14 +26,19 @@ export default function LoginPage() {
     setSubmitting(true);
     setError(null);
 
-    const ok = await verifyCredential({
-      mode,
-      value: values.value.trim(),
-      userId: mode === 'apiKey' ? values.userId?.trim() || undefined : undefined,
-      tenantId: mode === 'apiKey' ? values.tenantId?.trim() || undefined : undefined,
-    });
+    try {
+      const ok = await verifyCredential({
+        mode,
+        value: values.value.trim(),
+        userId: mode === 'apiKey' ? values.userId?.trim() || undefined : undefined,
+        tenantId: mode === 'apiKey' ? values.tenantId?.trim() || undefined : undefined,
+      });
 
-    if (ok) {
+      if (!ok) {
+        setError('凭据校验失败：后端返回 401（密钥无效，或未配置鉴权但后端不可达）。');
+        return;
+      }
+
       setCredential({
         mode,
         value: values.value.trim(),
@@ -41,8 +46,8 @@ export default function LoginPage() {
         tenantId: mode === 'apiKey' ? values.tenantId?.trim() || undefined : undefined,
       });
       navigate(redirect, { replace: true });
-    } else {
-      setError('凭据校验失败：后端返回 401（密钥无效，或未配置鉴权但后端不可达）。');
+    } finally {
+      // 成功路径会触发路由切换，这里兜底复位（组件未卸载时表单可再次提交）
       setSubmitting(false);
     }
   };

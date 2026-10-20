@@ -61,14 +61,46 @@ export default function DeploymentsPage() {
     });
   }, [deployments, keyword]);
 
-  const [xml, setXml] = useState<{ title: string; content: string; fileName: string } | null>(null);
-  const [versions, setVersions] = useState<{ key: string; rows: ProcessDefinitionResponse[]; loading: boolean } | null>(null);
-  const [resources, setResources] = useState<{
-    deploymentId: string;
-    name?: string | null;
-    rows: DeploymentResource[];
-    loading: boolean;
-  } | null>(null);
+  // 三个弹窗的数据源：target 为 null 时 enabled=false 不发请求；由 query 统一缓存 / 错误处理
+  const [xmlTarget, setXmlTarget] = useState<DeploymentDefinitionResponse | null>(null);
+  const [versionsKey, setVersionsKey] = useState<string | null>(null);
+  const [resourcesTarget, setResourcesTarget] = useState<DeploymentSummaryResponse | null>(null);
+
+  const xmlQuery = useQuery({
+    queryKey: ['designer', 'definition-xml', xmlTarget?.processDefinitionId],
+    queryFn: () => deploymentsApi.definitionXml(xmlTarget!.processDefinitionId),
+    enabled: xmlTarget !== null,
+  });
+
+  const versionsQuery = useQuery({
+    queryKey: ['designer', 'versions', versionsKey],
+    queryFn: () => deploymentsApi.versions(versionsKey!, { firstResult: 0, maxResults: 200 }),
+    enabled: versionsKey !== null,
+  });
+
+  const resourcesQuery = useQuery({
+    queryKey: ['designer', 'resources', resourcesTarget?.deploymentId],
+    queryFn: () => deploymentsApi.resources(resourcesTarget!.deploymentId),
+    enabled: resourcesTarget !== null,
+  });
+
+  useEffect(() => {
+    if (xmlQuery.isError) {
+      message.error(`获取 XML 失败：${(xmlQuery.error as Error).message}`);
+    }
+  }, [xmlQuery.isError, xmlQuery.error, message]);
+
+  useEffect(() => {
+    if (versionsQuery.isError) {
+      message.error(`获取版本失败：${(versionsQuery.error as Error).message}`);
+    }
+  }, [versionsQuery.isError, versionsQuery.error, message]);
+
+  useEffect(() => {
+    if (resourcesQuery.isError) {
+      message.error(`获取资源清单失败：${(resourcesQuery.error as Error).message}`);
+    }
+  }, [resourcesQuery.isError, resourcesQuery.error, message]);
 
   const toggleSuspension = async (definition: DeploymentDefinitionResponse) => {
     try {
@@ -86,49 +118,12 @@ export default function DeploymentsPage() {
     }
   };
 
-  const showXml = async (definition: DeploymentDefinitionResponse) => {
-    try {
-      const content = await deploymentsApi.definitionXml(definition.processDefinitionId);
-      setXml({
-        title: `${definition.key} v${definition.version} — ${definition.processDefinitionId}`,
-        content,
-        fileName: `${definition.key}-v${definition.version}.bpmn20.xml`,
-      });
-    } catch (error) {
-      message.error(`获取 XML 失败：${(error as Error).message}`);
-    }
-  };
-
   const downloadDefinition = async (definition: DeploymentDefinitionResponse) => {
     try {
       const content = await deploymentsApi.definitionXml(definition.processDefinitionId);
       downloadText(content, `${definition.key}-v${definition.version}.bpmn20.xml`);
     } catch (error) {
       message.error(`下载 XML 失败：${(error as Error).message}`);
-    }
-  };
-
-  const showResources = async (deployment: DeploymentSummaryResponse) => {
-    setResources({ deploymentId: deployment.deploymentId, name: deployment.name, rows: [], loading: true });
-
-    try {
-      const rows = await deploymentsApi.resources(deployment.deploymentId);
-      setResources({ deploymentId: deployment.deploymentId, name: deployment.name, rows, loading: false });
-    } catch (error) {
-      message.error(`获取资源清单失败：${(error as Error).message}`);
-      setResources(null);
-    }
-  };
-
-  const showVersions = async (definition: DeploymentDefinitionResponse) => {
-    setVersions({ key: definition.key, rows: [], loading: true });
-
-    try {
-      const page = await deploymentsApi.versions(definition.key, { firstResult: 0, maxResults: 200 });
-      setVersions({ key: definition.key, rows: page.items, loading: false });
-    } catch (error) {
-      message.error(`获取版本失败：${(error as Error).message}`);
-      setVersions(null);
     }
   };
 
@@ -167,10 +162,10 @@ export default function DeploymentsPage() {
           >
             {record.isSuspended ? '激活' : '挂起'}
           </Button>
-          <Button size="small" icon={<HistoryOutlined />} onClick={() => void showVersions(record)}>
+          <Button size="small" icon={<HistoryOutlined />} onClick={() => setVersionsKey(record.key)}>
             版本
           </Button>
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => void showXml(record)}>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => setXmlTarget(record)}>
             XML
           </Button>
           <Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadDefinition(record)}>
@@ -195,7 +190,7 @@ export default function DeploymentsPage() {
       width: 180,
       render: (_, record) => (
         <Space>
-          <Button size="small" onClick={() => void showResources(record)}>
+          <Button size="small" onClick={() => setResourcesTarget(record)}>
             资源
           </Button>
           <Popconfirm
@@ -254,17 +249,29 @@ export default function DeploymentsPage() {
       />
 
       <Modal
-        title={xml?.title ?? ''}
-        open={xml !== null}
+        title={
+          xmlTarget
+            ? `${xmlTarget.key} v${xmlTarget.version} — ${xmlTarget.processDefinitionId}`
+            : ''
+        }
+        open={xmlTarget !== null}
         width={820}
-        onCancel={() => setXml(null)}
+        onCancel={() => setXmlTarget(null)}
         footer={
           <Space>
-            <Button onClick={() => setXml(null)}>关闭</Button>
+            <Button onClick={() => setXmlTarget(null)}>关闭</Button>
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              onClick={() => xml && downloadText(xml.content, xml.fileName)}
+              loading={xmlQuery.isFetching}
+              onClick={() =>
+                xmlTarget !== null &&
+                xmlQuery.data !== undefined &&
+                downloadText(
+                  xmlQuery.data,
+                  `${xmlTarget.key}-v${xmlTarget.version}.bpmn20.xml`,
+                )
+              }
             >
               下载 BPMN
             </Button>
@@ -272,21 +279,21 @@ export default function DeploymentsPage() {
         }
       >
         <pre style={{ maxHeight: '60vh', overflow: 'auto', background: '#fafafa', padding: 12, borderRadius: 6, fontSize: 12 }}>
-          {xml?.content ?? ''}
+          {xmlQuery.isPending && xmlTarget !== null ? '加载中…' : (xmlQuery.data ?? '')}
         </pre>
       </Modal>
 
       <Modal
-        title={`「${versions?.key ?? ''}」的历史版本`}
-        open={versions !== null}
+        title={`「${versionsKey ?? ''}」的历史版本`}
+        open={versionsKey !== null}
         footer={null}
         width={760}
-        onCancel={() => setVersions(null)}
+        onCancel={() => setVersionsKey(null)}
       >
         <Table<ProcessDefinitionResponse>
           rowKey="processDefinitionId"
-          loading={versions?.loading}
-          dataSource={versions?.rows ?? []}
+          loading={versionsQuery.isPending || versionsQuery.isFetching}
+          dataSource={versionsQuery.data?.items ?? []}
           pagination={false}
           size="small"
           columns={[
@@ -306,16 +313,16 @@ export default function DeploymentsPage() {
       </Modal>
 
       <Modal
-        title={`部署资源清单${resources?.name ? ` · ${resources.name}` : ''}`}
-        open={resources !== null}
+        title={`部署资源清单${resourcesTarget?.name ? ` · ${resourcesTarget.name}` : ''}`}
+        open={resourcesTarget !== null}
         footer={null}
         width={680}
-        onCancel={() => setResources(null)}
+        onCancel={() => setResourcesTarget(null)}
       >
         <Table<DeploymentResource>
           rowKey="processDefinitionId"
-          loading={resources?.loading}
-          dataSource={resources?.rows ?? []}
+          loading={resourcesQuery.isPending || resourcesQuery.isFetching}
+          dataSource={resourcesQuery.data ?? []}
           pagination={false}
           size="small"
           columns={[

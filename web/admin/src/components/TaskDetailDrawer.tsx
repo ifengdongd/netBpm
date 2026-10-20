@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 
 import { runtimeApi } from '../api';
 import type { IdentityLink, Variables } from '../api/types';
-import { formatTime } from '../utils';
+import { formatTime, formatValue } from '../utils';
 
 interface Props {
   taskId: string | null;
@@ -98,9 +98,7 @@ export default function TaskDetailDrawer({ taskId, open, onClose }: Props) {
                 dataIndex: 'value',
                 key: 'value',
                 render: (value: unknown) => (
-                  <Typography.Text code>
-                    {value === null ? 'null' : typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                  </Typography.Text>
+                  <Typography.Text code>{formatValue(value)}</Typography.Text>
                 ),
               },
             ]}
