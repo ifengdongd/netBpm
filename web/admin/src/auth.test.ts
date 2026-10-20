@@ -19,7 +19,7 @@ function fakeJwt(payload: object): string {
 
 describe('凭据存取', () => {
   beforeEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
   });
 
   it('保存 / 读取 / 清除凭据', () => {
@@ -35,11 +35,11 @@ describe('凭据存取', () => {
   });
 
   it('损坏或形状不对的存储值一律视为未登录', () => {
-    localStorage.setItem('netbpm.admin.credential.v1', '{not-json');
+    sessionStorage.setItem('netbpm.admin.credential.v1', '{not-json');
 
     expect(getCredential()).toBeNull();
 
-    localStorage.setItem('netbpm.admin.credential.v1', JSON.stringify({ mode: 'apiKey', value: '' }));
+    sessionStorage.setItem('netbpm.admin.credential.v1', JSON.stringify({ mode: 'apiKey', value: '' }));
 
     expect(getCredential()).toBeNull();
   });

@@ -17,6 +17,12 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 401（凭据缺失 / 失效）事件：client 层不直接操作路由，由 AppLayout 监听后用
+ * router 软跳转到登录页（保留 SPA 状态，不整页刷新）。detail 携带回跳地址。
+ */
+export const AUTH_EXPIRED_EVENT = 'auth:expired';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // 附加鉴权头（API Key / Bearer Token）；开放模式（无凭据）时为空
   const headers = new Headers(init?.headers);
@@ -28,12 +34,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const response = await fetch(path, { ...init, headers });
 
-  // 401：凭据缺失 / 失效 → 清掉并跳登录页（登录页自身用 verifyCredential 直连，不经过这里）。
+  // 401：凭据缺失 / 失效 → 清掉并广播事件（登录页自身用 verifyCredential 直连，不经过这里）。
   // 抛出 401 终止后续处理：既避免继续解析响应体产生二次错误，也让调用方的 catch 有据可依。
   if (response.status === 401 && window.location.pathname !== '/login') {
     clearCredential();
-    const redirect = `${window.location.pathname}${window.location.search}`;
-    window.location.assign(`/login?redirect=${encodeURIComponent(redirect)}`);
+    window.dispatchEvent(
+      new CustomEvent(AUTH_EXPIRED_EVENT, {
+        detail: `${window.location.pathname}${window.location.search}`,
+      }),
+    );
 
     throw new ApiError(401, '登录已失效，请重新登录。');
   }

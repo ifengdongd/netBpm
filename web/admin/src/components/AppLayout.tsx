@@ -8,10 +8,11 @@ import {
   LogoutOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Button, Layout, Menu, Space, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { App, Button, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
+import { AUTH_EXPIRED_EVENT } from '../api/client';
 import { ADMIN_SCOPE, clearCredential, credentialLabel, getCredential, resolveIdentity } from '../auth';
 
 const { Sider, Header, Content } = Layout;
@@ -26,6 +27,7 @@ const menuItems = [
 ];
 
 export default function AppLayout() {
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const [credential, setCredentialState] = useState(getCredential());
@@ -33,6 +35,20 @@ export default function AppLayout() {
 
   // 取第一段作为高亮 key（/models、/process-types、/deployments、/monitoring）
   const selectedKey = `/${location.pathname.split('/')[1] ?? 'models'}`;
+
+  // 401（凭据失效）软跳转：router 跳登录页而不是整页刷新，保留 SPA 状态
+  useEffect(() => {
+    const onExpired = () => {
+      setCredentialState(null);
+      message.warning('登录已失效，请重新登录');
+
+      const redirect = `${window.location.pathname}${window.location.search}`;
+      navigate(`/login?redirect=${encodeURIComponent(redirect)}`, { replace: true });
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, [message, navigate]);
 
   const handleLogout = () => {
     clearCredential();

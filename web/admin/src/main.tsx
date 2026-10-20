@@ -6,6 +6,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 
 import App from './App';
+import AppErrorBoundary from './components/AppErrorBoundary';
 
 import 'antd/dist/reset.css';
 
@@ -30,9 +31,12 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <QueryClientProvider client={queryClient}>
       <ConfigProvider locale={zhCN}>
         <AntdApp>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          {/* 在 ConfigProvider / AntdApp 之内：兜底页用到 antd 组件与主题 */}
+          <AppErrorBoundary>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </AppErrorBoundary>
         </AntdApp>
       </ConfigProvider>
     </QueryClientProvider>

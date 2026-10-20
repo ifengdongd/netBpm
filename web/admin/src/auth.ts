@@ -1,5 +1,9 @@
 /**
- * 管理端鉴权凭据：localStorage 存储 + 请求头生成 + 有效性探针。
+ * 管理端鉴权凭据：sessionStorage 存储 + 请求头生成 + 有效性探针。
+ *
+ * 存储权衡（11b 方案）：凭据存 sessionStorage 而非 localStorage —— 关闭浏览器标签页即失效，
+ * 缩短令牌暴露窗口；但 XSS 仍可在会话期内读取凭据，彻底防御需后端改 httpOnly Cookie 会话（11c）。
+ * 副作用：新开标签页需重新登录，属于安全与便利的取舍。
  *
  * 后端两种鉴权（见 src/NetBpm.Rest/Security/AuthenticationMiddleware.cs）：
  *   - API Key：请求头 X-Api-Key（可再带 X-User-Id / X-Tenant-Id 声明身份与租户）；
@@ -22,7 +26,7 @@ const STORAGE_KEY = 'netbpm.admin.credential.v1';
 
 export function getCredential(): Credential | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(STORAGE_KEY);
 
     if (raw === null) {
       return null;
@@ -45,11 +49,11 @@ export function getCredential(): Credential | null {
 }
 
 export function setCredential(credential: Credential): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(credential));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(credential));
 }
 
 export function clearCredential(): void {
-  localStorage.removeItem(STORAGE_KEY);
+  sessionStorage.removeItem(STORAGE_KEY);
 }
 
 /** 由凭据生成要附加到每个请求的鉴权头。 */
