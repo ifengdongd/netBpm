@@ -31,6 +31,14 @@ export interface PagedList<T> {
   pagination: PagedListPagination;
 }
 
+/** usePagedList 可选项。 */
+export interface PagedListOptions {
+  /** 初始页大小（默认 20）。 */
+  defaultPageSize?: number;
+  /** 轮询间隔毫秒数（自动刷新）；缺省 false 不轮询。 */
+  refetchInterval?: number | false;
+}
+
 /**
  * 分页列表 Hook：基于 TanStack Query 封装 items / total / page / loading 状态与加载错误提示。
  * <para>
@@ -47,9 +55,9 @@ export function usePagedList<T>(
   queryKey: readonly unknown[],
   fetcher: (page: PageState) => Promise<PagedResponse<T>>,
   onError: (error: Error) => void,
-  defaultPageSize = 20,
+  options?: PagedListOptions,
 ): PagedList<T> {
-  const [page, setPage] = useState<PageState>({ current: 1, pageSize: defaultPageSize });
+  const [page, setPage] = useState<PageState>({ current: 1, pageSize: options?.defaultPageSize ?? 20 });
 
   // 通过 ref 让错误提示始终拿到最新回调，而不重挂 useEffect
   const onErrorRef = useRef(onError);
@@ -63,6 +71,7 @@ export function usePagedList<T>(
     queryFn: () => fetcher(page),
     // 翻页时保留上一页数据，避免表格清空闪烁
     placeholderData: keepPreviousData,
+    refetchInterval: options?.refetchInterval ?? false,
   });
 
   // 查询失败时提示一次

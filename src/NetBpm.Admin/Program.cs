@@ -1,3 +1,4 @@
+using Microsoft.OpenApi;
 using NetBpm.Admin.Endpoints;
 using NetBpm.Admin.Storage;
 using NetBpm.Persistence;
@@ -12,7 +13,19 @@ using NetBpm.Workflow.Hosting;
 var builder = WebApplication.CreateBuilder(args);
 
 // OpenAPI
-builder.Services.AddOpenApi();
+// OpenAPI 文档：修复 System.Text.Json 对日期与数字的 schema 弱化（OpenAPI 3.1 + JSON Schema）。
+//   - DateTime 只输出 format: date-time 而缺 type（dotnet/aspnetcore 已知问题）→ 前端生成 unknown；
+//   - int 因 JsonNumberHandling 输出 ["integer","string"] 联合 → 前端生成 number | string。
+// 两者都会让 openapi-typescript 产出不可用的契约类型，这里统一收敛。
+builder.Services.AddOpenApi(options =>
+{
+    options.AddSchemaTransformer((schema, _, _) =>
+    {
+        NormalizeOpenApiSchemaTypes(schema);
+
+        return Task.CompletedTask;
+    });
+});
 
 // 请求级身份上下文（由鉴权中间件填充）
 builder.Services.AddScoped<RequestContext>();
@@ -125,6 +138,41 @@ if (netBpmOptions.UsesDatabase)
 }
 
 app.Run();
+
+/// <summary>
+/// 收敛 System.Text.Json 生成的 OpenAPI schema 类型标注：
+///   - <c>format: date-time / date</c> 但缺 <c>type</c> → 补 <c>string</c>（保留 Null 标志）；
+///   - <c>format: int32 / int64</c> 且类型为 [integer, string] 联合 → 收敛为 <c>integer</c>。
+/// 递归覆盖属性与数组元素；嵌套对象通过 $ref 引用，会各自进入本转换器。
+/// </summary>
+static void NormalizeOpenApiSchemaTypes(OpenApiSchema schema)
+{
+    const JsonSchemaType nullableFlag = JsonSchemaType.Null;
+
+    if (schema.Format is "int32" or "int64"
+        && schema.Type is { } intType
+        && intType.HasFlag(JsonSchemaType.Integer))
+    {
+        var nullable = intType.HasFlag(nullableFlag) ? nullableFlag : 0;
+        schema.Type = JsonSchemaType.Integer | nullable;
+    }
+
+    if (schema.Format is "date-time" or "date")
+    {
+        var nullable = schema.Type is { } dateType && dateType.HasFlag(nullableFlag) ? nullableFlag : 0;
+        schema.Type = JsonSchemaType.String | nullable;
+    }
+
+    foreach (var property in schema.Properties?.Values.OfType<OpenApiSchema>() ?? Enumerable.Empty<OpenApiSchema>())
+    {
+        NormalizeOpenApiSchemaTypes(property);
+    }
+
+    if (schema.Items is OpenApiSchema items)
+    {
+        NormalizeOpenApiSchemaTypes(items);
+    }
+}
 
 /// <summary>供集成测试使用的可见性标记。</summary>
 public partial class Program;

@@ -2,11 +2,11 @@
  * 与后端 DTO 一一对应的 TypeScript 契约（见 src/NetBpm.Admin/Contracts.cs 与
  * src/NetBpm.Rest/Contracts.cs）。字段命名保持后端 JSON 的驼峰形式。
  *
- * ⚠️ 契约参照：`npm run api:gen` 可从运行中的宿主（`dotnet run --project src/NetBpm.Admin`）
- * 拉取 OpenAPI 文档生成 `./schema.d.ts`（全量 paths + schemas）。
- * 注意：生成的 schema 因 Minimal API 的 IResult 弱返回链路存在类型弱化
- * （DateTime → unknown、int → number | string、全字段可选），
- * 不能直接替换本文件的手写类型，仅作后端 DTO 漂移时的比对参照。
+ * 🔍 契约参照：`npm run api:gen` 从运行中的宿主（`dotnet run --project src/NetBpm.Admin`）
+ * 拉取 OpenAPI 文档生成 `./schema.d.ts`（全量 paths + schemas）。后端在 AddOpenApi 里用
+ * schema transformer 修复了 STJ 的日期 / 数字弱化，因此字段类型（string / number / boolean）
+ * 是准确的；但 STJ 默认不把非空属性标入 required，生成类型全字段可选——比手写契约更松。
+ * 所以本文件保持手写强契约，schema.d.ts 用于比对后端 DTO 漂移（改了后端字段就 diff 一下）。
  */
 
 // ─────────────────────────── 管理端 · 流程模型 ───────────────────────────

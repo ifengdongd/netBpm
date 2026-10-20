@@ -164,8 +164,8 @@ export interface paths {
                 query?: {
                     tenantId?: string;
                     key?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -204,8 +204,8 @@ export interface paths {
             parameters: {
                 query?: {
                     tenantId?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -357,8 +357,8 @@ export interface paths {
             parameters: {
                 query?: {
                     tenantId?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -476,10 +476,10 @@ export interface paths {
                     startUserId?: string;
                     tenantId?: string;
                     isActive?: boolean;
-                    startedAfter?: unknown;
-                    startedBefore?: unknown;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    startedAfter?: string;
+                    startedBefore?: string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -790,10 +790,10 @@ export interface paths {
                     processDefinitionId?: string;
                     taskDefinitionKey?: string;
                     suspended?: boolean;
-                    dueBefore?: unknown;
+                    dueBefore?: string;
                     tenantId?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -1350,7 +1350,7 @@ export interface paths {
                     candidateGroup?: string;
                     processDefinitionId?: string;
                     tenantId?: string;
-                    timeZoneOffsetMinutes?: number | string;
+                    timeZoneOffsetMinutes?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1721,13 +1721,13 @@ export interface paths {
                     startUserId?: string;
                     finished?: boolean;
                     deleted?: boolean;
-                    startedAfter?: unknown;
-                    startedBefore?: unknown;
-                    endedAfter?: unknown;
-                    endedBefore?: unknown;
+                    startedAfter?: string;
+                    startedBefore?: string;
+                    endedAfter?: string;
+                    endedBefore?: string;
                     tenantId?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -1839,11 +1839,11 @@ export interface paths {
                     onlyFinished?: boolean;
                     processDefinitionId?: string;
                     taskDefinitionKey?: string;
-                    finishedAfter?: unknown;
-                    finishedBefore?: unknown;
+                    finishedAfter?: string;
+                    finishedBefore?: string;
                     tenantId?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -1925,11 +1925,11 @@ export interface paths {
                     onlyFinished?: boolean;
                     processDefinitionId?: string;
                     taskDefinitionKey?: string;
-                    finishedAfter?: unknown;
-                    finishedBefore?: unknown;
+                    finishedAfter?: string;
+                    finishedBefore?: string;
                     tenantId?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -2079,8 +2079,8 @@ export interface paths {
             parameters: {
                 query?: {
                     keyword?: string;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -2221,7 +2221,7 @@ export interface paths {
         delete: {
             parameters: {
                 query?: {
-                    keepLatest?: number | string;
+                    keepLatest?: number;
                 };
                 header?: never;
                 path: {
@@ -2512,10 +2512,10 @@ export interface paths {
                     processInstanceId?: string;
                     tenantId?: string;
                     success?: boolean;
-                    since?: unknown;
-                    until?: unknown;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    since?: string;
+                    until?: string;
+                    firstResult?: number;
+                    maxResults?: number;
                     envelope?: boolean;
                 };
                 header?: never;
@@ -2540,7 +2540,7 @@ export interface paths {
         delete: {
             parameters: {
                 query?: {
-                    before?: unknown;
+                    before?: string;
                     tenantId?: string;
                 };
                 header?: never;
@@ -2576,8 +2576,8 @@ export interface paths {
             parameters: {
                 query?: {
                     tenantId?: string;
-                    timeZoneOffsetMinutes?: number | string;
-                    windowDays?: number | string;
+                    timeZoneOffsetMinutes?: number;
+                    windowDays?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2656,9 +2656,9 @@ export interface paths {
                     tenantId?: string;
                     businessKey?: string;
                     processInstanceId?: string;
-                    archivedAfter?: unknown;
-                    firstResult?: number | string;
-                    maxResults?: number | string;
+                    archivedAfter?: string;
+                    firstResult?: number;
+                    maxResults?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2727,7 +2727,7 @@ export interface components {
         AdminAuditActionCount: {
             action: string;
             /** Format: int32 */
-            count: number | string;
+            count: number;
         };
         AdminAuditItem: {
             id: string;
@@ -2742,50 +2742,50 @@ export interface components {
             success: boolean;
             error: null | string;
             /** Format: date-time */
-            createdAt: unknown;
+            createdAt: string;
         };
         AdminAuditPurgeResponse: {
             /** Format: int32 */
-            removed: number | string;
+            removed: number;
             /** Format: date-time */
-            before: unknown;
+            before: string;
             tenantId: null | string;
         };
         AdminMetricsResponse: {
             /** Format: date-time */
-            generatedAt: unknown;
+            generatedAt: string;
             tenantId: null | string;
             /** Format: int32 */
-            auditWindowDays: number | string;
+            auditWindowDays: number;
             /** Format: int32 */
-            runningProcessInstances: number | string;
+            runningProcessInstances: number;
             /** Format: int32 */
-            processDefinitions: number | string;
+            processDefinitions: number;
             /** Format: int32 */
-            historicProcessInstances: number | string;
+            historicProcessInstances: number;
             /** Format: int32 */
-            finishedProcessInstances: number | string;
+            finishedProcessInstances: number;
             /** Format: int32 */
-            deletedProcessInstances: number | string;
+            deletedProcessInstances: number;
             /** Format: int32 */
-            pendingTasks: null | number | string;
+            pendingTasks: null | number;
             /** Format: int32 */
-            overdueTasks: null | number | string;
+            overdueTasks: null | number;
             /** Format: int32 */
-            dueTodayTasks: null | number | string;
+            dueTodayTasks: null | number;
             pendingTasksByProcessKey: null | {
-                [key: string]: number | string;
+                [key: string]: number;
             };
             /** Format: int32 */
-            archivedInstances: null | number | string;
+            archivedInstances: null | number;
             auditActions: components["schemas"]["AdminAuditActionCount"][];
         };
         ArchiveHistoryRequest: {
             /** Format: date-time */
-            before?: unknown;
+            before?: string;
             dryRun?: boolean;
             /** Format: int32 */
-            batchSize?: null | number | string;
+            batchSize?: null | number;
             tenantId?: null | string;
         };
         BatchDeleteInstancesRequest: {
@@ -2799,11 +2799,11 @@ export interface components {
         };
         BatchResultResponse: {
             /** Format: int32 */
-            total: number | string;
+            total: number;
             /** Format: int32 */
-            succeeded: number | string;
+            succeeded: number;
             /** Format: int32 */
-            failed: number | string;
+            failed: number;
             items: components["schemas"]["BatchItemResult"][];
         };
         BatchTaskAssigneeRequest: {
@@ -2818,15 +2818,15 @@ export interface components {
             bpmnXml?: string;
             svg?: null | string;
             /** Format: date-time */
-            createTime?: unknown;
+            createTime?: string;
             /** Format: date-time */
-            modifyTime?: unknown;
+            modifyTime?: string;
         };
         BpmnModelRevisionDetail: {
             id?: string;
             modelId?: string;
             /** Format: int32 */
-            revision?: number | string;
+            revision?: number;
             name?: string;
             processKey?: string;
             description?: null | string;
@@ -2835,20 +2835,20 @@ export interface components {
             action?: string;
             operator?: null | string;
             /** Format: date-time */
-            createdAt?: unknown;
+            createdAt?: string;
         };
         BpmnModelRevisionSummary: {
             id?: string;
             modelId?: string;
             /** Format: int32 */
-            revision?: number | string;
+            revision?: number;
             name?: string;
             processKey?: string;
             description?: null | string;
             action?: string;
             operator?: null | string;
             /** Format: date-time */
-            createdAt?: unknown;
+            createdAt?: string;
         };
         BpmnModelSummary: {
             id?: string;
@@ -2856,18 +2856,18 @@ export interface components {
             processKey?: string;
             description?: null | string;
             /** Format: date-time */
-            modifyTime?: unknown;
+            modifyTime?: string;
         };
         ClaimTaskRequest: {
             userId?: null | string;
             /** Format: int32 */
-            expectedRevision?: null | number | string;
+            expectedRevision?: null | number;
             unclaim?: null | boolean;
         };
         CompleteTaskRequest: {
             variables?: null | Record<string, never>;
             /** Format: int32 */
-            expectedRevision?: null | number | string;
+            expectedRevision?: null | number;
         };
         DelegateTaskRequest: {
             userId?: null | string;
@@ -2877,7 +2877,7 @@ export interface components {
             key: string;
             name: null | string;
             /** Format: int32 */
-            version: number | string;
+            version: number;
             resourceName: null | string;
             isSuspended: boolean;
         };
@@ -2889,7 +2889,7 @@ export interface components {
             deploymentId: string;
             name: null | string;
             /** Format: date-time */
-            deployTime: unknown;
+            deployTime: string;
             tenantId: null | string;
             definitions: components["schemas"]["DeploymentDefinitionResponse"][];
         };
@@ -2897,7 +2897,7 @@ export interface components {
             processDefinitionId: string;
             processDefinitionKey: string;
             /** Format: int32 */
-            version: number | string;
+            version: number;
             deploymentId: string;
             resourceName: string;
             deploymentName?: null | string;
@@ -2940,9 +2940,9 @@ export interface components {
             taskId: null | string;
             assignee: null | string;
             /** Format: date-time */
-            startTime: unknown;
+            startTime: string;
             /** Format: date-time */
-            endTime: unknown;
+            endTime: string;
             isActive: boolean;
         };
         HistoricProcessInstanceResponse: {
@@ -2954,11 +2954,11 @@ export interface components {
             startActivityId: null | string;
             endActivityId: null | string;
             /** Format: date-time */
-            startTime: unknown;
+            startTime: string;
             /** Format: date-time */
-            endTime: unknown;
+            endTime: string;
             /** Format: int64 */
-            durationInMillis: null | number | string;
+            durationInMillis: null | number;
             deleteReason: null | string;
             isRunning: boolean;
             tenantId?: null | string;
@@ -2972,14 +2972,14 @@ export interface components {
             assignee: null | string;
             owner: null | string;
             /** Format: int32 */
-            priority: null | number | string;
+            priority: null | number;
             formKey: null | string;
             /** Format: date-time */
-            startTime: unknown;
+            startTime: string;
             /** Format: date-time */
-            endTime: unknown;
+            endTime: string;
             /** Format: int64 */
-            durationInMillis: null | number | string;
+            durationInMillis: null | number;
             deleteReason: null | string;
             tenantId?: null | string;
         };
@@ -2990,20 +2990,20 @@ export interface components {
             executionId: null | string;
             taskId: null | string;
             /** Format: date-time */
-            createTime: unknown;
+            createTime: string;
             /** Format: date-time */
-            lastUpdatedTime: unknown;
+            lastUpdatedTime: string;
         };
         HistoryArchivePage: {
             items: components["schemas"]["HistoryArchiveSummary"][];
             /** Format: int32 */
-            total: number | string;
+            total: number;
         };
         HistoryArchiveResult: {
             /** Format: int32 */
-            archivedCount: number | string;
+            archivedCount: number;
             /** Format: int32 */
-            remainingCount: number | string;
+            remainingCount: number;
             dryRun: boolean;
             processInstanceIds: string[];
         };
@@ -3015,11 +3015,11 @@ export interface components {
             businessKey: null | string;
             startUserId: null | string;
             /** Format: date-time */
-            startTime: unknown;
+            startTime: string;
             /** Format: date-time */
-            endTime: unknown;
+            endTime: string;
             /** Format: date-time */
-            archivedAt: unknown;
+            archivedAt: string;
             archivedBy: null | string;
         };
         IdentityLinkResponse: {
@@ -3047,7 +3047,7 @@ export interface components {
             fromActivityId: string;
             toActivityId: string;
             /** Format: int32 */
-            executionCount: number | string;
+            executionCount: number;
             recreateTask: boolean;
         };
         MigrationPlanResponse: {
@@ -3056,7 +3056,7 @@ export interface components {
             targetProcessDefinitionId: string;
             activities: components["schemas"]["MigrationActivityResponse"][];
             /** Format: int32 */
-            tasksToCancel: number | string;
+            tasksToCancel: number;
             warnings: string[];
             applied: boolean;
         };
@@ -3071,43 +3071,43 @@ export interface components {
             reason: null | string;
             userId: null | string;
             /** Format: date-time */
-            migratedAt: unknown;
+            migratedAt: string;
         };
         ModelHistoryPruneResponse: {
             /** Format: int32 */
-            removed: number | string;
+            removed: number;
             modelId: string;
             /** Format: int32 */
-            keepLatest: number | string;
+            keepLatest: number;
         };
         PagedResponseOfAdminAuditItem: {
             items: components["schemas"]["AdminAuditItem"][];
             /** Format: int32 */
-            total: number | string;
+            total: number;
             /** Format: int32 */
-            firstResult: number | string;
+            firstResult: number;
             /** Format: int32 */
-            maxResults: number | string;
+            maxResults: number;
         };
         PagedResponseOfBpmnModelSummary: {
             items: components["schemas"]["BpmnModelSummary"][];
             /** Format: int32 */
-            total: number | string;
+            total: number;
             /** Format: int32 */
-            firstResult: number | string;
+            firstResult: number;
             /** Format: int32 */
-            maxResults: number | string;
+            maxResults: number;
         };
         ProcessDefinitionResponse: {
             processDefinitionId: string;
             key: string;
             name: null | string;
             /** Format: int32 */
-            version: number | string;
+            version: number;
             deploymentId: string;
             tenantId: string;
             /** Format: date-time */
-            deployTime: unknown;
+            deployTime: string;
             /** @default false */
             isSuspended: boolean;
         };
@@ -3120,7 +3120,7 @@ export interface components {
             name: null | string;
             startUserId: null | string;
             /** Format: date-time */
-            startTime: unknown;
+            startTime: string;
             isActive: boolean;
             isSuspended: boolean;
             tenantId: null | string;
@@ -3133,12 +3133,12 @@ export interface components {
             viewUrl?: string;
             approveUrl?: string;
             /** Format: int32 */
-            sortOrder?: number | string;
+            sortOrder?: number;
             enabled?: boolean;
             /** Format: date-time */
-            createTime?: unknown;
+            createTime?: string;
             /** Format: date-time */
-            modifyTime?: unknown;
+            modifyTime?: string;
         };
         SaveBpmnModelRequest: {
             name?: string;
@@ -3153,7 +3153,7 @@ export interface components {
             viewUrl?: string;
             approveUrl?: string;
             /** Format: int32 */
-            sortOrder?: number | string;
+            sortOrder?: number;
             enabled?: boolean;
         };
         SetAssigneeRequest: {
@@ -3189,15 +3189,15 @@ export interface components {
             formKey: null | string;
             category: null | string;
             /** Format: int32 */
-            priority: number | string;
+            priority: number;
             /** Format: int32 */
-            revision: number | string;
+            revision: number;
             /** Format: date-time */
-            createTime: unknown;
+            createTime: string;
             /** Format: date-time */
-            dueDate: unknown;
+            dueDate: string;
             /** Format: date-time */
-            claimTime: unknown;
+            claimTime: string;
             tenantId: null | string;
             isSuspended: boolean;
             delegationState: null | string;
@@ -3214,33 +3214,33 @@ export interface components {
             executionId: null | string;
             formKey: null | string;
             /** Format: int32 */
-            priority: number | string;
+            priority: number;
             /** Format: int32 */
-            revision: number | string;
+            revision: number;
             /** Format: date-time */
-            createTime: unknown;
+            createTime: string;
             /** Format: date-time */
-            dueDate: unknown;
+            dueDate: string;
             /** Format: date-time */
-            claimTime: unknown;
+            claimTime: string;
             tenantId?: null | string;
         };
         TaskStatsResponse: {
             /** Format: int32 */
-            total: number | string;
+            total: number;
             /** Format: int32 */
-            overdue: number | string;
+            overdue: number;
             /** Format: int32 */
-            dueToday: number | string;
+            dueToday: number;
             byDefinition: {
-                [key: string]: number | string;
+                [key: string]: number;
             };
         };
         UpdateTaskRequest: {
             name?: null | string;
             description?: null | string;
             /** Format: int32 */
-            priority?: null | number | string;
+            priority?: null | number;
             dueDate?: unknown;
             category?: null | string;
             owner?: null | string;

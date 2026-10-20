@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 // 开发期把 /api 代理到 NetBpm.Admin 宿主（引擎 REST + 管理端端点都在同一个宿主）。
 // 目标地址默认 http://localhost:5081，可用环境变量 NETBPM_API_TARGET 覆盖，例如：
@@ -17,6 +17,11 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  // vitest 单元测试：jsdom 环境（auth.ts 依赖 localStorage；usePagedList 用 renderHook）
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
   },
   build: {
     // 与设计器共同落在管理宿主 wwwroot：设计器先构建到 wwwroot/designer，

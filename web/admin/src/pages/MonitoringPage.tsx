@@ -11,6 +11,7 @@ import {
   Row,
   Space,
   Statistic,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -42,10 +43,15 @@ export default function MonitoringPage() {
   const queryClient = useQueryClient();
   const [actionForm] = Form.useForm<{ assignee?: string; variables?: string }>();
 
+  // 自动刷新：开启后统计 + 三个列表每 30s 轮询（抽屉详情跟随 invalidate 联动，不单独轮询）
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const refetchInterval = autoRefresh ? 30_000 : false;
+
   // 统计
   const statsQuery = useQuery({
     queryKey: ['runtime', 'task-stats'],
     queryFn: () => runtimeApi.taskStats({ timeZoneOffsetMinutes: -new Date().getTimezoneOffset() }),
+    refetchInterval,
   });
   const stats = statsQuery.data ?? null;
 
@@ -64,6 +70,7 @@ export default function MonitoringPage() {
         maxResults: page.pageSize,
       }),
     (error) => message.error(`加载运行实例失败：${error.message}`),
+    { refetchInterval },
   );
 
   const taskList = usePagedList<TaskResponse>(
@@ -74,6 +81,7 @@ export default function MonitoringPage() {
         maxResults: page.pageSize,
       }),
     (error) => message.error(`加载待办任务失败：${error.message}`),
+    { refetchInterval },
   );
 
   const historicList = usePagedList<HistoricProcessInstance>(
@@ -84,6 +92,7 @@ export default function MonitoringPage() {
         maxResults: page.pageSize,
       }),
     (error) => message.error(`加载历史实例失败：${error.message}`),
+    { refetchInterval },
   );
 
   // 抽屉 / 弹窗
@@ -376,9 +385,17 @@ export default function MonitoringPage() {
         <Typography.Text type="secondary">
           运行实例、待办任务与历史实例的实时监控；支持实例挂起/激活/跳转、任务认领/转办/完成。
         </Typography.Text>
-        <Button icon={<ReloadOutlined />} onClick={refreshAll}>
-          刷新
-        </Button>
+        <Space>
+          <Space size={4}>
+            <Switch checked={autoRefresh} onChange={setAutoRefresh} size="small" />
+            <Typography.Text type={autoRefresh ? undefined : 'secondary'} style={{ fontSize: 13 }}>
+              自动刷新（30s）
+            </Typography.Text>
+          </Space>
+          <Button icon={<ReloadOutlined />} onClick={refreshAll}>
+            刷新
+          </Button>
+        </Space>
       </Space>
 
       <Row gutter={16}>

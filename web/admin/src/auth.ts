@@ -180,6 +180,17 @@ function readClaimSet(payload: Record<string, unknown>, ...keys: string[]): stri
   for (const key of keys) {
     const value = payload[key];
 
+    // JSON 数组写法（scp: ["a","b"]）——之前注释声称支持但实现漏掉了
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string' && item.trim().length > 0) {
+          values.add(item.trim());
+        }
+      }
+
+      continue;
+    }
+
     if (typeof value !== 'string') {
       continue;
     }

@@ -558,6 +558,22 @@ npm test         # 设计器单元测试
 两套示例：`order-process.bpmn20.xml`（订单审批）与 `leave-process.bpmn20.xml`（请假审批）。
 流程设计指引见 [`docs/process-design-guide.md`](docs/process-design-guide.md)。
 
+### 管理控制台前端（web/admin）
+
+```bash
+cd web/admin
+npm install
+npm run dev       # 开发（vite 代理 /api 到 localhost:5081，可用 NETBPM_API_TARGET 覆盖）
+npm run build     # 类型检查 + 构建，产物输出到 src/NetBpm.Admin/wwwroot/
+npm run lint      # ESLint
+npm test          # vitest 单元测试
+```
+
+⚠️ `src/NetBpm.Admin/wwwroot/` 是**构建产物，不入库**（设计器与管理台共用该目录，
+分别由 `web/designer` 与 `web/admin` 的 `npm run build` 产出）。首次拉取代码或清理后，
+需先在两个前端目录各执行一次 `npm run build` 再启动宿主，否则页面 404。
+CI（`.github/workflows/ci.yml`）会在 Build 前完成两段前端构建。
+
 ### 引擎启动步骤（其它 .NET 项目接入）
 
 1. **建库**：执行 `db/mysql/` 或 `db/sqlserver/` 建表脚本（分层与顺序见 [`db/README.md`](db/README.md)；
