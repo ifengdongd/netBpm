@@ -31,6 +31,9 @@
 --    workflow_type.id = instances.workflow_type_id（实例登记的类型 id）。
 --    name 必须与 BPMN process/@id（流程 key）一致；id 建议用设计器 modelId。
 --
+--  流程模型表（bpmn_model）：管理端流程设计器的模型落点（BPMN XML 编辑源），
+--    与部署结果（ACT_RE_PROCDEF）分离 —— 模型可反复编辑，部署才产生新版本。
+--
 --  执行顺序：0001_create_engine_schema.sql → 0002_create_business_tables.sql（本文件）
 -- ============================================================================
 
@@ -129,6 +132,23 @@ if not exists (select 1 from workflow_type where id = '3a7c2f14-8d52-4b6e-9a01-c
     values (1, '3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7', 'leave_process', N'请假申请流程', '/bill.html?process=leave_process&businessId={businessId}', '/approve.html?process=leave_process&taskId={taskId}', 2, 1, getutcdate());
 go
 
+
+-- ─────────────────────────── 流程模型表（管理端设计器） ───────────────────────────
+
+create table bpmn_model (
+    id nvarchar(64) not null,
+    tenant_id bigint not null,
+    name nvarchar(200) not null,
+    process_key nvarchar(50) not null,
+    description nvarchar(500),
+    bpmn_xml nvarchar(max) not null,
+    svg nvarchar(max),
+    create_time datetime not null,
+    modify_time datetime,
+    constraint pk_bpmn_model primary key clustered (id)
+);
+
+create index ix_bpmn_model_key on bpmn_model (tenant_id, process_key);
 
 -- ─────────────────────────── 表与列注释（扩展属性 MS_Description） ───────────────────────────
 
@@ -312,6 +332,38 @@ exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
     @level2type = N'COLUMN', @level2name = N'create_time';
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
     @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+    @level2type = N'COLUMN', @level2name = N'modify_time';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程模型表（管理端流程设计器的模型落点；BPMN XML 的编辑源，部署后产生 ACT_RE_PROCDEF 版本）',
+    @level0type = N'SCHEMA', @level0name = N'dbo',
+    @level1type = N'TABLE', @level1name = N'bpmn_model';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'模型 ID（设计器 modelId，GUID 字符串）',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'id';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户 id',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'tenant_id';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程名称（BPMN process/@name）',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'name';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程 key（= BPMN process/@id，如 order_process）',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'process_key';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程描述',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'description';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'BPMN 2.0 XML 内容',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'bpmn_xml';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图 SVG 预览（前端导出，可选）',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'svg';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+    @level2type = N'COLUMN', @level2name = N'create_time';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
     @level2type = N'COLUMN', @level2name = N'modify_time';
 
 go

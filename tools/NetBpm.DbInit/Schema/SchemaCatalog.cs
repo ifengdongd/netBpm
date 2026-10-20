@@ -678,6 +678,26 @@ internal static class SchemaCatalog
         ["id"],
         []);
 
+    // 管理端 · 流程模型表（设计器草稿/模型的服务端落点，随 0002 业务表一起建）
+    internal static readonly TableDef BpmnModelTable = new(
+        "bpmn_model",
+        "流程模型表（管理端流程设计器的模型落点；BPMN XML 的编辑源，部署后产生 ACT_RE_PROCDEF 版本）",
+        [
+            C("id", ColType.Varchar, 64, false, comment: "模型 ID（设计器 modelId，GUID 字符串）"),
+            C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户 id"),
+            C("name", ColType.Varchar, 200, false, comment: "流程名称（BPMN process/@name）"),
+            C("process_key", ColType.Varchar, 50, false, comment: "流程 key（= BPMN process/@id，如 order_process）"),
+            C("description", ColType.Varchar, 500, comment: "流程描述"),
+            C("bpmn_xml", ColType.LongText, nullable: false, comment: "BPMN 2.0 XML 内容"),
+            C("svg", ColType.LongText, comment: "流程图 SVG 预览（前端导出，可选）"),
+            C("create_time", ColType.DateTime, nullable: false, comment: "创建时间"),
+            C("modify_time", ColType.DateTime, comment: "最后修改时间"),
+        ],
+        ["id"],
+        [new IndexDef("ix_bpmn_model_key", ["tenant_id", "process_key"])],
+        [], [],
+        EngineCharset: false);
+
     // 0010 HTTP 幂等键表（幂等，无表注释）
     internal static readonly TableDef IdempotencyTable = new(
         "ACT_IDEMPOTENCY",

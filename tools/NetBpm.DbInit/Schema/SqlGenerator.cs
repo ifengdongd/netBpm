@@ -117,9 +117,17 @@ internal static class SqlGenerator
         lines.AddRange(BlankSection("种子数据：订单审批 / 请假审批两条流程"));
         lines.AddRange(RenderSeed(SchemaCatalog.WorkflowTypeSeeds, dialect, idempotent: false));
 
+        lines.AddRange(BlankSection("流程模型表（管理端设计器）"));
+        lines.AddRange(RenderCreateTable(SchemaCatalog.BpmnModelTable, dialect, idempotent: false));
+        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.BpmnModelTable, dialect, idempotent: false));
+
         if (dialect == Dialect.SqlServer)
         {
-            var tables = new List<TableDef>(SchemaCatalog.InstanceTables) { SchemaCatalog.WorkflowTypeTable };
+            var tables = new List<TableDef>(SchemaCatalog.InstanceTables)
+            {
+                SchemaCatalog.WorkflowTypeTable,
+                SchemaCatalog.BpmnModelTable,
+            };
             lines.AddRange(RenderTableComments(tables));
             lines.Add("go");
         }
@@ -662,6 +670,9 @@ internal static class SqlGenerator
         "--    流程的 Id / Name / Describe / ViewUrl / ApproveUrl 配置在表里，系统启动时加载。",
         "--    workflow_type.id = instances.workflow_type_id（实例登记的类型 id）。",
         "--    name 必须与 BPMN process/@id（流程 key）一致；id 建议用设计器 modelId。",
+        "--",
+        "--  流程模型表（bpmn_model）：管理端流程设计器的模型落点（BPMN XML 编辑源），",
+        "--    与部署结果（ACT_RE_PROCDEF）分离 —— 模型可反复编辑，部署才产生新版本。",
         "--",
         "--  执行顺序：0001_create_engine_schema.sql → 0002_create_business_tables.sql（本文件）",
         "-- ============================================================================",

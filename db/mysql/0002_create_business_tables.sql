@@ -31,6 +31,9 @@
 --    workflow_type.id = instances.workflow_type_id（实例登记的类型 id）。
 --    name 必须与 BPMN process/@id（流程 key）一致；id 建议用设计器 modelId。
 --
+--  流程模型表（bpmn_model）：管理端流程设计器的模型落点（BPMN XML 编辑源），
+--    与部署结果（ACT_RE_PROCDEF）分离 —— 模型可反复编辑，部署才产生新版本。
+--
 --  执行顺序：0001_create_engine_schema.sql → 0002_create_business_tables.sql（本文件）
 -- ============================================================================
 
@@ -123,4 +126,21 @@ create table workflow_type (
 insert into workflow_type (tenant_id, id, name, `describe`, view_url, approve_url, sort_order, enabled, create_time)
 values (1, '02830358-46ef-40e5-b3b9-4d5c4eb23f9f', 'order_process', '订单审批流程', '/bill.html?process=order_process&businessId={businessId}', '/approve.html?process=order_process&taskId={taskId}', 1, 1, utc_timestamp()),
        (1, '3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7', 'leave_process', '请假申请流程', '/bill.html?process=leave_process&businessId={businessId}', '/approve.html?process=leave_process&taskId={taskId}', 2, 1, utc_timestamp());
+
+
+-- ─────────────────────────── 流程模型表（管理端设计器） ───────────────────────────
+
+create table bpmn_model (
+    id varchar(64) not null comment '模型 ID（设计器 modelId，GUID 字符串）',
+    tenant_id bigint not null comment '多租户 id',
+    name varchar(200) not null comment '流程名称（BPMN process/@name）',
+    process_key varchar(50) not null comment '流程 key（= BPMN process/@id，如 order_process）',
+    description varchar(500) comment '流程描述',
+    bpmn_xml text not null comment 'BPMN 2.0 XML 内容',
+    svg text comment '流程图 SVG 预览（前端导出，可选）',
+    create_time datetime not null comment '创建时间',
+    modify_time datetime comment '最后修改时间',
+    primary key (id),
+    index ix_bpmn_model_key (tenant_id, process_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='流程模型表（管理端流程设计器的模型落点；BPMN XML 的编辑源，部署后产生 ACT_RE_PROCDEF 版本）';
 
