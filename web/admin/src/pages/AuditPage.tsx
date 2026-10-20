@@ -17,14 +17,13 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { auditApi } from '../api';
 import type { AuditQuery } from '../api';
 import type { AdminAuditItem } from '../api/types';
+import { usePagedList, type PageState } from '../hooks/usePagedList';
 import { auditActionColor, formatTime } from '../utils';
-
-const DEFAULT_PAGE_SIZE = 20;
 
 /** 常用动作（`AutoComplete` 仍允许手填，后端新增动作不需要改前端）。 */
 const ACTION_OPTIONS = [
@@ -51,11 +50,6 @@ const ACTION_OPTIONS = [
   'audit.purge',
 ].map((value) => ({ value }));
 
-interface PageState {
-  current: number;
-  pageSize: number;
-}
-
 interface FilterValues {
   actor?: string;
   action?: string;
@@ -76,10 +70,11 @@ export default function AuditPage() {
   const { message } = App.useApp();
   const [form] = Form.useForm<FilterValues>();
 
-  const [items, setItems] = useState<AdminAuditItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState<PageState>({ current: 1, pageSize: DEFAULT_PAGE_SIZE });
-  const [loading, setLoading] = useState(false);
+  // 分页列表状态与加载由 usePagedList 统一管理（含过期响应防护）
+  const auditList = usePagedList<AdminAuditItem>(
+    (target) => auditApi.list(buildQuery(target)),
+    (error) => message.error(`加载审计失败：${error.message}`),
+  );
 
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [purgeBefore, setPurgeBefore] = useState<Dayjs>(() => dayjs().subtract(30, 'day'));
@@ -105,46 +100,22 @@ export default function AuditPage() {
     [form],
   );
 
-  const load = useCallback(
-    async (target: PageState) => {
-      setLoading(true);
+  const { page, setPage, reload } = auditList;
 
-      try {
-        const result = await auditApi.list(buildQuery(target));
-
-        setItems(result.items);
-        setTotal(result.total);
-      } catch (error) {
-        message.error(`加载审计失败：${(error as Error).message}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [buildQuery, message],
-  );
-
-  useEffect(() => {
-    void load(page);
-  }, [load, page]);
-
-  const onSearch = () => {
+  const resetToFirstPage = () => {
     if (page.current === 1) {
-      void load(page);
+      reload();
       return;
     }
 
     setPage({ ...page, current: 1 });
   };
 
+  const onSearch = resetToFirstPage;
+
   const onReset = () => {
     form.resetFields();
-
-    if (page.current === 1) {
-      void load(page);
-      return;
-    }
-
-    setPage({ ...page, current: 1 });
+    resetToFirstPage();
   };
 
   const onPurge = async () => {
@@ -155,7 +126,7 @@ export default function AuditPage() {
 
       message.success(`已清理 ${result.removed} 条（早于 ${formatTime(result.before)}）`);
       setPurgeOpen(false);
-      void load(page);
+      reload();
     } catch (error) {
       message.error(`清理失败：${(error as Error).message}`);
     } finally {
@@ -217,7 +188,7 @@ export default function AuditPage() {
       title="管理动作审计"
       extra={(
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => void load(page)}>
+          <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
           <Button danger icon={<DeleteOutlined />} onClick={() => setPurgeOpen(true)}>
@@ -278,22 +249,12 @@ export default function AuditPage() {
       <Table<AdminAuditItem>
         rowKey="id"
         size="small"
-        loading={loading}
+        loading={auditList.loading}
         columns={columns}
-        dataSource={items}
+        dataSource={auditList.items}
         pagination={{
-          current: page.current,
-          pageSize: page.pageSize,
-          total,
-          showSizeChanger: true,
+          ...auditList.pagination,
           pageSizeOptions: [20, 50, 100],
-          showTotal: (count) => `共 ${count} 条`,
-        }}
-        onChange={(pagination) => {
-          setPage({
-            current: pagination.current ?? 1,
-            pageSize: pagination.pageSize ?? DEFAULT_PAGE_SIZE,
-          });
         }}
         expandable={{
           rowExpandable: (row) => Boolean(row.detail || row.error),

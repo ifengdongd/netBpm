@@ -12,6 +12,7 @@ public sealed class ProcessTypeStore
     private readonly IDbConnectionFactory _connections;
     private readonly long _tenantId;
     private readonly string _describe;
+    private readonly string _selectProjection;
 
     public ProcessTypeStore(IDbConnectionFactory connections, IConfiguration configuration)
     {
@@ -19,8 +20,21 @@ public sealed class ProcessTypeStore
         ArgumentNullException.ThrowIfNull(configuration);
 
         _connections = connections;
-        _tenantId = configuration.GetValue("NetBpm:AdminTenantId", 1L);
+        _tenantId = configuration.GetValue(AdminStorageDefaults.TenantConfigKey, AdminStorageDefaults.DefaultTenantId);
         _describe = connections.DatabaseType == DatabaseType.SqlServer ? "[describe]" : "`describe`";
+
+        // List / Get 共用的列投影（方言差异只有 describe 保留字的引用方式）
+        _selectProjection = $"""
+            id          as Id,
+            name        as Name,
+            {_describe} as Describe,
+            view_url    as ViewUrl,
+            approve_url as ApproveUrl,
+            sort_order  as SortOrder,
+            enabled     as Enabled,
+            create_time as CreateTime,
+            modify_time as ModifyTime
+            """;
     }
 
     /// <summary>流程类型列表（按 sort_order 升序）。</summary>
@@ -30,15 +44,7 @@ public sealed class ProcessTypeStore
 
         var rows = await connection.QueryAsync<ProcessTypeRow>(new CommandDefinition(
             $"""
-             select id          as Id,
-                    name        as Name,
-                    {_describe} as Describe,
-                    view_url    as ViewUrl,
-                    approve_url as ApproveUrl,
-                    sort_order  as SortOrder,
-                    enabled     as Enabled,
-                    create_time as CreateTime,
-                    modify_time as ModifyTime
+             select {_selectProjection}
                from workflow_type
               where tenant_id = @TenantId
               order by sort_order asc, id asc
@@ -56,15 +62,7 @@ public sealed class ProcessTypeStore
 
         var row = await connection.QuerySingleOrDefaultAsync<ProcessTypeRow>(new CommandDefinition(
             $"""
-             select id          as Id,
-                    name        as Name,
-                    {_describe} as Describe,
-                    view_url    as ViewUrl,
-                    approve_url as ApproveUrl,
-                    sort_order  as SortOrder,
-                    enabled     as Enabled,
-                    create_time as CreateTime,
-                    modify_time as ModifyTime
+             select {_selectProjection}
                from workflow_type
               where id = @Id and tenant_id = @TenantId
              """,

@@ -283,11 +283,6 @@ export interface AdminAuditItem {
   createdAt: string;
 }
 
-export interface AdminAuditListResponse {
-  total: number;
-  items: AdminAuditItem[];
-}
-
 /** 保留策略清理结果（`DELETE /api/admin/audit`）。 */
 export interface AdminAuditPurgeResponse {
   removed: number;

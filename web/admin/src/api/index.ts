@@ -1,6 +1,6 @@
-import { http, list } from './client';
+import { http, list, toQueryString } from './client';
 import type {
-  AdminAuditListResponse,
+  AdminAuditItem,
   AdminAuditPurgeResponse,
   AdminMetricsResponse,
   BpmnModelDetail,
@@ -184,26 +184,13 @@ export interface AuditQuery {
   maxResults?: number;
 }
 
-function toQuery<T extends object>(params: T): string {
-  const search = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === '') continue;
-
-    search.set(key, String(value));
-  }
-
-  const query = search.toString();
-  return query.length > 0 ? `?${query}` : '';
-}
-
 export const auditApi = {
-  /** 分页查管理动作审计（`{ total, items }` 结构，不是 envelope）。 */
-  list: (params?: AuditQuery) => http.get<AdminAuditListResponse>(`/api/admin/audit${toQuery(params ?? {})}`),
+  /** 分页查管理动作审计（统一 envelope 分页信封 `{ items, total, firstResult, maxResults }`）。 */
+  list: (params?: AuditQuery) => list<AdminAuditItem>('/api/admin/audit', params),
 
   /** 保留策略清理：删除 `before` 之前的记录，返回删除条数。 */
   purge: (params: { before: string; tenantId?: string }) =>
-    http.del<AdminAuditPurgeResponse>(`/api/admin/audit${toQuery(params)}`),
+    http.del<AdminAuditPurgeResponse>(`/api/admin/audit${toQueryString(params)}`),
 };
 
 // ─────────────────────────── 管理治理 · 指标 ───────────────────────────
@@ -215,7 +202,7 @@ export const metricsApi = {
    */
   get: (params?: { windowDays?: number; timeZoneOffsetMinutes?: number }) =>
     http.get<AdminMetricsResponse>(
-      `/api/admin/metrics${toQuery({
+      `/api/admin/metrics${toQueryString({
         windowDays: params?.windowDays,
         timeZoneOffsetMinutes: params?.timeZoneOffsetMinutes,
       })}`,

@@ -24,7 +24,7 @@ public sealed class BpmnModelStore
         ArgumentNullException.ThrowIfNull(configuration);
 
         _connections = connections;
-        _tenantId = configuration.GetValue("NetBpm:AdminTenantId", 1L);
+        _tenantId = configuration.GetValue(AdminStorageDefaults.TenantConfigKey, AdminStorageDefaults.DefaultTenantId);
     }
 
     /// <summary>模型列表（不含 XML/SVG 正文，按最近修改倒序）。</summary>
@@ -73,6 +73,11 @@ public sealed class BpmnModelStore
 
     /// <summary>
     /// 按 id upsert 保存模型，并在同一事务内追加版本快照。
+    /// <para>
+    /// revision 由 <c>max+1</c> 计算得出，并发保存同一模型时会撞唯一索引
+    /// <c>ux_bpmn_model_history_rev (model_id, revision)</c> —— 数据库保证不会写入重复版本，
+    /// 这里捕获冲突后重读重算，最多重试 3 次。
+    /// </para>
     /// </summary>
     /// <param name="id">模型 id。</param>
     /// <param name="model">模型内容（调用方已完成部署期校验）。</param>
@@ -90,6 +95,29 @@ public sealed class BpmnModelStore
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(model);
 
+        const int maxAttempts = 3;
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await SaveOnceAsync(id, model, operatorId, action, ct).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (attempt < maxAttempts && DatabaseErrors.IsUniqueViolation(exception))
+            {
+                // 撞唯一索引：另一个并发保存已抢先占用了版本号，重读 revision 再试
+            }
+        }
+    }
+
+    /// <summary>单次保存尝试（含事务；失败时事务随 dispose 回滚）。</summary>
+    private async Task<int> SaveOnceAsync(
+        string id,
+        SaveBpmnModelRequest model,
+        string? operatorId,
+        string action,
+        CancellationToken ct)
+    {
         await using var connection = _connections.CreateConnection();
         using var transaction = connection.BeginTransaction();
 

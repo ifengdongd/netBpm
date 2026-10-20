@@ -30,7 +30,7 @@ import type {
   ProcessInstanceResponse,
   Variables,
 } from '../api/types';
-import { formatTime } from '../utils';
+import { formatDuration, formatTime, formatValue } from '../utils';
 
 // bpmn-js 体积较大，只在打开「流程图」Tab 时按需加载
 const BpmnDiagram = lazy(() => import('./BpmnDiagram'));
@@ -315,27 +315,7 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
 
       {(isRunning || isHistoric) && (
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          {isRunning && (
-            <Descriptions size="small" bordered column={2}>
-              <Descriptions.Item label="流程 Key" span={2}>
-                {instance.processDefinitionKey ?? '—'}
-              </Descriptions.Item>
-              <Descriptions.Item label="实例 ID" span={2}>
-                {instance.processInstanceId}
-              </Descriptions.Item>
-              <Descriptions.Item label="定义 ID" span={2}>
-                {instance.processDefinitionId}
-              </Descriptions.Item>
-              <Descriptions.Item label="业务主键">{instance.businessKey ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label="实例名">{instance.name ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label="发起人">{instance.startUserId ?? '—'}</Descriptions.Item>
-              <Descriptions.Item label="开始时间">{formatTime(instance.startTime)}</Descriptions.Item>
-              <Descriptions.Item label="状态">
-                {instance.isSuspended ? <Tag color="warning">已挂起</Tag> : <Tag color="success">运行中</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="租户">{instance.tenantId ?? '—'}</Descriptions.Item>
-            </Descriptions>
-          )}
+          {isRunning && <RunningInstanceDescriptions instance={instance} />}
 
           {isHistoric && (
             <>
@@ -349,26 +329,7 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
                   <Tag>已结束</Tag>
                 )}
               </Space>
-              <Descriptions size="small" bordered column={2}>
-                <Descriptions.Item label="流程 Key" span={2}>
-                  {historic.processDefinitionId.split(':')[0] || historic.processDefinitionId}
-                </Descriptions.Item>
-                <Descriptions.Item label="实例 ID" span={2}>
-                  {historic.processInstanceId}
-                </Descriptions.Item>
-                <Descriptions.Item label="定义 ID" span={2}>
-                  {historic.processDefinitionId}
-                </Descriptions.Item>
-                <Descriptions.Item label="业务主键">{historic.businessKey ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label="实例名">{historic.name ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label="发起人">{historic.startUserId ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label="开始时间">{formatTime(historic.startTime)}</Descriptions.Item>
-                <Descriptions.Item label="结束时间">{formatTime(historic.endTime)}</Descriptions.Item>
-                <Descriptions.Item label="耗时">{formatDuration(historic.durationInMillis)}</Descriptions.Item>
-                <Descriptions.Item label="删除原因" span={2}>
-                  {historic.deleteReason ?? '—'}
-                </Descriptions.Item>
-              </Descriptions>
+              <HistoricInstanceDescriptions historic={historic} />
             </>
           )}
 
@@ -429,38 +390,55 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
   );
 }
 
-function formatValue(value: unknown): string {
-  if (value === null) {
-    return 'null';
-  }
+// ─────────────────────────── 描述信息子组件 ───────────────────────────
 
-  if (value === undefined) {
-    return '—';
-  }
-
-  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+/** 运行实例基本信息（Descriptions）。 */
+function RunningInstanceDescriptions({ instance }: { instance: ProcessInstanceResponse }) {
+  return (
+    <Descriptions size="small" bordered column={2}>
+      <Descriptions.Item label="流程 Key" span={2}>
+        {instance.processDefinitionKey ?? '—'}
+      </Descriptions.Item>
+      <Descriptions.Item label="实例 ID" span={2}>
+        {instance.processInstanceId}
+      </Descriptions.Item>
+      <Descriptions.Item label="定义 ID" span={2}>
+        {instance.processDefinitionId}
+      </Descriptions.Item>
+      <Descriptions.Item label="业务主键">{instance.businessKey ?? '—'}</Descriptions.Item>
+      <Descriptions.Item label="实例名">{instance.name ?? '—'}</Descriptions.Item>
+      <Descriptions.Item label="发起人">{instance.startUserId ?? '—'}</Descriptions.Item>
+      <Descriptions.Item label="开始时间">{formatTime(instance.startTime)}</Descriptions.Item>
+      <Descriptions.Item label="状态">
+        {instance.isSuspended ? <Tag color="warning">已挂起</Tag> : <Tag color="success">运行中</Tag>}
+      </Descriptions.Item>
+      <Descriptions.Item label="租户">{instance.tenantId ?? '—'}</Descriptions.Item>
+    </Descriptions>
+  );
 }
 
-function formatDuration(milliseconds?: number | null): string {
-  if (milliseconds === undefined || milliseconds === null) {
-    return '—';
-  }
-
-  if (milliseconds < 1000) {
-    return `${milliseconds} ms`;
-  }
-
-  const seconds = Math.floor(milliseconds / 1000);
-
-  if (seconds < 60) {
-    return `${seconds} 秒`;
-  }
-
-  const minutes = Math.floor(seconds / 60);
-
-  if (minutes < 60) {
-    return `${minutes} 分 ${seconds % 60} 秒`;
-  }
-
-  return `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
+/** 历史实例基本信息（Descriptions，只读）。 */
+function HistoricInstanceDescriptions({ historic }: { historic: HistoricProcessInstance }) {
+  return (
+    <Descriptions size="small" bordered column={2}>
+      <Descriptions.Item label="流程 Key" span={2}>
+        {historic.processDefinitionId.split(':')[0] || historic.processDefinitionId}
+      </Descriptions.Item>
+      <Descriptions.Item label="实例 ID" span={2}>
+        {historic.processInstanceId}
+      </Descriptions.Item>
+      <Descriptions.Item label="定义 ID" span={2}>
+        {historic.processDefinitionId}
+      </Descriptions.Item>
+      <Descriptions.Item label="业务主键">{historic.businessKey ?? '—'}</Descriptions.Item>
+      <Descriptions.Item label="实例名">{historic.name ?? '—'}</Descriptions.Item>
+      <Descriptions.Item label="发起人">{historic.startUserId ?? '—'}</Descriptions.Item>
+      <Descriptions.Item label="开始时间">{formatTime(historic.startTime)}</Descriptions.Item>
+      <Descriptions.Item label="结束时间">{formatTime(historic.endTime)}</Descriptions.Item>
+      <Descriptions.Item label="耗时">{formatDuration(historic.durationInMillis)}</Descriptions.Item>
+      <Descriptions.Item label="删除原因" span={2}>
+        {historic.deleteReason ?? '—'}
+      </Descriptions.Item>
+    </Descriptions>
+  );
 }

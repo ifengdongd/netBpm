@@ -107,7 +107,11 @@ export interface Identity {
   scopes: string[];
 }
 
-/** 管理范围 scope（与后端 TaskScopes.Admin 一致）。 */
+/**
+ * 管理范围 scope。
+ * ⚠️ 唯一来源是后端 `src/NetBpm.Rest/Security/RequestContext.cs` 的
+ * `TaskScopes.Admin`（'netbpm.admin'），改值需两侧同步。
+ */
 export const ADMIN_SCOPE = 'netbpm.admin';
 
 /**

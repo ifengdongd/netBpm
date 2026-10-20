@@ -29,14 +29,8 @@ import type {
 } from '../api/types';
 import InstanceDetailDrawer from '../components/InstanceDetailDrawer';
 import TaskDetailDrawer from '../components/TaskDetailDrawer';
+import { usePagedList } from '../hooks/usePagedList';
 import { formatTime } from '../utils';
-
-const DEFAULT_PAGE_SIZE = 20;
-
-interface PageState {
-  current: number;
-  pageSize: number;
-}
 
 interface TaskActionState {
   mode: 'assignee' | 'complete';
@@ -50,30 +44,40 @@ export default function MonitoringPage() {
   // 统计
   const [stats, setStats] = useState<TaskStatsResponse | null>(null);
 
-  // 运行实例
-  const [instances, setInstances] = useState<ProcessInstanceResponse[]>([]);
-  const [instanceTotal, setInstanceTotal] = useState(0);
-  const [instancePage, setInstancePage] = useState<PageState>({ current: 1, pageSize: DEFAULT_PAGE_SIZE });
-  const [instanceLoading, setInstanceLoading] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // 三个列表共用 usePagedList：状态、加载、错误提示与竞态防护只写一遍
+  const instanceList = usePagedList<ProcessInstanceResponse>(
+    (page) =>
+      runtimeApi.instances({
+        firstResult: (page.current - 1) * page.pageSize,
+        maxResults: page.pageSize,
+      }),
+    (error) => message.error(`加载运行实例失败：${error.message}`),
+  );
 
-  // 待办任务
-  const [tasks, setTasks] = useState<TaskResponse[]>([]);
-  const [taskTotal, setTaskTotal] = useState(0);
-  const [taskPage, setTaskPage] = useState<PageState>({ current: 1, pageSize: DEFAULT_PAGE_SIZE });
-  const [taskLoading, setTaskLoading] = useState(false);
+  const taskList = usePagedList<TaskResponse>(
+    (page) =>
+      runtimeApi.tasks({
+        firstResult: (page.current - 1) * page.pageSize,
+        maxResults: page.pageSize,
+      }),
+    (error) => message.error(`加载待办任务失败：${error.message}`),
+  );
 
-  // 历史实例
-  const [historic, setHistoric] = useState<HistoricProcessInstance[]>([]);
-  const [historicTotal, setHistoricTotal] = useState(0);
-  const [historicPage, setHistoricPage] = useState<PageState>({ current: 1, pageSize: DEFAULT_PAGE_SIZE });
-  const [historicLoading, setHistoricLoading] = useState(false);
+  const historicList = usePagedList<HistoricProcessInstance>(
+    (page) =>
+      runtimeApi.historicInstances({
+        firstResult: (page.current - 1) * page.pageSize,
+        maxResults: page.pageSize,
+      }),
+    (error) => message.error(`加载历史实例失败：${error.message}`),
+  );
 
   // 抽屉 / 弹窗
   const [detailInstanceId, setDetailInstanceId] = useState<string | null>(null);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [taskAction, setTaskAction] = useState<TaskActionState | null>(null);
   const [actionSubmitting, setActionSubmitting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -83,91 +87,16 @@ export default function MonitoringPage() {
     }
   }, [message]);
 
-  const loadInstances = useCallback(
-    async (page: PageState) => {
-      setInstanceLoading(true);
-
-      try {
-        const result = await runtimeApi.instances({
-          firstResult: (page.current - 1) * page.pageSize,
-          maxResults: page.pageSize,
-        });
-
-        setInstances(result.items);
-        setInstanceTotal(result.total);
-      } catch (error) {
-        message.error(`加载运行实例失败：${(error as Error).message}`);
-      } finally {
-        setInstanceLoading(false);
-      }
-    },
-    [message],
-  );
-
-  const loadTasks = useCallback(
-    async (page: PageState) => {
-      setTaskLoading(true);
-
-      try {
-        const result = await runtimeApi.tasks({
-          firstResult: (page.current - 1) * page.pageSize,
-          maxResults: page.pageSize,
-        });
-
-        setTasks(result.items);
-        setTaskTotal(result.total);
-      } catch (error) {
-        message.error(`加载待办任务失败：${(error as Error).message}`);
-      } finally {
-        setTaskLoading(false);
-      }
-    },
-    [message],
-  );
-
-  const loadHistoric = useCallback(
-    async (page: PageState) => {
-      setHistoricLoading(true);
-
-      try {
-        const result = await runtimeApi.historicInstances({
-          firstResult: (page.current - 1) * page.pageSize,
-          maxResults: page.pageSize,
-        });
-
-        setHistoric(result.items);
-        setHistoricTotal(result.total);
-      } catch (error) {
-        message.error(`加载历史实例失败：${(error as Error).message}`);
-      } finally {
-        setHistoricLoading(false);
-      }
-    },
-    [message],
-  );
-
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
 
-  useEffect(() => {
-    void loadInstances(instancePage);
-  }, [instancePage, loadInstances]);
-
-  useEffect(() => {
-    void loadTasks(taskPage);
-  }, [taskPage, loadTasks]);
-
-  useEffect(() => {
-    void loadHistoric(historicPage);
-  }, [historicPage, loadHistoric]);
-
   const refreshAll = () => {
     setSelectedIds([]);
     void loadStats();
-    void loadInstances(instancePage);
-    void loadTasks(taskPage);
-    void loadHistoric(historicPage);
+    instanceList.reload();
+    taskList.reload();
+    historicList.reload();
   };
 
   // ─────────────────────────── 实例操作 ───────────────────────────
@@ -396,7 +325,7 @@ export default function MonitoringPage() {
   const tabItems = [
     {
       key: 'instances',
-      label: `运行实例（${instanceTotal}）`,
+      label: `运行实例（${instanceList.total}）`,
       children: (
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0} onClick={() => void batchDelete()}>
@@ -405,58 +334,37 @@ export default function MonitoringPage() {
           <Table<ProcessInstanceResponse>
             rowKey="id"
             columns={instanceColumns}
-            dataSource={instances}
-            loading={instanceLoading}
+            dataSource={instanceList.items}
+            loading={instanceList.loading}
             rowSelection={{ selectedRowKeys: selectedIds, onChange: (keys) => setSelectedIds(keys as string[]) }}
-            pagination={{
-              current: instancePage.current,
-              pageSize: instancePage.pageSize,
-              total: instanceTotal,
-              showSizeChanger: true,
-              showTotal: (total) => `共 ${total} 条`,
-              onChange: (current, pageSize) => setInstancePage({ current, pageSize }),
-            }}
+            pagination={instanceList.pagination}
           />
         </Space>
       ),
     },
     {
       key: 'tasks',
-      label: `待办任务（${taskTotal}）`,
+      label: `待办任务（${taskList.total}）`,
       children: (
         <Table<TaskResponse>
           rowKey="id"
           columns={taskColumns}
-          dataSource={tasks}
-          loading={taskLoading}
-          pagination={{
-            current: taskPage.current,
-            pageSize: taskPage.pageSize,
-            total: taskTotal,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: (current, pageSize) => setTaskPage({ current, pageSize }),
-          }}
+          dataSource={taskList.items}
+          loading={taskList.loading}
+          pagination={taskList.pagination}
         />
       ),
     },
     {
       key: 'historic',
-      label: `历史实例（${historicTotal}）`,
+      label: `历史实例（${historicList.total}）`,
       children: (
         <Table<HistoricProcessInstance>
           rowKey="processInstanceId"
           columns={historicColumns}
-          dataSource={historic}
-          loading={historicLoading}
-          pagination={{
-            current: historicPage.current,
-            pageSize: historicPage.pageSize,
-            total: historicTotal,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: (current, pageSize) => setHistoricPage({ current, pageSize }),
-          }}
+          dataSource={historicList.items}
+          loading={historicList.loading}
+          pagination={historicList.pagination}
         />
       ),
     },

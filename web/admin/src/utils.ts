@@ -38,3 +38,41 @@ export function auditActionColor(action: string): string {
 
   return 'blue';
 }
+
+/** 变量值的只读展示：null / undefined / 对象 / 标量各有可读形态。 */
+export function formatValue(value: unknown): string {
+  if (value === null) {
+    return 'null';
+  }
+
+  if (value === undefined) {
+    return '—';
+  }
+
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+/** 毫秒时长转可读文本（秒 / 分秒 / 时分）；空值显示占位符。 */
+export function formatDuration(milliseconds?: number | null): string {
+  if (milliseconds === undefined || milliseconds === null) {
+    return '—';
+  }
+
+  if (milliseconds < 1000) {
+    return `${milliseconds} ms`;
+  }
+
+  const seconds = Math.floor(milliseconds / 1000);
+
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes} 分 ${seconds % 60} 秒`;
+  }
+
+  return `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
+}

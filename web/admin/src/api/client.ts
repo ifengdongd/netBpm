@@ -28,11 +28,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const response = await fetch(path, { ...init, headers });
 
-  // 401：凭据缺失 / 失效 → 清掉并跳登录页（登录页自身用 verifyCredential 直连，不经过这里）
+  // 401：凭据缺失 / 失效 → 清掉并跳登录页（登录页自身用 verifyCredential 直连，不经过这里）。
+  // 抛出 401 终止后续处理：既避免继续解析响应体产生二次错误，也让调用方的 catch 有据可依。
   if (response.status === 401 && window.location.pathname !== '/login') {
     clearCredential();
     const redirect = `${window.location.pathname}${window.location.search}`;
     window.location.assign(`/login?redirect=${encodeURIComponent(redirect)}`);
+
+    throw new ApiError(401, '登录已失效，请重新登录。');
   }
 
   // 204 / 无响应体：直接返回 undefined（调用方一般用 void 语义）
@@ -99,19 +102,26 @@ export const http = {
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
-/** 列表端点统一走 envelope=true，拿到 items + total，避免读 X-Total-Count 头。 */
-export async function list<T>(path: string, params?: object): Promise<PagedResponse<T>> {
-  const url = new URL(path, window.location.origin);
+/**
+ * 把参数对象序列化为查询串（跳过 undefined / null / 空串）。
+ * 返回空串或 `?key=value&...`，供 http.get 直接拼接。
+ */
+export function toQueryString(params?: object): string {
+  const search = new URLSearchParams();
 
   if (params !== undefined) {
     for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== '') {
-        url.searchParams.set(key, String(value));
+      if (value !== undefined && value !== null && value !== '') {
+        search.set(key, String(value));
       }
     }
   }
 
-  url.searchParams.set('envelope', 'true');
+  const query = search.toString();
+  return query.length > 0 ? `?${query}` : '';
+}
 
-  return http.get<PagedResponse<T>>(`${url.pathname}${url.search}`);
+/** 列表端点统一走 envelope=true，拿到 items + total，避免读 X-Total-Count 头。 */
+export async function list<T>(path: string, params?: object): Promise<PagedResponse<T>> {
+  return http.get<PagedResponse<T>>(`${path}${toQueryString({ ...params, envelope: 'true' })}`);
 }

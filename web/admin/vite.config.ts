@@ -2,14 +2,18 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 // 开发期把 /api 代理到 NetBpm.Admin 宿主（引擎 REST + 管理端端点都在同一个宿主）。
+// 目标地址默认 http://localhost:5081，可用环境变量 NETBPM_API_TARGET 覆盖，例如：
+//   NETBPM_API_TARGET=http://localhost:6001 npm run dev
 // 生产构建直接输出到 src/NetBpm.Admin/wwwroot，由该宿主的 UseStaticFiles 托管。
+const apiTarget = process.env.NETBPM_API_TARGET ?? 'http://localhost:5081';
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5274,
     proxy: {
       '/api': {
-        target: 'http://localhost:5081',
+        target: apiTarget,
         changeOrigin: true,
       },
     },
