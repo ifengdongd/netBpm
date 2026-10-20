@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 
 import type { PagedResponse } from '../api/types';
 
@@ -31,77 +32,60 @@ export interface PagedList<T> {
 }
 
 /**
- * 分页列表 Hook：统一封装 items / total / page / loading 状态与加载错误提示。
+ * 分页列表 Hook：基于 TanStack Query 封装 items / total / page / loading 状态与加载错误提示。
  * <para>
- * 内部带请求序号防竞态：翻页很快时，旧页的后到响应会被丢弃，避免表格内容与页码错位。
+ * - 由 queryKey 自动获得缓存、去重与跨组件失效（操作后 `invalidateQueries` 即可联动刷新）；
+ * - 翻页时保留上一页数据（`keepPreviousData`），表格不闪烁，且天然无过期响应竞态。
  * </para>
  *
+ * @param queryKey 查询缓存键前缀（如 `['runtime', 'instances']`，分页状态会自动追加）。
  * @param fetcher 按页拉取数据的 API 调用（返回 `{ items, total }`）。
  * @param onError 加载失败时的提示回调（一般是 message.error）。
  * @param defaultPageSize 初始页大小。
  */
 export function usePagedList<T>(
+  queryKey: readonly unknown[],
   fetcher: (page: PageState) => Promise<PagedResponse<T>>,
   onError: (error: Error) => void,
   defaultPageSize = 20,
 ): PagedList<T> {
-  const [items, setItems] = useState<T[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState<PageState>({ current: 1, pageSize: defaultPageSize });
-  const [loading, setLoading] = useState(false);
 
-  // 通过 ref 让 load / reload 始终拿到最新的 fetcher 与 onError，而不重挂 useEffect
-  const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
+  // 通过 ref 让错误提示始终拿到最新回调，而不重挂 useEffect
   const onErrorRef = useRef(onError);
-  onErrorRef.current = onError;
-
-  const pageRef = useRef(page);
-  pageRef.current = page;
-
-  // 请求序号：只有最新一次请求允许写状态
-  const seqRef = useRef(0);
-
-  const load = useCallback(async (target: PageState) => {
-    const seq = ++seqRef.current;
-    setLoading(true);
-
-    try {
-      const result = await fetcherRef.current(target);
-
-      if (seq !== seqRef.current) {
-        return; // 过期响应，丢弃
-      }
-
-      setItems(result.items);
-      setTotal(result.total);
-    } catch (error) {
-      if (seq === seqRef.current) {
-        onErrorRef.current(error as Error);
-      }
-    } finally {
-      if (seq === seqRef.current) {
-        setLoading(false);
-      }
-    }
-  }, []);
 
   useEffect(() => {
-    void load(page);
-  }, [page, load]);
+    onErrorRef.current = onError;
+  });
 
-  const reload = useCallback(() => {
-    void load(pageRef.current);
-  }, [load]);
+  const query = useQuery({
+    queryKey: [...queryKey, page],
+    queryFn: () => fetcher(page),
+    // 翻页时保留上一页数据，避免表格清空闪烁
+    placeholderData: keepPreviousData,
+  });
 
-  const pagination: PagedListPagination = {
-    current: page.current,
-    pageSize: page.pageSize,
-    total,
-    showSizeChanger: true,
-    showTotal: (value) => `共 ${value} 条`,
-    onChange: (current, pageSize) => setPage({ current, pageSize }),
+  // 查询失败时提示一次
+  useEffect(() => {
+    if (query.isError) {
+      onErrorRef.current(query.error as Error);
+    }
+  }, [query.isError, query.error]);
+
+  return {
+    items: query.data?.items ?? [],
+    total: query.data?.total ?? 0,
+    page,
+    loading: query.isPending || query.isFetching,
+    setPage,
+    reload: () => void query.refetch(),
+    pagination: {
+      current: page.current,
+      pageSize: page.pageSize,
+      total: query.data?.total ?? 0,
+      showSizeChanger: true,
+      showTotal: (value) => `共 ${value} 条`,
+      onChange: (current, pageSize) => setPage({ current, pageSize }),
+    },
   };
-
-  return { items, total, page, loading, setPage, reload, pagination };
 }

@@ -3,7 +3,9 @@ using NetBpm.Admin.Storage;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
 using NetBpm.Engine;
+using NetBpm.Persistence.Admin;
 using NetBpm.Rest;
+using NetBpm.Rest.Auditing;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 
@@ -15,9 +17,38 @@ namespace NetBpm.Admin.Endpoints;
 /// </summary>
 public static partial class AdminEndpoints
 {
-    private static async Task<IReadOnlyList<BpmnModelSummary>> ListModelsAsync(
+    /// <summary>
+    /// 分页查模型列表（按最近修改倒序；<c>keyword</c> 模糊匹配名称 / 流程 Key / 描述）。
+    /// <para>
+    /// 分页协议与引擎列表端点一致：默认裸数组 + <c>X-Total-Count</c>，
+    /// <c>envelope=true</c> 返回 <see cref="PagedResponse{T}"/> 信封。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> ListModelsAsync(
+        string? keyword,
+        int? firstResult,
+        int? maxResults,
+        bool? envelope,
         BpmnModelStore store,
-        CancellationToken ct) => await store.ListAsync(ct).ConfigureAwait(false);
+        HttpResponse response,
+        CancellationToken ct)
+    {
+        var page = await store
+            .ListAsync(
+                Math.Max(0, firstResult ?? 0),
+                Math.Clamp(maxResults ?? 100, 1, 200),
+                keyword,
+                ct)
+            .ConfigureAwait(false);
+
+        return PagedResults.Create(
+            page.Items,
+            page.Total,
+            Math.Max(0, firstResult ?? 0),
+            Math.Clamp(maxResults ?? 100, 1, 200),
+            response,
+            envelope == true);
+    }
 
     private static async Task<IResult> GetModelAsync(
         string id,
@@ -94,6 +125,39 @@ public static partial class AdminEndpoints
         await store.RollbackAsync(id, revisionId, requestContext.UserId, ct).ConfigureAwait(false) is { } model
             ? Results.Ok(model)
             : Results.NotFound();
+
+    /// <summary>
+    /// 清理模型历史：只保留最近 <c>keepLatest</c> 个版本快照（默认 10，最新版本永远保留）。
+    /// <para>清理本身也是管理动作（<c>model.history_prune</c>），成功 / 失败都写审计。</para>
+    /// </summary>
+    private static async Task<IResult> PruneModelHistoryAsync(
+        string id,
+        int? keepLatest,
+        RequestContext requestContext,
+        BpmnModelStore store,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        var keep = Math.Clamp(keepLatest ?? 10, 0, 1000);
+
+        if (await store.GetAsync(id, ct).ConfigureAwait(false) is null)
+        {
+            return Results.NotFound(new ErrorResponse($"流程模型 '{id}' 不存在。"));
+        }
+
+        var removed = await WithAuditTrailAsync(
+            requestContext,
+            auditor,
+            AdminAuditActions.ModelHistoryPrune,
+            AdminAuditTargets.Model,
+            ResolveTenant(null, requestContext),
+            failureDetail: () => new { modelId = id, keepLatest = keep },
+            successDetail: removed => new { modelId = id, keepLatest = keep, removed },
+            operation: async token => await store.PruneHistoryAsync(id, keep, token).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
+
+        return Results.Ok(new ModelHistoryPruneResponse(removed, id, keep));
+    }
 
     /// <summary>发布模型：用当前 XML 走引擎部署（校验/版本递增与设计器部署完全一致）。</summary>
     private static async Task<IResult> PublishModelAsync(

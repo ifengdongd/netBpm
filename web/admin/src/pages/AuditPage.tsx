@@ -70,16 +70,6 @@ export default function AuditPage() {
   const { message } = App.useApp();
   const [form] = Form.useForm<FilterValues>();
 
-  // 分页列表状态与加载由 usePagedList 统一管理（含过期响应防护）
-  const auditList = usePagedList<AdminAuditItem>(
-    (target) => auditApi.list(buildQuery(target)),
-    (error) => message.error(`加载审计失败：${error.message}`),
-  );
-
-  const [purgeOpen, setPurgeOpen] = useState(false);
-  const [purgeBefore, setPurgeBefore] = useState<Dayjs>(() => dayjs().subtract(30, 'day'));
-  const [purging, setPurging] = useState(false);
-
   const buildQuery = useCallback(
     (target: PageState): AuditQuery => {
       const values = form.getFieldsValue();
@@ -99,6 +89,17 @@ export default function AuditPage() {
     },
     [form],
   );
+
+  // 分页列表状态与加载由 usePagedList 统一管理（缓存 / 失效联动 / 过期响应防护）
+  const auditList = usePagedList<AdminAuditItem>(
+    ['admin', 'audit'],
+    (target) => auditApi.list(buildQuery(target)),
+    (error) => message.error(`加载审计失败：${error.message}`),
+  );
+
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purgeBefore, setPurgeBefore] = useState<Dayjs>(() => dayjs().subtract(30, 'day'));
+  const [purging, setPurging] = useState(false);
 
   const { page, setPage, reload } = auditList;
 

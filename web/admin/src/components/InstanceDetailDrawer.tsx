@@ -18,12 +18,11 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { lazy, Suspense, useState } from 'react';
 
 import { runtimeApi } from '../api';
 import type {
-  Diagram,
-  HistoricActivity,
   HistoricProcessInstance,
   HistoricTask,
   HistoricVariable,
@@ -47,67 +46,42 @@ interface Props {
 export default function InstanceDetailDrawer({ instanceId, open, onClose, onChanged }: Props) {
   const { message } = App.useApp();
 
-  const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  // 详情查询：6 个数据源一次并行拉取；键含实例 id，
+  // 挂起 / 跳转等操作后由 onChanged → invalidateQueries(['runtime']) 联动刷新本抽屉与列表。
+  // 各数据源独立兜底：授权不足 / 历史未启用时不影响基本信息展示。
+  const detailQuery = useQuery({
+    queryKey: ['runtime', 'instance-detail', instanceId],
+    queryFn: async () => {
+      const id = instanceId as string;
 
-  const [instance, setInstance] = useState<ProcessInstanceResponse | null>(null);
-  const [historic, setHistoric] = useState<HistoricProcessInstance | null>(null);
+      const [running, hist, vars, histVars, histTasks, diagramResult] = await Promise.all([
+        runtimeApi.instance(id).catch(() => null),
+        runtimeApi.historicInstance(id).catch(() => null),
+        runtimeApi.instanceVariables(id).catch(() => ({}) as Variables),
+        runtimeApi.historicVariables(id).catch(() => [] as HistoricVariable[]),
+        runtimeApi.historicTasks(id).catch(() => [] as HistoricTask[]),
+        runtimeApi.diagram(id).catch(() => null),
+      ]);
 
-  const [variables, setVariables] = useState<Variables>({});
-  const [historicVariables, setHistoricVariables] = useState<HistoricVariable[]>([]);
-  const [activities, setActivities] = useState<HistoricActivity[]>([]);
-  const [tasks, setTasks] = useState<HistoricTask[]>([]);
-  const [diagram, setDiagram] = useState<Diagram | null>(null);
+      return { running, hist, vars, histVars, histTasks, diagramResult };
+    },
+    enabled: open && instanceId !== null,
+  });
+
+  const instance = detailQuery.data?.running ?? null;
+  const historic = detailQuery.data?.hist ?? null;
+  const variables = detailQuery.data?.vars ?? {};
+  const historicVariables = detailQuery.data?.histVars ?? [];
+  const activities = detailQuery.data?.diagramResult?.activities ?? [];
+  const tasks = detailQuery.data?.histTasks ?? [];
+  const diagram = detailQuery.data?.diagramResult ?? null;
 
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumping, setJumping] = useState(false);
   const [jumpForm] = Form.useForm<{ targetActivityId: string; reason?: string }>();
 
-  const loadDetails = useCallback(
-    async (id: string) => {
-      setLoading(true);
-
-      try {
-        // 各数据源独立兜底：授权不足 / 历史未启用时不影响基本信息展示
-        const [running, hist, vars, histVars, histTasks, diagramResult] = await Promise.all([
-          runtimeApi.instance(id).catch(() => null),
-          runtimeApi.historicInstance(id).catch(() => null),
-          runtimeApi.instanceVariables(id).catch(() => ({}) as Variables),
-          runtimeApi.historicVariables(id).catch(() => [] as HistoricVariable[]),
-          runtimeApi.historicTasks(id).catch(() => [] as HistoricTask[]),
-          runtimeApi.diagram(id).catch(() => null),
-        ]);
-
-        setInstance(running);
-        setHistoric(hist);
-        setVariables(vars);
-        setHistoricVariables(histVars);
-        setTasks(histTasks);
-        setDiagram(diagramResult);
-        setActivities(diagramResult?.activities ?? []);
-      } catch (error) {
-        message.error(`加载实例详情失败：${(error as Error).message}`);
-      } finally {
-        setLoading(false);
-        setLoaded(true);
-      }
-    },
-    [message],
-  );
-
-  useEffect(() => {
-    if (open && instanceId !== null) {
-      setLoaded(false);
-      setInstance(null);
-      setHistoric(null);
-      setVariables({});
-      setHistoricVariables([]);
-      setActivities([]);
-      setTasks([]);
-      setDiagram(null);
-      void loadDetails(instanceId);
-    }
-  }, [open, instanceId, loadDetails]);
+  const loading = open && detailQuery.isPending;
+  const loaded = detailQuery.isSuccess || detailQuery.isError;
 
   const toggleSuspend = async () => {
     if (instance === null) {
@@ -123,8 +97,8 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
         message.success('已挂起实例');
       }
 
+      // 失效 runtime 查询族：列表与本抽屉的详情会自动重新拉取
       onChanged();
-      await loadDetails(instance.id);
     } catch (error) {
       message.error(`操作失败：${(error as Error).message}`);
     }
@@ -145,7 +119,6 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
       setJumpOpen(false);
       jumpForm.resetFields();
       onChanged();
-      await loadDetails(instance.id);
     } catch (error) {
       message.error(`跳转失败：${(error as Error).message}`);
     } finally {

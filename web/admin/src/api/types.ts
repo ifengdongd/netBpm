@@ -1,6 +1,12 @@
 /**
  * 与后端 DTO 一一对应的 TypeScript 契约（见 src/NetBpm.Admin/Contracts.cs 与
  * src/NetBpm.Rest/Contracts.cs）。字段命名保持后端 JSON 的驼峰形式。
+ *
+ * ⚠️ 契约参照：`npm run api:gen` 可从运行中的宿主（`dotnet run --project src/NetBpm.Admin`）
+ * 拉取 OpenAPI 文档生成 `./schema.d.ts`（全量 paths + schemas）。
+ * 注意：生成的 schema 因 Minimal API 的 IResult 弱返回链路存在类型弱化
+ * （DateTime → unknown、int → number | string、全字段可选），
+ * 不能直接替换本文件的手写类型，仅作后端 DTO 漂移时的比对参照。
  */
 
 // ─────────────────────────── 管理端 · 流程模型 ───────────────────────────
@@ -30,6 +36,33 @@ export interface SaveBpmnModelRequest {
   description?: string | null;
   bpmnXml: string;
   svg?: string | null;
+}
+
+/** 模型版本摘要（不含 XML 正文）。 */
+export interface BpmnModelRevisionSummary {
+  id: string;
+  modelId: string;
+  revision: number;
+  name: string;
+  processKey: string;
+  description?: string | null;
+  /** save / rollback。 */
+  action: string;
+  operator?: string | null;
+  createdAt: string;
+}
+
+/** 模型版本详情（含 BPMN XML / SVG 快照）。 */
+export interface BpmnModelRevisionDetail extends BpmnModelRevisionSummary {
+  bpmnXml: string;
+  svg?: string | null;
+}
+
+/** 模型历史清理结果（`DELETE /api/admin/models/{id}/history`）。 */
+export interface ModelHistoryPruneResponse {
+  removed: number;
+  modelId: string;
+  keepLatest: number;
 }
 
 // ─────────────────────────── 管理端 · 流程类型 ───────────────────────────

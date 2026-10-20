@@ -551,6 +551,9 @@ public static class AdminAuditActions
     /// <summary>删除任务局部变量。</summary>
     public const string TaskVariableDelete = "task_variable.delete";
 
+    /// <summary>清理模型历史（按保留版本数删除）。</summary>
+    public const string ModelHistoryPrune = "model.history_prune";
+
     /// <summary>部署（发布）流程定义。</summary>
     public const string DeploymentCreate = "deployment.create";
 
@@ -587,6 +590,9 @@ public static class AdminAuditTargets
 
     /// <summary>部署。</summary>
     public const string Deployment = "deployment";
+
+    /// <summary>流程模型（bpmn_model 编辑源及其版本历史）。</summary>
+    public const string Model = "model";
 
     /// <summary>流程定义。</summary>
     public const string ProcessDefinition = "process_definition";

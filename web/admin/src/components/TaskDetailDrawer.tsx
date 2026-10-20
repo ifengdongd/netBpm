@@ -1,9 +1,10 @@
 import { App, Descriptions, Drawer, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
 import { runtimeApi } from '../api';
-import type { IdentityLink, TaskDetail, Variables } from '../api/types';
+import type { IdentityLink, Variables } from '../api/types';
 import { formatTime } from '../utils';
 
 interface Props {
@@ -15,39 +16,30 @@ interface Props {
 export default function TaskDetailDrawer({ taskId, open, onClose }: Props) {
   const { message } = App.useApp();
 
-  const [loading, setLoading] = useState(false);
-  const [task, setTask] = useState<TaskDetail | null>(null);
-  const [variables, setVariables] = useState<Variables>({});
+  // 详情查询：键含任务 id，由 queryClient 统一缓存；任务操作后 invalidate ['runtime'] 即可联动刷新
+  const taskQuery = useQuery({
+    queryKey: ['runtime', 'task-detail', taskId],
+    queryFn: async () => {
+      const id = taskId as string;
 
-  const load = useCallback(
-    async (id: string) => {
-      setLoading(true);
+      const [detail, vars] = await Promise.all([
+        runtimeApi.task(id),
+        runtimeApi.taskVariables(id).catch(() => ({}) as Variables),
+      ]);
 
-      try {
-        const [detail, vars] = await Promise.all([
-          runtimeApi.task(id),
-          runtimeApi.taskVariables(id).catch(() => ({}) as Variables),
-        ]);
-
-        setTask(detail);
-        setVariables(vars);
-      } catch (error) {
-        message.error(`加载任务详情失败：${(error as Error).message}`);
-        setTask(null);
-      } finally {
-        setLoading(false);
-      }
+      return { detail, vars };
     },
-    [message],
-  );
+    enabled: open && taskId !== null,
+  });
+
+  const task = taskQuery.data?.detail ?? null;
+  const variables = taskQuery.data?.vars ?? {};
 
   useEffect(() => {
-    if (open && taskId !== null) {
-      setTask(null);
-      setVariables({});
-      void load(taskId);
+    if (taskQuery.isError) {
+      message.error(`加载任务详情失败：${(taskQuery.error as Error).message}`);
     }
-  }, [open, taskId, load]);
+  }, [taskQuery.isError, taskQuery.error, message]);
 
   const linkColumns: ColumnsType<IdentityLink> = [
     { title: '关系', dataIndex: 'type', key: 'type', width: 120, render: (value: string) => <Tag>{value}</Tag> },
@@ -56,7 +48,7 @@ export default function TaskDetailDrawer({ taskId, open, onClose }: Props) {
   ];
 
   return (
-    <Drawer title="任务详情" open={open} width={680} onClose={onClose} destroyOnClose loading={loading}>
+    <Drawer title="任务详情" open={open} width={680} onClose={onClose} destroyOnClose loading={open && taskQuery.isPending}>
       {task !== null && (
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           <Descriptions size="small" bordered column={2}>

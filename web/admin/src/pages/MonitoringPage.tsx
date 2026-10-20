@@ -17,14 +17,14 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 
 import { runtimeApi } from '../api';
 import type {
   HistoricProcessInstance,
   ProcessInstanceResponse,
   TaskResponse,
-  TaskStatsResponse,
   Variables,
 } from '../api/types';
 import InstanceDetailDrawer from '../components/InstanceDetailDrawer';
@@ -39,13 +39,25 @@ interface TaskActionState {
 
 export default function MonitoringPage() {
   const { message } = App.useApp();
+  const queryClient = useQueryClient();
   const [actionForm] = Form.useForm<{ assignee?: string; variables?: string }>();
 
   // 统计
-  const [stats, setStats] = useState<TaskStatsResponse | null>(null);
+  const statsQuery = useQuery({
+    queryKey: ['runtime', 'task-stats'],
+    queryFn: () => runtimeApi.taskStats({ timeZoneOffsetMinutes: -new Date().getTimezoneOffset() }),
+  });
+  const stats = statsQuery.data ?? null;
 
-  // 三个列表共用 usePagedList：状态、加载、错误提示与竞态防护只写一遍
+  useEffect(() => {
+    if (statsQuery.isError) {
+      message.error(`加载待办统计失败：${(statsQuery.error as Error).message}`);
+    }
+  }, [statsQuery.isError, statsQuery.error, message]);
+
+  // 三个列表共用 usePagedList：缓存、去重与失效联动由 queryClient 统一管理
   const instanceList = usePagedList<ProcessInstanceResponse>(
+    ['runtime', 'instances'],
     (page) =>
       runtimeApi.instances({
         firstResult: (page.current - 1) * page.pageSize,
@@ -55,6 +67,7 @@ export default function MonitoringPage() {
   );
 
   const taskList = usePagedList<TaskResponse>(
+    ['runtime', 'tasks'],
     (page) =>
       runtimeApi.tasks({
         firstResult: (page.current - 1) * page.pageSize,
@@ -64,6 +77,7 @@ export default function MonitoringPage() {
   );
 
   const historicList = usePagedList<HistoricProcessInstance>(
+    ['runtime', 'historic-instances'],
     (page) =>
       runtimeApi.historicInstances({
         firstResult: (page.current - 1) * page.pageSize,
@@ -79,24 +93,10 @@ export default function MonitoringPage() {
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const loadStats = useCallback(async () => {
-    try {
-      setStats(await runtimeApi.taskStats({ timeZoneOffsetMinutes: -new Date().getTimezoneOffset() }));
-    } catch (error) {
-      message.error(`加载待办统计失败：${(error as Error).message}`);
-    }
-  }, [message]);
-
-  useEffect(() => {
-    void loadStats();
-  }, [loadStats]);
-
+  // 所有 runtime 查询（统计 / 三个列表 / 两个抽屉详情）统一失效刷新
   const refreshAll = () => {
     setSelectedIds([]);
-    void loadStats();
-    instanceList.reload();
-    taskList.reload();
-    historicList.reload();
+    void queryClient.invalidateQueries({ queryKey: ['runtime'] });
   };
 
   // ─────────────────────────── 实例操作 ───────────────────────────

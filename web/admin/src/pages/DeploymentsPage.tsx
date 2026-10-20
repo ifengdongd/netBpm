@@ -9,7 +9,8 @@ import {
 } from '@ant-design/icons';
 import { App, Button, Input, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 
 import { deploymentsApi } from '../api';
 import type {
@@ -23,9 +24,22 @@ import { formatTime } from '../utils';
 export default function DeploymentsPage() {
   const { message } = App.useApp();
 
-  const [deployments, setDeployments] = useState<DeploymentSummaryResponse[]>([]);
-  const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
+
+  const deploymentsQuery = useQuery({
+    queryKey: ['designer', 'deployments'],
+    queryFn: () => deploymentsApi.list({ firstResult: 0, maxResults: 200 }),
+  });
+
+  // useMemo 稳定空数组引用，避免下游 useMemo 依赖每次渲染变化
+  const deployments = useMemo(() => deploymentsQuery.data?.items ?? [], [deploymentsQuery.data]);
+  const loading = deploymentsQuery.isFetching;
+
+  useEffect(() => {
+    if (deploymentsQuery.isError) {
+      message.error(`加载部署列表失败：${(deploymentsQuery.error as Error).message}`);
+    }
+  }, [deploymentsQuery.isError, deploymentsQuery.error, message]);
 
   const filteredDeployments = useMemo(() => {
     const query = keyword.trim().toLowerCase();
@@ -56,23 +70,6 @@ export default function DeploymentsPage() {
     loading: boolean;
   } | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-
-    try {
-      const page = await deploymentsApi.list({ firstResult: 0, maxResults: 200 });
-      setDeployments(page.items);
-    } catch (error) {
-      message.error(`加载部署列表失败：${(error as Error).message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [message]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   const toggleSuspension = async (definition: DeploymentDefinitionResponse) => {
     try {
       if (definition.isSuspended) {
@@ -83,7 +80,7 @@ export default function DeploymentsPage() {
         message.success(`已挂起：${definition.key} v${definition.version}`);
       }
 
-      await load();
+      await deploymentsQuery.refetch();
     } catch (error) {
       message.error(`操作失败：${(error as Error).message}`);
     }
@@ -139,7 +136,7 @@ export default function DeploymentsPage() {
     try {
       await deploymentsApi.removeDeployment(deployment.deploymentId, true);
       message.success(`已删除部署：${deployment.name ?? deployment.deploymentId}`);
-      await load();
+      await deploymentsQuery.refetch();
     } catch (error) {
       message.error(`删除部署失败：${(error as Error).message}`);
     }
@@ -233,7 +230,7 @@ export default function DeploymentsPage() {
               : `共 ${deployments.length} 次部署`}
           </Typography.Text>
         </Space>
-        <Button icon={<ReloadOutlined />} onClick={() => void load()}>
+        <Button icon={<ReloadOutlined />} onClick={() => void deploymentsQuery.refetch()}>
           刷新
         </Button>
       </Space>

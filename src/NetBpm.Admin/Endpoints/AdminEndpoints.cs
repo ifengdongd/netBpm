@@ -33,7 +33,9 @@ public static partial class AdminEndpoints
         var group = endpoints.MapGroup("/api/admin").WithTags("admin");
 
         // ── 流程模型（bpmn_model，设计器编辑源）──
-        group.MapGet("/models", ListModelsAsync).Produces<IReadOnlyList<BpmnModelSummary>>()
+        group.MapGet("/models", ListModelsAsync)
+            .Produces<IReadOnlyList<BpmnModelSummary>>()
+            .Produces<PagedResponse<BpmnModelSummary>>()
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程模型");
         group.MapGet("/models/{id}", GetModelAsync).Produces<BpmnModelDetail>()
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程模型");
@@ -50,6 +52,8 @@ public static partial class AdminEndpoints
         group.MapPost("/models/{id}/rollback/{revisionId}", RollbackModelAsync)
             .Produces<BpmnModelDetail>()
             .RequireAdminScope(TaskScopes.AdminModelWrite, "回滚模型版本");
+        group.MapDelete("/models/{id}/history", PruneModelHistoryAsync).Produces<ModelHistoryPruneResponse>()
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "清理模型历史");
         group.MapPost("/models/{id}/publish", PublishModelAsync).Produces<DeployResponse>()
             .RequireAdminScope(TaskScopes.AdminModelWrite, "发布流程模型");
 

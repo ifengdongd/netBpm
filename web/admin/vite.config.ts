@@ -25,5 +25,15 @@ export default defineConfig({
     outDir: '../../src/NetBpm.Admin/wwwroot',
     emptyOutDir: false,
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // 大依赖拆为独立 chunk：框架与 UI 库变更少，利于浏览器长缓存
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          antd: ['antd'],
+          icons: ['@ant-design/icons'],
+        },
+      },
+    },
   },
 });

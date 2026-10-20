@@ -16,7 +16,8 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 
 import { metricsApi } from '../api';
 import type { AdminAuditActionCount, AdminMetricsResponse } from '../api/types';
@@ -32,34 +33,26 @@ interface PendingRow {
 export default function MetricsPage() {
   const { message } = App.useApp();
 
-  const [metrics, setMetrics] = useState<AdminMetricsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
   const [windowDays, setWindowDays] = useState(7);
 
-  const load = useCallback(
-    async (days: number) => {
-      setLoading(true);
+  const metricsQuery = useQuery({
+    queryKey: ['admin', 'metrics', windowDays],
+    // 「今日到期」按浏览器时区换算自然日
+    queryFn: () =>
+      metricsApi.get({
+        windowDays,
+        timeZoneOffsetMinutes: -new Date().getTimezoneOffset(),
+      }),
+  });
 
-      try {
-        // 「今日到期」按浏览器时区换算自然日
-        setMetrics(
-          await metricsApi.get({
-            windowDays: days,
-            timeZoneOffsetMinutes: -new Date().getTimezoneOffset(),
-          }),
-        );
-      } catch (error) {
-        message.error(`加载指标失败：${(error as Error).message}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [message],
-  );
+  const metrics = metricsQuery.data ?? null;
+  const loading = metricsQuery.isFetching;
 
   useEffect(() => {
-    void load(windowDays);
-  }, [load, windowDays]);
+    if (metricsQuery.isError) {
+      message.error(`加载指标失败：${(metricsQuery.error as Error).message}`);
+    }
+  }, [metricsQuery.isError, metricsQuery.error, message]);
 
   const pendingRows: PendingRow[] = Object.entries(metrics?.pendingTasksByProcessKey ?? {})
     .map(([processKey, count]) => ({ processKey, count }))
@@ -131,7 +124,7 @@ export default function MetricsPage() {
             <Typography.Text type="secondary" code>
               {formatTime(metrics?.generatedAt)}
             </Typography.Text>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load(windowDays)}>
+            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void metricsQuery.refetch()}>
               刷新
             </Button>
           </Space>

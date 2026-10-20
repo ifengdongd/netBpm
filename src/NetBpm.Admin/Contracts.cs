@@ -14,6 +14,11 @@ public sealed class BpmnModelSummary
     public DateTime ModifyTime { get; set; }
 }
 
+/// <summary>模型分页结果。</summary>
+/// <param name="Items">当前页。</param>
+/// <param name="Total">满足条件的总数。</param>
+public sealed record BpmnModelPage(IReadOnlyList<BpmnModelSummary> Items, int Total);
+
 /// <summary>流程模型详情（含 BPMN XML 与 SVG 预览）。</summary>
 public sealed class BpmnModelDetail
 {
@@ -47,6 +52,12 @@ public sealed class SaveBpmnModelRequest
 
     public string? Svg { get; set; }
 }
+
+/// <summary>模型历史清理结果（<c>DELETE /api/admin/models/{id}/history</c>）。</summary>
+/// <param name="Removed">删除的版本快照数。</param>
+/// <param name="ModelId">模型 id。</param>
+/// <param name="KeepLatest">保留的最近版本数。</param>
+public sealed record ModelHistoryPruneResponse(int Removed, string ModelId, int KeepLatest);
 
 /// <summary>
 /// 保存模型的结果（含新版本号与校验明细）。

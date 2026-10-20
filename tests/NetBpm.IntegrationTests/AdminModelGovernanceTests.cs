@@ -180,6 +180,65 @@ public sealed class AdminModelGovernanceTests : IClassFixture<AdminEngineFactory
         Assert.Equal(2, second.GetProperty("version").GetInt32());
     }
 
+    [Fact]
+    public async Task PruneHistory_ShouldKeepLatestRevisions_AndReturn404ForMissingModel()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        Cleanup();
+
+        using var client = _factory.CreateClient();
+
+        // 前置：模型不存在时 404
+        using (var missing = await client.DeleteAsync(
+            new Uri($"/api/admin/models/{ModelId}/history?keepLatest=2", UriKind.Relative), Ct))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        }
+
+        // 保存 3 个版本
+        foreach (var xml in new[] { V1, V2, V1 })
+        {
+            using var save = await PutModelAsync(client, xml);
+            Assert.True(save.IsSuccessStatusCode, await save.Content.ReadAsStringAsync(Ct));
+        }
+
+        Assert.Equal(3, (await HistoryAsync(client)).Count);
+
+        // 保留最近 2 版：删掉 v1，最新版本（v3）永远保留
+        using (var prune = await client.DeleteAsync(
+            new Uri($"/api/admin/models/{ModelId}/history?keepLatest=2", UriKind.Relative), Ct))
+        {
+            var body = await prune.Content.ReadAsStringAsync(Ct);
+            Assert.True(prune.IsSuccessStatusCode, $"清理失败：{prune.StatusCode} {body}");
+
+            using var document = JsonDocument.Parse(body);
+            Assert.Equal(1, document.RootElement.GetProperty("removed").GetInt32());
+            Assert.Equal(2, document.RootElement.GetProperty("keepLatest").GetInt32());
+        }
+
+        var history = await HistoryAsync(client);
+
+        Assert.Equal(2, history.Count);
+        Assert.Equal(3, history[0].GetProperty("revision").GetInt32());
+        Assert.Equal(2, history[1].GetProperty("revision").GetInt32());
+
+        // 再次清理：没有可删的（cutoff < 1），返回 0 且不报错
+        using (var pruneAgain = await client.DeleteAsync(
+            new Uri($"/api/admin/models/{ModelId}/history?keepLatest=2", UriKind.Relative), Ct))
+        {
+            var body = await pruneAgain.Content.ReadAsStringAsync(Ct);
+            Assert.True(pruneAgain.IsSuccessStatusCode, body);
+
+            using var document = JsonDocument.Parse(body);
+            Assert.Equal(0, document.RootElement.GetProperty("removed").GetInt32());
+        }
+
+        // 模型本身不受影响
+        var historyAfterPrune = await HistoryAsync(client);
+        Assert.Equal(2, historyAfterPrune.Count);
+    }
+
     private async Task<HttpResponseMessage> PutModelAsync(HttpClient client, string xml) =>
         await client.PutAsJsonAsync(
             new Uri($"/api/admin/models/{ModelId}", UriKind.Relative),

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App as AntdApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import React from 'react';
@@ -8,14 +9,32 @@ import App from './App';
 
 import 'antd/dist/reset.css';
 
+// 全局查询客户端：
+//   - 4xx 不重试（401 已跳登录、403 重复请求无意义），其余失败重试 1 次；
+//   - 短暂 staleTime 内命中缓存，操作后由 invalidateQueries 主动刷新。
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number }).status;
+        return !(typeof status === 'number' && status >= 400 && status < 500) && failureCount < 1;
+      },
+      refetchOnWindowFocus: false,
+      staleTime: 5_000,
+    },
+  },
+});
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <ConfigProvider locale={zhCN}>
-      <AntdApp>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </AntdApp>
-    </ConfigProvider>
+    <QueryClientProvider client={queryClient}>
+      <ConfigProvider locale={zhCN}>
+        <AntdApp>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </AntdApp>
+      </ConfigProvider>
+    </QueryClientProvider>
   </React.StrictMode>,
 );

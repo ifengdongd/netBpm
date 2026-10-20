@@ -5,6 +5,7 @@ import type {
   AdminMetricsResponse,
   BpmnModelDetail,
   BpmnModelSummary,
+  BpmnModelRevisionSummary,
   BatchResultResponse,
   DeploymentSummaryResponse,
   DeploymentResource,
@@ -13,6 +14,7 @@ import type {
   HistoricProcessInstance,
   HistoricTask,
   HistoricVariable,
+  ModelHistoryPruneResponse,
   ProcessDefinitionResponse,
   ProcessInstanceResponse,
   ProcessType,
@@ -27,11 +29,29 @@ import type {
 // ─────────────────────────── 流程模型 ───────────────────────────
 
 export const modelsApi = {
-  list: () => http.get<BpmnModelSummary[]>('/api/admin/models'),
+  /** 分页查模型列表（envelope 信封；`keyword` 模糊匹配名称 / 流程 Key / 描述）。 */
+  list: (params?: { keyword?: string; firstResult?: number; maxResults?: number }) =>
+    list<BpmnModelSummary>('/api/admin/models', params),
   get: (id: string) => http.get<BpmnModelDetail>(`/api/admin/models/${encodeURIComponent(id)}`),
   save: (id: string, request: SaveBpmnModelRequest) =>
     http.put<void>(`/api/admin/models/${encodeURIComponent(id)}`, request),
   remove: (id: string) => http.del<void>(`/api/admin/models/${encodeURIComponent(id)}`),
+
+  /** 版本历史（不含 XML 正文，按版本号倒序）。 */
+  history: (id: string) =>
+    http.get<BpmnModelRevisionSummary[]>(`/api/admin/models/${encodeURIComponent(id)}/history`),
+
+  /** 回滚到指定版本：该版本内容作为新版本写入（历史只增不删）。 */
+  rollback: (id: string, revisionId: string) =>
+    http.post<BpmnModelDetail>(
+      `/api/admin/models/${encodeURIComponent(id)}/rollback/${encodeURIComponent(revisionId)}`,
+    ),
+
+  /** 清理历史：只保留最近 `keepLatest` 个版本（最新版本永远保留）。 */
+  pruneHistory: (id: string, keepLatest: number) =>
+    http.del<ModelHistoryPruneResponse>(
+      `/api/admin/models/${encodeURIComponent(id)}/history?keepLatest=${keepLatest}`,
+    ),
 };
 
 // ─────────────────────────── 流程类型 ───────────────────────────

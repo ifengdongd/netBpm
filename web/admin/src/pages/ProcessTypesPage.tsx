@@ -12,11 +12,14 @@ import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } 
 import { CSS } from '@dnd-kit/utilities';
 import { App, Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, HTMLAttributes } from 'react';
 
 import { processTypesApi } from '../api';
 import type { ProcessType, SaveProcessTypeRequest } from '../api/types';
+
+const PROCESS_TYPES_KEY = ['admin', 'process-types'] as const;
 
 interface EditorState {
   open: boolean;
@@ -25,14 +28,28 @@ interface EditorState {
 
 export default function ProcessTypesPage() {
   const { message } = App.useApp();
+  const queryClient = useQueryClient();
   const [form] = Form.useForm<SaveProcessTypeRequest>();
 
-  const [items, setItems] = useState<ProcessType[]>([]);
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editor, setEditor] = useState<EditorState>({ open: false, editing: null });
   const [reordering, setReordering] = useState(false);
   const [keyword, setKeyword] = useState('');
+
+  const typesQuery = useQuery({
+    queryKey: PROCESS_TYPES_KEY,
+    queryFn: () => processTypesApi.list(),
+  });
+
+  // useMemo 稳定空数组引用，避免下游 useMemo 依赖每次渲染变化
+  const items = useMemo(() => typesQuery.data ?? [], [typesQuery.data]);
+  const loading = typesQuery.isFetching;
+
+  useEffect(() => {
+    if (typesQuery.isError) {
+      message.error(`加载流程类型失败：${(typesQuery.error as Error).message}`);
+    }
+  }, [typesQuery.isError, typesQuery.error, message]);
 
   const hasKeyword = keyword.trim().length > 0;
 
@@ -53,23 +70,7 @@ export default function ProcessTypesPage() {
   // 拖拽需移动 4px 才激活，避免点击「编辑 / 删除」按钮时误触发
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  const load = useCallback(async () => {
-    setLoading(true);
-
-    try {
-      setItems(await processTypesApi.list());
-    } catch (error) {
-      message.error(`加载流程类型失败：${(error as Error).message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [message]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // 拖拽结束后按新顺序重排 sortOrder 并逐个持久化（流程类型数量少，串行更新保证一致）
+  /** 拖拽结束后按新顺序重排 sortOrder 并逐个持久化（流程类型数量少，串行更新保证一致）。 */
   const persistOrder = async (ordered: ProcessType[]) => {
     setReordering(true);
 
@@ -88,7 +89,7 @@ export default function ProcessTypesPage() {
       message.success('排序已保存');
     } catch (error) {
       message.error(`保存排序失败：${(error as Error).message}`);
-      await load();
+      await typesQuery.refetch();
     } finally {
       setReordering(false);
     }
@@ -112,7 +113,8 @@ export default function ProcessTypesPage() {
     // 重排后按 0..n 重新分配 sortOrder（后端按 sort_order asc, id asc 返回）
     const reordered = arrayMove(items, oldIndex, newIndex).map((item, index) => ({ ...item, sortOrder: index }));
 
-    setItems(reordered);
+    // 乐观更新缓存，随后逐行持久化；失败时 refetch 回滚为服务端顺序
+    queryClient.setQueryData(PROCESS_TYPES_KEY, reordered);
     void persistOrder(reordered);
   };
 
@@ -148,7 +150,7 @@ export default function ProcessTypesPage() {
       }
 
       setEditor({ open: false, editing: null });
-      await load();
+      await typesQuery.refetch();
     } catch (error) {
       message.error(`保存失败：${(error as Error).message}`);
     } finally {
@@ -160,7 +162,7 @@ export default function ProcessTypesPage() {
     try {
       await processTypesApi.remove(id);
       message.success(`已删除：${name}`);
-      await load();
+      await typesQuery.refetch();
     } catch (error) {
       message.error(`删除失败：${(error as Error).message}`);
     }
