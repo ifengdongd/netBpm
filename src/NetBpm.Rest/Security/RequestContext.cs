@@ -69,11 +69,63 @@ public sealed class RequestContext
 
     /// <summary>是否具备指定 scope。</summary>
     public bool HasScope(string scope) => Scopes.Contains(scope);
+
+    /// <summary>
+    /// 是否具备细粒度管理 scope：持有 <c>netbpm.admin</c>（超级权限）或该 scope 本身。
+    /// <para>
+    /// 这是管理能力判定的唯一入口：<c>netbpm.admin</c> 隐含全部 <c>netbpm.admin.*</c> 子权限，
+    /// 保证已发放的旧令牌在引入细粒度授权后仍然可用。
+    /// </para>
+    /// </summary>
+    public bool HasAdminScope(string scope) => Scopes.Contains(TaskScopes.Admin) || Scopes.Contains(scope);
 }
 
-/// <summary>REST 层使用的授权范围常量。</summary>
+/// <summary>
+/// REST 层使用的授权范围常量。
+/// <para>
+/// 命名约定：<c>netbpm.admin</c> 是超级管理范围，<c>netbpm.admin.&lt;域&gt;.&lt;动作&gt;</c> 是可单独授予的
+/// 细粒度权限。持有 <c>netbpm.admin</c> 隐含全部子 scope（见 <see cref="RequestContext.HasAdminScope"/>）。
+/// </para>
+/// <para>
+/// 注意：细粒度管理 scope <b>只约束「管理员越权」这条路径</b>。业务参与人（办理人 / 候选人 / 发起人）
+/// 依业务规则本就可以执行的动作，不需要管理 scope —— 否则会把正常办理也挡在门外。
+/// </para>
+/// </summary>
 public static class TaskScopes
 {
-    /// <summary>管理范围：跨办理人完成任务、批量操作等。</summary>
+    /// <summary>超级管理范围：隐含全部 <c>netbpm.admin.*</c> 子权限，可越过“仅办理人可操作”的限制。</summary>
     public const string Admin = "netbpm.admin";
+
+    /// <summary>管理端读：流程模型 / 版本历史 / 流程类型。</summary>
+    public const string AdminModelRead = "netbpm.admin.model.read";
+
+    /// <summary>管理端写：保存 / 删除 / 回滚 / 发布模型，增删改流程类型。</summary>
+    public const string AdminModelWrite = "netbpm.admin.model.write";
+
+    /// <summary>任务管理动作：转办、改任务字段、增删候选关系（越权时所需）。</summary>
+    public const string AdminTaskModerate = "netbpm.admin.task.moderate";
+
+    /// <summary>实例管理动作：跳转节点、迁移到其它定义（越权时所需）。</summary>
+    public const string AdminInstanceJump = "netbpm.admin.instance.jump";
+
+    /// <summary>实例管理动作：删除（撤销）运行中的流程实例，含批量删除。</summary>
+    public const string AdminInstanceDelete = "netbpm.admin.instance.delete";
+
+    /// <summary>实例管理动作：挂起 / 激活流程实例（影响所有人能否继续办理）。</summary>
+    public const string AdminInstanceSuspend = "netbpm.admin.instance.suspend";
+
+    /// <summary>变量直写：越过参与人限制直接写 / 删流程实例变量与任务局部变量。</summary>
+    public const string AdminVariablesWrite = "netbpm.admin.variables.write";
+
+    /// <summary>指标查询。</summary>
+    public const string AdminMetricsRead = "netbpm.admin.metrics.read";
+
+    /// <summary>管理动作审计查询。</summary>
+    public const string AdminAuditRead = "netbpm.admin.audit.read";
+
+    /// <summary>清理管理动作审计（按保留期删除，可抹除历史痕迹，需单独授权）。</summary>
+    public const string AdminAuditPurge = "netbpm.admin.audit.purge";
+
+    /// <summary>历史归档（把已结束实例的历史行搬运到归档表）。</summary>
+    public const string AdminHistoryArchive = "netbpm.admin.history.archive";
 }

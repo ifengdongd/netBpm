@@ -11,6 +11,14 @@ public interface IExecutionEntity : IDelegateExecution
     /// <summary>乐观锁版本（<c>REV_</c>）。</summary>
     int Revision { get; set; }
 
+    /// <summary>
+    /// 当前执行的流程定义 id（<c>PROC_DEF_ID_</c>）。
+    /// <para>
+    /// 基接口只读；实例迁移需要把运行中的执行整棵树切到目标版本，因此在派生接口里开放写入。
+    /// </para>
+    /// </summary>
+    new string? ProcessDefinitionId { get; set; }
+
     new bool IsActive { get; set; }
 
     new bool IsConcurrent { get; set; }

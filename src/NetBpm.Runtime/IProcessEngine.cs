@@ -3,6 +3,7 @@ using NetBpm.Bpmn.Validation;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 using NetBpm.Persistence.Deployment;
 
@@ -29,6 +30,21 @@ public interface IProcessEngine
 {
     /// <summary>执行任意命令（一个命令 = 一个事务）。</summary>
     ValueTask<TResult> ExecuteAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default);
+
+    /// <summary>
+    /// 触发到期的定时边界作业（宿主后台轮询调用）。
+    /// <para>
+    /// 每条作业一个独立命令（独立事务）：抢占失败 / 任务已完成都只影响这一条。
+    /// 未启用定时器（未注册 <c>ITimerJobManager</c>）时返回 0。
+    /// </para>
+    /// </summary>
+    /// <param name="utcNow">当前 UTC 时间（测试可传未来时间，无需真的等待）。</param>
+    /// <param name="maxJobs">本轮最多处理的作业数。</param>
+    /// <returns>实际触发（抢占并推进了流程）的作业数。</returns>
+    ValueTask<int> TriggerDueTimersAsync(
+        DateTime utcNow,
+        int maxJobs = 50,
+        CancellationToken ct = default);
 
     /// <summary>
     /// 部署流程定义（解析 → 校验 → 落库）。
@@ -424,5 +440,35 @@ public interface IProcessEngine
         string processInstanceId,
         string targetActivityId,
         string? reason = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 预演流程实例迁移（<b>只读</b>）：返回活动映射、待取消待办数与风险提示。
+    /// <para>
+    /// 与 <see cref="MigrateProcessInstanceAsync"/> 共用同一套规则（类型兼容、映射完整性、多实例拒绝、
+    /// 目标定义/租户校验），因此「预览通过」不会在真正执行时因规则差异失败。
+    /// </para>
+    /// </summary>
+    /// <exception cref="NetBpm.Engine.EngineException">校验不通过（聚合全部错误）。</exception>
+    ValueTask<MigrationPlan> ValidateMigrationAsync(
+        ProcessInstanceMigrationRequest request,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 把运行中的实例迁移到同 key 的另一个流程定义（通常是新版本），并返回实际执行的计划。
+    /// <para>
+    /// 一个命令 = 一个事务：切定义 → 取消旧待办（历史留原因）→ 作废旧定时器 → 收口旧活动行 →
+    /// 按新定义重新进入目标节点（重建待办/办理人/表单/边界定时器）→ 写迁移审计。
+    /// </para>
+    /// <para>历史口径：<c>ACT_HI_PROCINST.PROC_DEF_ID_</c> 保持启动时的定义，迁移事实见 <c>ACT_HI_MIGRATION</c>。</para>
+    /// </summary>
+    /// <exception cref="NetBpm.Engine.EngineException">校验不通过 / 并发修改冲突。</exception>
+    ValueTask<MigrationPlan> MigrateProcessInstanceAsync(
+        ProcessInstanceMigrationRequest request,
+        CancellationToken ct = default);
+
+    /// <summary>查流程实例的迁移记录（按迁移时间倒序）；未启用审计存储时返回空表。</summary>
+    ValueTask<IReadOnlyList<MigrationRecord>> FindMigrationsAsync(
+        string processInstanceId,
         CancellationToken ct = default);
 }

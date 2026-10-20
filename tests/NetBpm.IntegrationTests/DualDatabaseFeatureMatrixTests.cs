@@ -211,9 +211,10 @@ public sealed class DualDatabaseFeatureMatrixTests
         Assert.Empty(await harness.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId, Ct));
         Assert.Equal(0, harness.CountRows("ACT_RU_EXECUTION"));
 
-        // 完成计数已落库（3 次完成之后实例结束，行已清 —— 用历史活动行数佐证推进了 3 个实例）
+        // 历史活动行已每实例一行（对齐 Activiti）：sign 节点 3 行，加 start / end 共 5 行
         using var session = harness.SessionFactory.Create();
-        Assert.Equal(3, RowValues.Query(session, "select ID_ from ACT_HI_ACTINST").Count);
+        Assert.Equal(5, RowValues.Query(session, "select ID_ from ACT_HI_ACTINST").Count);
+        Assert.Equal(3, RowValues.Query(session, "select ID_ from ACT_HI_ACTINST where ACT_ID_ = 'sign'").Count);
     }
 
     // ─────────────────────────── B1.2 多实例（会签 + 完成条件）───────────────────────────

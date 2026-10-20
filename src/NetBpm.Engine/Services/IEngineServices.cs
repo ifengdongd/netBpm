@@ -38,6 +38,12 @@ public interface IEngineServices
     IProcessDefinitionResolver? ProcessDefinitionResolver { get; }
 
     /// <summary>
+    /// 定时作业存储（边界定时器）。未注入时用户任务<b>不会</b>创建定时器
+    /// （宿主必须注册实现才能启用定时能力，见 <c>AddNetBpm</c>）。
+    /// </summary>
+    Jobs.ITimerJobManager? TimerJobManager { get; }
+
+    /// <summary>
     /// 引擎日志（可空）。事件监听器 throwOnFailure=false 的失败通过它记警告；
     /// 未注入时此类失败会响亮抛出，避免静默丢失语义。
     /// </summary>

@@ -406,6 +406,18 @@ body.resizing {
   background: #fdf0ef;
 }
 
+/* ─────────────── 画布上的校验标记 ─────────────── */
+
+.djs-element.netbpm-error .djs-visual > :first-child {
+  stroke: #c0392b !important;
+  stroke-width: 2.5px !important;
+}
+
+.djs-element.netbpm-warning .djs-visual > :first-child {
+  stroke: #e08b00 !important;
+  stroke-width: 2.5px !important;
+}
+
 /* ─────────────── 即时校验清单（§6.2 第 3 项）─────────────── */
 
 .issues {

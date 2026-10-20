@@ -263,3 +263,63 @@ export interface PagedResponse<T> {
   firstResult: number;
   maxResults: number;
 }
+
+// ─────────────────────────── 管理治理 · 审计 ───────────────────────────
+
+/** 一条管理动作审计（`GET /api/admin/audit`）。 */
+export interface AdminAuditItem {
+  id: string;
+  tenantId?: string | null;
+  actor?: string | null;
+  authMode: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  processInstanceId?: string | null;
+  /** 动作明细（JSON 字符串，不含变量值）。 */
+  detail?: string | null;
+  success: boolean;
+  error?: string | null;
+  createdAt: string;
+}
+
+export interface AdminAuditListResponse {
+  total: number;
+  items: AdminAuditItem[];
+}
+
+/** 保留策略清理结果（`DELETE /api/admin/audit`）。 */
+export interface AdminAuditPurgeResponse {
+  removed: number;
+  before: string;
+  tenantId?: string | null;
+}
+
+/**
+ * 管理指标（`GET /api/admin/metrics`）。
+ *
+ * `null` 表示「当前宿主无法统计」（例如内存宿主没有 `ACT_RU_TASK` 可聚合、归档未启用），
+ * 而不是统计结果为 0 —— 界面应显示为「不可用」。
+ */
+export interface AdminMetricsResponse {
+  generatedAt: string;
+  tenantId?: string | null;
+  auditWindowDays: number;
+  runningProcessInstances: number;
+  processDefinitions: number;
+  historicProcessInstances: number;
+  finishedProcessInstances: number;
+  deletedProcessInstances: number;
+  pendingTasks?: number | null;
+  overdueTasks?: number | null;
+  dueTodayTasks?: number | null;
+  pendingTasksByProcessKey?: Record<string, number> | null;
+  archivedInstances?: number | null;
+  auditActions: AdminAuditActionCount[];
+}
+
+/** 窗口内按动作聚合的审计计数。 */
+export interface AdminAuditActionCount {
+  action: string;
+  count: number;
+}

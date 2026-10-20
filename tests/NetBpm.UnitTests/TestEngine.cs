@@ -8,6 +8,7 @@ using NetBpm.Engine.Command;
 using NetBpm.Engine.Command.Interceptors;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Services;
 using NetBpm.Engine.Tasks;
 
@@ -25,7 +26,8 @@ internal sealed class TestEngine
         InMemoryExecutionManager executionManager,
         InMemoryTaskManager taskManager,
         TestDelegateResolver delegateResolver,
-        TestDefinitionResolver definitionResolver)
+        TestDefinitionResolver definitionResolver,
+        InMemoryTimerJobManager timerJobs)
     {
         CommandExecutor = commandExecutor;
         Services = services;
@@ -33,6 +35,7 @@ internal sealed class TestEngine
         TaskManager = taskManager;
         DelegateResolver = delegateResolver;
         Resolver = definitionResolver;
+        TimerJobs = timerJobs;
     }
 
     public ICommandExecutor CommandExecutor { get; }
@@ -42,6 +45,9 @@ internal sealed class TestEngine
     public InMemoryExecutionManager ExecutionManager { get; }
 
     public InMemoryTaskManager TaskManager { get; }
+
+    /// <summary>定时作业表（边界定时器测试用）。</summary>
+    public InMemoryTimerJobManager TimerJobs { get; }
 
     public TestDelegateResolver DelegateResolver { get; }
 
@@ -60,7 +66,8 @@ internal sealed class TestEngine
         // ⚠️ 执行树与任务表必须共用同一个 ID 生成器，否则会撞 id
         var idGenerator = new InMemoryIdGenerator();
         var taskManager = new InMemoryTaskManager(idGenerator, history);
-        var executionManager = new InMemoryExecutionManager(idGenerator, taskManager, history);
+        var timerJobs = new InMemoryTimerJobManager();
+        var executionManager = new InMemoryExecutionManager(idGenerator, taskManager, history, timerJobs);
         var delegateResolver = new TestDelegateResolver();
         var definitionResolver = new TestDefinitionResolver();
         var behaviorFactory = new ActivityBehaviorFactory(() => holder!);
@@ -73,7 +80,9 @@ internal sealed class TestEngine
             behaviorFactory,
             delegateResolver,
             taskManager,
-            definitionResolver);
+            definitionResolver,
+            logger: null,
+            timerJobs);
 
         holder = services;
 
@@ -85,7 +94,36 @@ internal sealed class TestEngine
             ],
             () => new CommandContext(services));
 
-        return new TestEngine(executor, services, executionManager, taskManager, delegateResolver, definitionResolver);
+        return new TestEngine(
+            executor,
+            services,
+            executionManager,
+            taskManager,
+            delegateResolver,
+            definitionResolver,
+            timerJobs);
+    }
+
+    /// <summary>触发到期的边界定时器（测试可直接传未来时间，无需真的等待）。</summary>
+    public async ValueTask<int> TriggerDueTimersAsync(
+        DateTime utcNow,
+        int maxJobs = 50,
+        CancellationToken ct = default)
+    {
+        var due = await TimerJobs.FindDueAsync(utcNow, maxJobs, ct).ConfigureAwait(false);
+        var fired = 0;
+
+        foreach (var job in due)
+        {
+            if (await CommandExecutor
+                    .ExecuteAsync(new TriggerTimerJobCommand(job.Id), ct)
+                    .ConfigureAwait(false))
+            {
+                fired++;
+            }
+        }
+
+        return fired;
     }
 
     /// <summary>解析 XML → 启动流程实例 → 排空议程。</summary>

@@ -643,11 +643,118 @@ public sealed class RestEndToEndTests : IClassFixture<RestEngineFactory>
         Assert.Equal(DateTimeKind.Utc, parsed.Kind);
     }
 
+    [Fact]
+    public async Task MigrationEndpoint_ShouldPreviewThenApply_AndExposeAudit()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        using (var session = MySqlTestDatabase.CreateSessionFactory().Create())
+        {
+            MySqlTestDatabase.Reset(session);
+        }
+
+        using var client = _factory.CreateClient();
+
+        var v1 = await DeployXmlAsync(client, MigrationV1);
+        var v2 = await DeployXmlAsync(client, MigrationV2);
+
+        string processInstanceId;
+
+        using (var start = await client.PostAsJsonAsync(
+            new Uri("/api/runtime/process-instances", UriKind.Relative),
+            new { processDefinitionId = v1, businessKey = "BIZ-MIG-1", startUserId = "tester" },
+            Ct))
+        {
+            var body = await start.Content.ReadAsStringAsync(Ct);
+            Assert.True(start.IsSuccessStatusCode, $"启动失败：{start.StatusCode} {body}");
+
+            using var document = JsonDocument.Parse(body);
+            processInstanceId = document.RootElement.GetProperty("processInstanceId").GetString()!;
+        }
+
+        Assert.Single(await TasksOfAsync(client, "alice"));
+
+        var previewBody = await PostJsonAsync(
+            client,
+            $"/api/runtime/process-instances/{processInstanceId}/migrate",
+            new
+            {
+                targetProcessDefinitionId = v2,
+                activityMappings = new Dictionary<string, string> { ["task_approve"] = "task_review" },
+                validateOnly = true,
+            });
+
+        Assert.False(previewBody.GetProperty("applied").GetBoolean());
+        Assert.Equal(1, previewBody.GetProperty("tasksToCancel").GetInt32());
+
+        // 预演不写库：旧任务仍在
+        Assert.Single(await TasksOfAsync(client, "alice"));
+
+        var appliedBody = await PostJsonAsync(
+            client,
+            $"/api/runtime/process-instances/{processInstanceId}/migrate",
+            new
+            {
+                targetProcessDefinitionId = v2,
+                activityMappings = new Dictionary<string, string> { ["task_approve"] = "task_review" },
+                reason = "HTTP 迁移",
+            });
+
+        Assert.True(appliedBody.GetProperty("applied").GetBoolean());
+        Assert.Empty(await TasksOfAsync(client, "alice"));
+
+        var newTaskId = await SingleTaskOfAsync(client, "bob");
+        var newTask = await GetJsonAsync(client, $"/api/runtime/tasks/{newTaskId}");
+
+        Assert.Equal("task_review", newTask.GetProperty("taskDefinitionKey").GetString());
+
+        var records = await JsonArrayAsync(
+            client,
+            $"/api/runtime/process-instances/{processInstanceId}/migrations");
+
+        Assert.Single(records);
+        Assert.Equal(v1, records[0].GetProperty("sourceProcessDefinitionId").GetString());
+        Assert.Equal("HTTP 迁移", records[0].GetProperty("reason").GetString());
+    }
+
+    private const string MigrationV1 = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="rest_migrate" isExecutable="true">
+            <startEvent id="start" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="task_approve" />
+            <userTask id="task_approve" name="审批" activiti:assignee="alice" />
+            <sequenceFlow id="f2" sourceRef="task_approve" targetRef="end" />
+            <endEvent id="end" />
+          </process>
+        </definitions>
+        """;
+
+    private const string MigrationV2 = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="rest_migrate" isExecutable="true">
+            <startEvent id="start" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="task_review" />
+            <userTask id="task_review" name="复核" activiti:assignee="bob" />
+            <sequenceFlow id="f2" sourceRef="task_review" targetRef="end" />
+            <endEvent id="end" />
+          </process>
+        </definitions>
+        """;
+
     // ─────────────────────────── HTTP 辅助 ───────────────────────────
 
-    private static async Task<string> DeployAsync(HttpClient client)
+    private static async Task<string> DeployAsync(HttpClient client) =>
+        await DeployXmlAsync(client, ApprovalProcess());
+
+    private static async Task<string> DeployXmlAsync(HttpClient client, string xml)
     {
-        using var content = new StringContent(ApprovalProcess(), Encoding.UTF8, "text/xml");
+        using var content = new StringContent(xml, Encoding.UTF8, "text/xml");
         using var response = await client.PostAsync(new Uri("/api/designer/deploy", UriKind.Relative), content, Ct);
 
         var body = await response.Content.ReadAsStringAsync(Ct);
@@ -717,6 +824,17 @@ public sealed class RestEndToEndTests : IClassFixture<RestEngineFactory>
 
         var body = await response.Content.ReadAsStringAsync(Ct);
         Assert.True(response.IsSuccessStatusCode, $"GET {path} 失败：{response.StatusCode} {body}");
+
+        using var document = JsonDocument.Parse(body);
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<JsonElement> PostJsonAsync(HttpClient client, string path, object payload)
+    {
+        using var response = await client.PostAsJsonAsync(new Uri(path, UriKind.Relative), payload, Ct);
+
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.IsSuccessStatusCode, $"POST {path} 失败：{response.StatusCode} {body}");
 
         using var document = JsonDocument.Parse(body);
         return document.RootElement.Clone();

@@ -190,7 +190,7 @@
 |---|---|---|---|
 | T8.1 | 任务实体与查询 | `TaskEntity` / `ITaskManager` / `TaskQuery` | 任务行**不做脏检查**（即时写）⇒ "只改了 `CLAIM_TIME_`"必须显式 `UpdateTaskAsync` |
 | T8.2 | 身份关系 | `IdentityLink`（人/组）、claim / 取消 claim | 候选组展开需要 `IUserGroupManager`，**只有应用层做得了**，别塞进引擎 |
-| T8.3 | 身份端口可替换 | `EmptyUserGroupManager` / `IOrgDirectory` / `InMemoryOrgDirectory` | 端口设计要能被真库实现（Demo 的 `MySqlOrgDirectory` 是范例：部门/员工/审批组四张表） |
+| T8.3 | 身份端口可替换 | `EmptyUserGroupManager` / `IOrgDirectory` / `InMemoryOrgDirectory` | 端口设计要能被真库实现 —— **2026-10-20 已兑现**：Demo 的 `MySqlOrgDirectory` 读 `sys_dept` / `sys_emp` / `sys_emp_group` / `sys_emp_group_member` 四张真表（随 `AddDemoStores` 按方言切换；SqlServer / JSON 模式仍用内存版） |
 
 ### WP9 设计器前端（P8）
 
@@ -292,7 +292,7 @@
 | # | 任务 | 依赖 | 要点 |
 |---|---|---|---|
 | B1.1 | ~~**脚本任务执行**（Roslyn Scripting）~~ ✅ 已完成（2026-10-16） | 无 | `ScriptTaskEngine`（`src/NetBpm.Engine/Script/`）：只支持 `scriptFormat="csharp"`（缺省/其它格式部署期拒绝）；脚本顶层可用 `execution`（当前执行）与 `vars`（变量快照，赋值不写回）；`autoStoreVariables` 存脚本顶层变量、`resultVariable` 存最后一条顶层表达式的值；编译结果按脚本原文缓存 |
-| B1.2 | ~~**多实例会签 / 串签**~~ ✅ 已完成（2026-10-16，无 DDL 变更） | 引擎（执行树扩展） | 仅 `userTask` 支持（其它活动部署期拒绝，含解析进模型防静默丢弃）；串行 = 主执行逐实例建任务，并行 = N 个子执行各挂一任务（复用并行网关收口机制）；循环变量走流程变量跨命令恢复；`completionCondition` 为真时取消剩余实例。**已登记偏差**：ACT_HI_ACTINST 每节点 1 行（Activiti 每实例 1 行）、并行模式共享作用域的 loopCounter/elementVariable 只反映最后实例、实例级监听器不逐实例触发、多实例与 skipExpression 互斥 |
+| B1.2 | ~~**多实例会签 / 串签**~~ ✅ 已完成（2026-10-16，无 DDL 变更；2026-10-20 消除历史行偏差：`ACT_HI_ACTINST` 每实例 1 行） | 引擎（执行树扩展） | 仅 `userTask` 支持（其它活动部署期拒绝，含解析进模型防静默丢弃）；串行 = 主执行逐实例建任务，并行 = N 个子执行各挂一任务（复用并行网关收口机制）；循环变量走流程变量跨命令恢复；`completionCondition` 为真时取消剩余实例。历史活动行已对齐 Activiti：每实例 1 行（串行在同一执行依次开合；并行每实例 1 行 + 主执行容器行，实例完成即收口、提前完成记取消原因）。**仍登记的偏差**：并行模式共享作用域的 loopCounter/elementVariable 只反映最后实例、实例级监听器不逐实例触发、多实例与 skipExpression 互斥 |
 | B1.3 | ~~纯条件评测型测试（不改库）~~ ✅ 已完成（2026-10-16，`CorpusInMemoryTests`） | 无 | 全部 210 条对拍语料在**纯内存宿主**（TestEngine）上跑通操作脚本（动作语义与 `DifferentialRunner.ApplyAsync` 逐条对齐：completeAnyTask 确定性挑选 / completeTask 唯一性 / completeAllTasks+limit），0.4 秒回归不依赖 MySQL；断言部署校验干净 + 脚本可执行 + 执行树一致。**分工**：内存套件答「跑得动 + 推进正确」，差分对拍答「与 Activiti 行级一致」；语料脚本歧义（同 key 多待办）与差分执行器同口径跳过。语料读取为最小副本（避免测试工程互引导致 xunit 入口重复） |
 | B1.4 | ~~CI 流水线~~ ✅ 已完成（2026-10-16，`.github/workflows/ci.yml`） | 无 | build + 单测 + MySQL 服务容器跑集成测试（`DbMigrate --create-database` 建表）；⚠️ 测试执行用 `dotnet run --project`（MTP 原生）；`dotnet test` 亦可用，但不要带 `--nologo`（MTP 透传后拒绝 → 「运行了零个测试」/exit 5）；对拍 Job 需 JDK + 预言机产物，暂未开启。**双库功能矩阵（2026-10-16）**：B1/B2 全部功能 × MySQL（localhost）与 SqlServer（10.1.245.36，Windows 认证）各跑一遍（`DualDatabaseFeatureMatrixTests`，10 项功能 × 2 方言 = 20 行，库表自动创建迁移，方言不可用动态跳过；SqlServer 侧默认由 Testcontainers 拉起 `mssql/server:2022`（2026-10-19 起，此前默认连内网 10.1.245.36；仍可用 `NETBPM_SQLSERVER_CONNECTION` 指到已有实例；Docker 不可用则动态跳过） |
 

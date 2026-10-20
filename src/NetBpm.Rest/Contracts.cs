@@ -2,6 +2,7 @@ using System.Text.Json;
 using NetBpm.Bpmn.Validation;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 
 namespace NetBpm.Rest;
@@ -493,6 +494,108 @@ public sealed record SetAssigneeRequest(string? Assignee = null);
 public sealed record JumpProcessInstanceRequest(string? TargetActivityId = null, string? Reason = null);
 
 /// <summary>
+/// 流程实例迁移请求（定义升级后的存量实例处置）。
+/// </summary>
+/// <param name="TargetProcessDefinitionId">目标流程定义 id（必须与当前定义同 key / 同租户）。</param>
+/// <param name="ActivityMappings">
+/// 活动映射（源节点 id → 目标节点 id）。只需列出 id 发生变化的活动；
+/// 目标定义存在同 id 且类型兼容的节点时默认按同 id 迁移。
+/// </param>
+/// <param name="Reason">迁移原因（写入被取消待办的删除原因与迁移审计）。</param>
+/// <param name="ValidateOnly">
+/// 为 <see langword="true"/> 时只做预演（不写库），用于发布前确认影响面。
+/// </param>
+public sealed record MigrateProcessInstanceRequest(
+    string? TargetProcessDefinitionId = null,
+    IDictionary<string, string>? ActivityMappings = null,
+    string? Reason = null,
+    bool ValidateOnly = false);
+
+/// <summary>单个活动的迁移明细。</summary>
+/// <param name="FromActivityId">源节点 id。</param>
+/// <param name="ToActivityId">目标节点 id。</param>
+/// <param name="ExecutionCount">受影响的执行数（并行分支/会签 &gt; 1）。</param>
+/// <param name="RecreateTask">是否重建待办。</param>
+public sealed record MigrationActivityResponse(
+    string FromActivityId,
+    string ToActivityId,
+    int ExecutionCount,
+    bool RecreateTask);
+
+/// <summary>迁移计划 / 执行结果。</summary>
+/// <param name="ProcessInstanceId">流程实例 id。</param>
+/// <param name="SourceProcessDefinitionId">迁移前定义 id。</param>
+/// <param name="TargetProcessDefinitionId">目标定义 id。</param>
+/// <param name="Activities">活动映射明细。</param>
+/// <param name="TasksToCancel">被取消的待办数。</param>
+/// <param name="Warnings">不阻断迁移、但需确认的提示。</param>
+/// <param name="Applied">是否已实际执行（预演为 <see langword="false"/>）。</param>
+public sealed record MigrationPlanResponse(
+    string ProcessInstanceId,
+    string SourceProcessDefinitionId,
+    string TargetProcessDefinitionId,
+    IReadOnlyList<MigrationActivityResponse> Activities,
+    int TasksToCancel,
+    IReadOnlyList<string> Warnings,
+    bool Applied)
+{
+    /// <summary>从引擎计划映射。</summary>
+    public static MigrationPlanResponse From(MigrationPlan plan, bool applied)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        return new MigrationPlanResponse(
+            plan.ProcessInstanceId,
+            plan.SourceProcessDefinitionId,
+            plan.TargetProcessDefinitionId,
+            [.. plan.Activities.Select(activity => new MigrationActivityResponse(
+                activity.FromActivityId,
+                activity.ToActivityId,
+                activity.ExecutionCount,
+                activity.RecreateTask))],
+            plan.TasksToCancel,
+            [.. plan.Warnings],
+            applied);
+    }
+}
+
+/// <summary>迁移审计记录。</summary>
+/// <param name="Id">记录 id。</param>
+/// <param name="ProcessInstanceId">流程实例 id。</param>
+/// <param name="SourceProcessDefinitionId">源定义 id。</param>
+/// <param name="TargetProcessDefinitionId">目标定义 id。</param>
+/// <param name="ActivityMappings">活动映射。</param>
+/// <param name="Reason">迁移原因。</param>
+/// <param name="UserId">操作人。</param>
+/// <param name="MigratedAt">迁移时间（UTC）。</param>
+public sealed record MigrationRecordResponse(
+    string Id,
+    string ProcessInstanceId,
+    string SourceProcessDefinitionId,
+    string TargetProcessDefinitionId,
+    IReadOnlyDictionary<string, string> ActivityMappings,
+    string? Reason,
+    string? UserId,
+    DateTime MigratedAt)
+{
+    /// <summary>从引擎审计记录映射。</summary>
+    public static MigrationRecordResponse From(MigrationRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        return new MigrationRecordResponse(
+            record.Id,
+            record.ProcessInstanceId,
+            record.SourceProcessDefinitionId,
+            record.TargetProcessDefinitionId,
+            record.ActivityMappings,
+            record.Reason,
+            record.UserId,
+            record.MigratedAt);
+    }
+}
+
+/// <summary>
 /// 任务增量更新请求。每个字段为 <see langword="null"/> 表示不修改；
 /// <c>owner</c> 传空串表示清空所有者。
 /// </summary>
@@ -724,7 +827,7 @@ public sealed record ValidationResponse(
 /// <para>定义 id 形如 <c>{key}:{version}:{idGeneratorId}</c>（见 README），key 不含冒号，
 /// 因此取第一段即可得到流程 key。</para>
 /// </summary>
-internal static class DefinitionIdParser
+public static class DefinitionIdParser
 {
     public static string? Key(string? processDefinitionId)
     {

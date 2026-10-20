@@ -42,6 +42,19 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
     /// <summary>把元素写回 XML。</summary>
     protected abstract void ConvertElementToXml(XmlWriter writer, TElement element);
 
+    /// <summary>
+    /// 本元素<b>实际实现</b>的 <c>activiti:*</c> 属性名。
+    /// <para>
+    /// 未列入的属性会被记到 <see cref="BaseElement.Attributes"/>，由
+    /// <c>unknown-activiti-attribute</c> 规则给提示 —— 典型是 <c>asyncBefore</c> / <c>asyncAfter</c>
+    /// 这类「引擎按同步执行、写了也不生效」的配置。不在这里直接报错，是因为模型校验只依赖
+    /// 模型对象，拒绝与否统一由校验层裁定。
+    /// </para>
+    /// </summary>
+    protected virtual IReadOnlySet<string> KnownActivitiAttributes => NoActivitiAttributes;
+
+    private static readonly HashSet<string> NoActivitiAttributes = new(StringComparer.Ordinal);
+
     /// <inheritdoc />
     Type IBpmnElementXmlConverter.ElementType => typeof(TElement);
 
@@ -52,8 +65,34 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         element.Id = reader.GetAttribute("id");
         element.Name = reader.GetAttribute("name");
 
+        RecordUnknownActivitiAttributes(reader, element);
+
         ConvertXmlToElement(reader, element, process);
         return element;
+    }
+
+    /// <summary>
+    /// 在读取自身属性之前，把本元素上未被任何转换器消费的 <c>activiti:*</c> 属性记进模型。
+    /// <para>必须在 <see cref="ConvertXmlToElement"/> 之前调用：那时 reader 还停在起始标签上。</para>
+    /// </summary>
+    private void RecordUnknownActivitiAttributes(XmlReader reader, TElement element)
+    {
+        if (!reader.MoveToFirstAttribute())
+        {
+            return;
+        }
+
+        do
+        {
+            if (string.Equals(reader.NamespaceURI, BpmnConstants.ActivitiNamespace, StringComparison.Ordinal)
+                && !KnownActivitiAttributes.Contains(reader.LocalName))
+            {
+                element.AddAttribute(BpmnConstants.ActivitiNamespace, reader.LocalName, reader.Value);
+            }
+        }
+        while (reader.MoveToNextAttribute());
+
+        reader.MoveToElement();
     }
 
     /// <summary>供注册表调用的写入口。</summary>
@@ -118,6 +157,115 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
             }
         }
     }
+
+    /// <summary>
+    /// 读取事件上的<b>事件定义</b>子元素（定时 / 终止 / 消息 / 信号 / 错误……）。
+    /// <para>
+    /// 必须把它们<b>记下来</b>：整棵忽略会让「定时启动」的流程部署成功、语义却静默丢失。
+    /// 记录后由校验层逐类裁定支持与否（本子集支持 <c>terminateEventDefinition</c> 与
+    /// 边界事件上的 <c>timerEventDefinition</c>）。
+    /// </para>
+    /// </summary>
+    protected static void ReadEventDefinitions(XmlReader reader, Event element)
+    {
+        ReadChildren(reader, element, child =>
+        {
+            if (!EventDefinitionElements.Contains(child.LocalName))
+            {
+                return;
+            }
+
+            if (!element.EventDefinitions.Contains(child.LocalName, StringComparer.Ordinal))
+            {
+                element.EventDefinitions.Add(child.LocalName);
+            }
+
+            if (string.Equals(child.LocalName, BpmnConstants.ElementTimerEventDefinition, StringComparison.Ordinal))
+            {
+                element.Timer = ReadTimerEventDefinition(child);
+            }
+        });
+
+        element.HasEventDefinition = element.EventDefinitions.Count > 0;
+        element.HasMultipleEventDefinitions = element.EventDefinitions.Count > 1;
+    }
+
+    /// <summary>读取 <c>timerEventDefinition</c> 的 timeDate / timeDuration / timeCycle 文本。</summary>
+    private static TimerEventDefinition ReadTimerEventDefinition(XmlReader reader)
+    {
+        var timer = new TimerEventDefinition();
+
+        ReadChildren(reader, child =>
+        {
+            switch (child.LocalName)
+            {
+                case BpmnConstants.ElementTimeDate:
+                    timer.TimeDate = ReadElementText(child);
+                    break;
+
+                case BpmnConstants.ElementTimeDuration:
+                    timer.TimeDuration = ReadElementText(child);
+                    break;
+
+                case BpmnConstants.ElementTimeCycle:
+                    timer.TimeCycle = ReadElementText(child);
+                    break;
+            }
+        });
+
+        return timer;
+    }
+
+    /// <summary>
+    /// 把事件定义写回 XML（往返保真）。
+    /// <para>
+    /// 过去只在读侧记录、写侧完全缺失 —— 设计器保存一次就会把 <c>terminateEventDefinition</c>
+    /// 与定时配置永久丢掉。
+    /// </para>
+    /// </summary>
+    protected static void WriteEventDefinitions(XmlWriter writer, Event element)
+    {
+        foreach (var definition in element.EventDefinitions)
+        {
+            writer.WriteStartElement(definition, BpmnConstants.BpmnNamespace);
+
+            if (string.Equals(definition, BpmnConstants.ElementTimerEventDefinition, StringComparison.Ordinal)
+                && element.Timer is { } timer)
+            {
+                WriteTextElementIfPresent(writer, BpmnConstants.ElementTimeDate, timer.TimeDate);
+                WriteTextElementIfPresent(writer, BpmnConstants.ElementTimeDuration, timer.TimeDuration);
+                WriteTextElementIfPresent(writer, BpmnConstants.ElementTimeCycle, timer.TimeCycle);
+            }
+
+            writer.WriteEndElement();
+        }
+    }
+
+    private static void WriteTextElementIfPresent(XmlWriter writer, string localName, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        writer.WriteStartElement(localName, BpmnConstants.BpmnNamespace);
+        writer.WriteString(value);
+        writer.WriteEndElement();
+    }
+
+    private static readonly HashSet<string> EventDefinitionElements = new(StringComparer.Ordinal)
+    {
+        "timerEventDefinition",
+        "messageEventDefinition",
+        "signalEventDefinition",
+        "errorEventDefinition",
+        "terminateEventDefinition",
+        "conditionalEventDefinition",
+        "escalationEventDefinition",
+        "compensateEventDefinition",
+        "linkEventDefinition",
+        "cancelEventDefinition",
+    };
 
     /// <summary>读取元素的文本内容（要求 <c>reader</c> 位于起始标签）。</summary>
     protected static string? ReadElementText(XmlReader reader)

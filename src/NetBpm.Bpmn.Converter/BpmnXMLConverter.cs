@@ -42,6 +42,7 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
     {
         Register(new StartEventXmlConverter());
         Register(new EndEventXmlConverter());
+        Register(new BoundaryEventXmlConverter());
         Register(new SequenceFlowXmlConverter());
         Register(new ExclusiveGatewayXmlConverter());
         Register(new ParallelGatewayXmlConverter());
@@ -117,6 +118,7 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         foreach (var process in model.Processes)
         {
             WireSequenceFlows(process);
+            WireBoundaryEvents(process);
         }
 
         return model;
@@ -189,6 +191,10 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         process.IsExecutable = isExecutable is null
             || string.Equals(isExecutable, "true", StringComparison.OrdinalIgnoreCase);
 
+        // 流程自身没有转换器：把未实现的 activiti:* 属性（如 candidateStarterUsers）记下来，
+        // 交给 unknown-activiti-attribute 规则提示，而不是静默忽略
+        RecordUnknownProcessActivitiAttributes(reader, process);
+
         model.AddProcess(process);
 
         if (reader.IsEmptyElement)
@@ -238,6 +244,26 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
                     "支持的元素见开发计划 §1.2；排除项见 §1.3。");
             }
         }
+    }
+
+    /// <summary>记录 <c>&lt;process&gt;</c> 起始标签上未被引擎实现的 <c>activiti:*</c> 属性。</summary>
+    private static void RecordUnknownProcessActivitiAttributes(XmlReader reader, Process process)
+    {
+        if (!reader.MoveToFirstAttribute())
+        {
+            return;
+        }
+
+        do
+        {
+            if (string.Equals(reader.NamespaceURI, BpmnConstants.ActivitiNamespace, StringComparison.Ordinal))
+            {
+                process.AddAttribute(BpmnConstants.ActivitiNamespace, reader.LocalName, reader.Value);
+            }
+        }
+        while (reader.MoveToNextAttribute());
+
+        reader.MoveToElement();
     }
 
     private static void ReadDiagram(XmlReader reader, BpmnModel model)
@@ -471,6 +497,22 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
             {
                 sequenceFlow.TargetFlowNode = target;
                 target.IncomingFlows.Add(sequenceFlow);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 把边界事件挂到 <c>attachedToRef</c> 指向的活动上（Activiti 在解析末期做同样的事）。
+    /// <para>解析不到不抛异常：交给 <c>boundary-event-configuration</c> 规则给出可定位的报错。</para>
+    /// </summary>
+    private static void WireBoundaryEvents(Process process)
+    {
+        foreach (var boundaryEvent in process.FindFlowElementsOfType<BoundaryEvent>())
+        {
+            if (boundaryEvent.AttachedToRef is not null
+                && process.GetFlowElement(boundaryEvent.AttachedToRef) is Activity activity)
+            {
+                boundaryEvent.AttachedTo = activity;
             }
         }
     }

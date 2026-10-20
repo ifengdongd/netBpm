@@ -493,6 +493,22 @@ function FormPropertiesEditor(props: { element: DiagramElement; context: EntryCo
             onChange: (event: Event) => debounce((v: string) => setProp(item, 'variable', normalize(v)))((event.target as HTMLInputElement).value),
           }),
         ),
+        h('div', { class: 'nb-item-row' },
+          h('input', {
+            class: 'nb-impl-value',
+            type: 'text',
+            placeholder: t('默认值（default）'),
+            value: textOf(item.default),
+            onChange: (event: Event) => debounce((v: string) => setProp(item, 'default', normalize(v)))((event.target as HTMLInputElement).value),
+          }),
+          h('input', {
+            class: 'nb-impl-value',
+            type: 'text',
+            placeholder: t('日期格式（datePattern），如 yyyy-MM-dd'),
+            value: textOf(item.datePattern),
+            onChange: (event: Event) => debounce((v: string) => setProp(item, 'datePattern', normalize(v)))((event.target as HTMLInputElement).value),
+          }),
+        ),
         h('div', { class: 'nb-check-row' },
           ['required', 'readable', 'writable'].map((name) =>
             h('label', { class: 'nb-check', key: name },

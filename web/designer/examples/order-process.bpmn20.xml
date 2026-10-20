@@ -23,7 +23,8 @@
       流程参数：product_name / amount / remark（发起时经 paraDict 写入，存 order_bill 真列）
       审批时写入：result / comment
 
-    ⚠️ 网关设了 default 流（本子集要求排他网关必须有可选流）。
+    ⚠️ 网关设了 default 流做兜底：默认流必须指向本网关的真实出流、且不写条件（default-flow 规则）。
+      兜底方向是「申请人修改」而不是「通过」—— 条件全假/变量缺失时宁可退回，也不静默放行。
   -->
   <bpmn:process id="order_process" name="订单审批流程" isExecutable="true">
     <bpmn:startEvent id="start" name="提交订单申请">

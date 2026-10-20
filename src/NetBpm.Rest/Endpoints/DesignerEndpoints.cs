@@ -1,6 +1,8 @@
 using System.Text;
 using NetBpm.Engine;
+using NetBpm.Persistence.Admin;
 using NetBpm.Persistence.Deployment;
+using NetBpm.Rest.Auditing;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 
@@ -26,25 +28,36 @@ public static class DesignerEndpoints
     {
         var group = endpoints.MapGroup("/api/designer").WithTags("designer");
 
-        group.MapPost("/deploy", DeployAsync).Accepts<string>("text/xml").Produces<DeployResponse>();
+        // 🔐 设计器是管理工具：发布定义 / 定义级挂起 / 删部署都改变"线上行为"，需要管理 scope
+        // （validate 只解析校验、不落库，保持开放；读接口只受租户约束）
+        group.MapPost("/deploy", DeployAsync).Accepts<string>("text/xml").Produces<DeployResponse>()
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "部署流程定义");
         group.MapPost("/validate", ValidateAsync).Accepts<string>("text/xml").Produces<ValidationResponse>();
-        group.MapGet("/definitions", FindDefinitionsAsync).Produces<IReadOnlyList<ProcessDefinitionResponse>>();
+        group.MapGet("/definitions", FindDefinitionsAsync).Produces<IReadOnlyList<ProcessDefinitionResponse>>()
+            .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程定义");
         group.MapGet("/definitions/{processDefinitionKey}/versions", FindDefinitionVersionsAsync)
-            .Produces<IReadOnlyList<ProcessDefinitionResponse>>();
-        group.MapGet("/definition/{processDefinitionId}/xml", GetDefinitionXmlAsync).Produces<string>();
+            .Produces<IReadOnlyList<ProcessDefinitionResponse>>()
+            .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程定义");
+        group.MapGet("/definition/{processDefinitionId}/xml", GetDefinitionXmlAsync).Produces<string>()
+            .RequireAdminScope(TaskScopes.AdminModelRead, "回显流程定义");
 
         // 流程定义挂起 / 激活（仓库服务语义，不属于设计器契约；放在同一组只是为了按定义聚合端点）
         // ?suspendProcessInstances=true / ?activateProcessInstances=true 一并挂起（激活）运行中的实例
-        group.MapPost("/definitions/{processDefinitionId}/suspend", SuspendDefinitionAsync);
-        group.MapPost("/definitions/{processDefinitionId}/activate", ActivateDefinitionAsync);
+        group.MapPost("/definitions/{processDefinitionId}/suspend", SuspendDefinitionAsync)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "挂起流程定义");
+        group.MapPost("/definitions/{processDefinitionId}/activate", ActivateDefinitionAsync)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "激活流程定义");
 
         // 部署维度：列表 + 资源清单（删除见下方 DELETE）
-        group.MapGet("/deployments", FindDeploymentsAsync).Produces<IReadOnlyList<DeploymentSummaryResponse>>();
+        group.MapGet("/deployments", FindDeploymentsAsync).Produces<IReadOnlyList<DeploymentSummaryResponse>>()
+            .RequireAdminScope(TaskScopes.AdminModelRead, "查看部署列表");
         group.MapGet("/deployments/{deploymentId}/resources", FindDeploymentResourcesAsync)
-            .Produces<IReadOnlyList<DeploymentResourceResponse>>();
+            .Produces<IReadOnlyList<DeploymentResourceResponse>>()
+            .RequireAdminScope(TaskScopes.AdminModelRead, "查看部署资源");
 
         // 删除部署（repositoryService.deleteDeployment）：cascade=true 时连同运行中的实例一起删
-        group.MapDelete("/deployments/{deploymentId}", DeleteDeploymentAsync);
+        group.MapDelete("/deployments/{deploymentId}", DeleteDeploymentAsync)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "删除部署");
 
         return group;
     }
@@ -56,6 +69,7 @@ public static class DesignerEndpoints
         string? deploymentName,
         RequestContext requestContext,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         // JWT 下租户只能来自令牌；API Key / 开发模式下显式传参优先
@@ -83,6 +97,26 @@ public static class DesignerEndpoints
             .ConfigureAwait(false);
 
         var definition = result.ProcessDefinition;
+
+        // 只记「部署成功」：设计器会在编辑过程中反复提交、校验失败很常见，
+        // 若失败也记会把审计表刷满（与 validate 的噪声同源）。
+        await auditor.RecordAsync(
+            requestContext,
+            AdminAuditActions.DeploymentCreate,
+            AdminAuditTargets.Deployment,
+            definition.DeploymentId,
+            processInstanceId: null,
+            detail: new
+            {
+                processDefinitionId = definition.Id,
+                processDefinitionKey = definition.Key,
+                version = definition.Version,
+                resourceName = definition.ResourceName,
+                deploymentName = string.IsNullOrWhiteSpace(deploymentName) ? null : deploymentName,
+                warningCount = result.Warnings.Count,
+            },
+            success: true,
+            ct: ct).ConfigureAwait(false);
 
         return Results.Created(
             $"/api/designer/definitions/{definition.Id}",
@@ -207,15 +241,28 @@ public static class DesignerEndpoints
         bool? suspendProcessInstances,
         RequestContext requestContext,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         await EnsureDefinitionAccessAsync(engine, requestContext, processDefinitionId, ct).ConfigureAwait(false);
 
-        await engine
-            .SuspendProcessDefinitionAsync(processDefinitionId, suspendProcessInstances ?? false, ct)
-            .ConfigureAwait(false);
+        return await AuditedAction.RunAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.DefinitionSuspend,
+            AdminAuditTargets.ProcessDefinition,
+            processDefinitionId,
+            processInstanceId: null,
+            new { suspendProcessInstances = suspendProcessInstances ?? false },
+            async () =>
+            {
+                await engine
+                    .SuspendProcessDefinitionAsync(processDefinitionId, suspendProcessInstances ?? false, ct)
+                    .ConfigureAwait(false);
 
-        return Results.NoContent();
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>激活流程定义：恢复「可启动新实例」；<c>activateProcessInstances=true</c> 时一并激活实例。</summary>
@@ -224,15 +271,28 @@ public static class DesignerEndpoints
         bool? activateProcessInstances,
         RequestContext requestContext,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         await EnsureDefinitionAccessAsync(engine, requestContext, processDefinitionId, ct).ConfigureAwait(false);
 
-        await engine
-            .ActivateProcessDefinitionAsync(processDefinitionId, activateProcessInstances ?? false, ct)
-            .ConfigureAwait(false);
+        return await AuditedAction.RunAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.DefinitionActivate,
+            AdminAuditTargets.ProcessDefinition,
+            processDefinitionId,
+            processInstanceId: null,
+            new { activateProcessInstances = activateProcessInstances ?? false },
+            async () =>
+            {
+                await engine
+                    .ActivateProcessDefinitionAsync(processDefinitionId, activateProcessInstances ?? false, ct)
+                    .ConfigureAwait(false);
 
-        return Results.NoContent();
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -362,8 +422,17 @@ public static class DesignerEndpoints
         bool? cascade,
         RequestContext requestContext,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
+        // cascade=true 会连带删除运行中的实例：在 model.write 之外再要求实例删除权限，
+        // 避免持有「改定义」权限的角色顺带清空运行数据
+        if (cascade == true)
+        {
+            AdminAuthorization.Ensure(
+                requestContext, TaskScopes.AdminInstanceDelete, "级联删除部署（连同运行实例）");
+        }
+
         // 跨租户删除按 404 处理；仍有运行实例时由引擎抛 409（cascade=false）
         if (requestContext.IsTenantRestricted)
         {
@@ -381,8 +450,21 @@ public static class DesignerEndpoints
             }
         }
 
-        await engine.DeleteDeploymentAsync(deploymentId, cascade ?? false, ct).ConfigureAwait(false);
-        return Results.NoContent();
+        return await AuditedAction.RunAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.DeploymentDelete,
+            AdminAuditTargets.Deployment,
+            deploymentId,
+            processInstanceId: null,
+            new { cascade = cascade ?? false },
+            async () =>
+            {
+                await engine.DeleteDeploymentAsync(deploymentId, cascade ?? false, ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     private static async Task<IResult> GetDefinitionXmlAsync(

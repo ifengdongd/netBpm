@@ -30,9 +30,11 @@ public sealed class EndExecutionOperation : IOperation
 
     /// <inheritdoc />
     public ValueTask RunAsync(CancellationToken ct = default) =>
-        _execution.IsProcessInstanceType
-            ? HandleProcessInstanceExecutionAsync(_execution, ct)
-            : HandleRegularExecutionAsync(ct);
+        _execution.IsEnded
+            ? ValueTask.CompletedTask
+            : _execution.IsProcessInstanceType
+                ? HandleProcessInstanceExecutionAsync(_execution, ct)
+                : HandleRegularExecutionAsync(ct);
 
     /// <summary>对应 Activiti 的 <c>handleProcessInstanceExecution</c>（裁剪掉调用活动 / 子流程部分）。</summary>
     private async ValueTask HandleProcessInstanceExecutionAsync(

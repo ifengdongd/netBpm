@@ -14,10 +14,11 @@ public sealed class ProcessValidator : IProcessValidator
 {
     private readonly IReadOnlyList<IProcessValidationRule> _rules;
 
-    /// <summary>使用默认的规则集构造（含脚本任务与多实例规则，共 15 条）。</summary>
+    /// <summary>使用默认的规则集构造（含脚本任务、多实例、边界定时器与表达式预解析规则，共 22 条）。</summary>
     public ProcessValidator()
         : this(
         [
+            new ProcessIdRule(),
             new NodeHasOutgoingFlowRule(),
             new ExclusiveGatewayHasSelectableFlowRule(),
             new NoOrphanNodeRule(),
@@ -27,9 +28,15 @@ public sealed class ProcessValidator : IProcessValidator
             new EventGatewayUnsupportedRule(),
             new StartAndEndEventRule(),
             new SequenceFlowReferenceRule(),
+            new DefaultFlowRule(),
+            new UnsupportedEventDefinitionRule(),
+            new BoundaryEventConfigurationRule(),
+            new TerminateEndEventRule(),
+            new ExpressionParseRule(),
             new RequiredAttributesRule(),
             new ListenerConfigurationRule(),
             new UnsupportedCapabilityRule(),
+            new UnknownActivitiAttributeRule(),
             new ScriptTaskRule(),
             new MultiInstanceRule(),
             new UserTaskAssignmentRule(),

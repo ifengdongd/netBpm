@@ -27,12 +27,11 @@ public sealed partial class DatabaseScriptTests
         "ACT_HI_IDENTITYLINK",
     ];
 
-    /// <summary>§7.2 明确裁剪的 12 张表。</summary>
+    /// <summary>§7.2 明确裁剪的 11 张表（ACT_RU_TIMER_JOB 已由 0006 补回，见 <see cref="AddedTables"/>）。</summary>
     private static readonly string[] RemovedTables =
     [
         "ACT_RE_MODEL",
         "ACT_RU_JOB",
-        "ACT_RU_TIMER_JOB",
         "ACT_RU_SUSPENDED_JOB",
         "ACT_RU_DEADLETTER_JOB",
         "ACT_RU_EVENT_SUBSCR",
@@ -42,6 +41,12 @@ public sealed partial class DatabaseScriptTests
         "ACT_HI_DETAIL",
         "ACT_HI_COMMENT",
         "ACT_HI_ATTACHMENT",
+    ];
+
+    /// <summary>0006 新增的引擎扩展表（不属于 Activiti 13 张基础表）。</summary>
+    private static readonly string[] AddedTables =
+    [
+        "ACT_RU_TIMER_JOB",
     ];
 
     [Theory]
@@ -97,14 +102,31 @@ public sealed partial class DatabaseScriptTests
         Assert.Contains("ROOT_PROC_INST_ID_", schemaScript, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("sqlserver")]
+    [InlineData("mysql")]
+    public void TimerJobScript_ShouldCreateExactlyTheAddedTables(string dialect)
+    {
+        var script = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0006_create_timer_job.sql"));
+
+        var created = CreateTableRegex()
+            .Matches(script)
+            .Select(match => match.Groups["table"].Value.ToUpperInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Equal(AddedTables.Length, created.Count);
+        Assert.All(AddedTables, table => Assert.Contains(table, created));
+    }
+
     [Fact]
     public void KeptAndRemovedTables_ShouldCoverTheUpstreamTwentyFive()
     {
-        // §7.2：25 张表 = 保留 13 + 裁剪 12
-        Assert.Equal(25, KeptTables.Length + RemovedTables.Length);
+        // §7.2：25 张表 = 保留 13 + 裁剪 11 + 本项目新增 1（ACT_RU_TIMER_JOB）
+        Assert.Equal(25, KeptTables.Length + RemovedTables.Length + AddedTables.Length);
     }
 
-    [GeneratedRegex(@"create\s+table\s+(?<table>\w+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"create\s+table\s+(?:if\s+not\s+exists\s+)?(?<table>\w+)", RegexOptions.IgnoreCase)]
     private static partial Regex CreateTableRegex();
 
     private static string StripComments(string script) =>

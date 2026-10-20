@@ -367,6 +367,175 @@ export function selectEntryRaw(
   };
 }
 
+// ─────────────────────────── 多实例（会签 / 串签）───────────────────────────
+
+/** 读取多实例特性（未启用时返回 undefined）。 */
+export function readLoopCharacteristics(element: DiagramElement): ModdleElement | undefined {
+  const value = businessObject(element).loopCharacteristics;
+
+  return value !== undefined && value !== null && typeof value === 'object'
+    ? (value as ModdleElement)
+    : undefined;
+}
+
+function readExpressionBody(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    return value.length === 0 ? undefined : value;
+  }
+
+  const body = (value as ModdleElement).body;
+
+  return body === undefined || body === null || String(body).length === 0 ? undefined : String(body);
+}
+
+function updateLoopCharacteristics(
+  element: DiagramElement,
+  context: EntryContext,
+  properties: Record<string, unknown>,
+): void {
+  const mi = readLoopCharacteristics(element);
+
+  if (mi === undefined) {
+    return;
+  }
+
+  context.modeling.updateModdleProperties(element, mi, properties);
+}
+
+/**
+ * 多实例属性组（会签 / 串签）。
+ *
+ * ⚠️ 只支持用户任务上的多实例（后端 `multi-instance` 规则会拒绝其它活动）。
+ * 实例数来源二选一：`loopCardinality`（数字/表达式）或 `activiti:collection`（集合表达式）。
+ * 两个 Expression 子元素都必须用 `moddle.create('bpmn:FormalExpression')` 创建 ——
+ * 直接写字符串会让 moddle 序列化失败或丢属性（与 `conditionExpression` 同一个坑）。
+ */
+export function multiInstanceEntries(
+  element: DiagramElement,
+  context: EntryContext,
+  t: (text: string) => string,
+): PropertyEntry[] {
+  const enabled = readLoopCharacteristics(element) !== undefined;
+
+  const entries: PropertyEntry[] = [
+    {
+      id: 'multiInstanceEnabled',
+      component: DebouncedCheckboxEntry,
+      element,
+      label: t('启用多实例（会签 / 串签）'),
+      description: t('并行会签：一次创建 N 个任务；串签：完成一个再创建下一个。仅用户任务支持。'),
+      isEdited: isCheckboxEntryEdited,
+      getValue: () => readLoopCharacteristics(element) !== undefined,
+      setValue: (value: unknown) => {
+        if (value === true) {
+          context.modeling.updateProperties(element, {
+            loopCharacteristics: context.moddle.create('bpmn:MultiInstanceLoopCharacteristics', {
+              isSequential: false,
+            }),
+          });
+          return;
+        }
+
+        context.modeling.updateProperties(element, { loopCharacteristics: undefined });
+      },
+    },
+  ];
+
+  if (!enabled) {
+    return entries;
+  }
+
+  entries.push(
+    selectEntryRaw(
+      {
+        id: 'multiInstanceSequential',
+        element,
+        label: t('执行模式'),
+        choices: [
+          { label: t('并行会签（同时创建全部任务）'), value: 'false' },
+          { label: t('串签（完成一个再创建下一个）'), value: 'true' },
+        ],
+        getValue: () => (readLoopCharacteristics(element)?.isSequential === true ? 'true' : 'false'),
+        setValue: (value: string) =>
+          updateLoopCharacteristics(element, context, { isSequential: value === 'true' }),
+      },
+      context,
+    ),
+    {
+      id: 'multiInstanceCardinality',
+      component: DebouncedTextFieldEntry,
+      element,
+      label: t('实例数（loopCardinality）'),
+      description: t('数字或表达式，如 3 或 ${approvers.size()}；与「集合」二选一'),
+      placeholder: '3',
+      isEdited: isTextFieldEntryEdited,
+      getValue: () => readExpressionBody(readLoopCharacteristics(element)?.loopCardinality),
+      setValue: (value: unknown) => {
+        const text = normalizeText(value);
+
+        updateLoopCharacteristics(element, context, {
+          loopCardinality:
+            text === undefined ? undefined : context.moddle.create('bpmn:FormalExpression', { body: text }),
+        });
+      },
+    },
+    {
+      id: 'multiInstanceCollection',
+      component: DebouncedTextFieldEntry,
+      element,
+      label: t('集合（activiti:collection）'),
+      description: t('集合表达式，元素个数 = 实例数，如 ${approvers}；与「实例数」二选一'),
+      placeholder: '${approvers}',
+      isEdited: isTextFieldEntryEdited,
+      getValue: () => {
+        const value = readLoopCharacteristics(element)?.collection;
+        return value === undefined || value === null ? undefined : String(value);
+      },
+      setValue: (value: unknown) =>
+        updateLoopCharacteristics(element, context, { collection: normalizeText(value) }),
+    },
+    {
+      id: 'multiInstanceElementVariable',
+      component: DebouncedTextFieldEntry,
+      element,
+      label: t('元素变量（activiti:elementVariable）'),
+      description: t('把集合元素逐个写入该变量，办理人可写 ${approver}'),
+      placeholder: 'approver',
+      isEdited: isTextFieldEntryEdited,
+      getValue: () => {
+        const value = readLoopCharacteristics(element)?.elementVariable;
+        return value === undefined || value === null ? undefined : String(value);
+      },
+      setValue: (value: unknown) =>
+        updateLoopCharacteristics(element, context, { elementVariable: normalizeText(value) }),
+    },
+    {
+      id: 'multiInstanceCompletionCondition',
+      component: DebouncedTextFieldEntry,
+      element,
+      label: t('完成条件（completionCondition）'),
+      description: t('每完成一个实例判定一次，为真即提前收口并取消剩余实例，如 ${nrOfCompletedInstances == 2}'),
+      placeholder: '${nrOfCompletedInstances == 2}',
+      isEdited: isTextFieldEntryEdited,
+      getValue: () => readExpressionBody(readLoopCharacteristics(element)?.completionCondition),
+      setValue: (value: unknown) => {
+        const text = normalizeText(value);
+
+        updateLoopCharacteristics(element, context, {
+          completionCondition:
+            text === undefined ? undefined : context.moddle.create('bpmn:FormalExpression', { body: text }),
+        });
+      },
+    },
+  );
+
+  return entries;
+}
+
 /** 条件表达式校验（与 `validation.ts` 的口径一致）。 */
 export function validateConditionExpression(value: unknown): string | null {
   const text = normalizeText(value);
@@ -424,14 +593,184 @@ export function unsupportedCapabilities(element: DiagramElement): string[] {
   const extensions = bo.extensionElements?.values ?? [];
 
   // ⚠️ 执行/任务/事件监听器与表单属性已支持（见 listEditors.ts），不再列为"不支持"；
-  // 字段注入与事件定义仍属子集外能力。
+  // 字段注入仍属子集外能力。
   if (bo.$type === 'bpmn:ServiceTask' && extensions.some((value) => value.$type === 'activiti:Field')) {
     found.push('字段注入（activiti:field）');
   }
 
-  if ((bo.eventDefinitions ?? []).length > 0) {
+  // 已支持的事件定义：结束事件的 terminate、边界事件的 timer；其余仍是子集外
+  const definitions = bo.eventDefinitions ?? [];
+  const supported = definitions.every((definition) => {
+    if (bo.$type === 'bpmn:EndEvent') {
+      return definition.$type === 'bpmn:TerminateEventDefinition';
+    }
+
+    if (bo.$type === 'bpmn:BoundaryEvent') {
+      return definition.$type === 'bpmn:TimerEventDefinition';
+    }
+
+    return false;
+  });
+
+  if (!supported) {
     found.push('事件定义（定时/消息/信号等）');
   }
 
   return found;
+}
+
+// ─────────────────────────── 边界定时器 / 终止结束事件 ───────────────────────────
+
+/** 读取边界事件的定时定义。 */
+export function readTimerEventDefinition(element: DiagramElement): ModdleElement | undefined {
+  const definitions = (businessObject(element).eventDefinitions ?? []) as ModdleElement[];
+
+  return definitions.find((definition) => definition.$type === 'bpmn:TimerEventDefinition');
+}
+
+/** 读取定时定义里的文本（FormalExpression 或字符串）。 */
+function readTimerText(timer: ModdleElement | undefined, property: string): string | undefined {
+  if (timer === undefined) {
+    return undefined;
+  }
+
+  const value = timer[property];
+
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    return value.length === 0 ? undefined : value;
+  }
+
+  const body = (value as ModdleElement).body;
+
+  return body === undefined || body === null || String(body).length === 0 ? undefined : String(body);
+}
+
+function updateTimerText(
+  element: DiagramElement,
+  context: EntryContext,
+  timer: ModdleElement,
+  properties: Record<string, unknown>,
+): void {
+  context.modeling.updateModdleProperties(element, timer, properties);
+}
+
+/**
+ * 边界定时器属性组。
+ * <p>
+ * 本子集只支持「挂在用户任务上的中断型一次性定时器」：`timeDuration` 与 `timeDate` 二选一。
+ * `timeCycle`（重复/cron）与 `cancelActivity=false` 部署期会被拒绝，面板直接不给入口。
+ * </p>
+ */
+export function boundaryTimerEntries(
+  element: DiagramElement,
+  context: EntryContext,
+  t: (text: string) => string,
+): PropertyEntry[] {
+  const timer = readTimerEventDefinition(element);
+
+  if (timer === undefined) {
+    return [
+      noteEntry(
+        element,
+        t('缺少定时定义'),
+        t('该边界事件没有 timerEventDefinition，部署会被拒绝。删除后从调色板重新添加「边界定时器」。'),
+      ),
+    ];
+  }
+
+  const createExpression = (text: string): ModdleElement =>
+    context.moddle.create('bpmn:FormalExpression', { body: text });
+
+  return [
+    noteEntry(
+      element,
+      t('挂靠任务'),
+      t('定时器挂在用户任务上；到点后取消该任务，并沿本边界事件的出流继续。'),
+    ),
+    {
+      id: 'boundaryTimeDuration',
+      component: DebouncedTextFieldEntry,
+      element,
+      label: t('时长（timeDuration）'),
+      description: t('ISO-8601 时长（PT30M、PT2H、P1D）或表达式 ${timeout}；与「时间点」二选一'),
+      placeholder: 'PT24H',
+      isEdited: isTextFieldEntryEdited,
+      getValue: () => readTimerText(timer, 'timeDuration'),
+      setValue: (value: unknown) => {
+        const text = normalizeText(value);
+
+        updateTimerText(element, context, timer, {
+          timeDuration: text === undefined ? undefined : createExpression(text),
+          timeDate: undefined,
+        });
+      },
+    },
+    {
+      id: 'boundaryTimeDate',
+      component: DebouncedTextFieldEntry,
+      element,
+      label: t('时间点（timeDate）'),
+      description: t('ISO-8601 时间点（2026-10-20T09:00:00Z）或表达式 ${deadline}；与「时长」二选一'),
+      placeholder: '2026-10-20T09:00:00Z',
+      isEdited: isTextFieldEntryEdited,
+      getValue: () => readTimerText(timer, 'timeDate'),
+      setValue: (value: unknown) => {
+        const text = normalizeText(value);
+
+        updateTimerText(element, context, timer, {
+          timeDate: text === undefined ? undefined : createExpression(text),
+          timeDuration: undefined,
+        });
+      },
+    },
+    {
+      id: 'boundaryCancelActivity',
+      component: DebouncedCheckboxEntry,
+      element,
+      label: t('中断挂靠任务（cancelActivity）'),
+      description: t('本子集只支持中断型（true）：到点取消任务后转入边界分支。非中断型会被部署拒绝。'),
+      isEdited: isCheckboxEntryEdited,
+      getValue: () => businessObject(element).cancelActivity !== false,
+      setValue: (value: unknown) =>
+        context.modeling.updateProperties(element, { cancelActivity: value === true }),
+    },
+  ];
+}
+
+/** 终止结束事件属性组：勾选即写入/移除 terminateEventDefinition。 */
+export function terminateEndEventEntries(
+  element: DiagramElement,
+  context: EntryContext,
+  t: (text: string) => string,
+): PropertyEntry[] {
+  return [
+    {
+      id: 'terminateEndEvent',
+      component: DebouncedCheckboxEntry,
+      element,
+      label: t('终止结束事件（terminateEventDefinition）'),
+      description: t('勾选后：到达该节点立即终止整个流程实例，并行/会签分支一并取消，且不能再有出流。'),
+      isEdited: isCheckboxEntryEdited,
+      getValue: () =>
+        ((businessObject(element).eventDefinitions ?? []) as ModdleElement[]).some(
+          (definition) => definition.$type === 'bpmn:TerminateEventDefinition',
+        ),
+      setValue: (value: unknown) => {
+        const current = ((businessObject(element).eventDefinitions ?? []) as ModdleElement[]).filter(
+          (definition) => definition.$type !== 'bpmn:TerminateEventDefinition',
+        );
+
+        context.modeling.updateProperties(element, {
+          eventDefinitions:
+            value === true
+              ? [...current, context.moddle.create('bpmn:TerminateEventDefinition')]
+              : current,
+        });
+      },
+    },
+  ];
 }

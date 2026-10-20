@@ -28,13 +28,15 @@ public sealed class InMemoryExecutionManager : IExecutionManager
     private readonly IIdGenerator _idGenerator;
     private readonly ITaskManager _taskManager;
     private readonly IHistoryManager _historyManager;
+    private readonly Jobs.ITimerJobManager? _timerJobs;
     private readonly Dictionary<string, IExecutionEntity> _executions = new(StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
 
     public InMemoryExecutionManager(
         IIdGenerator idGenerator,
         ITaskManager taskManager,
-        IHistoryManager historyManager)
+        IHistoryManager historyManager,
+        Jobs.ITimerJobManager? timerJobs = null)
     {
         ArgumentNullException.ThrowIfNull(idGenerator);
         ArgumentNullException.ThrowIfNull(taskManager);
@@ -43,6 +45,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         _idGenerator = idGenerator;
         _taskManager = taskManager;
         _historyManager = historyManager;
+        _timerJobs = timerJobs;
     }
 
     /// <summary>当前执行数（诊断用）。</summary>
@@ -164,6 +167,29 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         lock (_syncRoot)
         {
             return ValueTask.FromResult(_executions.GetValueOrDefault(executionId));
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<IExecutionEntity>> FindAllByProcessInstanceIdAsync(
+        string processInstanceId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        lock (_syncRoot)
+        {
+            IReadOnlyList<IExecutionEntity> result =
+            [
+                .. _executions.Values
+                    .Where(execution => string.Equals(
+                        execution.ProcessInstanceId ?? execution.Id,
+                        processInstanceId,
+                        StringComparison.Ordinal))
+                    .OrderBy(execution => execution.Id, StringComparer.Ordinal),
+            ];
+
+            return ValueTask.FromResult(result);
         }
     }
 
@@ -295,7 +321,12 @@ public sealed class InMemoryExecutionManager : IExecutionManager
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
 
-        // 与 Dapper 实现保持同一顺序：先清任务与流程实例级身份关系，再删执行树
+        // 与 Dapper 实现保持同一顺序：先清定时作业、任务与流程实例级身份关系，再删执行树
+        if (_timerJobs is not null)
+        {
+            await _timerJobs.DeleteByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+        }
+
         await _taskManager
             .DeleteTasksByProcessInstanceAsync(processInstanceId, deleteReason, ct)
             .ConfigureAwait(false);

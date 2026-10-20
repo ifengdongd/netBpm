@@ -13,7 +13,7 @@ namespace NetBpm.Rest.Security;
 /// <list type="bullet">
 ///   <item><description>流程实例变量：发起人，或该实例<b>运行中任务</b>的办理人 / 所有者 / 候选人（含候选组）；</description></item>
 ///   <item><description>任务局部变量：该任务的办理人 / 所有者 / 候选人，或流程实例发起人；</description></item>
-///   <item><description>持有 <c>netbpm.admin</c> scope 可越过上述限制。</description></item>
+///   <item><description>持有 <c>netbpm.admin</c>（或写操作对应的 <c>netbpm.admin.variables.write</c>）可越过上述限制。</description></item>
 /// </list>
 /// </para>
 /// <para>
@@ -31,11 +31,12 @@ internal static class VariableAuthorization
         string processInstanceId,
         RequestContext context,
         IProcessEngine engine,
-        CancellationToken ct)
+        CancellationToken ct,
+        string requiredScope = TaskScopes.Admin)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (Skip(context))
+        if (Skip(context, requiredScope))
         {
             return;
         }
@@ -81,7 +82,7 @@ internal static class VariableAuthorization
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (Skip(context))
+        if (Skip(context, TaskScopes.Admin))
         {
             return;
         }
@@ -112,12 +113,13 @@ internal static class VariableAuthorization
         RequestContext context,
         IExecutionManager executionManager,
         IProcessEngine engine,
-        CancellationToken ct)
+        CancellationToken ct,
+        string requiredScope = TaskScopes.Admin)
     {
         ArgumentNullException.ThrowIfNull(task);
         ArgumentNullException.ThrowIfNull(context);
 
-        if (Skip(context))
+        if (Skip(context, requiredScope))
         {
             return;
         }
@@ -143,7 +145,12 @@ internal static class VariableAuthorization
             $"当前用户不是任务 '{task.Id}' 的办理人 / 所有者 / 候选人，无权读写变量。");
     }
 
-    private static bool Skip(RequestContext context) => !context.IsUserPrincipal || context.IsAdmin;
+    /// <summary>
+    /// 是否跳过参与人校验：可信服务（API Key）跳过；JWT 用户持有超级范围
+    /// <c>netbpm.admin</c> 或该动作对应的细粒度 scope 时跳过。
+    /// </summary>
+    private static bool Skip(RequestContext context, string requiredScope) =>
+        !context.IsUserPrincipal || context.HasAdminScope(requiredScope);
 
     private static string RequireUser(RequestContext context) =>
         context.UserId ?? throw new ForbiddenException("JWT 缺少 sub 声明，无法判断变量归属。");

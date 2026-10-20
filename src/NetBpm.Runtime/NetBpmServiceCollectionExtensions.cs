@@ -10,15 +10,20 @@ using NetBpm.Engine.Command;
 using NetBpm.Engine.Command.Interceptors;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Jobs;
+using NetBpm.Engine.Migration;
 using NetBpm.Engine.Services;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
 using NetBpm.Persistence;
+using NetBpm.Persistence.Admin;
 using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
 using NetBpm.Persistence.Idempotency;
+using NetBpm.Persistence.Jobs;
+using NetBpm.Persistence.Migration;
 using NetBpm.Persistence.Tasks;
 
 namespace NetBpm.Runtime;
@@ -77,6 +82,22 @@ public static class NetBpmServiceCollectionExtensions
             services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
         }
 
+        // ── 管理治理：动作审计 + 历史归档 ─────────────────────────────
+        // 审计：内存宿主持有最近 N 条（开发可查）；数据库宿主可长期追溯。
+        // 归档：只在数据库宿主可用 —— 内存宿主没有 ACT_HI_*，明确返回 501 而不是静默空操作。
+        if (options.UsesDatabase)
+        {
+            services.AddSingleton<IAdminAuditStore, DapperAdminAuditStore>();
+            services.AddSingleton<IHistoryArchiveStore, DapperHistoryArchiveStore>();
+            services.AddSingleton<IAdminMetricsStore, DapperAdminMetricsStore>();
+        }
+        else
+        {
+            services.AddSingleton<IAdminAuditStore, InMemoryAdminAuditStore>();
+            services.AddSingleton<IHistoryArchiveStore, UnsupportedHistoryArchiveStore>();
+            services.AddSingleton<IAdminMetricsStore, UnsupportedAdminMetricsStore>();
+        }
+
         // ── P6：引擎服务与议程 ──────────────────────────────────────
         services.AddSingleton<IActivityDelegateResolver, ServiceProviderActivityDelegateResolver>();
 
@@ -93,7 +114,8 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetRequiredService<IActivityDelegateResolver>(),
             provider.GetRequiredService<ITaskManager>(),
             provider.GetRequiredService<IProcessDefinitionResolver>(),
-            provider.GetService<ILoggerFactory>()?.CreateLogger("NetBpm.Engine")));
+            provider.GetService<ILoggerFactory>()?.CreateLogger("NetBpm.Engine"),
+            provider.GetRequiredService<ITimerJobManager>()));
 
         // ── 命令与拦截器 ────────────────────────────────────────────
         // 链序：Log → Retry → Transaction → CommandContext
@@ -184,6 +206,8 @@ public static class NetBpmServiceCollectionExtensions
         {
             // 内存宿主：单元测试与 POC 脚手架
             services.AddSingleton<IIdGenerator, InMemoryIdGenerator>();
+            services.AddSingleton<ITimerJobManager, InMemoryTimerJobManager>();
+            services.AddSingleton<IMigrationLog, InMemoryMigrationLog>();
             services.AddSingleton<IExecutionManager, InMemoryExecutionManager>();
             services.AddSingleton<IProcessDefinitionStore, InMemoryProcessDefinitionStore>();
             services.AddSingleton<ITaskManager, InMemoryTaskManager>();
@@ -214,6 +238,8 @@ public static class NetBpmServiceCollectionExtensions
             provider => new DbIdGenerator(provider.GetRequiredService<IPropertyStore>(), options.IdBlockSize));
 
         services.AddSingleton<IVariableInstanceManager, DapperVariableInstanceManager>();
+        services.AddSingleton<ITimerJobManager, DapperTimerJobManager>();
+        services.AddSingleton<IMigrationLog, DapperMigrationLog>();
         services.AddSingleton<IExecutionManager, DapperExecutionManager>();
         services.AddSingleton<IProcessDefinitionStore, DapperProcessDefinitionStore>();
         services.AddSingleton<ITaskManager, DapperTaskManager>();

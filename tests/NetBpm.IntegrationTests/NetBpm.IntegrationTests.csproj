@@ -11,6 +11,14 @@
     <ProjectReference Include="..\..\src\NetBpm.Persistence\NetBpm.Persistence.csproj" />
     <ProjectReference Include="..\..\src\NetBpm.Rest\NetBpm.Rest.csproj" />
     <ProjectReference Include="..\..\src\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+    <!-- 管理端宿主有独立的 Program，用别名避免与 Rest 宿主冲突 -->
+    <ProjectReference Include="..\..\src\NetBpm.Admin\NetBpm.Admin.csproj">
+      <Aliases>AdminHost</Aliases>
+    </ProjectReference>
+    <!-- Demo 宿主（MySqlOrgDirectory 等存储实现）同样有独立 Program，同样用别名隔离 -->
+    <ProjectReference Include="..\..\samples\NetBpm.Demo\NetBpm.Demo.csproj">
+      <Aliases>DemoHost</Aliases>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

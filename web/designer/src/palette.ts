@@ -25,6 +25,10 @@ export default class NetBpmPaletteProvider {
     'lassoTool',
     'handTool',
     'globalConnect',
+    'selection',
+    'modeling',
+    'moddle',
+    'elementRegistry',
     'translate',
   ];
 
@@ -34,6 +38,10 @@ export default class NetBpmPaletteProvider {
   private readonly lassoTool: any;
   private readonly handTool: any;
   private readonly globalConnect: any;
+  private readonly selection: any;
+  private readonly modeling: any;
+  private readonly moddle: any;
+  private readonly elementRegistry: any;
   private readonly translate: (text: string) => string;
 
   constructor(
@@ -44,6 +52,10 @@ export default class NetBpmPaletteProvider {
     lassoTool: any,
     handTool: any,
     globalConnect: any,
+    selection: any,
+    modeling: any,
+    moddle: any,
+    elementRegistry: any,
     translate: (text: string) => string,
   ) {
     this.create = create;
@@ -52,6 +64,10 @@ export default class NetBpmPaletteProvider {
     this.lassoTool = lassoTool;
     this.handTool = handTool;
     this.globalConnect = globalConnect;
+    this.selection = selection;
+    this.modeling = modeling;
+    this.moddle = moddle;
+    this.elementRegistry = elementRegistry;
     this.translate = translate;
 
     palette.registerProvider(this);
@@ -64,6 +80,12 @@ export default class NetBpmPaletteProvider {
       // ── 事件 ──────────────────────────────────────────────
       'create.start-event': this.createShape('bpmn:StartEvent', 'bpmn-icon-start-event-none', '开始事件'),
       'create.end-event': this.createShape('bpmn:EndEvent', 'bpmn-icon-end-event-none', '结束事件'),
+      'create.boundary-timer': {
+        group: MODULE_GROUP,
+        className: 'bpmn-icon-intermediate-event-catch-timer',
+        title: t('边界定时器（挂在选中的用户任务上）'),
+        action: { click: (event: Event) => this.createBoundaryTimer(event) },
+      },
 
       // ── 任务 ──────────────────────────────────────────────
       'create.user-task': this.createShape('bpmn:UserTask', 'bpmn-icon-user-task', '用户任务'),
@@ -71,11 +93,13 @@ export default class NetBpmPaletteProvider {
       'create.manual-task': this.createShape('bpmn:ManualTask', 'bpmn-icon-manual-task', '手工任务'),
       'create.script-task': this.createShape('bpmn:ScriptTask', 'bpmn-icon-script-task', '脚本任务'),
 
-      // ── 网关（与 Activiti 原版一致的四类）──────────────────
+      // ── 网关 ──────────────────────────────────────────────
+      // ⚠️ 不提供事件网关：它的后续必须是中间捕获事件（定时/消息/信号），本子集没有对应行为，
+      // 画出来必然被部署期拒绝（event-gateway-unsupported）。导出历史模型里若已存在，
+      // 属性面板仍会显示只读提示，不影响打开与另存。
       'create.exclusive-gateway': this.createShape('bpmn:ExclusiveGateway', 'bpmn-icon-gateway-xor', '单一网关'),
       'create.parallel-gateway': this.createShape('bpmn:ParallelGateway', 'bpmn-icon-gateway-parallel', '并行网关'),
       'create.inclusive-gateway': this.createShape('bpmn:InclusiveGateway', 'bpmn-icon-gateway-or', '包含网关'),
-      'create.event-based-gateway': this.createShape('bpmn:EventBasedGateway', 'bpmn-icon-gateway-eventbased', '事件网关'),
 
       // ── 连线 ──────────────────────────────────────────────
       'global-connect-tool': {
@@ -117,6 +141,58 @@ export default class NetBpmPaletteProvider {
         },
       },
     };
+  }
+
+  /**
+   * 新建「边界定时器」并直接挂到用户任务上。
+   *
+   * 边界事件不能像普通节点一样落在空白画布上（没有宿主就是不合法模型），所以这里
+   * 优先挂到当前选中的用户任务；没选中但图里只有一个用户任务时自动用它；
+   * 其它情况给出提示，让用户先选任务。
+   */
+  private createBoundaryTimer(event: Event): void {
+    void event;
+
+    const isUserTask = (element: any) => element?.businessObject?.$type === 'bpmn:UserTask';
+    let host = this.selection.get().find(isUserTask);
+
+    if (host === undefined) {
+      const userTasks = this.elementRegistry.getAll().filter(isUserTask);
+
+      if (userTasks.length === 1) {
+        host = userTasks[0];
+      }
+    }
+
+    if (host === undefined) {
+      this.notify('请先选中一个用户任务，再点击「边界定时器」。');
+      return;
+    }
+
+    const shape = this.modeling.createShape(
+      { type: 'bpmn:BoundaryEvent' },
+      { x: host.x + host.width - 18, y: host.y + host.height - 18 },
+      host,
+    );
+
+    this.modeling.updateProperties(shape, {
+      attachedToRef: host.businessObject,
+      cancelActivity: true,
+      eventDefinitions: [
+        this.moddle.create('bpmn:TimerEventDefinition', {
+          timeDuration: this.moddle.create('bpmn:FormalExpression', { body: 'PT24H' }),
+        }),
+      ],
+    });
+
+    this.selection.select(shape);
+    this.notify('已添加边界定时器（默认 PT24H），可在右侧属性面板修改时长或改为时间点。');
+  }
+
+  private notify(message: string): void {
+    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+      window.alert(message);
+    }
   }
 
   /**

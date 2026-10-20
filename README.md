@@ -24,8 +24,9 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 
 | 元素 | XML 标签 |
 |---|---|
-| 开始事件（空） | `startEvent` |
-| 结束事件（空） | `endEvent` |
+| 开始事件（空） | `startEvent`（定时/消息启动仍不支持） |
+| 结束事件 | `endEvent`（空事件 / **终止结束事件** `terminateEventDefinition`） |
+| 边界定时事件 | `boundaryEvent` + `timerEventDefinition`（**中断型、一次性**，只能挂在用户任务上） |
 | 顺序流 | `sequenceFlow`（含 `conditionExpression`） |
 | 排他网关 | `exclusiveGateway`（含 `default` 默认流） |
 | 并行网关 | `parallelGateway`（分叉 / 同步合并） |
@@ -37,9 +38,10 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 | 脚本任务 | `scriptTask`（`scriptFormat="csharp"`，Roslyn C# Scripting 执行；其它 `scriptFormat` 部署被拒） |
 | 图形信息 | `bpmndi:BPMNDiagram` / `BPMNShape` / `BPMNEdge` |
 
-行为类规模：Activiti 58 个 → NetBpm 9 个 + 3 个基类。
+行为类规模：Activiti 58 个 → NetBpm 12 个 + 3 个基类。
 
-**明确不做**（占 Activiti 全部复杂度 70% 以上）：子流程 / 调用活动、边界事件、定时器与消息等事件定义、事件子流程、多实例会签、异步作业、泳道协作池、动态流程修改、表单引擎、PNG 图形生成、其余 6 种数据库方言。
+**明确不做**（占 Activiti 全部复杂度 70% 以上）：子流程 / 调用活动、**非中断型边界事件**、定时/消息启动事件、中间捕获/抛出事件、消息 / 信号 / 错误 / 补偿事件、事件子流程、**用户任务以外的多实例**（服务/脚本/手工任务）、异步作业、泳道协作池、动态流程修改、表单引擎、PNG 图形生成、其余 6 种数据库方言。
+（用户任务的多实例会签/串签**已支持**，见下文「多实例会签 / 串签」；中断型定时边界事件与终止结束事件**已支持**，见「边界定时器」与「终止结束事件」。）
 
 ---
 
@@ -49,12 +51,20 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 
 ### 流程（Process）
 
-- **流程 ID（key）必填**：为空部署直接失败。设计器侧要求 `^[A-Za-z_][A-Za-z0-9_-]*$`，即以字母或下划线开头，只含字母、数字、下划线与短横。
+- **流程 ID（key）必填**：为空部署直接失败。设计器按 `^[A-Za-z_][A-Za-z0-9_-]*$` 即时提示
+  （字母或下划线开头，只含字母、数字、下划线与短横）；后端对不符合该习惯的 id 只告警、不阻断
+  （Activiti 允许任意 id，对拍语料里就有 `myProcess{0}` 这类模板 id）。
 - 部署后流程定义 id 形如 `{key}:{version}:{id}`，其中的 key 就是流程 ID，后续按 key 启动流程实例。
 - **流程名称（name）可选**，无长度与字符限制。
 - 只支持**恰好一个**开始事件（多个会被拒绝部署）与至少一个结束事件。
-- `activiti:initiator` 可用；开始/结束事件必须为空事件，不支持定时器、消息、信号等事件定义。
-- 设计器属性面板为白名单接管，仅暴露子集支持的属性；documentation、事件定义、candidateStarter 等填了也无效。
+- `activiti:initiator` 可用；**开始事件必须为空事件**，定时/消息/信号启动事件部署期显式拒绝
+  （`unsupported-event-definition`）—— 不会出现「部署成功但定时语义丢失」。要表达定时触发，请在宿主侧调度并调用启动接口。
+- **结束事件支持两种**：空结束事件（正常结束）与 `terminateEventDefinition`（立即终止整个实例，
+  取消并行/会签分支，见下文「终止结束事件」）；其它事件定义仍拒绝。
+- 流程 id（key）非空（`process-id` 规则）；不符合标识符习惯（如含冒号）只提示，不阻断（Activiti 允许任意 id）。
+- **一个 BPMN 文件只能有一个 `isExecutable="true"` 的流程**（不写 `isExecutable` 时按可执行处理）：
+  多个会被部署/校验显式拒绝（非可执行流程不参与部署）。
+- 设计器属性面板为白名单接管，仅暴露子集支持的属性；documentation、子集外事件定义、candidateStarter 等填了也无效。
 
 ### 元素 ID
 
@@ -78,7 +88,10 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - 部署期两道检查：`listener-configuration` 规则校验事件与实现必填（取值非法拒部署）；
   `ServiceTaskDelegateGuard` 预解析 class / delegateExpression（解析不到宿主起不来）。
 - 设计器可配置、保存 → 重开 → 落库往返不丢；顺序流上的 take 监听器同样可配。
-- **`activiti:field`（服务任务字段注入）仍不支持**：部署期直接拒绝。
+- **`activiti:field`（服务任务字段注入）已支持**（`stringValue` / `expression`）；**监听器上的字段注入仍不支持**，
+  部署期由 `unsupported-capability` 规则拒绝。
+- **任务监听器的 `delete` 事件不支持**：引擎各条删除路径都没有通知点，部署期由 `listener-configuration` 规则拒绝
+  （可用 `complete` 事件或宿主侧逻辑替代）。
 - **`activiti:formProperty`（表单属性）引擎只透传不执行**：解析 / 落库往返保真（设计器「保存 → 重开」回显不丢、部署不被拒）；
   审批应用层（`NetBpm.Workflow`）以它为**表单契约** —— 枚举选项（`activiti:value`）随实例视图一起下发给前端、
   提交值按 `variable` 映射成流程变量供网关取道。
@@ -91,6 +104,10 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - 并行网关：至少一入一出，**不支持默认流**（配了 `default` 部署被拒）；出口不校验条件。
 - 事件网关：本子集未实现（后续必须是中间捕获事件：定时/消息/信号），**部署期显式拒绝**，请改用单一网关或包含网关。
 - 条件表达式必须写成 `${...}` 或 `#{...}`（`<conditionExpression xsi:type="tFormalExpression">`），否则后端按字面量处理，不当作表达式求值；设计器会对不合规的条件给出警告。
+- **默认流必须指向本节点的出流**（写错 id / 指向别的节点的流由 `default-flow` 规则拒绝）；
+  **默认流上不要写条件** —— Activiti 语义下它不参与判定，规则会给提示。
+- **所有表达式属性在部署期预解析**（`expression-parseable`）：条件、办理人、`dueDate`、`priority`、
+  `skipExpression`、多实例的实例数/集合/完成条件、监听器表达式，语法错误部署即拒绝，不会等到运行期。
 
 ### 用户任务（UserTask）
 
@@ -126,7 +143,55 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - `isSequential="true"` 为**串签**（一次一个任务，完成后再建下一个）；缺省为**并行会签**（N 个任务同时创建）。
 - `<completionCondition>`（如 `${nrOfCompletedInstances == 2}`）：每次实例完成后判定，为真即提前收口——剩余实例与待办被取消。
 - 循环变量（与 Activiti 同名，落在流程实例作用域）：`nrOfInstances` / `nrOfActiveInstances` / `nrOfCompletedInstances` / `loopCounter`（1 起）。
-- 与 Activiti 的已登记偏差：`ACT_HI_ACTINST` 每节点 1 行（非每实例 1 行）；并行模式下 `loopCounter` / `elementVariable` 变量只反映最后创建的实例（任务的办理人 / 名称在创建时逐实例求值，不受影响）；实例级 executionListener 不逐实例触发。多实例用户任务不支持 `activiti:skipExpression`（部署期拒绝）。
+- 历史活动行（`ACT_HI_ACTINST`）**每实例一行**（对齐 Activiti）：串签在同一执行上依次开合；会签每个实例一行（另加主执行的容器行），实例完成即收口、提前完成时剩余行记录取消原因。并行模式下 `loopCounter` / `elementVariable` 变量只反映最后创建的实例（任务的办理人 / 名称在创建时逐实例求值，不受影响）；实例级 executionListener 不逐实例触发。多实例用户任务不支持 `activiti:skipExpression`（部署期拒绝）。
+
+### 边界定时器（boundaryEvent + timerEventDefinition）
+
+```xml
+<bpmn:userTask id="task_approve" name="经理审批" activiti:assignee="${manager}" />
+<bpmn:boundaryEvent id="timer_approve" attachedToRef="task_approve" cancelActivity="true">
+  <bpmn:timerEventDefinition>
+    <bpmn:timeDuration>PT48H</bpmn:timeDuration>
+  </bpmn:timerEventDefinition>
+</bpmn:boundaryEvent>
+<bpmn:sequenceFlow id="flow_timeout" sourceRef="timer_approve" targetRef="task_escalate" />
+```
+
+- **只支持中断型（`cancelActivity="true"`）一次性定时器，且只能挂在用户任务上**：
+  非中断型（催办）、`timeCycle`（重复/cron）、挂在服务/脚本任务上都会被部署期规则
+  `boundary-event-configuration` 拒绝。
+- `timeDuration`（ISO-8601 时长，如 `PT30M` / `PT2H` / `P1D`）与 `timeDate`
+  （ISO-8601 时间点，如 `2026-10-20T09:00:00Z`）**二选一**；都可以写成表达式（`${timeout}`），
+  在**任务创建时**求值 —— 发起人可以在表单里决定"几小时不处理就转办"。
+- 到点后的语义：删除待办（`ACT_HI_TASKINST.DELETE_REASON_ = boundary timer`）、
+  收口该用户任务的历史活动行（`ACT_HI_ACTINST` 结束时间 + 删除原因）、沿边界事件出流继续。
+- **作业存储**：`ACT_RU_TIMER_JOB`（`db/{dialect}/0006_create_timer_job.sql`）。任务完成 / 跳转 /
+  实例结束 / 终止时作业一并删除；任务先完成则到点作业自动作废。
+- **调度**：宿主后台服务轮询（`TimerJobSchedulerService`），配置节：
+
+  ```json
+  "NetBpm": { "Timer": { "Enabled": true, "PollIntervalMs": 5000, "BatchSize": 50 } }
+  ```
+
+  默认 5 秒一轮；多宿主同时轮询也不会重复触发（作业以条件删除抢占），但建议只在一个宿主启用。
+- 时钟口径：一律 UTC，服务端当前时间；**不支持工作日历 / 时区平移**（Activiti 的
+  `businessCalendarName` 不在子集内）。
+- 设计器：选中用户任务 → 调色板「边界定时器」→ 在右侧属性面板改时长/时间点。
+
+### 终止结束事件（terminateEventDefinition）
+
+```xml
+<bpmn:endEvent id="end_terminate">
+  <bpmn:terminateEventDefinition />
+</bpmn:endEvent>
+```
+
+- 到达即**终止整个流程实例**：删除执行树、取消全部待办（含并行分支与会签剩余实例）、收口历史。
+- `ACT_HI_PROCINST.DELETE_REASON_ = terminate end event`，`END_ACT_ID_` 指向该结束事件；
+  **不触发** `PROCESS_COMPLETED`（被终止不是正常完成）。
+- **不能有出流**（部署期 `terminate-end-event` 规则拒绝）：终止后任何节点都不会执行。
+- 与"删除流程实例"的区别：终止是流程内部的一条合法路径（有历史、有原因），删除是运维动作。
+- 设计器：选中结束事件 → 勾选「终止结束事件」。
 
 ### 服务任务（ServiceTask）
 
@@ -144,11 +209,160 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - 变量写回语义与 Activiti 对齐：脚本顶层声明的变量默认**不**写回；`activiti:autoStoreVariables="true"` 时全部存回；`activiti:resultVariable` 存脚本**最后一条顶层表达式的值**。
 - 部署期校验：脚本任务必须有 `<script>` 内容；与委托相同的约束 —— 脚本与流程同处一个命令事务，内部不得 await 外部系统 IO。
 
+### 实例迁移（定义升级后的存量实例）
+
+流程定义不可变：改图再部署 = 新版本，存量实例仍在旧版本上。迁移把运行中的实例切到同 key 的新版本：
+
+```http
+POST /api/runtime/process-instances/{id}/migrate
+{
+  "targetProcessDefinitionId": "leave:3:90001",
+  "activityMappings": { "task_leader_approve": "task_manager_approve" },
+  "reason": "审批环节合并",
+  "validateOnly": true
+}
+```
+
+- **先预演**（`validateOnly=true`）：只读返回活动映射、待取消待办数与风险提示；再正式提交。
+- 规则：同 key / 同租户；实例与目标定义都未挂起；**有待办的执行只能迁到用户任务**；
+  停在网关 Join 上的非活动执行只能迁到同类型网关；**会签/串签节点不支持迁移**；
+  目标定义存在同 id 且类型兼容的节点时默认按同 id 迁移，只需列 id 变化的映射。
+- 一个事务内完成：切整棵执行树的 `PROC_DEF_ID_` → 取消旧待办（留删除原因）→ 作废旧边界定时器 →
+  收口旧活动行 → 按新定义重入目标节点（重建待办/办理人/表单/定时器）→ 写审计。
+- **待办 id 会变**、**定时器重新计时**、**节点 start 监听器会再跑一次**（有外部副作用需幂等）。
+- 历史口径：`ACT_HI_PROCINST.PROC_DEF_ID_` 保持启动时的定义；迁移事实查
+  `GET /api/runtime/process-instances/{id}/migrations`（`ACT_HI_MIGRATION`）。
+- 支持回退迁移（再指回旧版本）；禁止用 SQL 直接改 `PROC_DEF_ID_` / `ACT_ID_`。
+- 已有库需执行 `db/{dialect}/0007_create_migration_log.sql`（新库 `migrate` 自动包含）。
+
+### 流程模型治理（草稿 / 版本 / 回滚 / 发布）
+
+设计器的服务端模型（`bpmn_model`）是**草稿**，与部署结果（`ACT_RE_PROCDEF`）分离：
+
+| 动作 | 接口 | 语义 |
+|---|---|---|
+| 保存草稿 | `PUT /api/admin/models/{id}` | 允许保存半成品；返回 `revision` + 校验 `errors/warnings` |
+| 版本历史 | `GET /api/admin/models/{id}/history` | 每次保存/回滚追加一版（含操作人、时间） |
+| 版本详情 | `GET /api/admin/models/{id}/history/{revisionId}` | 取该版 XML/SVG（用于对比） |
+| 回滚 | `POST /api/admin/models/{id}/rollback/{revisionId}` | 把旧版内容作为**新版本**写回（历史只增不删） |
+| 发布 | `POST /api/admin/models/{id}/publish` | 用当前 XML 走引擎部署：**部署期校验强制拦截**，成功返回定义 id/版本 |
+
+- 保存与历史写入在**同一事务**内，不会出现「模型更新了、历史没记」。
+- 草稿可含阻断级问题（方便保存半成品），但**发布会 400 并逐条返回问题**。
+- 已有库需执行 `db/{dialect}/0008_create_model_history.sql`（新库 `migrate` 自动包含）。
+
+### 管理治理：细粒度授权 / 审计 / 指标与归档
+
+**① 细粒度管理 scope**
+
+`netbpm.admin` 仍是超级范围（隐含全部子权限，旧令牌不受影响）；另可单独授予：
+
+| scope | 覆盖的动作 |
+|---|---|
+| `netbpm.admin.model.read` | 读模型 / 版本历史 / 流程类型；设计器定义列表、部署列表、回显 XML |
+| `netbpm.admin.model.write` | 保存 / 删除 / 回滚 / 发布模型，增删改流程类型；部署定义、定义级挂起 / 激活、删部署 |
+| `netbpm.admin.task.moderate` | **越权**转办、改任务字段、增删候选关系 |
+| `netbpm.admin.instance.jump` | 跳转节点、迁移到其它定义 |
+| `netbpm.admin.instance.delete` | 删除（撤销）运行中的实例，含批量删除 |
+| `netbpm.admin.instance.suspend` | 挂起 / 激活实例 |
+| `netbpm.admin.variables.write` | **越权**直写 / 删除实例变量与任务局部变量 |
+| `netbpm.admin.metrics.read` | 管理指标 |
+| `netbpm.admin.audit.read` | 管理动作审计查询 |
+| `netbpm.admin.audit.purge` | 清理审计记录（可抹除历史痕迹，单独授权） |
+| `netbpm.admin.history.archive` | 历史归档（执行与查询） |
+
+- 判定口径：未启用凭据（开发）放行；API Key 代表可信服务放行；JWT 必须持有对应 scope 或 `netbpm.admin`。
+- 两类动作的约束不同：
+  - **纯管理动作**（`/api/admin/**`、删除实例、挂起 / 激活实例、跳转、迁移、设计器写操作）：**只有**管理 scope 能通过，
+    普通同租户用户一律 **403**；
+  - **业务动作 + 管理员越权**（转办、改任务、候选关系、变量直写）：办理人 / 候选人 / 发起人依业务规则本就能做，
+    不需要管理 scope（否则会把正常办理挡在门外）；**越权**时才要求上表对应 scope。
+- `GET /api/admin/info` 只含版本、方言、结构版本等运维信息，保持公开（与就绪探针同口径）。
+- 设计器端点：
+  - **读**（`/definitions`、`/definitions/{key}/versions`、`/definition/{id}/xml`、`/deployments`、
+    `/deployments/{id}/resources`）需要 `netbpm.admin.model.read`；
+  - **写**（`/deploy`、`/definitions/{id}/suspend|activate`、`DELETE /deployments/{id}`）需要
+    `netbpm.admin.model.write`；**`?cascade=true` 的删部署额外要求 `netbpm.admin.instance.delete`**
+    （它会连带删除运行中的实例）；
+  - `POST /api/designer/validate` 只解析校验、不落库，保持开放。
+- 设计器前端从 `localStorage['netbpm.admin.credential.v1']`（由管理控制台登录页写入，bearer / apiKey）
+  自动附加凭据；403 时提示缺少的具体 scope。凭据无权限时**不再静默回退 localStorage 草稿**，
+  避免误以为「数据丢了」。
+
+**② 管理动作审计**
+
+| 动作 | `action` | 触发点 |
+|---|---|---|
+| 转办 | `task.reassign` / `task.batch_reassign` | `POST /api/runtime/tasks/{id}/assignee`、批量转办 |
+| 改任务 / 候选关系 | `task.update` / `task.candidate_add` / `task.candidate_remove` | `PATCH /tasks/{id}`、`/candidate-users`、`/candidate-groups` |
+| 跳转 / 迁移 | `instance.jump` / `instance.migrate` | `.../jump`、`.../migrate`（预演不记） |
+| 删除实例 | `instance.delete` / `instance.batch_delete` | `DELETE /process-instances/{id}`、`.../batch/delete`（逐项记） |
+| 挂起 / 激活 | `instance.suspend` / `instance.activate` | `.../suspend`、`.../activate` |
+| 变量直写 | `variable.write` / `variable.delete` / `task_variable.*` | 实例变量与任务局部变量的 PUT / DELETE |
+| 部署 | `deployment.create` | `POST /api/designer/deploy`（只记成功，避免编辑期失败刷表） |
+| 删部署 | `deployment.delete` | `DELETE /api/designer/deployments/{id}`（明细含 `cascade`） |
+| 定义挂起 / 激活 | `definition.suspend` / `definition.activate` | `/api/designer/definitions/{id}/suspend|activate` |
+| 历史归档 | `history.archive` | `POST /api/admin/history/archive`（预演不记） |
+
+- 记录字段：租户、操作人、鉴权方式、动作、目标、关联实例、明细（JSON）、成功/失败、错误、UTC 时间。
+- **不记录变量值**（可能是敏感数据，也会让审计表膨胀），只记变量名与 `valueType`；任务描述同理，只记「是否改动」。
+- 被 **403 拒绝**的越权请求不会写审计（未进入执行阶段）；审计只记录真正执行过的管理动作及其结果。
+- 运行时端点与设计器端点共用同一套「执行 → 按结果留痕」封装（`AuditedAction`），不会出现两套口径。
+- 审计写入失败**不影响业务**（只记 warning），但 `0009` 脚本未执行时审计会丢失。
+- 查询：`GET /api/admin/audit?action=&actor=&processInstanceId=&success=&since=&until=&firstResult=&maxResults=`。
+
+**保留策略**（审计只增不删会持续膨胀）：
+
+- 手工清理：`DELETE /api/admin/audit?before=<UTC>&tenantId=` → `{ removed, before, tenantId }`；
+  `before` 必填且不能晚于当前时间；需要 `netbpm.admin.audit.purge`。
+- 清理动作本身写一条 `audit.purge`（晚于 `before`，不会被同一次清理删掉），「谁清了多少」始终可查。
+- 自动清理：配置 `NetBpm:Admin:AuditRetentionDays`（默认 `0` = 关闭），开启后每 6 小时删除过期记录
+  （跨租户统一口径；启动后延迟 5 分钟首轮执行，失败只告警）。
+- 内存宿主同样支持清理（队列重建），且本身只保留最近 1 万条。
+- 管理控制台提供「审计日志」页（`/audit`）：按操作人 / 动作 / 实例 / 结果 / 时间筛选，
+  展开行看明细 JSON（自动格式化）；「清理历史」对应 `DELETE /api/admin/audit`，
+  缺 `netbpm.admin.audit.purge` 时后端 403、前端提示所需 scope。
+- 管理控制台提供「管理指标」页（`/metrics`）：运行中 / 待办 / 逾期 / 今日到期 / 历史 / 已结束 /
+  已删除实例、流程定义、归档量九张统计卡，待办按流程 key 的占比分布，窗口内审计动作计数；
+  「不可用」明确标注为宿主无法统计（内存宿主），与 0 区分。
+
+**③ 指标与历史归档**
+
+- `GET /api/admin/metrics`：运行中 / 历史 / 已结束 / 已删除实例数、流程定义数、待办总数 / 逾期 / 今日到期、
+  按流程 key 的待办分布、窗口内管理动作计数、归档量。
+  `pendingTasks` 系列在**内存宿主为 `null`**（没有 `ACT_RU_TASK` 可聚合）；`null` 表示「不可用」，不是 0。
+- `POST /api/admin/history/archive`（`before` 必填，`dryRun` 预演）：把已结束实例的
+  `ACT_HI_PROCINST / ACT_HI_ACTINST / ACT_HI_TASKINST / ACT_HI_VARINST / ACT_HI_IDENTITYLINK` 行
+  序列化为 JSON 快照写入 `admin_history_archive`，并在**同一事务**内删除原行（含 longString 字节行）。
+- 归档行对 `process_instance_id` 建唯一键：重复归档幂等跳过；`batchSize` 单次上限 1000（默认 200）。
+- 查询：`GET /api/admin/history/archives`（列表，不含 payload）、`GET /api/admin/history/archives/{processInstanceId}`（含快照）。
+- 内存宿主没有持久化历史：归档相关接口返回 **501**，指标里的归档量为 `null`。
+- 已有库需执行 `db/{dialect}/0009_create_admin_governance.sql`（新库 `migrate` 自动包含）。
+
+**④ 可观测性（OpenTelemetry 指标）**
+
+管理治理三件套（RBAC / 审计 / 清理）各自埋了标准 OTel 计数器（Meter 名 `NetBpm.Admin`，
+零 SDK 依赖的 `System.Diagnostics.Metrics`）：
+
+| 指标 | 标签 | 含义 |
+|---|---|---|
+| `netbpm.admin.authorization.denied` | `netbpm.admin.scope`、`netbpm.auth.mode` | RBAC 拒绝（越权尝试被 403）——「谁在撞门」 |
+| `netbpm.admin.audit.recorded` | `netbpm.admin.action`、`netbpm.audit.success`、`netbpm.auth.mode` | 审计留痕条数（成功 / 失败都计） |
+| `netbpm.admin.audit.purged` | — | 保留策略清理删除的条数 |
+
+- 埋点位置：`AdminAuthorization.Ensure`（拒绝）、`AdminActionAuditor.RecordAsync`（审计；动作发生即计数，
+  不依赖审计存储是否写成功）、`DELETE /api/admin/audit`（清理）。
+- **默认关闭**：未接线时只是无人订阅的静默计数。启用（满足其一）：
+  配置 `NetBpm:Otel:Enabled=true`，或设置 OTel 标准环境变量 `OTEL_EXPORTER_OTLP_ENDPOINT`
+  （默认 `http://localhost:4317`，gRPC）。
+- 启用后经 OTLP 导出（`OpenTelemetry.Extensions.Hosting` + `OpenTelemetry.Exporter.OpenTelemetryProtocol`），
+  Resource 服务名 `NetBpm`；只订阅本引擎的 Meter，HTTP / 运行时指标由宿主自行决定。
+
 ### BPMN XML 整体要求
 
 - 必须保留 **Activiti 扩展命名空间 `http://activiti.org/bpmn`**，assignee、candidateUsers、class 等扩展属性均按此命名空间读取。
 - `targetNamespace` 可选，导出为空时自动回填默认命名空间。
-- 子集外的 BPMN 元素会**显式拒绝部署**（提示「不在本子集支持范围内」）；仅 `extensionElements`、`documentation`、`textAnnotation`、`association` 等被容忍并忽略。
+- 子集外的 BPMN 元素（子流程、中间事件、泳道等）会**显式拒绝部署**（提示「不在本子集支持范围内」）；仅 `extensionElements`、`documentation`、`textAnnotation`、`association` 等被容忍并忽略。
 - 图形信息（`bpmndi:BPMNDiagram`）**可选**，没有也能部署；XML 必须格式合法（禁止 DTD），否则解析失败。
 
 ---
@@ -157,7 +371,7 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 
 ```
 NetBpm/
-├── src/                          # 引擎核心（9 个项目）
+├── src/                          # 引擎核心 + 两个宿主（11 个项目）
 │   ├── NetBpm.Bpmn.Model/        # BPMN 2.0 模型对象
 │   ├── NetBpm.Bpmn.Converter/    # XML ⇄ 模型 转换器与解析器
 │   ├── NetBpm.Bpmn.Validation/   # 定义校验（无出流、缺默认流等红线）
@@ -177,7 +391,7 @@ NetBpm/
 │   └── NetBpm.Demo/              # 合并审批 Demo（订单 + 请假；公共应用层 + 通用端点的完整接入示例）
 ├── web/designer/                 # 流程设计器（bpmn-js 18 + Vite 6 + TS）
 ├── db/
-│   ├── mysql/                    # 0001-0010 建表 + 种子脚本（单一数据源生成，请勿手改）
+│   ├── mysql/                    # 0001-0008 建表脚本（单一数据源生成，请勿手改）
 │   └── sqlserver/                # 同上（两方言结构一一对应，仅语法差异）
 ├── docs/
 │   └── process-design-guide.md   # 流程设计操作指引（以请假 / 订单流程为例）
@@ -228,7 +442,7 @@ dotnet run --project tools/NetBpm.DbInit -- \
 ```
 
 脚本由单一数据源 `tools/NetBpm.DbInit/Schema/SchemaCatalog.cs` 生成（分层见 [`db/README.md`](db/README.md)），
-引擎表为 13 张 `ACT_*` 表，与 Activiti 表结构对齐。运维动作（探库 / 清库 / 校验 / 单脚本执行）用
+引擎表为 13 张 `ACT_*` 表（外加 `0006` 的 `ACT_RU_TIMER_JOB`、`0007` 的 `ACT_HI_MIGRATION` 两张引擎扩展表，以及 `0008` 的 `bpmn_model_history` 模型版本表），与 Activiti 表结构对齐。运维动作（探库 / 清库 / 校验 / 单脚本执行）用
 `NetBpm.DbMigrate` 的 `probe` / `purge` / `check` / `apply` 子命令，`--provider` 可选 `mysql` 或 `sqlserver`。
 
 ### 启动 REST 服务
@@ -297,14 +511,16 @@ SQL Server 由 SqlClient 负责（4.0 起已移除 TLS 1.0/1.1 支持），请�
 
 **任务级授权**：JWT 用户「完成 / 认领 / 取消认领 / 委派 / 解决委派」时，必须是当前办理人、
 候选人（`groups` 声明匹配候选组）或持有 `netbpm.admin` scope，否则 **403**；
-「转办 / 修改任务字段 / 增删候选关系」时，必须是当前办理人、所有者或流程实例发起人（或管理员）——
-这些动作会改变办理人 / 候选关系，若不校验就能把别人待办改给自己后以办理人身份完成，从而绕过上面的边界。
+「转办 / 修改任务字段 / 增删候选关系」时，必须是当前办理人、所有者或流程实例发起人
+（或持有 `netbpm.admin.task.moderate` 的管理员）——这些动作会改变办理人 / 候选关系，
+若不校验就能把别人待办改给自己后以办理人身份完成，从而绕过上面的边界。
 API Key 模式代表可信服务，不做任务级校验。令牌支持 `groups` / `group`（空格、逗号或 JSON 数组）与
 `scope` / `scp` 声明。
 
-**变量读写授权**：JWT 用户读写**流程实例变量**时，必须是发起人，或该实例运行中任务的办理人 / 所有者 /
+**变量读写授权**：JWT 用户读**流程实例变量**时，必须是发起人，或该实例运行中任务的办理人 / 所有者 /
 候选人（含候选组）；读写**任务局部变量**时，必须是该任务的办理人 / 所有者 / 候选人，或流程实例发起人。
-不满足一律 **403**。`netbpm.admin` scope 可越过；API Key 模式不做参与人校验。
+不满足一律 **403**。越权**写 / 删**需要 `netbpm.admin.variables.write`（或超级 `netbpm.admin`），
+越权**读**需要 `netbpm.admin`；API Key 模式不做参与人校验。
 
 两者都留空则保持开放（仅限开发环境，此时请求头声明的身份被直接信任）。
 
@@ -434,7 +650,7 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 | `IWorkflowDataStore` | 应用层与宿主之间唯一的缝：实例登记 / 审批结论 / 流程参数 / 审批记录 / 当前待办 |
 | `JsonWorkflowDataStore` | 端口的**参考实现**：五个区块直接落一个 JSON 文件（零落库跑通全链路，换真库时数据形状不变） |
 | `WorkflowCompletionDelegate` | 「结束收口」委托基类：派生一个类只需声明 `[ServiceTaskName]` 与结论名 |
-| `IOrgDirectory` / `InMemoryOrgDirectory` | 组织架构查询（部门 / 员工 / 按候选组找审批人）+ 内置演示实现；真库实现参照 Demo 的 `MySqlOrgDirectory` |
+| `IOrgDirectory` / `InMemoryOrgDirectory` | 组织架构查询（部门 / 员工 / 按候选组找审批人）：内置演示实现（SqlServer / JSON 模式）+ MySQL 真表实现 `MySqlOrgDirectory`（Demo 存储层，读 `sys_dept` / `sys_emp` 等四张 `sys_*` 表，随业务存储按方言切换） |
 | `ApprovalFormGuard` | 部署期自检：审批表单约定（`approvalResult` 枚举 ↔ `result` 变量） |
 | `ListenerStats` | 监听器触发计数（端到端断言「监听器真的被调到了」） |
 
@@ -462,6 +678,12 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | GET | `/health/live` | 存活探针（只判断进程） |
 | GET | `/health/ready` | 就绪探针（数据库不可用返回 503） |
 | GET | `/api/admin/info` | 运维信息（版本 / 方言 / 历史开关 / 结构版本 / 运行时长） |
+| GET | `/api/admin/audit` | 管理动作审计（`action`/`actor`/`processInstanceId`/`success`/时间 + 分页） |
+| DELETE | `/api/admin/audit` | 审计保留策略清理（`before` 必填，需要 `netbpm.admin.audit.purge`） |
+| GET | `/api/admin/metrics` | 管理指标（实例 / 定义 / 待办 / 审计动作 / 归档量） |
+| POST | `/api/admin/history/archive` | 历史归档（`before` 必填，`dryRun` 预演） |
+| GET | `/api/admin/history/archives` | 归档记录列表（不含 payload） |
+| GET | `/api/admin/history/archives/{processInstanceId}` | 归档详情（含历史行 JSON 快照） |
 | GET | `/openapi/v1.json` | OpenAPI 文档 |
 | POST | `/api/designer/deploy` | 部署 BPMN XML 定义（`?resourceName=` / `?deploymentName=` / `?tenantId=`） |
 | POST | `/api/designer/validate` | 试校验 BPMN XML（不落库，返回 errors / warnings） |

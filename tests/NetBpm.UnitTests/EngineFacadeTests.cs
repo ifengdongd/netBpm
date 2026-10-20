@@ -3,6 +3,7 @@ using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
 using NetBpm.Engine;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
 using NetBpm.Persistence.Deployment;
@@ -798,6 +799,37 @@ public sealed class EngineFacadeTests
     }
 
     [Fact]
+    public async Task ValidateAsync_MultipleExecutableProcesses_ShouldBeRejected()
+    {
+        var (engine, _) = Create();
+
+        // 多可执行流程：过去只校验/部署第一个，其余静默丢弃；现在显式拒绝
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         targetNamespace="http://netbpm/test">
+              <process id="first" isExecutable="true">
+                <startEvent id="s1" />
+                <endEvent id="e1" />
+                <sequenceFlow id="f1" sourceRef="s1" targetRef="e1" />
+              </process>
+              <process id="second" isExecutable="true">
+                <startEvent id="s2" />
+                <endEvent id="e2" />
+                <sequenceFlow id="f2" sourceRef="s2" targetRef="e2" />
+              </process>
+            </definitions>
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+
+        var exception = await Assert.ThrowsAsync<EngineException>(
+            () => engine.ValidateAsync(stream, Ct).AsTask());
+
+        Assert.Contains("2 个 isExecutable", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExpectedRevision_ShouldRejectStaleWrites()
     {
         var (engine, host) = Create();
@@ -828,6 +860,411 @@ public sealed class EngineFacadeTests
         Assert.Null(await engine.GetTaskAsync(task.Id, Ct));
     }
 
+    // ─────────────────────────── 实例迁移 ───────────────────────────
+
+    private const string MigrationV1 = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="migrate_demo" isExecutable="true">
+            <startEvent id="start" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="task_approve" />
+            <userTask id="task_approve" name="审批" activiti:assignee="alice" />
+            <sequenceFlow id="f2" sourceRef="task_approve" targetRef="end" />
+            <endEvent id="end" />
+          </process>
+        </definitions>
+        """;
+
+    private const string MigrationV2 = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="migrate_demo" isExecutable="true">
+            <startEvent id="start" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="task_review" />
+            <userTask id="task_review" name="复核" activiti:assignee="bob" />
+            <sequenceFlow id="f2" sourceRef="task_review" targetRef="end" />
+            <endEvent id="end" />
+          </process>
+        </definitions>
+        """;
+
+    [Fact]
+    public async Task Migration_ShouldMoveTaskAndDefinition_AndKeepVariables()
+    {
+        var (engine, host) = Create();
+        var v1 = await DeployAsync(engine, host, MigrationV1);
+        var v2 = await DeployAsync(engine, host, MigrationV2);
+
+        var processInstanceId = await engine.StartProcessInstanceAsync(
+            v1.Id,
+            "biz-migrate",
+            "alice",
+            new Dictionary<string, object?> { ["amount"] = 42m },
+            Ct);
+
+        var oldTask = Assert.Single(await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId));
+
+        // 预演只读：执行树与任务都不动
+        var preview = await engine.ValidateMigrationAsync(
+            new ProcessInstanceMigrationRequest(
+                processInstanceId,
+                v2.Id,
+                new Dictionary<string, string> { ["task_approve"] = "task_review" },
+                "审批环节改名为复核"),
+            Ct);
+
+        Assert.Equal(v1.Id, preview.SourceProcessDefinitionId);
+        Assert.Equal(v2.Id, preview.TargetProcessDefinitionId);
+        Assert.Equal(1, preview.TasksToCancel);
+        var activity = Assert.Single(preview.Activities);
+        Assert.Equal("task_approve", activity.FromActivityId);
+        Assert.Equal("task_review", activity.ToActivityId);
+        Assert.Equal(1, activity.ExecutionCount);
+        Assert.NotNull(await engine.GetTaskAsync(oldTask.Id, Ct));
+
+        var plan = await engine.MigrateProcessInstanceAsync(
+            new ProcessInstanceMigrationRequest(
+                processInstanceId,
+                v2.Id,
+                new Dictionary<string, string> { ["task_approve"] = "task_review" },
+                "审批环节改名为复核",
+                "ops"),
+            Ct);
+
+        Assert.Equal(preview.Activities, plan.Activities);
+
+        Assert.Null(await engine.GetTaskAsync(oldTask.Id, Ct));
+
+        var newTask = Assert.Single(await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId));
+        Assert.Equal("task_review", newTask.TaskDefinitionKey);
+        Assert.Equal("bob", newTask.Assignee);
+        Assert.Equal(v2.Id, newTask.ProcessDefinitionId);
+
+        var instance = await host.ExecutionManager.FindByIdAsync(processInstanceId);
+        Assert.NotNull(instance);
+        Assert.Equal(v2.Id, instance!.ProcessDefinitionId);
+
+        // 根执行是作用域容器，真正停在用户任务上的是子执行
+        var taskExecution = await host.ExecutionManager.FindByIdAsync(newTask.ExecutionId!);
+        Assert.NotNull(taskExecution);
+        Assert.Equal(v2.Id, taskExecution!.ProcessDefinitionId);
+        Assert.Equal("task_review", taskExecution.CurrentActivityId);
+
+        var variables = await engine.GetVariablesAsync(processInstanceId, Ct);
+        Assert.Equal(42m, variables["amount"]);
+
+        var record = Assert.Single(await engine.FindMigrationsAsync(processInstanceId, Ct));
+        Assert.Equal(v1.Id, record.SourceProcessDefinitionId);
+        Assert.Equal(v2.Id, record.TargetProcessDefinitionId);
+        Assert.Equal("task_review", record.ActivityMappings["task_approve"]);
+        Assert.Equal("ops", record.UserId);
+
+        // 迁移后实例仍可正常办结
+        await engine.CompleteTaskAsync(newTask.Id, null, null, Ct);
+        Assert.Empty(await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId));
+    }
+
+    [Fact]
+    public async Task Migration_ShouldKeepSameActivityId_WithoutExplicitMapping()
+    {
+        var (engine, host) = Create();
+        var v1 = await DeployAsync(engine, host, MigrationV1);
+
+        const string v2 = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="migrate_demo" isExecutable="true">
+                <startEvent id="start" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="task_approve" />
+                <userTask id="task_approve" name="审批" activiti:assignee="carol" />
+                <sequenceFlow id="f2" sourceRef="task_approve" targetRef="end" />
+                <endEvent id="end" />
+              </process>
+            </definitions>
+            """;
+
+        var v2Def = await DeployAsync(engine, host, v2);
+
+        var processInstanceId = await engine.StartProcessInstanceAsync(v1.Id, null, "alice", null, Ct);
+        var oldTask = Assert.Single(await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId));
+
+        var plan = await engine.MigrateProcessInstanceAsync(
+            new ProcessInstanceMigrationRequest(processInstanceId, v2Def.Id, Reason: "只改办理人"),
+            Ct);
+
+        Assert.Empty(plan.Warnings.Where(warning => !warning.Contains("版本", StringComparison.Ordinal)));
+
+        var newTask = Assert.Single(await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId));
+        Assert.Equal("task_approve", newTask.TaskDefinitionKey);
+        Assert.Equal("carol", newTask.Assignee);
+        Assert.NotEqual(oldTask.Id, newTask.Id);
+    }
+
+    [Fact]
+    public async Task Migration_ShouldRescheduleBoundaryTimers()
+    {
+        var (engine, host) = Create();
+        var v1 = await DeployAsync(engine, host, MigrationV1);
+
+        const string v2 = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="migrate_demo" isExecutable="true">
+                <startEvent id="start" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="task_approve" />
+                <userTask id="task_approve" name="审批" activiti:assignee="alice" />
+                <boundaryEvent id="timeout" attachedToRef="task_approve">
+                  <timerEventDefinition>
+                    <timeDuration>PT1H</timeDuration>
+                  </timerEventDefinition>
+                </boundaryEvent>
+                <sequenceFlow id="f2" sourceRef="task_approve" targetRef="end" />
+                <sequenceFlow id="f3" sourceRef="timeout" targetRef="end_timeout" />
+                <endEvent id="end" />
+                <endEvent id="end_timeout" />
+              </process>
+            </definitions>
+            """;
+
+        var v2Def = await DeployAsync(engine, host, v2);
+
+        var processInstanceId = await engine.StartProcessInstanceAsync(v1.Id, null, "alice", null, Ct);
+        Assert.Equal(0, await host.TimerJobs.CountAsync());
+
+        await engine.MigrateProcessInstanceAsync(
+            new ProcessInstanceMigrationRequest(processInstanceId, v2Def.Id),
+            Ct);
+
+        var job = Assert.Single(await host.TimerJobs.FindDueAsync(DateTime.UtcNow.AddHours(2), 10));
+        Assert.Equal(processInstanceId, job.ProcessInstanceId);
+        Assert.Equal("timeout", job.BoundaryEventId);
+    }
+
+    [Fact]
+    public async Task Migration_ShouldMoveParallelBranches_AndKeepJoinWorking()
+    {
+        var (engine, host) = Create();
+
+        const string v1 = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="migrate_parallel" isExecutable="true">
+                <startEvent id="start" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="fork" />
+                <parallelGateway id="fork" />
+                <sequenceFlow id="f2" sourceRef="fork" targetRef="task_a" />
+                <sequenceFlow id="f3" sourceRef="fork" targetRef="task_b" />
+                <userTask id="task_a" activiti:assignee="alice" />
+                <userTask id="task_b" activiti:assignee="bob" />
+                <sequenceFlow id="f4" sourceRef="task_a" targetRef="join" />
+                <sequenceFlow id="f5" sourceRef="task_b" targetRef="join" />
+                <parallelGateway id="join" />
+                <sequenceFlow id="f6" sourceRef="join" targetRef="end" />
+                <endEvent id="end" />
+              </process>
+            </definitions>
+            """;
+
+        const string v2 = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="migrate_parallel" isExecutable="true">
+                <startEvent id="start" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="fork" />
+                <parallelGateway id="fork" />
+                <sequenceFlow id="f2" sourceRef="fork" targetRef="task_a2" />
+                <sequenceFlow id="f3" sourceRef="fork" targetRef="task_b2" />
+                <userTask id="task_a2" activiti:assignee="alice" />
+                <userTask id="task_b2" activiti:assignee="bob" />
+                <sequenceFlow id="f4" sourceRef="task_a2" targetRef="join" />
+                <sequenceFlow id="f5" sourceRef="task_b2" targetRef="join" />
+                <parallelGateway id="join" />
+                <sequenceFlow id="f6" sourceRef="join" targetRef="end" />
+                <endEvent id="end" />
+              </process>
+            </definitions>
+            """;
+
+        var v1Def = await DeployAsync(engine, host, v1);
+        var v2Def = await DeployAsync(engine, host, v2);
+
+        var processInstanceId = await engine.StartProcessInstanceAsync(v1Def.Id, null, "alice", null, Ct);
+        Assert.Equal(2, (await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId)).Count);
+
+        var plan = await engine.MigrateProcessInstanceAsync(
+            new ProcessInstanceMigrationRequest(
+                processInstanceId,
+                v2Def.Id,
+                new Dictionary<string, string>
+                {
+                    ["task_a"] = "task_a2",
+                    ["task_b"] = "task_b2",
+                }),
+            Ct);
+
+        Assert.Equal(2, plan.Activities.Count);
+        Assert.Equal(2, plan.TasksToCancel);
+
+        var tasks = await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId);
+        Assert.Equal(2, tasks.Count);
+        Assert.All(tasks, task => Assert.Equal(v2Def.Id, task.ProcessDefinitionId));
+
+        foreach (var task in tasks)
+        {
+            await engine.CompleteTaskAsync(task.Id, null, null, Ct);
+        }
+
+        Assert.Empty(await host.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId));
+        Assert.Null(await host.ExecutionManager.FindByIdAsync(processInstanceId));
+    }
+
+    [Fact]
+    public async Task Migration_ShouldRejectAmbiguousOrUnsafeTargets()
+    {
+        var (engine, host) = Create();
+        var v1 = await DeployAsync(engine, host, MigrationV1);
+        var v2 = await DeployAsync(engine, host, MigrationV2);
+        var processInstanceId = await engine.StartProcessInstanceAsync(v1.Id, null, "alice", null, Ct);
+
+        // 缺映射：目标没有同 id 节点
+        var missing = await Assert.ThrowsAsync<EngineException>(async () =>
+            await engine.ValidateMigrationAsync(new ProcessInstanceMigrationRequest(processInstanceId, v2.Id), Ct));
+        Assert.Contains("没有同 id 节点", missing.Message, StringComparison.Ordinal);
+
+        // 源节点写错
+        var typo = await Assert.ThrowsAsync<EngineException>(async () =>
+            await engine.ValidateMigrationAsync(
+                new ProcessInstanceMigrationRequest(
+                    processInstanceId,
+                    v2.Id,
+                    new Dictionary<string, string> { ["task_typo"] = "task_review" }),
+                Ct));
+        Assert.Contains("不在当前流程定义中", typo.Message, StringComparison.Ordinal);
+
+        // 目标节点写错
+        var badTarget = await Assert.ThrowsAsync<EngineException>(async () =>
+            await engine.ValidateMigrationAsync(
+                new ProcessInstanceMigrationRequest(
+                    processInstanceId,
+                    v2.Id,
+                    new Dictionary<string, string> { ["task_approve"] = "task_missing" }),
+                Ct));
+        Assert.Contains("不在目标流程定义中", badTarget.Message, StringComparison.Ordinal);
+
+        // 当前定义就是目标定义
+        var same = await Assert.ThrowsAsync<EngineException>(async () =>
+            await engine.ValidateMigrationAsync(new ProcessInstanceMigrationRequest(processInstanceId, v1.Id), Ct));
+        Assert.Contains("已经在定义", same.Message, StringComparison.Ordinal);
+
+        // 跨 key
+        const string otherKey = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="another_process" isExecutable="true">
+                <startEvent id="start" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="task_x" />
+                <userTask id="task_x" activiti:assignee="alice" />
+                <sequenceFlow id="f2" sourceRef="task_x" targetRef="end" />
+                <endEvent id="end" />
+              </process>
+            </definitions>
+            """;
+
+        var other = await DeployAsync(engine, host, otherKey);
+
+        var crossKey = await Assert.ThrowsAsync<EngineException>(async () =>
+            await engine.ValidateMigrationAsync(
+                new ProcessInstanceMigrationRequest(processInstanceId, other.Id),
+                Ct));
+        Assert.Contains("不能跨流程迁移", crossKey.Message, StringComparison.Ordinal);
+
+        // 挂起实例
+        await engine.SuspendProcessInstanceAsync(processInstanceId, Ct);
+
+        var suspended = await Assert.ThrowsAsync<EngineConflictException>(async () =>
+            await engine.ValidateMigrationAsync(
+                new ProcessInstanceMigrationRequest(
+                    processInstanceId,
+                    v2.Id,
+                    new Dictionary<string, string> { ["task_approve"] = "task_review" }),
+                Ct));
+        Assert.Contains("已挂起", suspended.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Migration_ShouldRejectMultiInstanceActivities()
+    {
+        var (engine, host) = Create();
+
+        const string v1 = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="migrate_mi" isExecutable="true">
+                <startEvent id="start" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="task_sign" />
+                <userTask id="task_sign" activiti:assignee="${approver}">
+                  <multiInstanceLoopCharacteristics isSequential="false"
+                                                activiti:collection="${approvers}"
+                                                activiti:elementVariable="approver" />
+                </userTask>
+                <sequenceFlow id="f2" sourceRef="task_sign" targetRef="end" />
+                <endEvent id="end" />
+              </process>
+            </definitions>
+            """;
+
+        const string v2 = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="migrate_mi" isExecutable="true">
+                <startEvent id="start" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="task_sign" />
+                <userTask id="task_sign" activiti:assignee="${approver}" />
+                <sequenceFlow id="f2" sourceRef="task_sign" targetRef="end" />
+                <endEvent id="end" />
+              </process>
+            </definitions>
+            """;
+
+        var v1Def = await DeployAsync(engine, host, v1);
+        var v2Def = await DeployAsync(engine, host, v2);
+
+        var processInstanceId = await engine.StartProcessInstanceAsync(
+            v1Def.Id,
+            null,
+            "alice",
+            new Dictionary<string, object?>
+            {
+                ["approvers"] = new List<string> { "alice", "bob" },
+            },
+            Ct);
+
+        var error = await Assert.ThrowsAsync<EngineException>(async () =>
+            await engine.ValidateMigrationAsync(
+                new ProcessInstanceMigrationRequest(processInstanceId, v2Def.Id),
+                Ct));
+
+        Assert.Contains("多实例", error.Message, StringComparison.Ordinal);
+    }
+
     // ─────────────────────────── 装配 ───────────────────────────
 
     private static (IProcessEngine Engine, TestEngine Host) Create(IHistoryManager? history = null)
@@ -845,7 +1282,9 @@ public sealed class EngineFacadeTests
             host.TaskManager,
             new EmptyUserGroupManager(),
             host.ExecutionManager,
-            history ?? new NullHistoryManager());
+            history ?? new NullHistoryManager(),
+            host.TimerJobs,
+            new InMemoryMigrationLog());
 
         return (engine, host);
     }

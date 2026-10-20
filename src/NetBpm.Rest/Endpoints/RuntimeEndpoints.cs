@@ -1,8 +1,11 @@
 using System.Text.Json;
 using NetBpm.Engine;
 using NetBpm.Engine.Execution;
+using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
+using NetBpm.Persistence.Admin;
+using NetBpm.Rest.Auditing;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 
@@ -40,6 +43,10 @@ public static class RuntimeEndpoints
         group.MapPost("/process-instances/{processInstanceId}/suspend", SuspendProcessInstanceAsync);
         group.MapPost("/process-instances/{processInstanceId}/activate", ActivateProcessInstanceAsync);
         group.MapPost("/process-instances/{processInstanceId}/jump", JumpProcessInstanceAsync);
+        group.MapPost("/process-instances/{processInstanceId}/migrate", MigrateProcessInstanceAsync)
+            .Produces<MigrationPlanResponse>();
+        group.MapGet("/process-instances/{processInstanceId}/migrations", FindMigrationsAsync)
+            .Produces<IReadOnlyList<MigrationRecordResponse>>();
 
         // 任务（P7 已落地）
         group.MapGet("/tasks", FindTasksAsync).Produces<IReadOnlyList<TaskResponse>>();
@@ -171,13 +178,30 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
             .ConfigureAwait(false);
 
-        await engine.DeleteProcessInstanceAsync(processInstanceId, deleteReason, ct).ConfigureAwait(false);
-        return Results.NoContent();
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceDelete, "删除流程实例");
+
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.InstanceDelete,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            new { deleteReason },
+            async () =>
+            {
+                await engine.DeleteProcessInstanceAsync(processInstanceId, deleteReason, ct)
+                    .ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>挂起流程实例：待办仍可查，但不能完成 / 认领（对应 suspendProcessInstanceById）。</summary>
@@ -186,13 +210,29 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
             .ConfigureAwait(false);
 
-        await engine.SuspendProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
-        return Results.NoContent();
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceSuspend, "挂起流程实例");
+
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.InstanceSuspend,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            detail: null,
+            async () =>
+            {
+                await engine.SuspendProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>激活流程实例（与挂起对称）。</summary>
@@ -201,13 +241,29 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
             .ConfigureAwait(false);
 
-        await engine.ActivateProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
-        return Results.NoContent();
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceSuspend, "激活流程实例");
+
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.InstanceActivate,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            detail: null,
+            async () =>
+            {
+                await engine.ActivateProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     private static async Task<IResult> GetProcessInstanceAsync(
@@ -290,6 +346,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request?.TargetActivityId))
@@ -300,11 +357,107 @@ public static class RuntimeEndpoints
         await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
             .ConfigureAwait(false);
 
-        await engine
-            .MoveActivityToAsync(processInstanceId, request.TargetActivityId, request.Reason, ct)
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceJump, "跳转流程实例");
+
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.InstanceJump,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            new { targetActivityId = request.TargetActivityId, reason = request.Reason },
+            async () =>
+            {
+                await engine
+                    .MoveActivityToAsync(processInstanceId, request.TargetActivityId, request.Reason, ct)
+                    .ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 流程实例迁移（定义升级后的存量实例处置）。
+    /// <para>
+    /// <c>validateOnly=true</c> 时只返回计划（映射明细 / 待取消待办 / 风险提示），不写任何数据；
+    /// 否则在同一事务内切定义、取消旧待办、重排定时器并在目标节点重建待办。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> MigrateProcessInstanceAsync(
+        string processInstanceId,
+        MigrateProcessInstanceRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request?.TargetProcessDefinitionId))
+        {
+            return Results.BadRequest(new ErrorResponse("targetProcessDefinitionId 必填（目标流程定义 id）。"));
+        }
+
+        await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
             .ConfigureAwait(false);
 
-        return Results.NoContent();
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceJump, "迁移流程实例");
+
+        Dictionary<string, string>? mappings = request.ActivityMappings is null
+            ? null
+            : new Dictionary<string, string>(request.ActivityMappings, StringComparer.Ordinal);
+
+        var migration = new ProcessInstanceMigrationRequest(
+            processInstanceId,
+            request.TargetProcessDefinitionId,
+            mappings,
+            request.Reason,
+            requestContext.UserId);
+
+        if (request.ValidateOnly)
+        {
+            var preview = await engine.ValidateMigrationAsync(migration, ct).ConfigureAwait(false);
+
+            return Results.Ok(MigrationPlanResponse.From(preview, applied: false));
+        }
+
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.InstanceMigrate,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            new
+            {
+                targetProcessDefinitionId = request.TargetProcessDefinitionId,
+                activityMappingCount = mappings?.Count ?? 0,
+                reason = request.Reason,
+            },
+            async () =>
+            {
+                var plan = await engine.MigrateProcessInstanceAsync(migration, ct).ConfigureAwait(false);
+
+                return Results.Ok(MigrationPlanResponse.From(plan, applied: true));
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>查流程实例的迁移记录（按迁移时间倒序）。</summary>
+    private static async Task<IResult> FindMigrationsAsync(
+        string processInstanceId,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
+            .ConfigureAwait(false);
+
+        var records = await engine.FindMigrationsAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        return Results.Ok(records.Select(MigrationRecordResponse.From).ToArray());
     }
 
     // ─────────────────────────── 任务 ───────────────────────────
@@ -425,6 +578,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
@@ -433,8 +587,21 @@ public static class RuntimeEndpoints
             .EnsureCanModerateAsync(task, requestContext, executionManager, "转办", ct)
             .ConfigureAwait(false);
 
-        await engine.SetAssigneeAsync(taskId, request?.Assignee, ct).ConfigureAwait(false);
-        return Results.NoContent();
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskReassign,
+            AdminAuditTargets.Task,
+            taskId,
+            task.ProcessInstanceId,
+            new { from = task.Assignee, to = request?.Assignee },
+            async () =>
+            {
+                await engine.SetAssigneeAsync(taskId, request?.Assignee, ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -447,6 +614,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (request is null)
@@ -460,21 +628,43 @@ public static class RuntimeEndpoints
             .EnsureCanModerateAsync(task, requestContext, executionManager, "修改任务", ct)
             .ConfigureAwait(false);
 
-        await engine.UpdateTaskAsync(
-                taskId,
-                new TaskUpdate(
-                    request.Name,
-                    request.Description,
-                    request.Priority,
-                    request.DueDate,
-                    request.Category,
-                    request.Owner,
-                    request.ClearDueDate == true,
-                    request.ClearDescription == true),
-                ct)
-            .ConfigureAwait(false);
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskUpdate,
+            AdminAuditTargets.Task,
+            taskId,
+            task.ProcessInstanceId,
+            new
+            {
+                name = request.Name,
+                priority = request.Priority,
+                category = request.Category,
+                owner = request.Owner,
+                dueDate = request.DueDate,
+                clearDueDate = request.ClearDueDate == true,
+                // 描述可能含敏感信息：只记「是否改动」，不记内容
+                descriptionChanged = request.Description is not null || request.ClearDescription == true,
+            },
+            async () =>
+            {
+                await engine.UpdateTaskAsync(
+                        taskId,
+                        new TaskUpdate(
+                            request.Name,
+                            request.Description,
+                            request.Priority,
+                            request.DueDate,
+                            request.Category,
+                            request.Owner,
+                            request.ClearDueDate == true,
+                            request.ClearDescription == true),
+                        ct)
+                    .ConfigureAwait(false);
 
-        return Results.NoContent();
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>加候选用户（任务级 candidate 关系）。</summary>
@@ -484,6 +674,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request?.UserId))
@@ -497,8 +688,21 @@ public static class RuntimeEndpoints
             .EnsureCanModerateAsync(task, requestContext, executionManager, "增加候选人", ct)
             .ConfigureAwait(false);
 
-        await engine.AddTaskCandidateUsersAsync(taskId, [request.UserId], ct).ConfigureAwait(false);
-        return Results.NoContent();
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskCandidateAdd,
+            AdminAuditTargets.Task,
+            taskId,
+            task.ProcessInstanceId,
+            new { kind = "user", userId = request.UserId },
+            async () =>
+            {
+                await engine.AddTaskCandidateUsersAsync(taskId, [request.UserId], ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>移除候选用户（不影响流程实例级参与者记录）；关系不存在返回 404。</summary>
@@ -508,6 +712,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
@@ -516,17 +721,31 @@ public static class RuntimeEndpoints
             .EnsureCanModerateAsync(task, requestContext, executionManager, "移除候选人", ct)
             .ConfigureAwait(false);
 
-        var links = await engine.FindTaskIdentityLinksAsync(taskId, ct).ConfigureAwait(false);
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskCandidateRemove,
+            AdminAuditTargets.Task,
+            taskId,
+            task.ProcessInstanceId,
+            new { kind = "user", userId },
+            async () =>
+            {
+                var links = await engine.FindTaskIdentityLinksAsync(taskId, ct).ConfigureAwait(false);
 
-        if (!links.Any(link =>
-                string.Equals(link.Type, IdentityLinkType.Candidate, StringComparison.Ordinal)
-                && string.Equals(link.UserId, userId, StringComparison.Ordinal)))
-        {
-            return Results.NotFound(new ErrorResponse($"任务 '{taskId}' 的候选用户 '{userId}' 不存在。"));
-        }
+                if (!links.Any(link =>
+                        string.Equals(link.Type, IdentityLinkType.Candidate, StringComparison.Ordinal)
+                        && string.Equals(link.UserId, userId, StringComparison.Ordinal)))
+                {
+                    return Results.NotFound(
+                        new ErrorResponse($"任务 '{taskId}' 的候选用户 '{userId}' 不存在。"));
+                }
 
-        await engine.RemoveTaskCandidateUserAsync(taskId, userId, ct).ConfigureAwait(false);
-        return Results.NoContent();
+                await engine.RemoveTaskCandidateUserAsync(taskId, userId, ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>加候选组。</summary>
@@ -536,6 +755,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request?.GroupId))
@@ -549,8 +769,21 @@ public static class RuntimeEndpoints
             .EnsureCanModerateAsync(task, requestContext, executionManager, "增加候选组", ct)
             .ConfigureAwait(false);
 
-        await engine.AddTaskCandidateGroupsAsync(taskId, [request.GroupId], ct).ConfigureAwait(false);
-        return Results.NoContent();
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskCandidateAdd,
+            AdminAuditTargets.Task,
+            taskId,
+            task.ProcessInstanceId,
+            new { kind = "group", groupId = request.GroupId },
+            async () =>
+            {
+                await engine.AddTaskCandidateGroupsAsync(taskId, [request.GroupId], ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>移除候选组；关系不存在返回 404。</summary>
@@ -560,6 +793,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
@@ -568,17 +802,31 @@ public static class RuntimeEndpoints
             .EnsureCanModerateAsync(task, requestContext, executionManager, "移除候选组", ct)
             .ConfigureAwait(false);
 
-        var links = await engine.FindTaskIdentityLinksAsync(taskId, ct).ConfigureAwait(false);
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskCandidateRemove,
+            AdminAuditTargets.Task,
+            taskId,
+            task.ProcessInstanceId,
+            new { kind = "group", groupId },
+            async () =>
+            {
+                var links = await engine.FindTaskIdentityLinksAsync(taskId, ct).ConfigureAwait(false);
 
-        if (!links.Any(link =>
-                string.Equals(link.Type, IdentityLinkType.Candidate, StringComparison.Ordinal)
-                && string.Equals(link.GroupId, groupId, StringComparison.Ordinal)))
-        {
-            return Results.NotFound(new ErrorResponse($"任务 '{taskId}' 的候选组 '{groupId}' 不存在。"));
-        }
+                if (!links.Any(link =>
+                        string.Equals(link.Type, IdentityLinkType.Candidate, StringComparison.Ordinal)
+                        && string.Equals(link.GroupId, groupId, StringComparison.Ordinal)))
+                {
+                    return Results.NotFound(
+                        new ErrorResponse($"任务 '{taskId}' 的候选组 '{groupId}' 不存在。"));
+                }
 
-        await engine.RemoveTaskCandidateGroupAsync(taskId, groupId, ct).ConfigureAwait(false);
-        return Results.NoContent();
+                await engine.RemoveTaskCandidateGroupAsync(taskId, groupId, ct).ConfigureAwait(false);
+
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>委派任务：原办理人记入 owner，委派状态 PENDING（此时不能直接完成）。</summary>
@@ -799,6 +1047,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (request?.TaskIds is not { Count: > 0 } taskIds)
@@ -825,10 +1074,33 @@ public static class RuntimeEndpoints
                     .ConfigureAwait(false);
 
                 await engine.SetAssigneeAsync(taskId, request.Assignee, ct).ConfigureAwait(false);
+
+                // 批量转办逐项审计：一条记录对应一个任务，失败项也留痕
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.TaskBatchReassign,
+                    AdminAuditTargets.Task,
+                    taskId,
+                    task.ProcessInstanceId,
+                    new { from = task.Assignee, to = request.Assignee },
+                    success: true,
+                    ct: ct).ConfigureAwait(false);
+
                 items.Add(new BatchItemResult(taskId, true, null));
             }
             catch (EngineException ex)
             {
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.TaskBatchReassign,
+                    AdminAuditTargets.Task,
+                    taskId,
+                    processInstanceId: null,
+                    detail: new { to = request.Assignee },
+                    success: false,
+                    error: ex.Message,
+                    ct: ct).ConfigureAwait(false);
+
                 items.Add(new BatchItemResult(taskId, false, ex.Message));
             }
         }
@@ -842,6 +1114,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (request?.ProcessInstanceIds is not { Count: > 0 } instanceIds)
@@ -853,6 +1126,9 @@ public static class RuntimeEndpoints
         {
             return Results.BadRequest(new ErrorResponse($"单次批量操作最多 {MaxBatchSize} 条。"));
         }
+
+        // 授权在循环外统一判定：缺 scope 整体 403，而不是逐项失败
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceDelete, "批量删除流程实例");
 
         var items = new List<BatchItemResult>(instanceIds.Count);
 
@@ -866,10 +1142,32 @@ public static class RuntimeEndpoints
                 await engine.DeleteProcessInstanceAsync(instanceId, request.DeleteReason, ct)
                     .ConfigureAwait(false);
 
+                // 批量删除逐项审计：一条记录对应一个实例，失败项也留痕
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.InstanceBatchDelete,
+                    AdminAuditTargets.ProcessInstance,
+                    instanceId,
+                    instanceId,
+                    new { deleteReason = request.DeleteReason },
+                    success: true,
+                    ct: ct).ConfigureAwait(false);
+
                 items.Add(new BatchItemResult(instanceId, true, null));
             }
             catch (EngineException ex)
             {
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.InstanceBatchDelete,
+                    AdminAuditTargets.ProcessInstance,
+                    instanceId,
+                    instanceId,
+                    new { deleteReason = request.DeleteReason },
+                    success: false,
+                    error: ex.Message,
+                    ct: ct).ConfigureAwait(false);
+
                 items.Add(new BatchItemResult(instanceId, false, ex.Message));
             }
         }
@@ -915,6 +1213,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (value is null || value.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
@@ -925,8 +1224,10 @@ public static class RuntimeEndpoints
         var instance = await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
             .ConfigureAwait(false);
 
+        // 参与人可写自己的变量；越权直写需要 netbpm.admin.variables.write
         await VariableAuthorization
-            .EnsureCanAccessInstanceVariablesAsync(instance, processInstanceId, requestContext, engine, ct)
+            .EnsureCanAccessInstanceVariablesAsync(
+                instance, processInstanceId, requestContext, engine, ct, TaskScopes.AdminVariablesWrite)
             .ConfigureAwait(false);
 
         var variables = JsonVariableReader.Read(new Dictionary<string, JsonElement> { [name] = value.Value });
@@ -937,11 +1238,23 @@ public static class RuntimeEndpoints
                 $"变量 '{name}' 的值为 null，未写入；删除变量请调用 DELETE。"));
         }
 
-        await engine
-            .SetVariableAsync(processInstanceId, name, parsedValue, ct)
-            .ConfigureAwait(false);
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.VariableWrite,
+            AdminAuditTargets.Variable,
+            $"{processInstanceId}:{name}",
+            processInstanceId,
+            new { name, valueType = value.Value.ValueKind.ToString(), scope = "process_instance" },
+            async () =>
+            {
+                await engine
+                    .SetVariableAsync(processInstanceId, name, parsedValue, ct)
+                    .ConfigureAwait(false);
 
-        return Results.NoContent();
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>批量写流程实例变量（同一事务）。请求体为 <c>{ "name": value, ... }</c>。</summary>
@@ -951,6 +1264,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (variables is null || variables.Count == 0)
@@ -962,7 +1276,8 @@ public static class RuntimeEndpoints
             .ConfigureAwait(false);
 
         await VariableAuthorization
-            .EnsureCanAccessInstanceVariablesAsync(instance, processInstanceId, requestContext, engine, ct)
+            .EnsureCanAccessInstanceVariablesAsync(
+                instance, processInstanceId, requestContext, engine, ct, TaskScopes.AdminVariablesWrite)
             .ConfigureAwait(false);
 
         var values = JsonVariableReader.Read(variables);
@@ -973,14 +1288,26 @@ public static class RuntimeEndpoints
                 "变量值不能全部为 null：本次请求没有可写入的变量（删除变量请用 DELETE）。"));
         }
 
-        await engine
-            .SetVariablesAsync(
-                processInstanceId,
-                new Dictionary<string, object?>(values, StringComparer.Ordinal),
-                ct)
-            .ConfigureAwait(false);
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.VariableWrite,
+            AdminAuditTargets.Variable,
+            processInstanceId,
+            processInstanceId,
+            new { names = variables.Keys.Order(StringComparer.Ordinal).ToArray(), scope = "process_instance" },
+            async () =>
+            {
+                await engine
+                    .SetVariablesAsync(
+                        processInstanceId,
+                        new Dictionary<string, object?>(values, StringComparer.Ordinal),
+                        ct)
+                    .ConfigureAwait(false);
 
-        return Results.NoContent();
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>删除流程实例作用域上的变量（B2.4）：沿作用域链查找，历史行保留。</summary>
@@ -990,18 +1317,29 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         var instance = await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
             .ConfigureAwait(false);
 
         await VariableAuthorization
-            .EnsureCanAccessInstanceVariablesAsync(instance, processInstanceId, requestContext, engine, ct)
+            .EnsureCanAccessInstanceVariablesAsync(
+                instance, processInstanceId, requestContext, engine, ct, TaskScopes.AdminVariablesWrite)
             .ConfigureAwait(false);
 
-        return await engine.RemoveVariableAsync(processInstanceId, name, ct).ConfigureAwait(false)
-            ? Results.NoContent()
-            : Results.NotFound(new ErrorResponse($"变量 '{name}' 不存在。"));
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.VariableDelete,
+            AdminAuditTargets.Variable,
+            $"{processInstanceId}:{name}",
+            processInstanceId,
+            new { name, scope = "process_instance" },
+            async () => await engine.RemoveVariableAsync(processInstanceId, name, ct).ConfigureAwait(false)
+                ? Results.NoContent()
+                : Results.NotFound(new ErrorResponse($"变量 '{name}' 不存在。")),
+            ct).ConfigureAwait(false);
     }
 
     // ─────────────────────────── 任务局部变量（B2.4）───────────────────────────
@@ -1031,6 +1369,7 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         if (value is null || value.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
@@ -1041,7 +1380,8 @@ public static class RuntimeEndpoints
         var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
 
         await VariableAuthorization
-            .EnsureCanAccessTaskVariablesAsync(task, requestContext, executionManager, engine, ct)
+            .EnsureCanAccessTaskVariablesAsync(
+                task, requestContext, executionManager, engine, ct, TaskScopes.AdminVariablesWrite)
             .ConfigureAwait(false);
 
         var variables = JsonVariableReader.Read(new Dictionary<string, JsonElement> { [name] = value.Value });
@@ -1052,10 +1392,22 @@ public static class RuntimeEndpoints
                 $"任务局部变量 '{name}' 的值为 null，未写入；删除变量请调用 DELETE。"));
         }
 
-        await engine.SetTaskVariableAsync(taskId, name, parsedValue, ct)
-            .ConfigureAwait(false);
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskVariableWrite,
+            AdminAuditTargets.Variable,
+            $"{taskId}:{name}",
+            task.ProcessInstanceId,
+            new { name, valueType = value.Value.ValueKind.ToString(), scope = "task", taskId },
+            async () =>
+            {
+                await engine.SetTaskVariableAsync(taskId, name, parsedValue, ct)
+                    .ConfigureAwait(false);
 
-        return Results.NoContent();
+                return Results.NoContent();
+            },
+            ct).ConfigureAwait(false);
     }
 
     private static async Task<IResult> RemoveTaskVariableAsync(
@@ -1064,17 +1416,28 @@ public static class RuntimeEndpoints
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
         var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
 
         await VariableAuthorization
-            .EnsureCanAccessTaskVariablesAsync(task, requestContext, executionManager, engine, ct)
+            .EnsureCanAccessTaskVariablesAsync(
+                task, requestContext, executionManager, engine, ct, TaskScopes.AdminVariablesWrite)
             .ConfigureAwait(false);
 
-        return await engine.RemoveTaskVariableAsync(taskId, name, ct).ConfigureAwait(false)
-            ? Results.NoContent()
-            : Results.NotFound(new ErrorResponse($"任务局部变量 '{name}' 不存在。"));
+        return await AuditAsync(
+            auditor,
+            requestContext,
+            AdminAuditActions.TaskVariableDelete,
+            AdminAuditTargets.Variable,
+            $"{taskId}:{name}",
+            task.ProcessInstanceId,
+            new { name, scope = "task", taskId },
+            async () => await engine.RemoveTaskVariableAsync(taskId, name, ct).ConfigureAwait(false)
+                ? Results.NoContent()
+                : Results.NotFound(new ErrorResponse($"任务局部变量 '{name}' 不存在。")),
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1279,6 +1642,33 @@ public static class RuntimeEndpoints
             response,
             envelope ?? false);
     }
+
+    // ─────────────────────────── 审计辅助 ───────────────────────────
+
+    /// <summary>
+    /// 执行管理动作并按结果写审计：成功与失败都留痕，失败仍照常抛给全局异常处理器。
+    /// <para>审计写入本身失败不会改变业务结果（见 <see cref="AdminActionAuditor"/>）。</para>
+    /// </summary>
+    private static Task<IResult> AuditAsync(
+        AdminActionAuditor auditor,
+        RequestContext requestContext,
+        string action,
+        string targetType,
+        string targetId,
+        string? processInstanceId,
+        object? detail,
+        Func<Task<IResult>> execute,
+        CancellationToken ct) =>
+        AuditedAction.RunAsync(
+            auditor,
+            requestContext,
+            action,
+            targetType,
+            targetId,
+            processInstanceId,
+            detail,
+            execute,
+            ct);
 
     // ─────────────────────────── 租户隔离辅助 ───────────────────────────
 

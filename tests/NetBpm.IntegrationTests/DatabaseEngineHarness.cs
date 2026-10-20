@@ -17,6 +17,8 @@ using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
+using NetBpm.Persistence.Jobs;
+using NetBpm.Persistence.Migration;
 using NetBpm.Persistence.Tasks;
 using NetBpm.Runtime;
 
@@ -69,7 +71,10 @@ internal sealed class DatabaseEngineHarness
         HistoryManager = new DapperHistoryManager(sessions, IdGenerator);
         VariableInstances = new DapperVariableInstanceManager(sessions, IdGenerator, HistoryManager);
         TaskManager = new DapperTaskManager(sessions, IdGenerator, HistoryManager, VariableInstances);
-        Executions = new DapperExecutionManager(sessions, IdGenerator, TaskManager, VariableInstances, HistoryManager);
+        TimerJobs = new DapperTimerJobManager(sessions);
+        MigrationLog = new DapperMigrationLog(sessions);
+        Executions = new DapperExecutionManager(
+            sessions, IdGenerator, TaskManager, VariableInstances, HistoryManager, TimerJobs);
         XmlConverter = xmlConverter ?? new BpmnXmlConverter();
         Definitions = new DapperProcessDefinitionStore(sessions, IdGenerator, XmlConverter);
         Recorder = new ExecutionSnapshotRecorder(sessions);
@@ -85,7 +90,9 @@ internal sealed class DatabaseEngineHarness
             behaviorFactory,
             new HarnessDelegateResolver(Delegates, Recorder),
             TaskManager,
-            new ProcessDefinitionResolver(Definitions));
+            new ProcessDefinitionResolver(Definitions),
+            logger: null,
+            TimerJobs);
 
         holder = services;
 
@@ -120,6 +127,10 @@ internal sealed class DatabaseEngineHarness
 
     public DapperHistoryManager HistoryManager { get; }
 
+    public DapperTimerJobManager TimerJobs { get; }
+
+    public DapperMigrationLog MigrationLog { get; }
+
     public DapperProcessDefinitionStore Definitions { get; }
 
     public ExecutionSnapshotRecorder Recorder { get; }
@@ -148,7 +159,9 @@ internal sealed class DatabaseEngineHarness
         TaskManager,
         new EmptyUserGroupManager(),
         Executions,
-        HistoryManager);
+        HistoryManager,
+        TimerJobs,
+        MigrationLog);
 
     private ProcessEngine? _engine;
 

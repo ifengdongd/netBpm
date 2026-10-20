@@ -14,7 +14,12 @@
  * parseProcessMeta / upsertDiagram 是纯函数，可在 Node 单测里直接验证（见 test/designer.test.ts）。
  */
 
-import { credentialHeaders } from './auth';
+import {
+  credentialHeaders,
+  describeHttpFailure,
+  MODEL_READ_SCOPE,
+  MODEL_WRITE_SCOPE,
+} from './auth';
 
 export interface DiagramRecord {
   /** 模型唯一 id（服务端 bpmn_model.id；localStorage 模式 = 旧 modelId，用于 ?modelId= 直接打开）。 */
@@ -76,7 +81,10 @@ async function resolveMode(): Promise<'server' | 'local'> {
 
   try {
     const response = await fetch('/api/admin/models', { method: 'GET', headers: credentialHeaders() });
-    backendMode = response.ok ? 'server' : 'local';
+
+    // 403 = 后端存在但当前凭据没有管理权限：必须留在 server 模式，
+    // 让列表/保存把 403 明确报出来；静默回退到 localStorage 会让人误以为「数据丢了」。
+    backendMode = response.ok || response.status === 401 || response.status === 403 ? 'server' : 'local';
   } catch {
     backendMode = 'local';
   }
@@ -158,13 +166,56 @@ function detailToRecord(detail: BpmnModelDetail): DiagramRecord {
   };
 }
 
-/** 把非 2xx 且非 404 的响应归因成可读错误。 */
-function ensureOk(response: Response, action: string): void {
+/** 把非 2xx 且非 404 的响应归因成可读错误（403 补上所需管理 scope）。 */
+function ensureOk(response: Response, action: string, requiredScope: string = MODEL_READ_SCOPE): void {
   if (response.ok || response.status === 404) {
     return;
   }
 
-  throw new Error(`${action}失败：HTTP ${response.status} ${response.statusText}`);
+  throw new Error(
+    `${action}失败：${describeHttpFailure(
+      response.status,
+      `HTTP ${response.status} ${response.statusText}`,
+      requiredScope,
+    )}`,
+  );
+}
+
+/**
+ * 保存失败的明细：后端在 XML 解析失败时返回 `{ message }`，
+ * 校验失败（草稿不会发生，但保留兼容）可能返回 `{ errors: [...] }`。
+ * 只取前几条，避免把整页 JSON 塞进状态栏。
+ */
+async function describeSaveFailure(response: Response): Promise<string> {
+  const text = await response.text();
+
+  try {
+    const body = JSON.parse(text) as {
+      message?: string;
+      errors?: { message?: string; elementId?: string }[];
+    };
+
+    const details = (body.errors ?? [])
+      .slice(0, 5)
+      .map((issue) => (issue.elementId ? `${issue.elementId}: ${issue.message ?? ''}` : issue.message ?? ''))
+      .filter((detail) => detail.length > 0);
+
+    if (details.length > 0) {
+      return `保存被拒绝：\n${details.join('\n')}`;
+    }
+
+    if (body.message !== undefined && body.message.length > 0) {
+      return `保存被拒绝：${describeHttpFailure(response.status, body.message, MODEL_WRITE_SCOPE)}`;
+    }
+  } catch {
+    // 非 JSON 响应（代理错误页等），退回到状态码
+  }
+
+  return `保存失败：${describeHttpFailure(
+    response.status,
+    `HTTP ${response.status} ${response.statusText}`,
+    MODEL_WRITE_SCOPE,
+  )}`;
 }
 
 // ─────────────────────────── 对外 API（异步）───────────────────────────
@@ -222,7 +273,9 @@ export async function saveDiagramXml(xml: string, modelId?: string): Promise<Dia
       body: JSON.stringify(payload),
     });
 
-    ensureOk(response, '保存');
+    if (!response.ok) {
+      throw new Error(await describeSaveFailure(response));
+    }
 
     return { modelId: id, processId, name, xml, updatedAt: new Date().toISOString(), version: 0 };
   }
@@ -238,7 +291,7 @@ export async function deleteDiagram(modelId: string): Promise<void> {
       headers: credentialHeaders(),
     });
 
-    ensureOk(response, '删除');
+    ensureOk(response, '删除', MODEL_WRITE_SCOPE);
 
     return;
   }

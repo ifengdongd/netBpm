@@ -38,6 +38,12 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
     /// <inheritdoc />
     public async ValueTask RunAsync(CancellationToken ct = default)
     {
+        // 终止结束事件会在同一命令里删掉整棵执行树（含并行分支上的执行）
+        if (_execution.IsEnded)
+        {
+            return;
+        }
+
         var currentFlowElement = _execution.CurrentFlowElement
             ?? throw new EngineException($"执行 '{_execution.Id}' 没有当前流程元素，无法离开。");
 

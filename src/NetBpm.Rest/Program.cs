@@ -1,8 +1,11 @@
 using NetBpm.Persistence;
 using NetBpm.Rest;
+using NetBpm.Rest.Auditing;
+using NetBpm.Rest.Diagnostics;
 using NetBpm.Rest.Endpoints;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
+using NetBpm.Workflow.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +18,9 @@ builder.Services.AddScoped<RequestContext>();
 // 组合根：模型 / 转换 / 校验 / 表达式 / 引擎 / 持久化 / 身份
 builder.Services.AddNetBpm(builder.Configuration);
 
+// 定时边界事件：后台轮询 ACT_RU_TIMER_JOB（NetBpm:Timer 可调间隔 / 关闭）
+builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
+
 // 全局异常处理：未处理异常（如数据库不可达）返回带信息的 JSON 错误体，
 // 而非纯文本 "Internal Server Error"（前端部署列表的「加载失败」提示来源）。
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -26,6 +32,15 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 // 幂等记录定期清理（否则 ACT_IDEMPOTENCY 无限增长）
 builder.Services.AddHostedService<IdempotencyCleanupService>();
+
+// 管理动作审计（转办 / 跳转 / 变量直写）：写审计存储，失败不影响业务
+builder.Services.AddNetBpmAuditing();
+
+// 审计保留策略（NetBpm:Admin:AuditRetentionDays，默认 0 = 永久保留）
+builder.Services.AddHostedService<AdminAuditCleanupService>();
+
+// 可选 OpenTelemetry 接线（NetBpm:Otel:Enabled 或 OTEL_EXPORTER_OTLP_ENDPOINT）
+builder.Services.AddNetBpmOpenTelemetry(builder.Configuration);
 
 var app = builder.Build();
 var startedAt = DateTime.UtcNow;

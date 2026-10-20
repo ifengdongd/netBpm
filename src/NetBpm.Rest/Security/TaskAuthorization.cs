@@ -132,7 +132,8 @@ internal static class TaskAuthorization
     /// 管理动作授权：转办、修改任务字段、增删候选关系。
     /// <para>
     /// 允许三类主体：当前办理人、所有者、流程实例发起人（发起人是业务上的流程负责人），
-    /// 以及持有 <c>netbpm.admin</c> 的管理员。未签收且无所有者时只有发起人或管理员能操作。
+    /// 以及持有 <c>netbpm.admin</c>（或细粒度 <paramref name="requiredScope"/>）的管理员。
+    /// 未签收且无所有者时只有发起人或管理员能操作。
     /// </para>
     /// <para>
     /// 该方法是任务级授权闭合的关键：这些动作会改变办理人 / 候选关系，若不校验，
@@ -144,13 +145,14 @@ internal static class TaskAuthorization
         RequestContext context,
         IExecutionManager executionManager,
         string action,
-        CancellationToken ct)
+        CancellationToken ct,
+        string requiredScope = TaskScopes.AdminTaskModerate)
     {
         ArgumentNullException.ThrowIfNull(task);
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(executionManager);
 
-        if (Skip(context))
+        if (Skip(context, requiredScope))
         {
             return;
         }
@@ -218,8 +220,12 @@ internal static class TaskAuthorization
         return IsCandidate(links, userId, context.Groups);
     }
 
-    private static bool Skip(RequestContext context) =>
-        !context.IsUserPrincipal || context.IsAdmin;
+    /// <summary>
+    /// 是否跳过任务级授权：可信服务（API Key）跳过；JWT 用户持有超级范围
+    /// <c>netbpm.admin</c> 或该动作对应的细粒度 scope 时跳过。
+    /// </summary>
+    private static bool Skip(RequestContext context, string requiredScope = TaskScopes.Admin) =>
+        !context.IsUserPrincipal || context.HasAdminScope(requiredScope);
 
     private static string RequireUser(RequestContext context) =>
         context.UserId ?? throw new ForbiddenException("JWT 缺少 sub 声明，无法判断任务归属。");

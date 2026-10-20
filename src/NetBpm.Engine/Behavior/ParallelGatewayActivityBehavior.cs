@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Services;
@@ -64,6 +65,20 @@ public sealed class ParallelGatewayActivityBehavior : GatewayActivityBehavior
         await Services.HistoryManager
             .RecordActivityEndQuietlyAsync(execution.AsEntity(), null, ct)
             .ConfigureAwait(false);
+
+        // ⚠️ Activiti 的判定是「总数相等」。一旦某条入流送来两个 token（环路重复经过、
+        // 上游误连成多入口），计数会大于期望值且永远不会回落 —— 流程静默卡死。
+        // 语义不改（对拍口径），但必须留下可诊断的痕迹，否则线上只能看到"流程不动了"。
+        if (joinedExecutions.Count > numberOfExecutionsToJoin)
+        {
+            Services.Logger?.LogWarning(
+                "并行网关 {GatewayId}（流程实例 {ProcessInstanceId}）收到 {Actual} 个 token，超过入流数 {Expected}：" +
+                "Join 永远无法满足，流程会停在该网关。请检查网关是否位于环路或同一条入流被重复触发。",
+                parallelGateway.Id,
+                processInstanceId,
+                joinedExecutions.Count,
+                numberOfExecutionsToJoin);
+        }
 
         // ④ 全部到齐 → Fork
         if (joinedExecutions.Count == numberOfExecutionsToJoin)

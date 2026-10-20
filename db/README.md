@@ -29,13 +29,17 @@ dotnet run --project tools/NetBpm.DbInit -- \
 | 0003 | `0003_create_demo_tables.sql` | **Demo 业务表** | 请假单（`leave_bill`）、订单单（`order_bill`）、流程参数键值表（`workflow_parameters`）、组织架构（`sys_*` 四张：部门 / 员工 / 审批组） |
 | 0004 | `0004_perf_indexes.sql` | **性能增强** | 运行期查询索引（执行树 / 任务 / 变量 / 关系）；幂等，可对已有库单独执行 |
 | 0005 | `0005_create_idempotency.sql` | **应用层（REST）** | `ACT_IDEMPOTENCY` HTTP 幂等键表；仅 REST 宿主使用，不属于 Activiti 13 张引擎表 |
+| 0006 | `0006_create_timer_job.sql` | **引擎扩展（定时器）** | `ACT_RU_TIMER_JOB` 边界定时作业表（一次性）；启用「用户任务 + 定时边界事件」时必需，幂等可重复执行 |
+| 0007 | `0007_create_migration_log.sql` | **引擎扩展（迁移审计）** | `ACT_HI_MIGRATION` 流程实例迁移审计表（源/目标定义、活动映射、原因、操作人）；使用实例迁移时必需，幂等可重复执行 |
+| 0008 | `0008_create_model_history.sql` | **管理端（模型治理）** | `bpmn_model_history` 流程模型版本历史（每次保存/回滚一版）；使用设计器服务端模型/回滚时必需，幂等可重复执行 |
+| 0009 | `0009_create_admin_governance.sql` | **管理端（治理）** | `admin_audit_log` 管理动作审计（转办 / 跳转 / 变量直写）+ `admin_history_archive` 历史归档快照；启用审计查询 / 历史归档时必需，幂等可重复执行 |
 
 > **其它 .NET 项目接入引擎**：必跑 0001 → 0002（引擎基础 + 流程实例/流程类型）；
 > 0003 是 Demo 业务表，按需取舍。
 
 ## 执行顺序
 
-`0001 → 0002 → 0003 → 0004 → 0005`
+`0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009`
 
 > **已初始化的库升级索引**：`migrate` 检测到 `ACT_GE_PROPERTY` 后会跳过全部脚本（结构版本不变），
 > 因此 `0004` 需要用 `apply` 单独执行（脚本幂等，可重复跑）：
@@ -45,10 +49,23 @@ dotnet run --project tools/NetBpm.DbInit -- \
 >   --provider mysql --connection "<连接串>" --script db/mysql/0004_perf_indexes.sql
 > ```
 >
-> 新库直接 `migrate` 即可，`0004` / `0005` 会随其它脚本一起执行。
+> 新库直接 `migrate` 即可，`0004` / `0005` / `0006` / `0007` 会随其它脚本一起执行。
 >
 > `0005` 同样可用 `apply` 单独执行（`create table if not exists`，幂等）；REST 宿主启用
 > `Idempotency-Key` 前必须确保该表存在，否则幂等中间件会在首次写入时报错。
+>
+> `0006`（`ACT_RU_TIMER_JOB`）在**已有库**上同样必须用 `apply` 单独执行，否则部署了带定时
+> 边界事件的流程会在创建任务时因缺表而失败。该脚本幂等，可重复执行。
+>
+> `0007`（`ACT_HI_MIGRATION`）在**已有库**上也要用 `apply` 单独执行，否则调用实例迁移时
+> 会因缺表失败（预演不受影响）。该脚本幂等，可重复执行。
+>
+> `0008`（`bpmn_model_history`）在**已有库**上也要用 `apply` 单独执行，否则设计器保存模型时
+> 会因缺表失败。该脚本幂等，可重复执行。
+>
+> `0009`（`admin_audit_log` / `admin_history_archive`）在**已有库**上同样要用 `apply` 单独执行：
+> 缺表时审计写入会降级为 warning（业务不受影响，但审计记录丢失），归档接口直接报错。
+> 该脚本幂等，可重复执行。
 
 - MySQL：`mysql -u<user> -p <database> < db/mysql/000x_*.sql`（库示例 `netbpm_demo`）；
 - SQL Server：脚本统一落 `dbo`（与引擎 ACT_* 表同 schema），先建库后逐个执行。

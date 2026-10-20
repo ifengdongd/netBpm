@@ -12,7 +12,7 @@ namespace NetBpm.Rest.Security;
 /// </list>
 /// </para>
 /// </summary>
-internal static class RequestIdentity
+public static class RequestIdentity
 {
     /// <summary>解析租户：JWT 下禁止用 query / body 跨租户；限定租户的服务密钥同样不能越界。</summary>
     public static string? Tenant(string? requested, RequestContext context)
@@ -94,7 +94,7 @@ internal static class RequestIdentity
 /// 不匹配一律抛 <see cref="EngineObjectNotFoundException"/>（404），避免用 403 泄露对象是否存在。
 /// </para>
 /// </summary>
-internal static class TenantGuard
+public static class TenantGuard
 {
     /// <summary>校验实体租户与生效租户一致；不一致按“不存在”处理。</summary>
     public static void Ensure(RequestContext context, string? entityTenantId, string objectName, string objectId)

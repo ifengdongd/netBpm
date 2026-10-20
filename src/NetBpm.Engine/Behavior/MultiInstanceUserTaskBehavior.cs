@@ -27,12 +27,20 @@ namespace NetBpm.Engine.Behavior;
 /// <c>loopCounter</c>（1 起）/ <c>elementVariable</c>（集合元素）。
 /// </para>
 /// <para>
+/// <b>历史活动行（ACT_HI_ACTINST）</b>：已对齐 Activiti —— <b>每个实例一行</b>：
+/// <list type="bullet">
+///   <item><description><b>串行</b>：实例 1 的行由进入操作（<c>ContinueProcessOperation</c>）写在主执行上；
+///     第 2..N 实例在创建前先收口上一行（正常完成），再为当前实例写新行（同一主执行，依次开合）。</description></item>
+///   <item><description><b>并行</b>：主执行进入节点的行是容器行（由收口时的离开操作收口）；
+///     每个实例执行再写一行。实例任务完成时立即收口该行（正常完成，原因空）；
+///     提前完成时剩余实例的行由执行删除收口（记录取消原因）。</description></item>
+/// </list>
+/// </para>
+/// <para>
 /// ⚠️ <b>已登记的偏差</b>：
-/// ① <c>ACT_HI_ACTINST</c> 里多实例节点只有 1 行（Activiti 每实例 1 行）——
-/// 历史行随主执行收口，实例执行不单独产生活动行；
-/// ② 并行模式下 <c>loopCounter</c> / <c>elementVariable</c> 变量只反映「最后创建的实例」
+/// ① 并行模式下 <c>loopCounter</c> / <c>elementVariable</c> 变量只反映「最后创建的实例」
 /// （共享作用域无法承载逐实例值）——任务的办理人 / 名称等在<b>创建时</b>逐实例求值，不受影响；
-/// ③ 实例级 executionListener start/end 不逐实例触发（节点级照常）。
+/// ② 实例级 executionListener start/end 不逐实例触发（节点级照常）。
 /// </para>
 /// <para>
 /// ⚠️ 实例数 / 完成数 / 集合元素通过<b>流程变量</b>在命令之间传递（跨命令重启后状态可恢复）；
@@ -136,6 +144,18 @@ public sealed class MultiInstanceUserTaskBehavior : FlowNodeActivityBehavior
     {
         await WriteLoopVariablesAsync(mi, execution, elements, loopCounter, ct).ConfigureAwait(false);
 
+        // 每实例一行：第 1 实例的行已由进入操作（ContinueProcessOperation）写在主执行上；
+        // 第 2..N 实例先收口上一行（正常完成，原因空），再为当前实例写新行
+        if (loopCounter > 1)
+        {
+            await Services.HistoryManager
+                .RecordActivityEndQuietlyAsync(execution.AsEntity(), null, ct)
+                .ConfigureAwait(false);
+
+            await Services.HistoryManager.RecordActivityStartAsync(execution.AsEntity(), ct)
+                .ConfigureAwait(false);
+        }
+
         // 单实例任务创建 = 内层用户任务行为的正常路径（建任务后等待）
         await _inner.ExecuteAsync(execution, ct).ConfigureAwait(false);
     }
@@ -161,7 +181,10 @@ public sealed class MultiInstanceUserTaskBehavior : FlowNodeActivityBehavior
 
             await executionManager.InsertAsync(child, ct).ConfigureAwait(false);
 
-            // 不走 PlanContinueProcessOperation：实例不单独产生活动历史行（见类注释偏差 ①）
+            // 每实例一行：实例执行也写活动历史行（对齐 Activiti）。
+            // 收口在两处：实例任务完成时（正常完成）/ 提前完成删执行时（记录取消原因）
+            await Services.HistoryManager.RecordActivityStartAsync(child, ct).ConfigureAwait(false);
+
             await _inner.ExecuteAsync(child, ct).ConfigureAwait(false);
         }
     }
@@ -219,6 +242,12 @@ public sealed class MultiInstanceUserTaskBehavior : FlowNodeActivityBehavior
             .ConfigureAwait(false);
 
         var earlyComplete = await IsCompletedAsync(mi, execution, instanceCount, completed, ct).ConfigureAwait(false);
+
+        // 触发执行就是刚完成任务的实例执行：先收口它的活动行（正常完成，原因空），
+        // 剩余实例的行在删除执行时收口（记录取消原因）
+        await Services.HistoryManager
+            .RecordActivityEndQuietlyAsync(execution.AsEntity(), null, ct)
+            .ConfigureAwait(false);
 
         if (!earlyComplete && completed < instanceCount)
         {

@@ -77,9 +77,8 @@ SQL Server 请使用支持 TLS 1.2+ 的实例（只支持 TLS 1.0 的老实例�
 
 ```
 AddNetBpm(configuration)                       引擎（真库 ACT_* 表，方言随 DatabaseType）
-AddDemoStores(configuration)                   业务数据三端口（按 DatabaseType 选 MySql/SqlServer 实现）
+AddDemoStores(configuration)                   业务数据三端口 + 组织架构（按 DatabaseType 选 MySql/SqlServer 实现）
 AddSingleton<IBusinessProcess, …>              业务流程接入（Order / Leave 各一个实现）
-AddSingleton<InMemoryOrgDirectory>             IOrgDirectory + IUserGroupManager（同一份数据两个视角）
 AddServiceTaskDelegates(typeof(Program).Assembly)   [ServiceTaskName] 扫描注册收口委托
 MapBusinessProcess(process)                    统一业务入口：POST {ApiPrefix}/business/start
 StartupInitializer.InitializeAsync(app)        启动序列：建库迁移 → 部署全部已注册流程 → 加载流程信息 → 发布流程图
@@ -126,7 +125,19 @@ Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；
 | `workflow_parameters` | 流程参数（0003 新增：「实例 × 参数名」键值表，两条流程共用） |
 | `workflow_type` | 流程类型表（0002：ProcessInfoEnum 的数据源，启动时加载） |
 | `order_bill` | 订单业务行（`status` 随审批回写） |
+| `sys_dept` / `sys_emp` / `sys_emp_group` / `sys_emp_group_member` | 组织架构四张表（0003，幂等带种子）：MySQL 模式的 `MySqlOrgDirectory` 直接读 |
 | `ACT_*` | 引擎 13 张表（执行树 / 任务 / 变量 / 历史 / 部署） |
+
+### 组织架构（IOrgDirectory + IUserGroupManager）
+
+`Storage/MySqlOrgDirectory.cs`：MySQL 模式的组织架构 —— 直接读 0003 建的四张 `sys_*` 表
+（按租户过滤，租户 id 取 `Workflow:TenantId`，缺省 1；种子数据 = 部门 101-103、
+员工 1001-1005、组 leaders/managers），同时实现 `IOrgDirectory`（业务查询）与
+`IUserGroupManager`（引擎查候选组待办的「用户 ↔ 组」展开）。
+语义与内存版对齐（换库不换人：请假审批人仍是 leader1、订单审批人仍是 manager1）；
+员工按部门 `sort_order` + `emp_id` 排、组成员按域账号序排（待办展开顺序稳定）。
+注册随 `AddDemoStores` 按方言切换：SqlServer / JSON 演示模式沿用 `InMemoryOrgDirectory`
+（SqlServer 的 `sys_*` 表结构相同，需要真表版照 `MySqlOrgDirectory` 平移一份即可）。
 
 ### HTTP 端点
 

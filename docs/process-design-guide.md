@@ -25,8 +25,9 @@
 - [5. 部署期校验红线](#5-部署期校验红线)
 - [6. 宿主必须自己补的三件事](#6-宿主必须自己补的三件事)
 - [7. 流程应用层封装（NetBpm.Workflow）](#7-流程应用层封装netbpmworkflow)
-- [8. 改流程后的自查清单](#8-改流程后的自查清单)
-- [9. 附录](#9-附录)
+- [8. 流程升级与实例迁移](#8-流程升级与实例迁移)
+- [9. 改流程后的自查清单](#9-改流程后的自查清单)
+- [10. 附录](#10-附录)
 
 ---
 
@@ -47,7 +48,8 @@ flowchart TD
     modify -->|修改后重提| leader
 
     gwDays -->|"days > 3 超过3天"| manager[经理审批<br/>approvalResult → result]
-    gwDays -.->|"默认流 3天及以内"| approve[审批通过<br/>leave.ApproveComplete]
+    gwDays -->|"days <= 3 3天及以内"| approve[审批通过<br/>leave.ApproveComplete]
+    gwDays -.->|"默认流 天数缺失/非法 退回补充"| modify
 
     manager --> gwManager{经理审批结果}
     gwManager -->|"result == 1 通过"| approve
@@ -69,7 +71,7 @@ flowchart TD
 | 3  | `task_leader_approve`   | `userTask`         | 组长审批   | `candidateGroups="leaders"`；表单 `approvalResult`(enum,必填)      |
 | 4  | `gw_leader`             | `exclusiveGateway` | 组长审批结果 | `default="flow_leader_modify"`                                |
 | 5  | `task_apply_modify`     | `userTask`         | 申请人修改  | `assignee="${applyUser}"`；表单与 `task_apply` 相同                 |
-| 6  | `gw_days`               | `exclusiveGateway` | 请假天数判断 | `default="flow_days_within3"`                                 |
+| 6  | `gw_days`               | `exclusiveGateway` | 请假天数判断 | `default="flow_days_modify"`（兜底退回补充）                        |
 | 7  | `task_manager_approve`  | `userTask`         | 经理审批   | `candidateGroups="managers"`；表单 `approvalResult`(enum,必填)     |
 | 8  | `gw_manager`            | `exclusiveGateway` | 经理审批结果 | `default="flow_manager_modify"`                               |
 | 9  | `task_approve_complete` | `serviceTask`      | 审批通过   | `delegateExpression="leave.ApproveComplete"`                  |
@@ -77,7 +79,7 @@ flowchart TD
 | 11 | `end_approved`          | `endEvent`         | 审批通过结束 | —                                                             |
 | 12 | `end_refused`           | `endEvent`         | 审批拒绝结束 | —                                                             |
 
-### 1.3 连线清单（15 条）
+### 1.3 连线清单（16 条）
 
 | #  | id                    | 从 → 到                                       | 名称    | 条件表达式            |
 | -- | --------------------- | ------------------------------------------- | ----- | ---------------- |
@@ -89,13 +91,14 @@ flowchart TD
 | 6  | `flow_leader_modify`  | `gw_leader` → `task_apply_modify`           | 驳回修改  | 无（**默认流**）       |
 | 7  | `flow_modify_leader`  | `task_apply_modify` → `task_leader_approve` | 修改后重提 | 无                |
 | 8  | `flow_days_over3`     | `gw_days` → `task_manager_approve`          | 超过3天  | `${days &gt; 3}` |
-| 9  | `flow_days_within3`   | `gw_days` → `task_approve_complete`         | 3天及以内 | 无（**默认流**）       |
-| 10 | `flow_manager_gw`     | `task_manager_approve` → `gw_manager`       | —     | 无                |
-| 11 | `flow_manager_pass`   | `gw_manager` → `task_approve_complete`      | 通过    | `${result == 1}` |
-| 12 | `flow_manager_refuse` | `gw_manager` → `task_refuse`                | 拒绝    | `${result == 2}` |
-| 13 | `flow_manager_modify` | `gw_manager` → `task_apply_modify`          | 驳回修改  | 无（**默认流**）       |
-| 14 | `flow_approve_end`    | `task_approve_complete` → `end_approved`    | —     | 无                |
-| 15 | `flow_refuse_end`     | `task_refuse` → `end_refused`               | —     | 无                |
+| 9  | `flow_days_within3`   | `gw_days` → `task_approve_complete`         | 3天及以内 | `${days &lt;= 3}` |
+| 10 | `flow_days_modify`    | `gw_days` → `task_apply_modify`             | 退回补充  | 无（**默认流**）       |
+| 11 | `flow_manager_gw`     | `task_manager_approve` → `gw_manager`       | —     | 无                |
+| 12 | `flow_manager_pass`   | `gw_manager` → `task_approve_complete`      | 通过    | `${result == 1}` |
+| 13 | `flow_manager_refuse` | `gw_manager` → `task_refuse`                | 拒绝    | `${result == 2}` |
+| 14 | `flow_manager_modify` | `gw_manager` → `task_apply_modify`          | 驳回修改  | 无（**默认流**）       |
+| 15 | `flow_approve_end`    | `task_approve_complete` → `end_approved`    | —     | 无                |
+| 16 | `flow_refuse_end`     | `task_refuse` → `end_refused`               | —     | 无                |
 
 > XML 里 `>` 必须写成 `&gt;`，否则不是合法 XML。
 
@@ -103,10 +106,11 @@ flowchart TD
 
 | 路径            | 走法                                          | 终态                                       |
 | ------------- | ------------------------------------------- | ---------------------------------------- |
-| **A. 短假直接通过** | 组长 `result=1` → `days <= 3` → 兜底流           | `leave.ApproveComplete` → `end_approved` |
+| **A. 短假直接通过** | 组长 `result=1` → `days <= 3`                   | `leave.ApproveComplete` → `end_approved` |
 | **B. 长假经理通过** | 组长 `result=1` → `days > 3` → 经理 `result=1`  | `leave.ApproveComplete` → `end_approved` |
 | **C. 拒绝**     | 组长**或**经理 `result=2`                        | `leave.RefuseComplete` → `end_refused`   |
 | **D. 驳回修改**   | 组长**或**经理 `result=3`（落到默认流）→ 申请人改完重提 → 回到组长 | 转入 A/B/C 之一                              |
+| **E. 天数缺失/非法** | `days` 没写或不是数字 → `gw_days` 落默认流「退回补充」→ 申请人补填 | 转入 A/B/C 之一（**不会静默通过**）             |
 
 ### 1.5 BaseModel（业务基础模型）
 
@@ -169,6 +173,10 @@ flowchart TD
 ---
 
 ## 2. 各环节怎么设
+
+> **一个 BPMN 文件只能有一个 `isExecutable="true"` 的流程。** 多个会被部署/校验拒绝
+> （`<process>` 不写 `isExecutable` 时按可执行处理）。非可执行流程（协作图 / 文档流程）
+> 不参与部署；要在一个文件里放多条流程，只能保留一条可执行。
 
 ### 2.1 开始事件 `startEvent`
 
@@ -304,19 +312,23 @@ var target = string.IsNullOrWhiteSpace(property.Variable) ? property.Id : proper
 
 设置要点：
 
-1. **必须有 `default`（默认流）。**  
+1. **默认流与无条件出流至少有一个。**  
    若每条出流都带条件且没设默认流，条件全假时选不出流，运行期会抛  
    `No outgoing sequence flow of the exclusive gateway 'xxx' could be selected` ——  
-   校验规则 `exclusive-gateway-has-selectable-flow` 会在**部署期**就拦下来。
-2. **默认流上不要写条件。**  
-   按 Activiti 语义，默认流只做兜底，它上面的条件不参与判定（写的条件不会被用来挑选它）。
+   校验规则 `exclusive-gateway-has-selectable-flow` 会在**部署期**就拦下来。  
+   本指引的示例统一用「默认流」做兜底，但**留一条无条件出流同样合法**，两种写法按团队习惯统一即可。
+2. **默认流必须指向本网关的出流，且不要写条件。**  
+   写错 id / 指向别的节点的流会被 `default-flow` 规则**拒绝部署**；  
+   按 Activiti 语义，默认流只做兜底，它上面的条件不参与判定（写的条件不会被用来挑选它），规则会给提示。
 3. **判定顺序 = `<bpmn:outgoing>` 的书写顺序。**  
    引擎取**第一条"条件为真且不是默认流"**&#x7684;出流，选中即停。  
    多个条件同时为真时**不会报错**，谁在前谁赢 —— 互斥条件之间没有顺序问题，但有重叠时顺序就是优先级。
 4. 无条件出流恒为真（`ConditionUtil`：空条件直接返回 `true`）。
 
 > ⚠️ **默认流会"吃掉"变量缺失**：`result` 没写进来时，`result == 1`、`result == 2` 都是 `false`，于是静默落到默认流"驳回修改"。  
-> 流程不会报错，但走向很可能是错的。**必填校验要在宿主侧做**（Demo 靠 `required="true"` + `MapToVariables` 拦住）。
+> 流程不会报错，但走向很可能是错的。**必填校验要在宿主侧做**（Demo 靠 `required="true"` + `MapToVariables` 拦住）。  
+> 也正因如此，**默认流的兜底方向必须是保守的**（退回修改 / 转人工 / 报错），绝不能默认"通过" ——
+> 示例里 `gw_days` 的默认流就是「退回补充」，而不是"3 天及以内通过"。
 
 ### 2.4 服务任务 `serviceTask`
 
@@ -391,7 +403,8 @@ builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly);
 
 - 至少一个结束事件；可以有多个（本流程按"通过/拒绝"分了两个，语义更清楚，也方便画图）。
 - 结束事件**不需要出流**（`node-has-outgoing-flow` 对它放行）。
-- 要"终止整个流程实例"的语义（打断并行分支）不在本流程里，本流程各分支互斥，不会并存。
+- 要"终止整个流程实例"（打断并行分支、取消会签剩余实例）请用**终止结束事件**，
+  见 §2.9；本流程各分支互斥，不需要它。
 
 ### 2.6 手写 XML 时的两条纪律
 
@@ -402,6 +415,84 @@ builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly);
    网关的判定顺序**就是 `outgoing` 的书写顺序**，所以顺序也不能随便抄。
 2. **`BPMNDiagram`（图形信息）要补齐**：每个节点一个 `BPMNShape`、每条线一个 `BPMNEdge`，坐标别重叠。  
    少了图形信息，图打开就是空白/错位。用设计器画完再导出最省事。
+
+### 2.7 多实例用户任务（会签 / 串签）
+
+同一环节需要多个审批人时，不要画 N 个用户任务，给一个用户任务加
+`multiInstanceLoopCharacteristics`：
+
+```xml
+<bpmn:userTask id="task_sign" name="会签" activiti:assignee="${approver}">
+  <bpmn:multiInstanceLoopCharacteristics isSequential="false"
+                                        activiti:collection="${approvers}"
+                                        activiti:elementVariable="approver">
+    <bpmn:completionCondition>${nrOfCompletedInstances == 3}</bpmn:completionCondition>
+  </bpmn:multiInstanceLoopCharacteristics>
+</bpmn:userTask>
+```
+
+| 配置 | 含义 | 约束 |
+|---|---|---|
+| `activiti:collection` | 集合表达式，元素个数 = 实例数 | 与 `loopCardinality` **二选一** |
+| `<loopCardinality>` | 实例数（数字或表达式） | 同上 |
+| `activiti:elementVariable` | 把集合元素逐实例写入该变量 | 用集合时建议必填，否则实例之间无法区分 |
+| `isSequential` | `false` 并行会签（同时建 N 个任务）/ `true` 串签 | 缺省并行 |
+| `<completionCondition>` | 每完成一个实例判定一次，为真即收口并取消剩余实例 | 如 `${nrOfCompletedInstances == 3}` |
+
+- 循环变量（落在流程实例作用域，与 Activiti 同名）：`nrOfInstances` / `nrOfActiveInstances` /
+  `nrOfCompletedInstances` / `loopCounter`（1 起）。
+- **只支持用户任务**：服务 / 脚本 / 手工任务配多实例会被 `multi-instance` 规则拒绝。
+- **多实例任务不支持 `skipExpression`**（与实例计数冲突，部署期拒绝）。
+- 设计器属性面板「多实例（会签 / 串签）」组可直接配置以上全部字段。
+- **历史活动行（`ACT_HI_ACTINST`）每实例一行**（对齐 Activiti）：串签在同一执行上依次开合；
+  会签每个实例一行（另加主执行的容器行），实例完成即收口、提前完成时剩余行记录取消原因 ——
+  审计能精确到「谁在哪一票」。并行模式下 `loopCounter` / `elementVariable` 变量只反映最后创建的实例
+  （仍为已登记偏差，任务的办理人在创建时逐实例求值，不受影响）。
+
+### 2.8 定时边界事件（超时自动流转）
+
+「审批 48 小时未处理 → 自动转办 / 退回 / 提醒」用**边界定时事件**，不要把等待写成服务任务轮询：
+
+```xml
+<bpmn:userTask id="task_manager_approve" name="经理审批" activiti:assignee="${manager}" />
+
+<bpmn:boundaryEvent id="timer_manager" attachedToRef="task_manager_approve" cancelActivity="true">
+  <bpmn:timerEventDefinition>
+    <bpmn:timeDuration>PT48H</bpmn:timeDuration>
+  </bpmn:timerEventDefinition>
+</bpmn:boundaryEvent>
+
+<bpmn:sequenceFlow id="flow_timeout" sourceRef="timer_manager" targetRef="task_escalate" />
+```
+
+- **只支持中断型、一次性、挂在用户任务上**；`cancelActivity="false"`、`timeCycle`、
+  挂服务/脚本任务都会被 `boundary-event-configuration` 拒绝。
+- `timeDuration` 与 `timeDate` 二选一，可写表达式（任务创建时求值，例如 `${timeout}`）。
+- 到点后：删除待办（删除原因 `boundary timer`）、收口该任务的历史活动行、沿边界事件出流继续。
+- 作业落 `ACT_RU_TIMER_JOB`，由宿主后台服务轮询（默认 5 秒）；任务先完成则作业自动作废。
+- **边界分支与原任务分支是互斥的**：边界出流与原任务的出流汇合时，必须用**排他/包含网关**，
+  不能直接连并行网关的 join（原分支不会再产生 token，join 会一直等）。
+- **会签/串签节点不支持边界定时器**（实例级超时与会签计数会脱节），请把超时放到会签外层。
+- 设计器的调色板提供「边界定时器」：先选中用户任务，再点击它。
+
+> **兜底方向要保守**：超时默认「转人工 / 退回补充」，不要默认「自动通过」——
+> 定时器只是兜底，不能替代审批人的判断。
+
+### 2.9 终止结束事件（立即终止整个实例）
+
+普通结束事件只结束**当前分支**；并行网关的其它分支仍会继续。需要「一票否决 / 立即终止」时用：
+
+```xml
+<bpmn:endEvent id="end_terminate">
+  <bpmn:terminateEventDefinition />
+</bpmn:endEvent>
+```
+
+- 到达即终止整个流程实例：删除执行树、取消全部待办（含并行分支、会签剩余实例）、收口历史。
+- **不能有出流**（`terminate-end-event` 规则拒绝）。
+- 历史：`ACT_HI_PROCINST.DELETE_REASON_ = terminate end event`，`END_ACT_ID_` 指向该结束事件；
+  不触发 `PROCESS_COMPLETED`。
+- 设计器：选中结束事件 → 勾选「终止结束事件」。
 
 ---
 
@@ -462,6 +553,9 @@ ${ 表达式 }       立即求值（BPMN 条件/属性统一用这个）
 - **整串先 `trim()` 再解析**（照搬 JUEL）：`"${ a } "` 里的空格会被去掉。
 - 不含 `${}` 的纯文本是合法的"字面量表达式"，求值出来就是它自己 —— 所以 `candidateGroups="leaders"` 能用。
 - 一个字符串里可以有多段：`${a}-${b}` 会拼成 `a-b`。
+- **部署期会预解析全部表达式**（`expression-parseable`）：语法错误在部署时就拒绝，
+  不用等流程跑到该节点。检查范围含条件、办理人、`dueDate`、`priority`、`skipExpression`、
+  多实例的实例数/集合/完成条件、监听器表达式。变量是否存在仍由运行期决定。
 
 ### 4.2 变量从哪来
 
@@ -539,7 +633,8 @@ Demo 里变量是这样进去的：
 | `${result == 1}` | `flow_leader_pass`、`flow_manager_pass`     | `result`（字符串 `"1"`）→ 长整数 `1`，`1 == 1` → 通过 |
 | `${result == 2}` | `flow_leader_refuse`、`flow_manager_refuse` | 同上，`2 == 2` → 拒绝                           |
 | `${days > 3}`    | `flow_days_over3`                          | `days`（long）与 `3` 比较，`4 > 3` → 走经理审批       |
-| （无）              | 三条默认流                                      | 空条件恒真，但只能在前面都没命中时兜底                        |
+| `${days <= 3}`   | `flow_days_within3`                        | `days` 存在且 ≤ 3 → 直接审批通过                     |
+| （无）              | 三条默认流                                      | 空条件恒真，但只能在前面都没命中时兜底（方向都是退回修改）              |
 
 
 ### 4.6 常见写法对照
@@ -564,27 +659,36 @@ Demo 里变量是这样进去的：
 
 流程在**部署时**会跑一遍校验（`NetBpm.Bpmn.Validation`），不通过直接抛 `ProcessValidationException`，消息里带**元素 id**。提前知道这些能省很多调试时间：
 
-| 规则名                                     | 触发条件                                                 | 怎么改                           |
-| --------------------------------------- | ---------------------------------------------------- | ----------------------------- |
-| `node-has-outgoing-flow`                | 非结束事件没有出流                                            | 补一条出流，或改成结束事件                 |
-| `no-orphan-node`                        | 非开始事件没有入流                                            | 补一条入流                         |
-| `unique-element-id`                     | id 重复或为空                                             | 改 id                          |
-| `exclusive-gateway-has-selectable-flow` | 排他网关每条出流都带条件且没有默认流                                   | **加 `default`，或留一条无条件出流**     |
-| `inclusive-gateway`                     | 包含网关缺入/出流，或全条件且无默认流                                  | 同上                            |
-| `parallel-gateway-flow-count`           | 并行网关缺入/出流；或设了默认流                                     | 并行网关**不支持**默认流                |
-| `event-gateway-unsupported`             | 用了事件网关                                               | 换排他/包含网关，或改流程结构               |
-| `start-and-end-event`                   | 没有开始事件；多于一个开始事件；没有结束事件                               | 保证**恰好一个**开始事件 + **至少一个**结束事件 |
-| `sequence-flow-reference`               | `sourceRef` / `targetRef` 解析不到节点                     | 检查 id 拼写                      |
-| `required-attributes`                   | 服务任务没写 `class` / `delegateExpression` / `expression` | 三选一补上                         |
-| `listener-configuration`                | 执行/任务监听器缺事件或取值非法；事件监听器缺 events / 实现 | 补全（监听器已支持，见 §6.5）             |
-| `unsupported-capability`                | 用了**服务任务字段注入** `<activiti:field>`               | 委托用构造函数/DI 拿依赖（Demo 就是这样）     |
+| 规则名 | 级别 | 触发条件 | 怎么改 |
+|---|---|---|---|
+| `process-id` | 错误 / 提示 | 流程 id 为空（错误）；不符合标识符习惯，如含冒号（提示） | 补 id；建议字母/下划线开头 |
+| `node-has-outgoing-flow` | 错误 | 非结束事件没有出流 | 补一条出流，或改成结束事件 |
+| `no-orphan-node` | 提示 | 非开始/边界事件没有入流 | 补一条入流 |
+| `unique-element-id` | 错误 | id 重复或为空 | 改 id |
+| `exclusive-gateway-has-selectable-flow` | 错误 | 排他网关每条出流都带条件且没有默认流 | **加 `default`，或留一条无条件出流** |
+| `inclusive-gateway` | 错误 | 包含网关缺入/出流，或全条件且无默认流 | 同上 |
+| `parallel-gateway-flow-count` | 错误 / 提示 | 并行网关缺入/出流（错误）；设了默认流（提示，不生效） | 并行网关**不支持**默认流 |
+| `event-gateway-unsupported` | 错误 | 用了事件网关 | 换排他/包含网关，或改流程结构 |
+| `start-and-end-event` | 错误 / 提示 | 没有开始事件、多于一个开始事件（错误）；没有结束事件（提示） | 保证**恰好一个**开始事件 + **至少一个**结束事件 |
+| `sequence-flow-reference` | 错误 | `sourceRef` / `targetRef` 解析不到节点 | 检查 id 拼写 |
+| `default-flow` | 错误 / 提示 | `default` 不是本节点的出流（错误）；默认流上写了条件（提示） | 改成真实出流 id，并去掉默认流上的条件 |
+| `unsupported-event-definition` | 错误 | 事件定义不在支持清单内（只支持结束事件的 terminate、边界事件的 timer）；一个边界事件挂多个定义 | 移除；定时启动请放宿主侧调度 |
+| `boundary-event-configuration` | 错误 | 边界事件没挂用户任务 / 挂了服务任务；`cancelActivity="false"`；无 timer；timeCycle；timeDuration / timeDate 非法或同时配置 | 按 §2.8 修正 |
+| `terminate-end-event` | 错误 | 终止结束事件配置了出流 | 删掉出流（见 §2.9） |
+| `expression-parseable` | 错误 | 条件、办理人、`dueDate`、`priority`、`skipExpression`、多实例表达式、定时值、监听器表达式的 EL 语法错误 | 按 §4 的语法修正 |
+| `required-attributes` | 错误 | 服务任务没写 `class` / `delegateExpression` / `expression` | 三选一补上 |
+| `listener-configuration` | 错误 | 监听器缺事件或取值非法（任务监听器不含 `delete`）；事件监听器缺 events / 实现 | 补全（见 §6.5） |
+| `unsupported-capability` | 错误 | **监听器**上的字段注入 `<activiti:field>`（服务任务字段注入已支持） | 监听器用构造函数/DI 拿依赖 |
+| `unknown-activiti-attribute` | 提示 | 出现引擎未实现的 `activiti:*` 属性（如 `asyncBefore` / `asyncAfter`） | 删掉；引擎按同步执行，写了不生效 |
+| `script-task` | 错误 | 缺 `<script>` 正文，或 `scriptFormat` 不是 `csharp` / `c#` | 补正文；格式写 `csharp` |
+| `multi-instance` | 错误 | 非用户任务配多实例；用户任务既无 `loopCardinality` 也无 `collection`；多实例 + `skipExpression` | 见 §2.7 |
+| `user-task-assignment` | 提示 | 用户任务没有办理人/候选用户/候选组 | 补办理关系（不阻断部署） |
 
 > **变更记录**：执行监听器 / 任务监听器 / 流程级事件监听器已支持（2026-10-14，见 §6.5）；
-> `unsupported-capability` 现在只剩字段注入一类。
----------------------------- | ------------------------- |
-| `activiti:executionListener` | 逻辑挪进服务任务委托                |
-| `activiti:taskListener`      | 逻辑挪进任务提交后的宿主代码            |
-| `<activiti:field>`（服务任务字段注入） | 委托用构造函数/DI 拿依赖（Demo 就是这样） |
+> 任务监听器 `delete` 事件未实现，现由 `listener-configuration` 拒绝；
+> 2026-10 新增 `process-id` / `default-flow` / `unsupported-event-definition` /
+> `expression-parseable` / `unknown-activiti-attribute` 五条规则；
+> 2026-10 新增定时边界事件（`boundary-event-configuration`）与终止结束事件（`terminate-end-event`）。
 
 ---
 
@@ -881,14 +985,138 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 
 ---
 
-## 8. 改流程后的自查清单
+## 8. 流程升级与实例迁移
+
+流程定义一旦部署就**不可变**：改图再部署 = 新版本（`{key}:{v+1}:{id}`），存量实例仍跑在旧版本上。
+升级后存量实例只有三种处置方式：
+
+| 方式 | 适用 | 代价 |
+|---|---|---|
+| 让存量实例跑完 | 旧版本只有少量实例、且不需要新节点 | 旧版本定义要一直保留（不能删部署） |
+| 终止旧实例 | 旧流程有设计缺陷 / 业务已取消 | 历史留删除原因，业务需重发起 |
+| **迁移到新版本** | 新增/改名/改办理人，流程骨架不变 | 见下面的规则与限制 |
+
+### 8.1 能不能迁：先预演
+
+**永远先预演，再执行。** 预演只读，不写执行树、不改待办、不记审计：
+
+```http
+POST /api/runtime/process-instances/{id}/migrate
+{
+  "targetProcessDefinitionId": "leave:3:90001",
+  "activityMappings": { "task_leader_approve": "task_manager_approve" },
+  "validateOnly": true
+}
+```
+
+返回：
+
+```json
+{
+  "sourceProcessDefinitionId": "leave:2:88001",
+  "targetProcessDefinitionId": "leave:3:90001",
+  "activities": [
+    { "fromActivityId": "task_leader_approve", "toActivityId": "task_manager_approve",
+      "executionCount": 1, "recreateTask": true }
+  ],
+  "tasksToCancel": 1,
+  "warnings": ["目标节点 'task_manager_approve' 带定时边界事件：迁移后定时器会从当前时刻重新计时。"],
+  "applied": false
+}
+```
+
+引擎侧等价入口：`IProcessEngine.ValidateMigrationAsync(...)`。
+
+### 8.2 迁移规则（不满足直接拒绝，不做"尽力而为"）
+
+1. **同 key、同租户**：`leave` 只能迁到 `leave` 的其它版本；跨流程/跨租户拒绝。
+2. 实例必须**运行中且未挂起**；目标定义必须**未挂起**。
+3. **映射只写 id 变化的节点**：目标定义里存在同 id 且类型兼容的节点时默认按同 id 迁移。
+4. **有待办的执行只能迁到用户任务**；**停在网关 Join 上的非活动执行只能迁到同类型网关**
+   （排他→排他、并行→并行），否则 Join 判定语义会变。
+5. **多实例（会签/串签）节点不支持迁移**：实例级迁移会与 `nrOf*` 计数脱节。
+   等会签结束再迁，或在业务上终止旧实例。
+6. 缺失映射、目标节点不存在、源节点写错、类型不兼容 → **聚合报错**，错误信息会列出全部问题。
+7. **Join 节点建议保持 id 不变**：如果给并行/包含网关的 Join 改了 id，必须确认新定义里所有分支
+   都汇入同一个新 id，否则令牌会各等各的，流程卡死。多数场景只需要映射用户任务，Join 按同 id 保留。
+
+### 8.3 迁移做了什么（一个事务）
+
+1. 整棵执行树（含没有当前节点的作用域执行）的 `PROC_DEF_ID_` 切到目标定义；
+2. 有待办的执行：取消旧待办（`ACT_HI_TASKINST.DELETE_REASON_` 记录原因）、
+   作废旧边界定时器、收口旧活动行（`ACT_HI_ACTINST` 补结束时间与原因）；
+3. 执行挪到目标节点，按**新定义**重新进入：重跑节点 start 监听器、重建待办、
+   重新解析办理人/候选组、重新挂表单与边界定时器；
+4. 写一条 `ACT_HI_MIGRATION` 审计（源/目标定义、映射、原因、操作人）。
+
+⚠️ 由此带来的三个可观察变化，业务侧要知道：
+
+- **待办 id 会变**（旧任务被删除、新任务重新创建），前端缓存的 taskId 立即失效；
+- **定时器重新计时**（迁移时刻 + 新定义的时长），不是"接着上次的剩余时间"；
+- **节点 start 监听器会再跑一次**，如果监听器有外部副作用（发短信、写台账），需要做幂等。
+
+### 8.4 历史口径
+
+- `ACT_HI_PROCINST.PROC_DEF_ID_` **保持实例启动时的定义不变**（"这个实例是从哪版发起的"）；
+- 迁移后新产生的活动/任务历史行落**目标定义 id**；
+- "什么时候从哪版迁到哪版"查 `ACT_HI_MIGRATION`：
+
+```http
+GET /api/runtime/process-instances/{id}/migrations
+```
+
+### 8.5 回退
+
+迁移是可逆的：把目标定义再指回旧版本即可（规则 8.2 全部适用，`warnings` 会提示"回退迁移"）。
+**不要**用 SQL 直接改 `PROC_DEF_ID_` / `ACT_ID_` —— 会绕过校验、留下对不上的待办与定时器。
+
+### 8.6 流程模型治理（草稿 → 校验 → 发布 → 回滚）
+
+设计器的服务端模型（`bpmn_model`）是**草稿**，部署结果才是运行版本：
+
+1. **保存草稿**：`PUT /api/admin/models/{id}`。允许保存半成品，响应里带本次 `revision`
+   与校验 `errors / warnings` —— 保存不因校验失败而拒绝，避免"画到一半存不了"。
+2. **版本历史**：每次保存/回滚都会追加一版（`bpmn_model_history`），记录操作人与时间；
+   `GET /models/{id}/history` 查列表，`GET /models/{id}/history/{revisionId}` 取该版 XML 做对比。
+3. **发布**：`POST /models/{id}/publish` 用当前 XML **走引擎部署**——部署期 22 条规则强校验，
+   有阻断级问题直接 400 并逐条返回；成功后产生新的 `ACT_RE_PROCDEF` 版本。
+4. **回滚**：`POST /models/{id}/rollback/{revisionId}` 把旧版内容作为**新版本**写回
+   （历史只增不删），而不是删掉中间版本。
+
+推荐流程：改图 → 保存草稿（看 `errors`）→ 修完 → 发布 → 用 §8 的实例迁移处置存量实例。
+**草稿能保存不代表能上线**：发布才是质量闸门。
+
+> 并发保存同一模型会因 `(model_id, revision)` 唯一索引冲突而失败（而不是静默覆盖）——
+> 这正是想要的：两个人同时改同一张图，必须有人重新拉取后再保存。
+
+### 8.7 批量迁移的建议
+
+当前按实例迁移（一次一个事务），批量场景由调用方循环，建议：
+
+- 先对每个实例 `validateOnly` 收集失败原因，再统一执行；
+- 每批控制在 50–100 个实例，失败单独重试（迁移是幂等的：已迁到目标的实例会返回"无需迁移"）；
+- 迁移前先备份 `ACT_RU_*` 与 `ACT_HI_MIGRATION`（历史表只增不删，但运行态回滚只能靠备份）。
+
+## 9. 改流程后的自查清单
 
 改完图（尤其是手写 XML）后，按顺序过一遍：
 
 - [ ] 新节点有 `incoming` / `outgoing`，且与 `sequenceFlow` 双向一致？
-- [ ] 新连线有 `id`，网关 `default` 指向的 id 真实存在？
-- [ ] 排他网关**每条都有默认流**，且默认流**没写条件**？
+- [ ] 新连线有 `id`，网关 `default` 指向的 id 真实存在（`default-flow` 会拦）？
+- [ ] 排他网关有**默认流或无条件出流**，且默认流**没写条件**？
+- [ ] **默认流的兜底方向是保守的**（退回修改 / 转人工 / 报错），而不是"默认通过"？
 - [ ] 条件表达式**返回布尔**，且引用的变量**一定有值**（否则静默走默认流）？
+- [ ] 新增/改动的表达式（条件、办理人、`dueDate`、多实例、监听器）**语法能被解析**（`expression-parseable` 会拦）？
+- [ ] 会签用**多实例用户任务**而不是复制 N 个节点；`collection` / `loopCardinality` 二选一，`elementVariable` 与 `assignee="${...}"` 对得上？
+- [ ] 超时兜底用**边界定时器**（而不是服务任务轮询），且默认方向是「转人工 / 退回」而非「自动通过」？
+- [ ] 边界定时器是中断型、一次性、挂在用户任务上，`timeDuration` / `timeDate` 只留一个？
+- [ ] 终止结束事件**没有出流**，且确认它要终止的是整个实例（而不是只结束当前分支）？
+- [ ] 发布前模型 `errors` 已清零（草稿可带错，发布不行）？需要留痕时先保存一版再发布？
+- [ ] 改结构后**存量实例**的处置方式已确定（跑完 / 终止 / 迁移）？迁移前跑过 `validateOnly` 预演？
+- [ ] 迁移映射只列了 id 变化的节点，且没有把用户任务迁到网关、没有迁入/迁出会签节点？
+- [ ] 迁移后待办 id 会变、定时器会重新计时、节点 start 监听器会再跑一次 —— 相关代码做了幂等？
+- [ ] 没有残留的**不支持事件定义**（定时启动 / 消息 / 信号 / 错误等），也没有 `activiti:asyncBefore` 之类未实现属性？
+- [ ] 节点 id 按 `task_{动词}` / `gw_{判断}` 命名、名称按 `{环节}.{动作}`；**没有同名节点**（同名会让"按环节名定位/跳转"失效）？
 - [ ] 表单字段的 `variable` 与条件里的变量名**对得上**？
 - [ ] `enum` 选项的 `id` 没被改成文本（改了会让 `== 1` 抛异常）？
 - [ ] 改了 `approvalResult` 的选项？数值要与 `src/NetBpm.Workflow/Model/ApprovalResult.cs` 同步（`ApprovalResultFormGuard` 会拦）？
@@ -916,7 +1144,7 @@ dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
 
 ---
 
-## 9. 附录
+## 10. 附录
 
 ### 9.1 Demo 的 HTTP 接口
 
@@ -995,7 +1223,9 @@ dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
 | 条件判定（空条件恒真）        | `src/NetBpm.Engine/ConditionUtil.cs`                             |
 | 排他网关取流语义           | `src/NetBpm.Engine/Behavior/ExclusiveGatewayActivityBehavior.cs` |
 | 用户任务候选人 / 办理人赋值    | `src/NetBpm.Engine/Behavior/TaskBehaviors.cs`                    |
-| 部署期校验规则            | `src/NetBpm.Bpmn.Validation/ProcessValidationRules.cs`           |
+| 部署期校验规则            | `src/NetBpm.Bpmn.Validation/`（`ProcessValidationRules.cs` / `StructureRules.cs` / `ExpressionRules.cs` / `BoundaryEventRules.cs`） |
+| 定时边界事件 / 终止语义      | `src/NetBpm.Engine/Behavior/EventBehaviors.cs` + `src/NetBpm.Engine/Command/TriggerTimerJobCommand.cs` |
+| 定时作业存储与轮询          | `src/NetBpm.Engine/Jobs/` + `src/NetBpm.Workflow/Hosting/TimerJobSchedulerService.cs` |
 | EL 相等与比较语义         | `src/NetBpm.El/BooleanOperations.cs`                             |
 | EL 语法与优先级          | `src/NetBpm.El/ElParser.cs`                                      |
 | 表达式管理器（trim / 字面量） | `src/NetBpm.El/ExpressionManager.cs`                             |

@@ -5,9 +5,12 @@ using NetBpm.Engine;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Jobs;
+using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
 using NetBpm.Persistence.Deployment;
+using NetBpm.Runtime.Migration;
 
 namespace NetBpm.Runtime;
 
@@ -22,6 +25,8 @@ public sealed class ProcessEngine : IProcessEngine
     private readonly IUserGroupManager _userGroupManager;
     private readonly IExecutionManager _executionManager;
     private readonly IHistoryManager _historyManager;
+    private readonly ITimerJobManager? _timerJobs;
+    private readonly IMigrationLog? _migrationLog;
 
     public ProcessEngine(
         ICommandExecutor commandExecutor,
@@ -31,7 +36,9 @@ public sealed class ProcessEngine : IProcessEngine
         ITaskManager taskManager,
         IUserGroupManager userGroupManager,
         IExecutionManager executionManager,
-        IHistoryManager historyManager)
+        IHistoryManager historyManager,
+        ITimerJobManager? timerJobs = null,
+        IMigrationLog? migrationLog = null)
     {
         ArgumentNullException.ThrowIfNull(commandExecutor);
         ArgumentNullException.ThrowIfNull(xmlConverter);
@@ -50,11 +57,44 @@ public sealed class ProcessEngine : IProcessEngine
         _userGroupManager = userGroupManager;
         _executionManager = executionManager;
         _historyManager = historyManager;
+        _timerJobs = timerJobs;
+        _migrationLog = migrationLog;
     }
 
     /// <inheritdoc />
     public ValueTask<TResult> ExecuteAsync<TResult>(ICommand<TResult> command, CancellationToken ct = default) =>
         _commandExecutor.ExecuteAsync(command, ct);
+
+    /// <inheritdoc />
+    public async ValueTask<int> TriggerDueTimersAsync(
+        DateTime utcNow,
+        int maxJobs = 50,
+        CancellationToken ct = default)
+    {
+        if (_timerJobs is null)
+        {
+            return 0;
+        }
+
+        var due = await _timerJobs.FindDueAsync(utcNow, Math.Max(1, maxJobs), ct).ConfigureAwait(false);
+
+        var fired = 0;
+
+        foreach (var job in due)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // 每条作业一个独立事务：某一条失败（并发完成 / 已删除）不影响其它作业
+            if (await _commandExecutor
+                    .ExecuteAsync(new TriggerTimerJobCommand(job.Id), ct)
+                    .ConfigureAwait(false))
+            {
+                fired++;
+            }
+        }
+
+        return fired;
+    }
 
     /// <inheritdoc />
     public async ValueTask<ProcessDefinition> DeployAsync(
@@ -89,8 +129,7 @@ public sealed class ProcessEngine : IProcessEngine
         using var parseStream = new MemoryStream(rawBytes);
         var bpmnModel = _xmlConverter.ConvertToBpmnModel(parseStream);
 
-        var process = bpmnModel.GetMainProcess()
-            ?? throw new NetBpm.Engine.EngineException("部署失败：BPMN 文件中没有流程定义。");
+        var process = ResolveDeployableProcess(bpmnModel, "部署");
 
         // 前端只读渲染用的即时校验不可信边界，后端必须复校（§6.2 第 4 项）。
         // 只有阻断级问题才抛异常；提示级问题随结果返回给设计器
@@ -123,10 +162,32 @@ public sealed class ProcessEngine : IProcessEngine
 
         var bpmnModel = _xmlConverter.ConvertToBpmnModel(buffer);
 
-        var process = bpmnModel.GetMainProcess()
-            ?? throw new EngineException("校验失败：BPMN 文件中没有流程定义。");
+        var process = ResolveDeployableProcess(bpmnModel, "校验");
 
         return _validator.Validate(process);
+    }
+
+    /// <summary>
+    /// 取唯一可执行流程；文件里有多个 <c>isExecutable="true"</c> 时显式拒绝。
+    /// <para>
+    /// 过去只取第一个可执行流程，其余流程<b>既不校验也不部署</b> —— 用户以为传上去的是多流程，
+    /// 实际只有一条生效。非可执行流程（协作图 / 文档流程）不属于部署对象，照旧忽略。
+    /// </para>
+    /// </summary>
+    private static Process ResolveDeployableProcess(BpmnModel model, string action)
+    {
+        var executable = model.Processes.Where(candidate => candidate.IsExecutable).ToArray();
+
+        if (executable.Length > 1)
+        {
+            throw new EngineException(
+                $"{action}失败：BPMN 文件中有 {executable.Length} 个 isExecutable=\"true\" 的流程" +
+                $"（{string.Join(", ", executable.Select(candidate => candidate.Id))}）。" +
+                "一个部署只能包含一个可执行流程：请拆成多个文件，或把其余流程标记为 isExecutable=\"false\"。");
+        }
+
+        return model.GetMainProcess()
+            ?? throw new EngineException($"{action}失败：BPMN 文件中没有流程定义。");
     }
 
     /// <inheritdoc />
@@ -823,6 +884,50 @@ public sealed class ProcessEngine : IProcessEngine
 
         await _commandExecutor
             .ExecuteAsync(new MoveActivityCommand(processInstanceId, targetActivityId, reason), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<MigrationPlan> ValidateMigrationAsync(
+        ProcessInstanceMigrationRequest request,
+        CancellationToken ct = default)
+    {
+        var planner = new ProcessInstanceMigrationPlanner(
+            _executionManager,
+            _taskManager,
+            _definitionStore);
+
+        var details = await planner.BuildAsync(request, ct).ConfigureAwait(false);
+
+        return details.Plan;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<MigrationPlan> MigrateProcessInstanceAsync(
+        ProcessInstanceMigrationRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return await _commandExecutor
+            .ExecuteAsync(new MigrateProcessInstanceCommand(_definitionStore, request, _migrationLog), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<MigrationRecord>> FindMigrationsAsync(
+        string processInstanceId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        if (_migrationLog is null)
+        {
+            return [];
+        }
+
+        return await _migrationLog
+            .FindByProcessInstanceAsync(processInstanceId, ct)
             .ConfigureAwait(false);
     }
 

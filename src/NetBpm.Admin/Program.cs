@@ -2,9 +2,12 @@ using NetBpm.Admin.Endpoints;
 using NetBpm.Admin.Storage;
 using NetBpm.Persistence;
 using NetBpm.Rest;
+using NetBpm.Rest.Auditing;
+using NetBpm.Rest.Diagnostics;
 using NetBpm.Rest.Endpoints;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
+using NetBpm.Workflow.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +20,9 @@ builder.Services.AddScoped<RequestContext>();
 // 组合根：引擎 / 持久化 / 身份（方言随 NetBpm:DatabaseType）
 builder.Services.AddNetBpm(builder.Configuration);
 
+// 定时边界事件：后台轮询 ACT_RU_TIMER_JOB（NetBpm:Timer 可调间隔 / 关闭）
+builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
+
 // 管理端业务存储：流程模型 + 流程类型注册表
 builder.Services.AddAdminStores();
 
@@ -28,6 +34,15 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 // 幂等记录定期清理
 builder.Services.AddHostedService<IdempotencyCleanupService>();
+
+// 管理动作审计（转办 / 跳转 / 变量直写）
+builder.Services.AddNetBpmAuditing();
+
+// 审计保留策略（NetBpm:Admin:AuditRetentionDays，默认 0 = 永久保留）
+builder.Services.AddHostedService<AdminAuditCleanupService>();
+
+// 可选 OpenTelemetry 接线（NetBpm:Otel:Enabled 或 OTEL_EXPORTER_OTLP_ENDPOINT）
+builder.Services.AddNetBpmOpenTelemetry(builder.Configuration);
 
 var app = builder.Build();
 var startedAt = DateTime.UtcNow;

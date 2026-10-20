@@ -698,6 +698,84 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: false);
 
+    // 0008 流程模型版本历史（管理端发布治理）
+    internal static readonly TableDef ModelHistoryTable = new(
+        "bpmn_model_history",
+        "流程模型版本历史：每次保存/回滚追加一版，支持回滚与变更追溯",
+        [
+            C("id", ColType.Varchar, 64, false, comment: "历史版本 id"),
+            C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户 id"),
+            C("model_id", ColType.Varchar, 64, false, comment: "模型 id（bpmn_model.id）"),
+            C("revision", ColType.Int, nullable: false, comment: "版本号（同一模型内递增，从 1 开始）"),
+            C("name", ColType.Varchar, 200, false, comment: "保存时的流程名称"),
+            C("process_key", ColType.Varchar, 50, false, comment: "保存时的流程 key"),
+            C("description", ColType.Varchar, 500, comment: "保存时的流程描述"),
+            C("bpmn_xml", ColType.LongText, nullable: false, comment: "BPMN XML 快照"),
+            C("svg", ColType.LongText, comment: "流程图 SVG 快照"),
+            C("action", ColType.Varchar, 32, nullable: false, comment: "动作：save / rollback"),
+            C("operator", ColType.Varchar, 255, comment: "操作人（请求身份）"),
+            C("created_at", ColType.DateTime3, nullable: false, comment: "写入时间（UTC）"),
+        ],
+        ["id"],
+        [new IndexDef("ix_bpmn_model_history_tenant", ["tenant_id", "model_id"])],
+        [new IndexDef("ux_bpmn_model_history_rev", ["model_id", "revision"], Unique: true)],
+        [],
+        EngineCharset: false);
+
+    // 0009 管理动作审计（RBAC 治理：转办 / 跳转 / 变量直写）
+    internal static readonly TableDef AdminAuditTable = new(
+        "admin_audit_log",
+        "管理动作审计：转办 / 跳转 / 变量直写等高风险动作的操作人、目标与结果",
+        [
+            C("id", ColType.Varchar, 64, false, comment: "审计记录 id"),
+            C("tenant_id", ColType.Varchar, 255, comment: "租户（与 ACT_* 的 TENANT_ID_ 同口径）"),
+            C("actor", ColType.Varchar, 255, comment: "操作人（JWT sub / X-User-Id）"),
+            C("auth_mode", ColType.Varchar, 16, nullable: false, comment: "鉴权方式：jwt / api_key / none"),
+            C("action", ColType.Varchar, 64, nullable: false, comment: "动作标识，如 task.reassign / instance.jump / variable.write"),
+            C("target_type", ColType.Varchar, 32, nullable: false, comment: "目标类型：task / process_instance / variable / history"),
+            C("target_id", ColType.Varchar, 128, nullable: false, comment: "目标 id"),
+            C("process_instance_id", ColType.Varchar, 64, comment: "关联流程实例 id（便于按实例追溯）"),
+            C("detail", ColType.MediumText, comment: "动作明细（JSON；不记录变量值）"),
+            C("success", ColType.Int, nullable: false, comment: "1=成功，0=失败"),
+            C("error", ColType.Varchar, 500, comment: "失败原因"),
+            C("created_at", ColType.DateTime3, nullable: false, comment: "写入时间（UTC）"),
+        ],
+        ["id"],
+        [
+            new IndexDef("ix_admin_audit_tenant_time", ["tenant_id", "created_at"]),
+            new IndexDef("ix_admin_audit_action", ["action"]),
+            new IndexDef("ix_admin_audit_target", ["target_type", "target_id"]),
+            new IndexDef("ix_admin_audit_instance", ["process_instance_id"]),
+        ],
+        [], [],
+        EngineCharset: false);
+
+    // 0009 历史归档（把已结束实例的 ACT_HI_* 行搬进 JSON 快照后删除原行）
+    internal static readonly TableDef HistoryArchiveTable = new(
+        "admin_history_archive",
+        "历史归档：已结束实例的 ACT_HI_* 行快照（JSON），原历史行在归档后删除",
+        [
+            C("id", ColType.Varchar, 64, false, comment: "归档行 id"),
+            C("process_instance_id", ColType.Varchar, 64, false, comment: "流程实例 id"),
+            C("tenant_id", ColType.Varchar, 255, comment: "租户"),
+            C("process_definition_id", ColType.Varchar, 64, comment: "流程定义 id（启动时版本）"),
+            C("business_key", ColType.Varchar, 255, comment: "业务主键"),
+            C("start_user_id", ColType.Varchar, 255, comment: "发起人"),
+            C("start_time", ColType.DateTime3, comment: "实例开始时间"),
+            C("end_time", ColType.DateTime3, comment: "实例结束时间"),
+            C("archived_at", ColType.DateTime3, nullable: false, comment: "归档时间（UTC）"),
+            C("archived_by", ColType.Varchar, 255, comment: "归档操作人"),
+            C("payload", ColType.MediumText, nullable: false, comment: "历史行快照（processInstance / activities / tasks / variables / identityLinks）"),
+        ],
+        ["id"],
+        [
+            new IndexDef("ix_admin_history_archive_tenant", ["tenant_id", "end_time"]),
+            new IndexDef("ix_admin_history_archive_business", ["business_key"]),
+        ],
+        [new IndexDef("ux_admin_history_archive_instance", ["process_instance_id"], Unique: true)],
+        [],
+        EngineCharset: false);
+
     // 0010 HTTP 幂等键表（幂等，无表注释）
     internal static readonly TableDef IdempotencyTable = new(
         "ACT_IDEMPOTENCY",
@@ -715,6 +793,51 @@ internal static class SchemaCatalog
         [new IndexDef("ACT_IDX_IDEMP_EXPIRES", ["EXPIRES_AT_"])],
         [], [],
         EngineCharset: false);
+
+    // 0006 定时作业表（引擎扩展，Activiti 原表裁列后保留核心列）
+    internal static readonly TableDef TimerJobTable = new(
+        "ACT_RU_TIMER_JOB",
+        "定时作业表：边界定时器（一次性）到点后触发",
+        [
+            C("ID_", ColType.Varchar, 64, false),
+            C("REV_", ColType.Int, def: "0"),
+            C("TYPE_", ColType.Varchar, 255, false),
+            C("EXECUTION_ID_", ColType.Varchar, 64, false),
+            C("PROCESS_INSTANCE_ID_", ColType.Varchar, 64, false),
+            C("PROC_DEF_ID_", ColType.Varchar, 64),
+            C("ACTIVITY_ID_", ColType.Varchar, 255),
+            C("BOUNDARY_EVENT_ID_", ColType.Varchar, 255),
+            C("DUEDATE_", ColType.DateTime3, nullable: false),
+            C("TENANT_ID_", ColType.Varchar, 255, def: "''"),
+            C("CREATE_TIME_", ColType.DateTime3, nullable: false),
+        ],
+        ["ID_"],
+        [
+            new IndexDef("ACT_IDX_TIMER_JOB_DUEDATE", ["DUEDATE_"]),
+            new IndexDef("ACT_IDX_TIMER_JOB_EXECUTION", ["EXECUTION_ID_"]),
+            new IndexDef("ACT_IDX_TIMER_JOB_PROCINST", ["PROCESS_INSTANCE_ID_"]),
+        ],
+        [], [],
+        EngineCharset: true);
+
+    // 0007 流程实例迁移审计表（引擎扩展）
+    internal static readonly TableDef MigrationTable = new(
+        "ACT_HI_MIGRATION",
+        "流程实例迁移审计表：记录源/目标定义、活动映射、原因与操作人",
+        [
+            C("ID_", ColType.Varchar, 64, false),
+            C("PROC_INST_ID_", ColType.Varchar, 64, false),
+            C("SOURCE_PROC_DEF_ID_", ColType.Varchar, 255, false),
+            C("TARGET_PROC_DEF_ID_", ColType.Varchar, 255, false),
+            C("ACTIVITY_MAPPINGS_", ColType.Varchar, 4000),
+            C("REASON_", ColType.Varchar, 400),
+            C("USER_ID_", ColType.Varchar, 255),
+            C("MIGRATED_AT_", ColType.DateTime3, nullable: false),
+        ],
+        ["ID_"],
+        [new IndexDef("ACT_IDX_MIGRATION_PROCINST", ["PROC_INST_ID_"])],
+        [], [],
+        EngineCharset: true);
 
     // 0002 引擎初值（schema.version / schema.history / next.dbid）
     internal static readonly IReadOnlyList<IReadOnlyList<object?>> PropertySeeds =

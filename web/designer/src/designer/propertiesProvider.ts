@@ -2,8 +2,9 @@
  * NetBpm 属性面板（开发计划 §6.2 第 3 项）。
  *
  * 🔑 **不装载 bpmn-js 自带的 `BpmnPropertiesProviderModule`**，而是整体接管属性组：
- * 官方默认组里有 Documentation / 多实例 / 事件定义 等本子集**不支持**的项 —— 它们要么被后端
- * 静默丢弃（documentation、potentialStarter、exporterVersion），要么被校验规则 9 拒绝。
+ * 官方默认组里有 Documentation / potentialStarter / 自定义扩展 等本子集**不执行**的项 ——
+ * 暴露它们就是「填了也白填」。多实例（会签/串签）后端已支持，因此这里提供了独立属性组；
+ * 事件定义仍由后端校验拒绝，只给只读提示。
  * "只暴露子集支持的属性" 因此落成一句话：**这里的白名单就是面板的全部内容**。
  *
  * 可写性以「后端能读、也能写回」为准（见 §15.4 / §15.5 与 BpmnXmlConverter 的读写对称性）：
@@ -15,10 +16,13 @@
  *    extensionElements、事件定义 —— 模型或转换器不支持，暴露就是"填了也白填"（风险 R5）。
  */
 import {
+  boundaryTimerEntries,
   checkboxEntry,
   conditionEntry,
   defaultFlowEntry,
+  multiInstanceEntries,
   noteEntry,
+  terminateEndEventEntries,
   textAreaEntry,
   textEntry,
   unsupportedCapabilities,
@@ -56,10 +60,11 @@ function group(id: string, label: string, entries: unknown[]): NetBpmGroup {
   return { id, label, entries };
 }
 
-/** 子集元素（§1.2）。其它类型（子流程/边界事件/泳道…）不属白名单，面板不渲染。 */
+/** 子集元素（§1.2）。其它类型（子流程/泳道…）不属白名单，面板不渲染。 */
 const SUBSET_TYPES = new Set([
   'bpmn:StartEvent',
   'bpmn:EndEvent',
+  'bpmn:BoundaryEvent',
   'bpmn:UserTask',
   'bpmn:ServiceTask',
   'bpmn:ManualTask',
@@ -80,11 +85,12 @@ const EXECUTION_EVENT_CHOICES: SelectOption[] = [
   { label: 'take（流经时）', value: 'take' },
 ];
 
+// ⚠️ 不提供 delete：引擎尚未实现任务删除通知（各条删除路径都没有触发点），
+// 配置了也会在部署期被 listener-configuration 规则拒绝。
 const TASK_EVENT_CHOICES: SelectOption[] = [
   { label: 'create（创建时）', value: 'create' },
   { label: 'assignment（被指派时）', value: 'assignment' },
   { label: 'complete（完成时）', value: 'complete' },
-  { label: 'delete（删除时）', value: 'delete' },
 ];
 
 export default class NetBpmPropertiesProvider {
@@ -146,6 +152,7 @@ function buildGroups(
   switch (type) {
     case 'bpmn:UserTask':
       groups.push(userTaskGroup(element, context, t));
+      groups.push(multiInstanceGroup(element, context, t));
       groups.push(
         listenersGroup('netbpm-user-task-exec-listeners', t('执行监听器'), element, context, t, {
           typeName: 'activiti:ExecutionListener',
@@ -175,6 +182,21 @@ function buildGroups(
       break;
     case 'bpmn:ScriptTask':
       groups.push(scriptTaskGroup(element, context, t));
+      // 脚本任务同样可以有执行监听器（引擎对任意 FlowElement 都会触发 start/end）
+      groups.push(
+        listenersGroup('netbpm-script-task-exec-listeners', t('执行监听器'), element, context, t, {
+          typeName: 'activiti:ExecutionListener',
+          eventChoices: EXECUTION_EVENT_CHOICES,
+          addDefaults: { event: 'start' },
+          emptyHint: t('尚未配置执行监听器（activiti:executionListener）。'),
+        }),
+      );
+      break;
+    case 'bpmn:BoundaryEvent':
+      groups.push(group('netbpm-boundary-timer', t('边界定时器'), boundaryTimerEntries(element, context, t)));
+      break;
+    case 'bpmn:EndEvent':
+      groups.push(group('netbpm-end-event', t('结束事件'), terminateEndEventEntries(element, context, t)));
       break;
     case 'bpmn:SequenceFlow':
       groups.push(sequenceFlowGroup(element, context, t));
@@ -313,6 +335,24 @@ function userTaskGroup(
   return group('netbpm-user-task', t('用户任务'), entries.filter((entry) => entry !== null));
 }
 
+/**
+ * 多实例组（会签 / 串签）。
+ *
+ * 后端已支持 userTask 的 `multiInstanceLoopCharacteristics`，但面板过去完全没有入口 ——
+ * 只能手写 XML。这里补齐：开关、串/并行、loopCardinality、collection、elementVariable、完成条件。
+ */
+function multiInstanceGroup(
+  element: DiagramElement,
+  context: EntryContext,
+  t: (text: string) => string,
+): unknown {
+  return group(
+    'netbpm-user-task-multi-instance',
+    t('多实例（会签 / 串签）'),
+    multiInstanceEntries(element, context, t),
+  );
+}
+
 function serviceTaskGroup(
   element: DiagramElement,
   context: EntryContext,
@@ -374,7 +414,7 @@ function scriptTaskGroup(
 ): unknown {
   return group('netbpm-script-task', t('脚本任务'), [
       textEntry(
-        { id: 'scriptFormat', property: 'scriptFormat', element, label: t('脚本格式'), placeholder: 'javascript' },
+        { id: 'scriptFormat', property: 'scriptFormat', element, label: t('脚本格式'), placeholder: 'csharp' },
         context,
       ),
       textEntry({ id: 'resultVariable', property: 'resultVariable', element, label: t('结果变量名') }, context),

@@ -1,3 +1,5 @@
+using Dapper;
+
 namespace NetBpm.IntegrationTests;
 
 /// <summary>
@@ -37,6 +39,12 @@ public sealed class MySqlMultiInstanceTests
             Assert.Equal("integer", RowValues.Text(byName["nrOfInstances"], "TYPE_"));
             Assert.Equal(3L, RowValues.Long(byName["nrOfInstances"], "LONG_"));
             Assert.Equal(0L, RowValues.Long(byName["nrOfCompletedInstances"], "LONG_"));
+
+            // 每实例一行 + 主执行容器行：4 行全部未收口（对齐 Activiti 的历史语义）
+            Assert.Equal(4, await session.Connection.ExecuteScalarAsync<int>(
+                "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve'"));
+            Assert.Equal(4, await session.Connection.ExecuteScalarAsync<int>(
+                "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve' and END_TIME_ is null"));
         }
 
         // 命令 2 / 3 / 4：逐个完成任务（每个都是独立的跨命令事务），待办数逐轮递减
@@ -46,12 +54,28 @@ public sealed class MySqlMultiInstanceTests
             Assert.Equal(3 - round, remaining.Count);
 
             await harness.CompleteTaskAsync(remaining[0].Id, ct: Ct);
+
+            // 完成的实例立即收口自己的历史行（原因空）；剩余实例的行保持未收口。
+            // 最后一轮完成后节点整体收口（容器行也结束），未收口行数为 0
+            using var session = harness.SessionFactory.Create();
+
+            Assert.Equal(
+                round < 2 ? 3 - round : 0,
+                await session.Connection.ExecuteScalarAsync<int>(
+                    "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve' and END_TIME_ is null"));
         }
 
         // 全部完成 → 实例执行清理、主执行离开、流程结束
         Assert.Empty(await harness.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId, Ct));
         Assert.Equal(0, harness.CountRows("ACT_RU_EXECUTION"));
         Assert.Equal(0, harness.CountRows("ACT_RU_VARIABLE"));
+
+        // 主执行离开节点时收口容器行：4 行全部结束
+        using (var session = harness.SessionFactory.Create())
+        {
+            Assert.Equal(0, await session.Connection.ExecuteScalarAsync<int>(
+                "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve' and END_TIME_ is null"));
+        }
     }
 
     [Fact]
@@ -74,8 +98,21 @@ public sealed class MySqlMultiInstanceTests
 
             await harness.CompleteTaskAsync(task.Id, ct: Ct);
 
-            // 完成计数随命令推进（真库读回）
+            // 历史活动行：已开始过的实例各一行，进行中的那一行未收口。
+            // 第 r 轮完成后：若还有下一实例则先收口第 r 行、再写第 r+1 行（行数 r+1、未收口 1）；
+            // 全部完成时节点整体收口（行数 3、未收口 0）
             using var session = harness.SessionFactory.Create();
+
+            Assert.Equal(
+                round < 3 ? round + 1 : 3,
+                await session.Connection.ExecuteScalarAsync<int>(
+                    "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve'"));
+            Assert.Equal(
+                round < 3 ? 1 : 0,
+                await session.Connection.ExecuteScalarAsync<int>(
+                    "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve' and END_TIME_ is null"));
+
+            // 完成计数随命令推进（真库读回）
             var rows = RowValues.Query(
                 session,
                 "select LONG_ from ACT_RU_VARIABLE where NAME_ = 'nrOfCompletedInstances'");
@@ -89,6 +126,15 @@ public sealed class MySqlMultiInstanceTests
 
         Assert.Empty(await harness.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId, Ct));
         Assert.Equal(0, harness.CountRows("ACT_RU_EXECUTION"));
+
+        // 全部完成：3 个实例行全部收口（各自行依次开合，最终都结束）
+        using (var session = harness.SessionFactory.Create())
+        {
+            Assert.Equal(3, await session.Connection.ExecuteScalarAsync<int>(
+                "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve'"));
+            Assert.Equal(0, await session.Connection.ExecuteScalarAsync<int>(
+                "select count(*) from ACT_HI_ACTINST where ACT_ID_ = 'approve' and END_TIME_ is null"));
+        }
     }
 
     /// <summary>并行会签：3 个实例（cardinality），静态办理人，结束于单一出流。</summary>

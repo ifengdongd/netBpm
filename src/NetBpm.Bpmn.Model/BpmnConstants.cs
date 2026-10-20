@@ -86,4 +86,28 @@ public static class BpmnConstants
 
     /// <summary>Activiti 元素：潜在启动者。</summary>
     public const string ElementPotentialStarter = "potentialStarter";
+
+    /// <summary>BPMN 元素：边界事件（<c>boundaryEvent</c>）。</summary>
+    public const string ElementBoundaryEvent = "boundaryEvent";
+
+    /// <summary>BPMN 元素：定时事件定义（<c>timerEventDefinition</c>）。</summary>
+    public const string ElementTimerEventDefinition = "timerEventDefinition";
+
+    /// <summary>BPMN 元素：终止事件定义（<c>terminateEventDefinition</c>）。</summary>
+    public const string ElementTerminateEventDefinition = "terminateEventDefinition";
+
+    /// <summary>BPMN 属性：边界事件挂靠的活动 id（<c>attachedToRef</c>）。</summary>
+    public const string AttributeAttachedToRef = "attachedToRef";
+
+    /// <summary>BPMN 属性：边界事件是否中断挂靠活动（<c>cancelActivity</c>）。</summary>
+    public const string AttributeCancelActivity = "cancelActivity";
+
+    /// <summary>BPMN 元素：定时日期（<c>timeDate</c>）。</summary>
+    public const string ElementTimeDate = "timeDate";
+
+    /// <summary>BPMN 元素：定时时长（<c>timeDuration</c>）。</summary>
+    public const string ElementTimeDuration = "timeDuration";
+
+    /// <summary>BPMN 元素：定时周期（<c>timeCycle</c>）。</summary>
+    public const string ElementTimeCycle = "timeCycle";
 }

@@ -9,11 +9,18 @@
  *  2. 即时校验：本地镜像的后端规则是否真的会拦下会被后端拒绝的图。
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { BpmnModdle } from 'bpmn-moddle';
 
 import activitiModdle from '../src/activiti-moddle.json';
+import {
+  describeHttpFailure,
+  forbiddenHint,
+  MODEL_READ_SCOPE,
+  MODEL_WRITE_SCOPE,
+} from '../src/auth';
 import { computeTypeChange, resolveDisplayKey } from '../src/designer/listEditors';
 import NetBpmPropertiesProvider from '../src/designer/propertiesProvider';
 import { parseProcessMeta, upsertDiagram, type DiagramRecord } from '../src/storage';
@@ -26,11 +33,13 @@ interface Harness {
   provider: NetBpmPropertiesProvider;
   registered: { priority: number; provider: unknown }[];
   updates: { element: unknown; properties: Record<string, unknown> }[];
+  moddleUpdates: { element: unknown; moddleElement: unknown; properties: Record<string, unknown> }[];
 }
 
 function createHarness(): Harness {
   const registered: { priority: number; provider: unknown }[] = [];
   const updates: { element: unknown; properties: Record<string, unknown> }[] = [];
+  const moddleUpdates: { element: unknown; moddleElement: unknown; properties: Record<string, unknown> }[] = [];
 
   const provider = new NetBpmPropertiesProvider(
     {
@@ -39,12 +48,14 @@ function createHarness(): Harness {
     {
       updateProperties: (element: unknown, properties: Record<string, unknown>) =>
         updates.push({ element, properties }),
+      updateModdleProperties: (element: unknown, moddleElement: unknown, properties: Record<string, unknown>) =>
+        moddleUpdates.push({ element, moddleElement, properties }),
     } as never,
     { create: (type: string, properties?: Record<string, unknown>) => ({ $type: type, ...properties }) } as never,
     (text: string) => text,
   );
 
-  return { provider, registered, updates };
+  return { provider, registered, updates, moddleUpdates };
 }
 
 function userTask(businessObject: Record<string, unknown> = {}): never {
@@ -297,10 +308,60 @@ test('用户任务：提供执行/任务监听器与表单属性编辑组', () =
   assert.deepEqual(groupIds, [
     'netbpm-common',
     'netbpm-user-task',
+    'netbpm-user-task-multi-instance',
     'netbpm-user-task-exec-listeners',
     'netbpm-user-task-task-listeners',
     'netbpm-form-properties',
   ]);
+});
+
+test('用户任务：多实例组可开关，开启后写入 moddle 子元素', () => {
+  const harness = createHarness();
+  const element = userTask();
+  const group = groupById(groupsOf(harness, element), 'netbpm-user-task-multi-instance');
+
+  const toggle = entryById(group, 'multiInstanceEnabled');
+  assert.equal(toggle.getValue?.(element), false);
+
+  toggle.setValue?.(true);
+
+  assert.deepEqual(harness.updates.at(-1)?.properties, {
+    loopCharacteristics: { $type: 'bpmn:MultiInstanceLoopCharacteristics', isSequential: false },
+  });
+
+  const enabled = userTask({
+    loopCharacteristics: {
+      $type: 'bpmn:MultiInstanceLoopCharacteristics',
+      isSequential: true,
+      collection: '${approvers}',
+      elementVariable: 'approver',
+    },
+  });
+  const enabledGroup = groupById(groupsOf(harness, enabled), 'netbpm-user-task-multi-instance');
+
+  assert.deepEqual(
+    enabledGroup.entries.map((entry) => entry.id),
+    [
+      'multiInstanceEnabled',
+      'multiInstanceSequential',
+      'multiInstanceCardinality',
+      'multiInstanceCollection',
+      'multiInstanceElementVariable',
+      'multiInstanceCompletionCondition',
+    ],
+  );
+
+  const sequential = entryById(enabledGroup, 'multiInstanceSequential');
+  assert.equal(sequential.getValue?.(enabled), 'true');
+
+  sequential.setValue?.('false');
+  assert.deepEqual(harness.moddleUpdates.at(-1)?.properties, { isSequential: false });
+
+  const completion = entryById(enabledGroup, 'multiInstanceCompletionCondition');
+  completion.setValue?.('${nrOfCompletedInstances == 2}');
+  assert.deepEqual(harness.moddleUpdates.at(-1)?.properties, {
+    completionCondition: { $type: 'bpmn:FormalExpression', body: '${nrOfCompletedInstances == 2}' },
+  });
 });
 
 test('顺序流：执行监听器组的事件只有 take', () => {
@@ -418,6 +479,132 @@ test('校验：并行网关不得有默认流，排他网关不得"全条件且�
   assert.ok(issues.some((issue) => issue.elementId === 'gw' && issue.message.includes('默认流')));
 });
 
+test('校验：多实例缺实例数来源报错，skipExpression 冲突报错', () => {
+  const missingSource = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          {
+            $type: 'bpmn:UserTask',
+            id: 'sign',
+            assignee: 'alice',
+            loopCharacteristics: { $type: 'bpmn:MultiInstanceLoopCharacteristics', isSequential: false },
+          },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(
+    missingSource.some(
+      (issue) => issue.elementId === 'sign' && issue.severity === 'error' && issue.message.includes('实例数来源'),
+    ),
+  );
+
+  const withSkip = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          {
+            $type: 'bpmn:UserTask',
+            id: 'sign',
+            assignee: 'alice',
+            skipExpression: '${skip}',
+            loopCharacteristics: {
+              $type: 'bpmn:MultiInstanceLoopCharacteristics',
+              collection: '${approvers}',
+              elementVariable: 'approver',
+            },
+          },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(
+    withSkip.some(
+      (issue) => issue.elementId === 'sign' && issue.severity === 'error' && issue.message.includes('skipExpression'),
+    ),
+  );
+});
+
+test('校验：默认流必须指向出流，且默认流上不该写条件', () => {
+  const dangling = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:UserTask', id: 'task', assignee: 'alice', default: 'typo' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'task' }, targetRef: { id: 'end' } },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(
+    dangling.some(
+      (issue) => issue.elementId === 'task' && issue.severity === 'error' && issue.message.includes('不是该节点的出流'),
+    ),
+  );
+
+  const conditional = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:UserTask', id: 'task', assignee: 'alice', default: 'f1' },
+          {
+            $type: 'bpmn:SequenceFlow',
+            id: 'f1',
+            sourceRef: { id: 'task' },
+            targetRef: { id: 'end' },
+            conditionExpression: { body: '${ok}' },
+          },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(
+    conditional.some(
+      (issue) => issue.elementId === 'task' && issue.severity === 'warning' && issue.message.includes('默认流'),
+    ),
+  );
+});
+
+test('校验：taskListener delete 事件被拒绝（后端未实现）', () => {
+  const issues = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          {
+            $type: 'bpmn:UserTask',
+            id: 'approve',
+            assignee: 'alice',
+            extensionElements: {
+              values: [{ $type: 'activiti:TaskListener', event: 'delete', class: 'X' }],
+            },
+          },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(
+    issues.some(
+      (issue) => issue.elementId === 'approve' && issue.severity === 'error' && issue.message.includes('delete'),
+    ),
+  );
+});
+
 test('校验：监听器/表单属性已支持不再告警，事件定义与字段注入仍拦下部署', () => {
   const issues = validateDiagram(
     registryOf([
@@ -506,7 +693,8 @@ test('校验：排他网关默认流以引用对象形式读取（回归）', ()
           { $type: 'bpmn:ExclusiveGateway', id: 'gw', default: { $type: 'bpmn:SequenceFlow', id: 'f2' } },
           { $type: 'bpmn:EndEvent', id: 'end' },
           { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'gw' }, targetRef: { id: 'end' }, conditionExpression: { body: '${a}' } },
-          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'gw' }, targetRef: { id: 'end' }, conditionExpression: { body: '${b}' } },
+          // 默认流不写条件：写了条件会被新增的 default-flow 规则提示（见专门的用例）
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'gw' }, targetRef: { id: 'end' } },
         ],
       },
     ]),
@@ -615,6 +803,150 @@ test('存储：按 processId 覆盖更新，新记录排在最前，且不改变
   assert.equal(JSON.stringify(existing), snapshot);
 });
 
+// ─────────────────────────── 边界定时器 / 终止结束事件 ───────────────────────────
+
+function timerDiagram(overrides: Record<string, unknown> = {}): never {
+  const boundary = {
+    $type: 'bpmn:BoundaryEvent',
+    id: 'boundary',
+    attachedToRef: { id: 'approve' },
+    cancelActivity: true,
+    eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition', timeDuration: { body: 'PT2H' } }],
+    ...overrides,
+  };
+
+  return registryOf([
+    {
+      $type: 'bpmn:Process',
+      id: 'p1',
+      flowElements: [
+        { $type: 'bpmn:StartEvent', id: 'start' },
+        { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'approve' } },
+        { $type: 'bpmn:UserTask', id: 'approve', assignee: 'alice' },
+        boundary,
+        { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'approve' }, targetRef: { id: 'end_ok' } },
+        { $type: 'bpmn:SequenceFlow', id: 'f3', sourceRef: { id: 'boundary' }, targetRef: { id: 'end_timeout' } },
+        { $type: 'bpmn:EndEvent', id: 'end_ok' },
+        { $type: 'bpmn:EndEvent', id: 'end_timeout' },
+      ],
+    },
+  ]);
+}
+
+test('边界定时器：合法模型零阻断错误', () => {
+  assert.deepEqual(validateDiagram(timerDiagram()).filter((issue) => issue.severity === 'error'), []);
+});
+
+test('边界定时器：缺定时定义 / 非中断 / 周期定时 / 挂在服务任务上都报错', () => {
+  const missing = validateDiagram(timerDiagram({ eventDefinitions: [] }));
+  assert.ok(missing.some((issue) => issue.elementId === 'boundary' && issue.message.includes('timerEventDefinition')));
+
+  const nonInterrupting = validateDiagram(timerDiagram({ cancelActivity: false }));
+  assert.ok(nonInterrupting.some((issue) => issue.elementId === 'boundary' && issue.message.includes('非中断')));
+
+  const cycle = validateDiagram(
+    timerDiagram({
+      eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition', timeCycle: { body: 'R3/PT1H' } }],
+    }),
+  );
+  assert.ok(cycle.some((issue) => issue.elementId === 'boundary' && issue.message.includes('timeCycle')));
+
+  const badDuration = validateDiagram(
+    timerDiagram({
+      eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition', timeDuration: { body: '2 hours' } }],
+    }),
+  );
+  assert.ok(badDuration.some((issue) => issue.elementId === 'boundary' && issue.message.includes('ISO-8601')));
+});
+
+test('边界定时器：挂在服务任务上直接报错', () => {
+  const issues = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'svc' } },
+          { $type: 'bpmn:ServiceTask', id: 'svc', class: 'X' },
+          {
+            $type: 'bpmn:BoundaryEvent',
+            id: 'boundary',
+            attachedToRef: { id: 'svc' },
+            cancelActivity: true,
+            eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition', timeDuration: { body: 'PT1H' } }],
+          },
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'svc' }, targetRef: { id: 'end' } },
+          { $type: 'bpmn:SequenceFlow', id: 'f3', sourceRef: { id: 'boundary' }, targetRef: { id: 'end' } },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(issues.some((issue) => issue.elementId === 'boundary' && issue.message.includes('只支持挂在用户任务上')));
+});
+
+test('终止结束事件：勾选后合法；有出流则报错', () => {
+  const terminate = { $type: 'bpmn:EndEvent', id: 'term', eventDefinitions: [{ $type: 'bpmn:TerminateEventDefinition' }] };
+
+  const ok = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'term' } },
+          terminate,
+        ],
+      },
+    ]),
+  );
+
+  assert.deepEqual(ok.filter((issue) => issue.severity === 'error'), []);
+
+  const withOutgoing = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'term' } },
+          terminate,
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'term' }, targetRef: { id: 'end' } },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(withOutgoing.some((issue) => issue.elementId === 'term' && issue.message.includes('不能有出流')));
+});
+
+test('开始事件仍不接受定时事件定义', () => {
+  const issues = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          {
+            $type: 'bpmn:StartEvent',
+            id: 'start',
+            eventDefinitions: [{ $type: 'bpmn:TimerEventDefinition', timeDuration: { body: 'PT1H' } }],
+          },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'end' } },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+        ],
+      },
+    ]),
+  );
+
+  assert.ok(issues.some((issue) => issue.elementId === 'start' && issue.severity === 'error'));
+});
+
 // ─────────────────────────── moddle 往返（保存/重开回归）───────────────────────────
 
 test('XML 往返：表单属性与监听器保存后重新载入仍出现在 extensionElements.values（回归）', async () => {
@@ -680,6 +1012,29 @@ test('XML 往返：表单属性与监听器保存后重新载入仍出现在 ext
   const reparsedTask = reparsedProcess.flowElements.find((element) => element.$type === 'bpmn:UserTask')!;
 
   assert.equal((reparsedTask.extensionElements?.values ?? []).length, 5);
+});
+
+test('示例流程：examples/*.bpmn20.xml 导入即零阻断错误', async () => {
+  // 示例是最直接的"建模契约"：用户会照着改。它们必须能通过设计器的即时校验，
+  // 否则等于官方示范了一个画完就不敢部署的流程。
+  const moddle = new BpmnModdle({ activiti: activitiModdle as never });
+
+  for (const name of ['leave-process.bpmn20.xml', 'order-process.bpmn20.xml']) {
+    const xml = readFileSync(new URL(`../examples/${name}`, import.meta.url), 'utf8');
+    const { rootElement } = await moddle.fromXML(xml);
+    const process = rootElement.rootElements.find((element) => element.$type === 'bpmn:Process')!;
+    const all = [process, ...(process.flowElements ?? [])];
+    const issues = validateDiagram({
+      getAll: () => all.map((businessObject) => ({
+        id: businessObject.id,
+        type: businessObject.$type,
+        businessObject,
+      })),
+    } as never);
+    const errors = issues.filter((issue) => issue.severity === 'error');
+
+    assert.deepEqual(errors, [], `${name} 不应有阻断级错误：${JSON.stringify(errors)}`);
+  }
 });
 
 test('XML 往返：排他网关默认流以引用对象读写（回归）', async () => {
@@ -749,4 +1104,31 @@ test('监听器实现方式：三项全空时用户的选择不回落（回归�
 
   const misclassified = { $type: 'activiti:ExecutionListener', class: '${WorkFlowProcessListener}' } as never;
   assert.equal(resolveDisplayKey(misclassified, null), 'delegateExpression');
+});
+
+// ─────────────────────────── 鉴权失败文案（403 补 scope）───────────────────────────
+
+test('403 且后端未给 scope 说明时，追加所需管理 scope', () => {
+  const message = describeHttpFailure(403, 'Forbidden', MODEL_READ_SCOPE);
+
+  assert.ok(message.startsWith('Forbidden'));
+  assert.ok(message.includes(MODEL_READ_SCOPE));
+  assert.ok(message.includes('netbpm.admin'));
+});
+
+test('非 403 或后端已说明 scope 时，不重复追加', () => {
+  assert.equal(describeHttpFailure(500, 'Internal Server Error', MODEL_READ_SCOPE), 'Internal Server Error');
+
+  const backendDetail = "当前主体缺少 scope 'netbpm.admin.model.read'，无法查看流程定义";
+  assert.equal(describeHttpFailure(403, backendDetail, MODEL_READ_SCOPE), backendDetail);
+
+  // 空 detail 退回到状态码，而不是空字符串
+  assert.ok(describeHttpFailure(403, '   ', MODEL_READ_SCOPE).startsWith('HTTP 403'));
+});
+
+test('forbiddenHint 会带出所需 scope 与超级范围', () => {
+  const hint = forbiddenHint(MODEL_WRITE_SCOPE);
+
+  assert.ok(hint.includes(MODEL_WRITE_SCOPE));
+  assert.ok(hint.includes('netbpm.admin'));
 });

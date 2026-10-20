@@ -29,6 +29,16 @@ public interface IExecutionManager
     ValueTask<IExecutionEntity?> FindByIdAsync(string executionId, CancellationToken ct = default);
 
     /// <summary>
+    /// 查某流程实例下的<b>全部</b>执行（含根执行与并行/会签子执行，按 id 升序）。
+    /// <para>
+    /// 实例迁移必须看到整棵树：只查活动执行会漏掉停在并行网关 Join 上的非活动执行。
+    /// </para>
+    /// </summary>
+    ValueTask<IReadOnlyList<IExecutionEntity>> FindAllByProcessInstanceIdAsync(
+        string processInstanceId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// 查「当前活动为指定节点、且处于非活动状态」的执行。
     /// 并行网关 Join 的判定基础（见 §5.4 之二）。
     /// </summary>

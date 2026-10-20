@@ -31,6 +31,10 @@ internal static class SqlGenerator
         Emit(directory, dialect, "0003_create_demo_tables.sql", RenderDemoTables(dialect));
         Emit(directory, dialect, "0004_perf_indexes.sql", RenderPerfIndexes(dialect));
         Emit(directory, dialect, "0005_create_idempotency.sql", RenderIdempotency(dialect));
+        Emit(directory, dialect, "0006_create_timer_job.sql", RenderTimerJob(dialect));
+        Emit(directory, dialect, "0007_create_migration_log.sql", RenderMigrationLog(dialect));
+        Emit(directory, dialect, "0008_create_model_history.sql", RenderModelHistory(dialect));
+        Emit(directory, dialect, "0009_create_admin_governance.sql", RenderAdminGovernance(dialect));
     }
 
     private static void Emit(string directory, Dialect dialect, string fileName, List<string> lines)
@@ -206,6 +210,83 @@ internal static class SqlGenerator
 
         lines.AddRange(RenderCreateTable(SchemaCatalog.IdempotencyTable, dialect, idempotent: true));
         lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.IdempotencyTable, dialect, idempotent: true));
+
+        return lines;
+    }
+
+    private static List<string> RenderTimerJob(Dialect dialect)
+    {
+        var lines = new List<string>();
+        lines.AddRange(Banner(dialect));
+        lines.AddRange(dialect == Dialect.MySql ? HeaderTimerJobMySql : HeaderTimerJobSqlServer);
+
+        lines.AddRange(RenderCreateTable(SchemaCatalog.TimerJobTable, dialect, idempotent: true));
+        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.TimerJobTable, dialect, idempotent: true));
+
+        if (dialect == Dialect.SqlServer)
+        {
+            lines.AddRange(RenderTableComments([SchemaCatalog.TimerJobTable]));
+            lines.Add("go");
+        }
+
+        return lines;
+    }
+
+    private static List<string> RenderMigrationLog(Dialect dialect)
+    {
+        var lines = new List<string>();
+        lines.AddRange(Banner(dialect));
+        lines.AddRange(dialect == Dialect.MySql ? HeaderMigrationMySql : HeaderMigrationSqlServer);
+
+        lines.AddRange(RenderCreateTable(SchemaCatalog.MigrationTable, dialect, idempotent: true));
+        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.MigrationTable, dialect, idempotent: true));
+
+        if (dialect == Dialect.SqlServer)
+        {
+            lines.AddRange(RenderTableComments([SchemaCatalog.MigrationTable]));
+            lines.Add("go");
+        }
+
+        return lines;
+    }
+
+    private static List<string> RenderModelHistory(Dialect dialect)
+    {
+        var lines = new List<string>();
+        lines.AddRange(Banner(dialect));
+        lines.AddRange(dialect == Dialect.MySql ? HeaderModelHistoryMySql : HeaderModelHistorySqlServer);
+
+        lines.AddRange(RenderCreateTable(SchemaCatalog.ModelHistoryTable, dialect, idempotent: true));
+        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.ModelHistoryTable, dialect, idempotent: true));
+
+        if (dialect == Dialect.SqlServer)
+        {
+            lines.AddRange(RenderTableComments([SchemaCatalog.ModelHistoryTable]));
+            lines.Add("go");
+        }
+
+        return lines;
+    }
+
+    private static List<string> RenderAdminGovernance(Dialect dialect)
+    {
+        var lines = new List<string>();
+        lines.AddRange(Banner(dialect));
+        lines.AddRange(dialect == Dialect.MySql ? HeaderAdminGovernanceMySql : HeaderAdminGovernanceSqlServer);
+
+        TableDef[] tables = [SchemaCatalog.AdminAuditTable, SchemaCatalog.HistoryArchiveTable];
+
+        foreach (var table in tables)
+        {
+            lines.AddRange(RenderCreateTable(table, dialect, idempotent: true));
+            lines.AddRange(RenderTableScopedIndexes(table, dialect, idempotent: true));
+        }
+
+        if (dialect == Dialect.SqlServer)
+        {
+            lines.AddRange(RenderTableComments(tables));
+            lines.Add("go");
+        }
 
         return lines;
     }
@@ -744,6 +825,132 @@ internal static class SqlGenerator
         "--   2. 已初始化的库需单独执行：",
         "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0005_create_idempotency.sql",
         "--   3. STATUS_CODE_ 为空表示「已占位、仍在处理」，并发同键请求会得到 409。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderTimerJobMySql =>
+    [
+        "--  定时作业表（边界定时器）。",
+        "--",
+        "--  背景：引擎支持「用户任务 + 定时边界事件」，任务创建时写一条作业，到点由宿主轮询触发：",
+        "--        取消任务 → 沿边界事件出流继续。",
+        "--",
+        "--  注意：",
+        "--   1. 本表是 Activiti ACT_RU_TIMER_JOB 的裁剪版（只保留一次性定时所需列）；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0006_create_timer_job.sql",
+        "--   3. 本脚本幂等，可重复执行。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderTimerJobSqlServer =>
+    [
+        "--  定时作业表（边界定时器）。",
+        "--",
+        "--  背景：引擎支持「用户任务 + 定时边界事件」，任务创建时写一条作业，到点由宿主轮询触发：",
+        "--        取消任务 → 沿边界事件出流继续。",
+        "--",
+        "--  注意：",
+        "--   1. 本表是 Activiti ACT_RU_TIMER_JOB 的裁剪版（只保留一次性定时所需列）；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0006_create_timer_job.sql",
+        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderMigrationMySql =>
+    [
+        "--  流程实例迁移审计表。",
+        "--",
+        "--  背景：流程定义升级后，运行中的实例可以迁到同 key 的新版本。",
+        "--        历史表（ACT_HI_PROCINST）保持实例启动时的定义不变，",
+        "--        迁移动作用本表记录（源/目标定义、活动映射、原因、操作人）。",
+        "--",
+        "--  注意：",
+        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0007_create_migration_log.sql",
+        "--   3. 本脚本幂等，可重复执行。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderMigrationSqlServer =>
+    [
+        "--  流程实例迁移审计表。",
+        "--",
+        "--  背景：流程定义升级后，运行中的实例可以迁到同 key 的新版本。",
+        "--        历史表（ACT_HI_PROCINST）保持实例启动时的定义不变，",
+        "--        迁移动作用本表记录（源/目标定义、活动映射、原因、操作人）。",
+        "--",
+        "--  注意：",
+        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0007_create_migration_log.sql",
+        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderModelHistoryMySql =>
+    [
+        "--  流程模型版本历史（管理端发布治理）。",
+        "--",
+        "--  背景：设计器保存模型时会覆盖 bpmn_model.bpmn_xml；本表在每次保存/回滚时追加一版快照，",
+        "--        支持查看历史、回滚到任意版本，并记录操作人与动作。",
+        "--",
+        "--  注意：",
+        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0008_create_model_history.sql",
+        "--   3. 本脚本幂等，可重复执行。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderModelHistorySqlServer =>
+    [
+        "--  流程模型版本历史（管理端发布治理）。",
+        "--",
+        "--  背景：设计器保存模型时会覆盖 bpmn_model.bpmn_xml；本表在每次保存/回滚时追加一版快照，",
+        "--        支持查看历史、回滚到任意版本，并记录操作人与动作。",
+        "--",
+        "--  注意：",
+        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0008_create_model_history.sql",
+        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderAdminGovernanceMySql =>
+    [
+        "--  管理治理（审计 + 历史归档）。",
+        "--",
+        "--  admin_audit_log：转办 / 跳转 / 变量直写等高风险管理动作的审计留痕",
+        "--    （操作人、租户、动作、目标、结果、时间；不记录变量值）。",
+        "--  admin_history_archive：已结束实例的 ACT_HI_* 行 JSON 快照；",
+        "--    归档后原历史行在同一事务内删除，使 ACT_HI_* 保持轻量。",
+        "--",
+        "--  注意：",
+        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0009_create_admin_governance.sql",
+        "--   3. 本脚本幂等，可重复执行。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderAdminGovernanceSqlServer =>
+    [
+        "--  管理治理（审计 + 历史归档）。",
+        "--",
+        "--  admin_audit_log：转办 / 跳转 / 变量直写等高风险管理动作的审计留痕",
+        "--    （操作人、租户、动作、目标、结果、时间；不记录变量值）。",
+        "--  admin_history_archive：已结束实例的 ACT_HI_* 行 JSON 快照；",
+        "--    归档后原历史行在同一事务内删除，使 ACT_HI_* 保持轻量。",
+        "--",
+        "--  注意：",
+        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
+        "--   2. 已初始化的库需单独执行：",
+        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0009_create_admin_governance.sql",
+        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
         string.Empty,
     ];
 

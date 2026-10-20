@@ -84,7 +84,8 @@ public sealed class NoOrphanNodeRule : IProcessValidationRule
 
         foreach (var node in process.FindFlowElementsOfType<FlowNode>())
         {
-            if (node is StartEvent || node.IncomingFlows.Count > 0)
+            // 边界事件天然没有入流（它由挂靠活动上的定时器触发）
+            if (node is StartEvent or BoundaryEvent || node.IncomingFlows.Count > 0)
             {
                 continue;
             }

@@ -5,8 +5,12 @@ namespace NetBpm.Bpmn.Validation;
 /// <summary>
 /// 规则 10：监听器定义的形状校验 —— 事件必填（且取值合法）、实现方式必填。
 /// <para>
-/// 覆盖执行监听器（事件 start / take / end）、任务监听器（create / assignment / complete / delete）
+/// 覆盖执行监听器（事件 start / take / end）、任务监听器（create / assignment / complete）
 /// 与流程级事件监听器（events 逗号分隔，如 <c>TASK_COMPLETED</c>）。
+/// <para>
+/// <c>delete</c> 事件<b>尚未实现</b>（任务删除的各条路径都没有通知点）。过去允许配置却从不触发，
+/// 属于「配置了但没做」的静默差异，现在按项目原则在部署期显式拒绝。
+/// </para>
 /// </para>
 /// <para>
 /// 实现能否解析成已注册的委托由部署期的 <c>ServiceTaskDelegateGuard</c> 预检 ——
@@ -23,7 +27,7 @@ public sealed class ListenerConfigurationRule : IProcessValidationRule
         new(StringComparer.OrdinalIgnoreCase) { "start", "take", "end" };
 
     private static readonly HashSet<string> TaskEvents = new(StringComparer.OrdinalIgnoreCase)
-        { "create", "assignment", "complete", "delete" };
+        { "create", "assignment", "complete" };
 
     /// <inheritdoc />
     public IEnumerable<ValidationError> Validate(Process process)
@@ -108,15 +112,19 @@ public sealed class ListenerConfigurationRule : IProcessValidationRule
                 RuleName,
                 elementId,
                 nameof(TaskListener),
-                "任务监听器（activiti:taskListener）必须声明 event（create / assignment / complete / delete）。");
+                "任务监听器（activiti:taskListener）必须声明 event（create / assignment / complete）。");
         }
         else if (!TaskEvents.Contains(listener.Event))
         {
+            var hint = string.Equals(listener.Event, TaskListener.EventDelete, StringComparison.OrdinalIgnoreCase)
+                ? "：delete 事件尚未实现（任务删除不会通知），请改用 complete 事件或在宿主侧处理"
+                : string.Empty;
+
             yield return new ValidationError(
                 RuleName,
                 elementId,
                 nameof(TaskListener),
-                $"任务监听器的 event 只支持 create / assignment / complete / delete，实际为 '{listener.Event}'。");
+                $"任务监听器的 event 只支持 create / assignment / complete，实际为 '{listener.Event}'{hint}。");
         }
 
         foreach (var error in ValidateImplementation(elementId, nameof(TaskListener), listener.ClassName, listener.DelegateExpression, listener.Expression))

@@ -1,7 +1,9 @@
 import {
   AppstoreOutlined,
   ApartmentOutlined,
+  AuditOutlined,
   CloudServerOutlined,
+  DashboardOutlined,
   EyeOutlined,
   LogoutOutlined,
   UserOutlined,
@@ -19,6 +21,8 @@ const menuItems = [
   { key: '/process-types', icon: <ApartmentOutlined />, label: '流程类型' },
   { key: '/deployments', icon: <CloudServerOutlined />, label: '部署管理' },
   { key: '/monitoring', icon: <EyeOutlined />, label: '实例监控' },
+  { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
+  { key: '/metrics', icon: <DashboardOutlined />, label: '管理指标' },
 ];
 
 export default function AppLayout() {

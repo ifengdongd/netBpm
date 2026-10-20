@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using NetBpm.Bpmn.Model;
 using NetBpm.El;
 using NetBpm.Engine.Execution;
+using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Script;
 using NetBpm.Engine.Services;
 using NetBpm.Engine.Tasks;
@@ -104,7 +105,88 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
                 .ConfigureAwait(false);
         }
 
+        // 定时边界事件：任务创建时挂作业（到点由宿主轮询触发，取消任务并转入边界分支）
+        await ScheduleBoundaryTimersAsync(userTask, execution, ct).ConfigureAwait(false);
+
         // 用户任务不离开节点：等 CompleteTaskCommand 删除任务后由 TriggerExecutionOperation 推进
+    }
+
+    /// <summary>
+    /// 为该用户任务挂上全部定时边界事件。
+    /// <para>
+    /// 只在<b>任务真正进入等待</b>后创建（skipExpression 跳过时不创建），
+    /// 每个边界事件一条作业；任务完成 / 跳转 / 实例结束时由对应命令删除。
+    /// </para>
+    /// </summary>
+    private async ValueTask ScheduleBoundaryTimersAsync(
+        UserTask userTask,
+        IDelegateExecution execution,
+        CancellationToken ct)
+    {
+        var timerJobs = Services.TimerJobManager;
+        var resolver = Services.ProcessDefinitionResolver;
+
+        if (timerJobs is null || resolver is null || string.IsNullOrEmpty(userTask.Id))
+        {
+            return;
+        }
+
+        var process = await resolver
+            .ResolveProcessModelAsync(execution.ProcessDefinitionId, ct)
+            .ConfigureAwait(false);
+
+        if (process is null)
+        {
+            return;
+        }
+
+        var boundaries = process
+            .FindFlowElementsOfType<BoundaryEvent>()
+            .Where(boundary =>
+                boundary.Timer is not null
+                && string.Equals(boundary.AttachedToRef, userTask.Id, StringComparison.Ordinal))
+            .ToArray();
+
+        if (boundaries.Length == 0)
+        {
+            return;
+        }
+
+        var executionEntity = execution.AsEntity();
+        var now = DateTime.UtcNow;
+
+        foreach (var boundary in boundaries)
+        {
+            // 非中断型部署期已拒绝；这里再守一道，避免绕过校验直接塞模型
+            if (!boundary.CancelActivity)
+            {
+                continue;
+            }
+
+            var (due, error) = await TimerDueDate
+                .ComputeAsync(boundary.Timer!, Services.ExpressionManager, execution, now, ct)
+                .ConfigureAwait(false);
+
+            if (error is not null)
+            {
+                throw new EngineException($"边界事件 '{boundary.Id}' 的定时器无法创建：{error}");
+            }
+
+            await timerJobs.InsertAsync(
+                new TimerJobEntity
+                {
+                    Id = Services.IdGenerator.NextId(),
+                    ExecutionId = executionEntity.Id,
+                    ProcessInstanceId = execution.ProcessInstanceId ?? executionEntity.Id,
+                    ProcessDefinitionId = execution.ProcessDefinitionId,
+                    ActivityId = userTask.Id,
+                    BoundaryEventId = boundary.Id ?? string.Empty,
+                    DueDate = due,
+                    TenantId = executionEntity.TenantId,
+                    CreateTime = now,
+                },
+                ct).ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />

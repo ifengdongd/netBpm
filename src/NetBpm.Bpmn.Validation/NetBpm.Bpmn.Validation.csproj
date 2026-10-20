@@ -7,6 +7,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
+    <!--
+      expression-parseable 规则需要在部署期预解析 EL（与运行期同一个解析器），
+      否则条件写错要到流程跑到该网关时才炸。El 不依赖其它工程，不会形成环。
+    -->
+    <ProjectReference Include="..\NetBpm.El\NetBpm.El.csproj" />
   </ItemGroup>
 
 </Project>

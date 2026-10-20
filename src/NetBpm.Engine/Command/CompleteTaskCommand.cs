@@ -115,6 +115,12 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
 
         await taskManager.DeleteTaskAsync(task, null, ct).ConfigureAwait(false);
 
+        // 任务已结束：挂在它上面的定时边界作业一并作废（否则到点会对着空任务空转）
+        if (execution is not null && services.TimerJobManager is { } timerJobs)
+        {
+            await timerJobs.DeleteByExecutionAsync(execution.Id, ct).ConfigureAwait(false);
+        }
+
         // 继续流程（独立任务没有执行，不需要推进）
         if (execution is not null)
         {

@@ -4,7 +4,7 @@ using NetBpm.Engine.Services;
 namespace NetBpm.Engine.Behavior;
 
 /// <summary>
-/// <see cref="IActivityBehaviorFactory"/> 的默认实现（8 个具体行为的唯一分发点）。
+/// <see cref="IActivityBehaviorFactory"/> 的默认实现（全部具体行为的唯一分发点）。
 /// <para>元素 → 行为 的对照表见开发计划 §1.2。</para>
 /// </summary>
 public sealed class ActivityBehaviorFactory : IActivityBehaviorFactory
@@ -32,6 +32,8 @@ public sealed class ActivityBehaviorFactory : IActivityBehaviorFactory
         {
             // 事件
             StartEvent => new NoneStartEventActivityBehavior(services),
+            BoundaryEvent => new BoundaryEventActivityBehavior(services),
+            EndEvent { IsTerminate: true } => new TerminateEndEventActivityBehavior(services),
             EndEvent => new NoneEndEventActivityBehavior(services),
 
             // 网关

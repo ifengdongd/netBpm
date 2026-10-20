@@ -28,6 +28,8 @@ public static class EngineTableCleaner
         "ACT_HI_TASKINST",
         "ACT_HI_PROCINST",
 
+        "ACT_HI_MIGRATION",
+        "ACT_RU_TIMER_JOB",      // 0006 新增；无外键，先于执行删除
         "ACT_RU_VARIABLE",       // → ACT_RU_EXECUTION
         "ACT_RU_IDENTITYLINK",   // → ACT_RU_TASK / ACT_RU_EXECUTION / ACT_RE_PROCDEF
         "ACT_RU_TASK",           // → ACT_RU_EXECUTION / ACT_RE_PROCDEF
@@ -38,13 +40,38 @@ public static class EngineTableCleaner
     ];
 
     /// <summary>清空全部引擎表（不动 <c>ACT_GE_PROPERTY</c>，否则会丢掉 <c>next.dbid</c> 与结构版本）。</summary>
+    /// <remarks>
+    /// 逐表探测是否存在：<c>0006</c>（定时作业）是可选脚本，老库没执行过时清库不应直接报错。
+    /// 探测失败（缺表 / 无权限）一律跳过 —— 本方法只用于开发与 CI，宁可少删也不要中断。
+    /// </remarks>
     public static void Purge(IDbSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
 
         foreach (var table in OrderedTables)
         {
+            if (!TableExists(session, table))
+            {
+                continue;
+            }
+
             session.Connection.Execute($"delete from {table}", transaction: session.Transaction);
+        }
+    }
+
+    private static bool TableExists(IDbSession session, string table)
+    {
+        try
+        {
+            session.Connection.Execute(
+                $"select 1 from {table} where 1 = 0",
+                transaction: session.Transaction);
+
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 }

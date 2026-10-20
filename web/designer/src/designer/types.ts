@@ -71,6 +71,9 @@ export interface CanvasService {
   scrollToElement(element: unknown): void;
   /** 容器尺寸变化后重算画布（从 hidden 视图切回编辑器时必须调用）。 */
   resized(): void;
+  /** 给元素挂/摘 CSS 标记（校验结果直接标在画布上）。 */
+  addMarker(element: string | unknown, marker: string): void;
+  removeMarker(element: string | unknown, marker: string): void;
   /** 无参读取当前缩放；传数字设置缩放；传 'fit-viewport' 适应画布。 */
   zoom(newZoom?: number | string, center?: { x: number; y: number } | 'auto'): unknown;
 }

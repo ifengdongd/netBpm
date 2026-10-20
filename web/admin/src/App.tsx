@@ -1,8 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import AppLayout from './components/AppLayout';
+import AuditPage from './pages/AuditPage';
 import DeploymentsPage from './pages/DeploymentsPage';
 import LoginPage from './pages/LoginPage';
+import MetricsPage from './pages/MetricsPage';
 import ModelEditorPage from './pages/ModelEditorPage';
 import ModelsPage from './pages/ModelsPage';
 import MonitoringPage from './pages/MonitoringPage';
@@ -19,6 +21,8 @@ export default function App() {
         <Route path="/process-types" element={<ProcessTypesPage />} />
         <Route path="/deployments" element={<DeploymentsPage />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
+        <Route path="/audit" element={<AuditPage />} />
+        <Route path="/metrics" element={<MetricsPage />} />
         <Route path="*" element={<Navigate to="/models" replace />} />
       </Route>
     </Routes>

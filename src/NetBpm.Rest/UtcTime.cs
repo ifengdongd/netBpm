@@ -8,7 +8,7 @@ namespace NetBpm.Rest;
 /// 这里把查询时间统一归一为 UTC：无偏移按 UTC 解释，本地按本地时区转换。
 /// </para>
 /// </summary>
-internal static class UtcTime
+public static class UtcTime
 {
     public static DateTime? Normalize(DateTime? value) => value is { } v ? Normalize(v) : null;
 

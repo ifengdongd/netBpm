@@ -1,5 +1,7 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NetBpm.Demo.Order;
 using NetBpm.Demo.Storage.DataAccess;
+using NetBpm.Identity;
 using NetBpm.Persistence;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
@@ -15,9 +17,11 @@ namespace NetBpm.Demo.Storage;
 /// </para>
 /// <list type="bullet">
 ///   <item><description><b>MySql</b>：MySqlWorkflowDataStore（instances / instance_current_task /
-///     deal_history / workflow_parameters 四张流程表）+ MySqlOrderBillStore（order_bill）；</description></item>
+///     deal_history / workflow_parameters 四张流程表）+ MySqlOrderBillStore（order_bill）
+///     + MySqlOrgDirectory（四张 sys_* 组织架构表）；</description></item>
 ///   <item><description><b>SqlServer</b>：SqlServerWorkflowDataStore + SqlServerOrderBillStore
-///     （同一套表结构，落在 <c>wf</c> schema，见 db/sqlserver/0003/0006/0007）；</description></item>
+///     （同一套表结构，落在 <c>wf</c> schema，见 db/sqlserver/0003/0006/0007），
+///     组织架构仍用 InMemoryOrgDirectory；</description></item>
 ///   <item><description><b>IWorkflowStoreInspector</b>：业务数据核对端点（/api/leave/business）的只读口子。</description></item>
 /// </list>
 /// <para>
@@ -48,6 +52,10 @@ public static class DemoServiceCollectionExtensions
                 services.AddSingleton<IWorkflowStoreInspector>(sp =>
                     sp.GetRequiredService<SqlServerWorkflowDataStore>());
                 services.AddSingleton<IOrderBillStore, SqlServerOrderBillStore>();
+
+                // 组织架构：SqlServer 演示模式沿用内置固定数据（db/sqlserver/0003 同样建了 sys_* 表，
+                // 需要真表版时照 MySqlOrgDirectory 平移一份即可）
+                RegisterInMemoryOrgDirectory(services);
                 break;
 
             default:
@@ -56,9 +64,23 @@ public static class DemoServiceCollectionExtensions
                 services.AddSingleton<IWorkflowStoreInspector>(sp =>
                     sp.GetRequiredService<MySqlWorkflowDataStore>());
                 services.AddSingleton<IOrderBillStore, MySqlOrderBillStore>();
+
+                // 组织架构：读真表（sys_dept / sys_emp / sys_emp_group / sys_emp_group_member）
+                services.AddSingleton<MySqlOrgDirectory>();
+                services.AddSingleton<IOrgDirectory>(sp => sp.GetRequiredService<MySqlOrgDirectory>());
+                services.Replace(ServiceDescriptor.Singleton<IUserGroupManager>(
+                    sp => sp.GetRequiredService<MySqlOrgDirectory>()));
                 break;
         }
 
         return services;
+    }
+
+    private static void RegisterInMemoryOrgDirectory(IServiceCollection services)
+    {
+        services.AddSingleton<InMemoryOrgDirectory>();
+        services.AddSingleton<IOrgDirectory>(sp => sp.GetRequiredService<InMemoryOrgDirectory>());
+        services.Replace(ServiceDescriptor.Singleton<IUserGroupManager>(
+            sp => sp.GetRequiredService<InMemoryOrgDirectory>()));
     }
 }

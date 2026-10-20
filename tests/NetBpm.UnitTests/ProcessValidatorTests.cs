@@ -322,6 +322,191 @@ public sealed class ProcessValidatorTests
         Assert.Contains(exception.Errors, error => error.Rule == "node-has-outgoing-flow");
     }
 
+    [Fact]
+    public void InvalidConditionExpression_ShouldBeRejectedAtDeployTime()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         targetNamespace="http://netbpm/test">
+              <process id="p11" isExecutable="true">
+                <startEvent id="start" />
+                <manualTask id="work" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="work">
+                  <conditionExpression xsi:type="tFormalExpression">${a ==}</conditionExpression>
+                </sequenceFlow>
+                <sequenceFlow id="f2" sourceRef="work" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var errors = Validator.Validate(Parse(xml));
+
+        Assert.Contains(errors, error => error.ElementId == "f1"
+            && error.Rule == "expression-parseable"
+            && error.IsError);
+    }
+
+    [Fact]
+    public void DefaultFlowPointingToForeignFlow_ShouldBeRejected()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         targetNamespace="http://netbpm/test">
+              <process id="p12" isExecutable="true">
+                <startEvent id="start" />
+                <exclusiveGateway id="gw" default="typo" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="gw" />
+                <sequenceFlow id="f2" sourceRef="gw" targetRef="end">
+                  <conditionExpression xsi:type="tFormalExpression">${a}</conditionExpression>
+                </sequenceFlow>
+                <sequenceFlow id="f3" sourceRef="gw" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var errors = Validator.Validate(Parse(xml));
+
+        Assert.Contains(errors, error => error.ElementId == "gw"
+            && error.Rule == "default-flow"
+            && error.IsError);
+    }
+
+    [Fact]
+    public void ConditionOnDefaultFlow_ShouldBeWarning()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         targetNamespace="http://netbpm/test">
+              <process id="p13" isExecutable="true">
+                <startEvent id="start" />
+                <exclusiveGateway id="gw" default="f2" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="gw" />
+                <sequenceFlow id="f2" sourceRef="gw" targetRef="end">
+                  <conditionExpression xsi:type="tFormalExpression">${a}</conditionExpression>
+                </sequenceFlow>
+              </process>
+            </definitions>
+            """;
+
+        var results = Validator.Validate(Parse(xml));
+
+        Assert.Contains(results, result => result.ElementId == "gw"
+            && result.Rule == "default-flow"
+            && result.Severity == ValidationSeverity.Warning);
+        Assert.DoesNotContain(results, result => result.Severity == ValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void ProcessIdWithColon_ShouldBeWarning()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="http://netbpm/test">
+              <process id="bad:key" isExecutable="true">
+                <startEvent id="start" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var results = Validator.Validate(Parse(xml));
+
+        // Activiti 允许任意 id（语料里就有 myProcess{0}），因此只提示、不阻断
+        Assert.Contains(results, result => result.Rule == "process-id"
+            && result.Severity == ValidationSeverity.Warning);
+        Assert.DoesNotContain(results, result => result.Severity == ValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void TimerStartEvent_ShouldBeRejectedInsteadOfSilentlyIgnored()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="http://netbpm/test">
+              <process id="p14" isExecutable="true">
+                <startEvent id="start">
+                  <timerEventDefinition>
+                    <timeDuration>PT1H</timeDuration>
+                  </timerEventDefinition>
+                </startEvent>
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var errors = Validator.Validate(Parse(xml));
+
+        Assert.Contains(errors, error => error.ElementId == "start"
+            && error.Rule == "unsupported-event-definition"
+            && error.IsError);
+    }
+
+    [Fact]
+    public void UnknownActivitiAttribute_ShouldBeWarning()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="p15" isExecutable="true">
+                <startEvent id="start" />
+                <serviceTask id="svc" activiti:delegateExpression="doWork" activiti:asyncBefore="true" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="svc" />
+                <sequenceFlow id="f2" sourceRef="svc" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var results = Validator.Validate(Parse(xml));
+
+        Assert.Contains(results, result => result.ElementId == "svc"
+            && result.Rule == "unknown-activiti-attribute"
+            && result.Severity == ValidationSeverity.Warning);
+        Assert.DoesNotContain(results, result => result.Severity == ValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void TaskListenerDeleteEvent_ShouldBeRejectedBecauseNotImplemented()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="p16" isExecutable="true">
+                <startEvent id="start" />
+                <userTask id="approve" activiti:assignee="kermit">
+                  <extensionElements>
+                    <activiti:taskListener event="delete" class="SomeListener" />
+                  </extensionElements>
+                </userTask>
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="approve" />
+                <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var errors = Validator.Validate(Parse(xml));
+
+        Assert.Contains(errors, error => error.ElementId == "approve"
+            && error.Rule == "listener-configuration"
+            && error.IsError);
+    }
+
     private static Bpmn.Model.Process Parse(string xml) =>
         new BpmnXmlConverter()
             .ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(xml)))

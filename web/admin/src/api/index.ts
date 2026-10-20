@@ -1,5 +1,8 @@
 import { http, list } from './client';
 import type {
+  AdminAuditListResponse,
+  AdminAuditPurgeResponse,
+  AdminMetricsResponse,
   BpmnModelDetail,
   BpmnModelSummary,
   BatchResultResponse,
@@ -163,4 +166,58 @@ export const runtimeApi = {
 
   taskStats: (params?: { timeZoneOffsetMinutes?: number }) =>
     http.get<TaskStatsResponse>(`/api/runtime/tasks/stats${params?.timeZoneOffsetMinutes !== undefined ? `?timeZoneOffsetMinutes=${params.timeZoneOffsetMinutes}` : ''}`),
+};
+
+// ─────────────────────────── 管理治理 · 审计 ───────────────────────────
+
+export interface AuditQuery {
+  actor?: string;
+  action?: string;
+  targetType?: string;
+  targetId?: string;
+  processInstanceId?: string;
+  tenantId?: string;
+  success?: boolean;
+  since?: string;
+  until?: string;
+  firstResult?: number;
+  maxResults?: number;
+}
+
+function toQuery<T extends object>(params: T): string {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+
+    search.set(key, String(value));
+  }
+
+  const query = search.toString();
+  return query.length > 0 ? `?${query}` : '';
+}
+
+export const auditApi = {
+  /** 分页查管理动作审计（`{ total, items }` 结构，不是 envelope）。 */
+  list: (params?: AuditQuery) => http.get<AdminAuditListResponse>(`/api/admin/audit${toQuery(params ?? {})}`),
+
+  /** 保留策略清理：删除 `before` 之前的记录，返回删除条数。 */
+  purge: (params: { before: string; tenantId?: string }) =>
+    http.del<AdminAuditPurgeResponse>(`/api/admin/audit${toQuery(params)}`),
+};
+
+// ─────────────────────────── 管理治理 · 指标 ───────────────────────────
+
+export const metricsApi = {
+  /**
+   * 管理指标。租户口径由令牌决定（受限身份传别的租户会被 403）；
+   * `timeZoneOffsetMinutes` 用于「今日到期」的自然日换算。
+   */
+  get: (params?: { windowDays?: number; timeZoneOffsetMinutes?: number }) =>
+    http.get<AdminMetricsResponse>(
+      `/api/admin/metrics${toQuery({
+        windowDays: params?.windowDays,
+        timeZoneOffsetMinutes: params?.timeZoneOffsetMinutes,
+      })}`,
+    ),
 };

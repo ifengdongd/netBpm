@@ -4,6 +4,7 @@ using NetBpm.Bpmn.Model;
 using NetBpm.Engine;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Tasks;
 using NetBpm.Persistence.Database;
 
@@ -53,6 +54,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
     private readonly ITaskManager _taskManager;
     private readonly IVariableInstanceManager _variableInstances;
     private readonly IHistoryManager _historyManager;
+    private readonly ITimerJobManager? _timerJobs;
     private readonly ConditionalWeakTable<IDbSession, SessionCache> _caches = new();
 
     public DapperExecutionManager(
@@ -60,7 +62,8 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         IIdGenerator idGenerator,
         ITaskManager taskManager,
         IVariableInstanceManager variableInstances,
-        IHistoryManager historyManager)
+        IHistoryManager historyManager,
+        ITimerJobManager? timerJobs = null)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(idGenerator);
@@ -73,6 +76,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         _taskManager = taskManager;
         _variableInstances = variableInstances;
         _historyManager = historyManager;
+        _timerJobs = timerJobs;
     }
 
     /// <summary>
@@ -233,6 +237,28 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         var states = await QueryStatesAsync(session, SelectByIdSql, new { executionId }, ct).ConfigureAwait(false);
 
         return states.Count == 0 ? null : Materialize(cache, states[0]);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<IExecutionEntity>> FindAllByProcessInstanceIdAsync(
+        string processInstanceId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var cache = GetCache(session);
+
+        await FlushAsync(session, ct).ConfigureAwait(false);
+
+        var states = await QueryStatesAsync(
+            session,
+            SelectByProcessInstanceSql,
+            new { processInstanceId },
+            ct).ConfigureAwait(false);
+
+        return [.. states.Select(state => (IExecutionEntity)Materialize(cache, state))];
     }
 
     /// <inheritdoc />
@@ -398,6 +424,12 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         var cache = GetCache(session);
 
         await FlushAsync(session, ct).ConfigureAwait(false);
+
+        // 定时作业：实例结束/终止/被删除后必须一并清掉，否则轮询会一直对着已消失的执行空转
+        if (_timerJobs is not null)
+        {
+            await _timerJobs.DeleteByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+        }
 
         // 流程实例级联清理：先摘掉挂在流程实例上的外部引用（这些外键在 DDL 里没有级联删除）
         // 任务与流程实例级身份关系的清理交给任务管理器（对应 TaskEntityManagerImpl.deleteTasksByProcessInstanceId）
@@ -1012,6 +1044,11 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
     private const string CountActiveChildrenOfProcessInstanceSql =
         "select count(*) from ACT_RU_EXECUTION " +
         "where PROC_INST_ID_ = @processInstanceId and PARENT_ID_ is not null and IS_ACTIVE_ = 1";
+
+    /// <summary>整棵执行树（根执行的 PROC_INST_ID_ = ID_，因此同一条 SQL 覆盖根与子执行）。</summary>
+    private const string SelectByProcessInstanceSql =
+        "select " + ExecutionColumns.All +
+        " from ACT_RU_EXECUTION where PROC_INST_ID_ = @processInstanceId order by ID_";
 
     private const string SelectChildExecutionsOfProcessInstanceSql =
         "select " + ExecutionColumns.All +

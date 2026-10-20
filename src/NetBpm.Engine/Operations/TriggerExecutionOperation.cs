@@ -38,6 +38,12 @@ public sealed class TriggerExecutionOperation : IOperation
     /// <inheritdoc />
     public async ValueTask RunAsync(CancellationToken ct = default)
     {
+        // 终止结束事件 / 边界定时器可能在同一条命令里已经删掉了该执行
+        if (_execution.IsEnded)
+        {
+            return;
+        }
+
         var currentFlowElement = await ResolveCurrentFlowElementAsync(ct).ConfigureAwait(false);
 
         switch (currentFlowElement)

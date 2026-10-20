@@ -15,7 +15,12 @@
  */
 import Modeler from 'bpmn-js/lib/Modeler';
 import { BpmnPropertiesPanelModule } from 'bpmn-js-properties-panel';
-import { credentialHeaders } from './auth';
+import {
+  credentialHeaders,
+  describeHttpFailure,
+  MODEL_READ_SCOPE,
+  MODEL_WRITE_SCOPE,
+} from './auth';
 import activitiModdle from './activiti-moddle.json';
 import NetBpmPaletteProvider from './palette';
 import NetBpmPropertiesProvider from './designer/propertiesProvider';
@@ -105,6 +110,12 @@ let services: ModelerServices | null = null;
 /** 当前编辑中的模型 id（服务端模式的 upsert 键；localStorage 模式也用它保持链接稳定）。 */
 let currentModelId: string | null = null;
 
+/**
+ * 画布是否有未保存的修改。
+ * 关闭/刷新页面与「返回列表」都会拦截 —— 过去两者都是直接跳走，误点即丢图。
+ */
+let editorDirty = false;
+
 function ensureModeler(): ModelerServices {
   if (services !== null) {
     return services;
@@ -144,8 +155,14 @@ function ensureModeler(): ModelerServices {
   };
 
   // 导入完成与每次编辑后重跑校验（commandStack.changed 覆盖属性面板的写入）
-  modeler.on('import.done', () => refreshValidation());
-  modeler.on('commandStack.changed', () => refreshValidation());
+  modeler.on('import.done', () => {
+    editorDirty = false;
+    refreshValidation();
+  });
+  modeler.on('commandStack.changed', () => {
+    editorDirty = true;
+    refreshValidation();
+  });
 
   return services;
 }
@@ -309,7 +326,10 @@ async function renderDeployList(): Promise<void> {
         detail === 'Internal Server Error' || detail === ''
           ? '（无法从后端获取错误详情：请确认 NetBpm.Rest 已在 http://localhost:5080 启动，且数据库可连接）'
           : '';
-      setDeployStatus(`加载失败：${detail}${hint}`, true);
+      setDeployStatus(
+        `加载失败：${describeHttpFailure(response.status, detail, MODEL_READ_SCOPE)}${hint}`,
+        true,
+      );
       return;
     }
 
@@ -366,6 +386,9 @@ function refreshValidation(): DraftIssue[] {
 
   const issues = validateDiagram(services.registry);
 
+  // 把问题直接标到画布上：长流程只看底部清单很难定位，标红/标黄后才能"一眼看到错在哪"
+  applyIssueMarkers(services, issues);
+
   if (issuesElement !== null) {
     renderIssues(issuesElement, issues, focusElement);
   }
@@ -373,6 +396,32 @@ function refreshValidation(): DraftIssue[] {
   setStatus(summarize(issues), hasBlockingError(issues));
 
   return issues;
+}
+
+/** 清掉上一次的校验标记，再按「错误优先」给每个元素挂一个标记。 */
+function applyIssueMarkers(current: ModelerServices, issues: DraftIssue[]): void {
+  for (const element of current.registry.getAll()) {
+    current.canvas.removeMarker(element.id, 'netbpm-error');
+    current.canvas.removeMarker(element.id, 'netbpm-warning');
+  }
+
+  const markerByElement = new Map<string, string>();
+
+  for (const issue of issues) {
+    if (issue.elementId === undefined || current.registry.get(issue.elementId) === undefined) {
+      continue;
+    }
+
+    if (issue.severity === 'error') {
+      markerByElement.set(issue.elementId, 'netbpm-error');
+    } else if (!markerByElement.has(issue.elementId)) {
+      markerByElement.set(issue.elementId, 'netbpm-warning');
+    }
+  }
+
+  for (const [elementId, marker] of markerByElement) {
+    current.canvas.addMarker(elementId, marker);
+  }
 }
 
 function focusElement(elementId: string): void {
@@ -511,6 +560,7 @@ async function save(): Promise<void> {
       editorTitleElement.textContent = record.name;
     }
 
+    editorDirty = false;
     setStatus(`已保存：${record.name}（${record.processId}）`);
   } catch (error) {
     setStatus(`保存失败：${(error as Error).message}`, true);
@@ -532,7 +582,15 @@ async function deployXml(xml: string): Promise<{ ok: boolean; message: string; v
     const payload = await response.json();
 
     if (!response.ok) {
-      return { ok: false, message: `部署被拒绝：${payload.message ?? response.statusText}`, version: 0 };
+      return {
+        ok: false,
+        message: `部署被拒绝：${describeHttpFailure(
+          response.status,
+          payload.message ?? response.statusText,
+          MODEL_WRITE_SCOPE,
+        )}`,
+        version: 0,
+      };
     }
 
     return {
@@ -601,7 +659,10 @@ async function loadDefinitionFromQuery(): Promise<boolean> {
   });
 
   if (!response.ok) {
-    setStatus(`回显失败：${response.statusText}`, true);
+    setStatus(
+      `回显失败：${describeHttpFailure(response.status, response.statusText, MODEL_READ_SCOPE)}`,
+      true,
+    );
     return true;
   }
 
@@ -711,12 +772,27 @@ fileInputList?.addEventListener('change', () => {
   });
 });
 
-// 编辑器：返回
+// 编辑器：返回（有未保存修改时先确认，避免误点丢图）
 document.querySelector('#btn-back')?.addEventListener('click', () => {
+  if (editorDirty && !window.confirm('当前流程图有未保存的修改，确定返回列表吗？')) {
+    return;
+  }
+
+  editorDirty = false;
   currentModelId = null;
   clearModelIdUrl();
   void renderList();
   showView('models');
+});
+
+// 关闭/刷新页面：浏览器原生「离开确认」（提示文案由浏览器决定，不能自定义）
+window.addEventListener('beforeunload', (event) => {
+  if (!editorDirty) {
+    return;
+  }
+
+  event.preventDefault();
+  event.returnValue = '';
 });
 
 fileInputEditor?.addEventListener('change', () => {

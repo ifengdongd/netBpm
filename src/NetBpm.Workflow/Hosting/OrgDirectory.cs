@@ -25,10 +25,21 @@ public sealed record OrgEmployee(string DomainAccount, string Name, string DeptN
 /// 负责把这两样东西翻译成人能看懂的姓名 / 部门 / 审批人名单。
 /// </para>
 /// <para>
-/// 两种实现与业务数据存储一起切换（见 Program.cs）：
-/// JSON 演示模式用 <see cref="InMemoryOrgDirectory"/>（数据与引擎表的演示账号对齐），
-/// MySQL 模式用 <see cref="MySqlOrgDirectory"/>（落到 0005 建的 sys_* 四张表）。
+/// Demo 有两份实现，随业务数据存储按 <c>NetBpm:DatabaseType</c> 一起切换（见 Demo 的
+/// <c>AddDemoStores</c>）：
 /// </para>
+/// <list type="bullet">
+///   <item><description>
+///   <b>MySql</b>：<c>MySqlOrgDirectory</c>（Demo 存储层）—— 直接读 0003 建的四张
+///   <c>sys_dept</c> / <c>sys_emp</c> / <c>sys_emp_group</c> / <c>sys_emp_group_member</c> 表，
+///   按租户过滤，演示语义与内存版一致（换库不换人）；
+///   </description></item>
+///   <item><description>
+///   <b>SqlServer / JSON</b>：<see cref="InMemoryOrgDirectory"/> —— 内置一套与 e2e /
+///   演示页对齐的固定数据（SqlServer 模式的 sys_* 表结构相同，需要真表版时照
+///   <c>MySqlOrgDirectory</c> 平移一份即可）。
+///   </description></item>
+/// </list>
 /// </remarks>
 public interface IOrgDirectory
 {

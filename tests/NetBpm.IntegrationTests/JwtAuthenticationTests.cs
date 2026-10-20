@@ -72,9 +72,9 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
             Assert.Equal(HttpStatusCode.Unauthorized, wrongAudience.StatusCode);
         }
 
-        // 签名、iss、aud、有效期全部正确
+        // 签名、iss、aud、有效期全部正确（读设计器数据需要 model.read scope）
         using (var valid = await SendWithTokenAsync(
-            client, CreateToken(), "/api/designer/definitions"))
+            client, CreateToken(scopes: "netbpm.admin.model.read"), "/api/designer/definitions"))
         {
             Assert.True(valid.IsSuccessStatusCode, $"有效 JWT 仍被拒绝：{valid.StatusCode}");
         }
@@ -95,7 +95,7 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
             HttpMethod.Post, new Uri("/api/designer/deploy", UriKind.Relative)))
         {
             deployRequest.Headers.Authorization = new AuthenticationHeaderValue(
-                "Bearer", CreateToken(userId: "designer", tenantId: "tenant-jwt"));
+                "Bearer", CreateToken(userId: "designer", tenantId: "tenant-jwt", scopes: "netbpm.admin"));
             deployRequest.Content = content;
 
             using var deploy = await client.SendAsync(deployRequest, Ct);
@@ -390,7 +390,9 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
         // 4) 部署仍有运行实例时删除 → 409
         string deploymentId;
         using (var definitions = await SendWithTokenAsync(
-            client, token, "/api/designer/definitions?key=jwt-single"))
+            client,
+            CreateToken(userId: "ops", tenantId: "tenant-jwt", scopes: "netbpm.admin.model.read"),
+            "/api/designer/definitions?key=jwt-single"))
         {
             var body = await definitions.Content.ReadAsStringAsync(Ct);
             deploymentId = JsonDocument.Parse(body).RootElement[0]
@@ -400,7 +402,9 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
         using (var delete = new HttpRequestMessage(
             HttpMethod.Delete, new Uri($"/api/designer/deployments/{deploymentId}", UriKind.Relative)))
         {
-            delete.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            // 删部署需要管理 scope（本用例只关心「仍有运行实例 → 409」）
+            delete.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer", CreateToken(userId: "ops", tenantId: "tenant-jwt", scopes: "netbpm.admin"));
 
             using var response = await client.SendAsync(delete, Ct);
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -578,7 +582,7 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
             HttpMethod.Post, new Uri("/api/designer/deploy", UriKind.Relative)))
         {
             deployRequest.Headers.Authorization = new AuthenticationHeaderValue(
-                "Bearer", CreateToken(userId: "designer", tenantId: "tenant-jwt"));
+                "Bearer", CreateToken(userId: "designer", tenantId: "tenant-jwt", scopes: "netbpm.admin"));
             deployRequest.Content = new StringContent(SingleTaskProcess(), Encoding.UTF8, "text/xml");
 
             using var deploy = await client.SendAsync(deployRequest, Ct);
@@ -813,10 +817,13 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
         string token,
         string businessKey)
     {
+        // 部署需要管理 scope：单独签一个同租户的部署令牌，避免给业务令牌（办理人 / 发起人）附带管理能力
+        var deployToken = CreateToken(userId: "deployer", tenantId: "tenant-jwt", scopes: "netbpm.admin");
+
         using (var deployRequest = new HttpRequestMessage(
             HttpMethod.Post, new Uri("/api/designer/deploy", UriKind.Relative)))
         {
-            deployRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            deployRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", deployToken);
             deployRequest.Content = new StringContent(SingleTaskProcess(), Encoding.UTF8, "text/xml");
 
             using var deploy = await client.SendAsync(deployRequest, Ct);

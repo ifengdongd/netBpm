@@ -126,6 +126,12 @@ public sealed class MoveActivityCommand : ICommand<Unit>
             await taskManager.DeleteTaskAsync(task, $"{_reason} → {_targetActivityId}", ct).ConfigureAwait(false);
         }
 
+        // 4.1 旧节点上的定时边界作业作废（目标节点若是用户任务，会按它自己的边界事件重新挂）
+        if (services.TimerJobManager is { } timerJobs)
+        {
+            await timerJobs.DeleteByExecutionAsync(current.Id, ct).ConfigureAwait(false);
+        }
+
         // 5. 收口当前活动的历史行（只收历史，不产生"活动完成"语义 —— 与执行删除清理同口径）
         if (current.CurrentActivityId is not null)
         {

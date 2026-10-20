@@ -1,10 +1,8 @@
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using NetBpm.Demo.Common;
 using NetBpm.Demo.Leave;
 using NetBpm.Demo.Order;
 using NetBpm.Demo.Storage;
 using NetBpm.Demo.Workflow;
-using NetBpm.Identity;
 using NetBpm.Runtime;
 using NetBpm.Workflow;
 using NetBpm.Workflow.Hosting;
@@ -24,6 +22,9 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.P
 // 引擎：落真库（ACT_* 表，方言随 NetBpm:DatabaseType）—— 必须与业务数据一致（内存执行树会与真库 instances 撞号）
 builder.Services.AddNetBpm(builder.Configuration);
 
+// 定时边界事件：后台轮询 ACT_RU_TIMER_JOB（NetBpm:Timer 可调间隔 / 关闭）
+builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
+
 // 业务数据存储：方言随 NetBpm:DatabaseType（引擎同一个库，双方言业务表与 ACT_* 表同库同 schema、表名逐字相同）
 builder.Services.AddDemoStores(builder.Configuration);
 
@@ -31,13 +32,11 @@ builder.Services.AddDemoStores(builder.Configuration);
 builder.Services.AddSingleton<IBusinessProcess, OrderBusinessProcess>();
 builder.Services.AddSingleton<IBusinessProcess, LeaveBusinessProcess>();
 
-// 身份与组织架构：InMemoryOrgDirectory 同时实现 IOrgDirectory（业务查询）
-// 与 IUserGroupManager（引擎查候选组待办要用的「用户 ↔ 组」展开）—— 同一份数据，两个视角。
-// 请假审批人 = candidateGroups="leaders" → leader1（赵志强）；订单审批人 = managers → manager1（孙建国）。
-builder.Services.AddSingleton<InMemoryOrgDirectory>();
-builder.Services.AddSingleton<IOrgDirectory>(provider => provider.GetRequiredService<InMemoryOrgDirectory>());
-builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager>(
-    provider => provider.GetRequiredService<InMemoryOrgDirectory>()));
+// 身份与组织架构：随 AddDemoStores 按方言切换 ——
+//   MySQL：MySqlOrgDirectory 读真表（sys_dept / sys_emp / sys_emp_group / sys_emp_group_member）；
+//   SqlServer：InMemoryOrgDirectory 内置演示数据。
+// 两者都同时实现 IOrgDirectory（业务查询）与 IUserGroupManager（引擎查候选组待办的「用户 ↔ 组」展开），
+// 数据语义一致：请假审批人 = candidateGroups="leaders" → leader1（赵志强）；订单审批人 = managers → manager1（孙建国）。
 
 // 监听器触发计数（观测用单例）：请假流程的监听器往里计数
 builder.Services.AddSingleton<ListenerStats>();

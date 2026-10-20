@@ -6,7 +6,11 @@ namespace NetBpm.Bpmn.Converter;
 /// <summary>开始事件（<c>startEvent</c>）转换器。对应 Activiti 的 <c>StartEventXMLConverter</c>。</summary>
 public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
 {
+    private static readonly HashSet<string> KnownAttributes = new(StringComparer.Ordinal) { "initiator" };
+
     public override string ElementName => "startEvent";
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
 
     protected override StartEvent CreateElement() => new();
 
@@ -15,8 +19,9 @@ public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
         // 发起人变量名（activiti:initiator）—— 实例启动时引擎把认证用户写进该变量
         element.Initiator = Attr(reader, "initiator", BpmnConstants.ActivitiNamespace);
 
-        // 子集内不支持任何事件定义（见 §1.3 第 3 条），出现即由校验层报错。
-        ReadChildren(reader, element, _ => { });
+        // 定时/消息等启动事件仍不支持：记录下来，由校验层显式拒绝，
+        // 而不是只认属性、把 <timerEventDefinition/> 静默丢掉。
+        ReadEventDefinitions(reader, element);
     }
 
     protected override void ConvertElementToXml(XmlWriter writer, StartEvent element)
@@ -25,6 +30,7 @@ public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
         WriteFlowElementAttributes(writer, element);
         WriteActivitiAttribute(writer, "initiator", element.Initiator);
         WriteExtensionElements(writer, element);
+        WriteEventDefinitions(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -36,14 +42,56 @@ public sealed class EndEventXmlConverter : BaseBpmnXmlConverter<EndEvent>
 
     protected override EndEvent CreateElement() => new();
 
+    // 终止结束事件（terminateEventDefinition）已支持；其它事件定义记录下来交给校验层拒绝
     protected override void ConvertXmlToElement(XmlReader reader, EndEvent element, Process process) =>
-        ReadChildren(reader, element, _ => { });
+        ReadEventDefinitions(reader, element);
 
     protected override void ConvertElementToXml(XmlWriter writer, EndEvent element)
     {
         writer.WriteStartElement("endEvent", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteExtensionElements(writer, element);
+        WriteEventDefinitions(writer, element);
+        writer.WriteEndElement();
+    }
+}
+
+/// <summary>
+/// 边界事件（<c>boundaryEvent</c>）转换器。
+/// <para>
+/// 只支持挂在用户任务上的定时边界事件；解析时把 <c>attachedToRef</c> 原样记下，
+/// 由 <c>BpmnXmlConverter</c> 在解析末期与 <c>BpmnModel</c> 接线（与顺序流同一时机）。
+/// </para>
+/// </summary>
+public sealed class BoundaryEventXmlConverter : BaseBpmnXmlConverter<BoundaryEvent>
+{
+    public override string ElementName => BpmnConstants.ElementBoundaryEvent;
+
+    protected override BoundaryEvent CreateElement() => new();
+
+    protected override void ConvertXmlToElement(XmlReader reader, BoundaryEvent element, Process process)
+    {
+        element.AttachedToRef = Attr(reader, BpmnConstants.AttributeAttachedToRef);
+
+        // cancelActivity 缺省为 true（BPMN 默认值）
+        element.CancelActivity = !string.Equals(
+            Attr(reader, BpmnConstants.AttributeCancelActivity),
+            "false",
+            StringComparison.OrdinalIgnoreCase);
+
+        ReadEventDefinitions(reader, element);
+    }
+
+    protected override void ConvertElementToXml(XmlWriter writer, BoundaryEvent element)
+    {
+        writer.WriteStartElement(BpmnConstants.ElementBoundaryEvent, BpmnConstants.BpmnNamespace);
+        WriteFlowElementAttributes(writer, element);
+        WriteAttributeIfPresent(writer, BpmnConstants.AttributeAttachedToRef, element.AttachedToRef);
+        writer.WriteAttributeString(
+            BpmnConstants.AttributeCancelActivity,
+            element.CancelActivity ? "true" : "false");
+        WriteExtensionElements(writer, element);
+        WriteEventDefinitions(writer, element);
         writer.WriteEndElement();
     }
 }
@@ -183,7 +231,22 @@ public sealed class SequenceFlowXmlConverter : BaseBpmnXmlConverter<SequenceFlow
 /// <summary>用户任务（<c>userTask</c>）转换器。对应 Activiti 的 <c>UserTaskXMLConverter</c>。</summary>
 public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
 {
+    private static readonly HashSet<string> KnownAttributes = new(StringComparer.Ordinal)
+    {
+        "assignee",
+        "owner",
+        "candidateUsers",
+        "candidateGroups",
+        "formKey",
+        "dueDate",
+        "priority",
+        "category",
+        "skipExpression",
+    };
+
     public override string ElementName => "userTask";
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
 
     protected override UserTask CreateElement() => new();
 
@@ -322,7 +385,17 @@ public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
 /// <summary>服务任务（<c>serviceTask</c>）转换器。对应 Activiti 的 <c>ServiceTaskXMLConverter</c>。</summary>
 public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
 {
+    private static readonly HashSet<string> KnownAttributes = new(StringComparer.Ordinal)
+    {
+        "class",
+        "delegateExpression",
+        "expression",
+        "resultVariableName",
+    };
+
     public override string ElementName => "serviceTask";
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
 
     protected override ServiceTask CreateElement() => new();
 
@@ -397,7 +470,15 @@ public sealed class ManualTaskXmlConverter : BaseBpmnXmlConverter<ManualTask>
 /// <summary>脚本任务（<c>scriptTask</c>）转换器。执行实现属二期（见 §1.2）。</summary>
 public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
 {
+    private static readonly HashSet<string> KnownAttributes = new(StringComparer.Ordinal)
+    {
+        "resultVariable",
+        "autoStoreVariables",
+    };
+
     public override string ElementName => "scriptTask";
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
 
     protected override ScriptTask CreateElement() => new();
 

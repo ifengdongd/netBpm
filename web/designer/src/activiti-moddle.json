@@ -40,6 +40,14 @@
       ]
     },
     {
+      "name": "MultiInstanceProps",
+      "extends": ["bpmn:MultiInstanceLoopCharacteristics"],
+      "properties": [
+        { "name": "collection", "isAttr": true, "type": "String" },
+        { "name": "elementVariable", "isAttr": true, "type": "String" }
+      ]
+    },
+    {
       "name": "ProcessProps",
       "extends": ["bpmn:Process"],
       "properties": [

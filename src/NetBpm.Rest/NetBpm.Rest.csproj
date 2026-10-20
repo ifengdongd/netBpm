@@ -11,11 +11,15 @@
     <ProjectReference Include="..\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
     <ProjectReference Include="..\NetBpm.Engine\NetBpm.Engine.csproj" />
     <ProjectReference Include="..\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+    <ProjectReference Include="..\NetBpm.Workflow\NetBpm.Workflow.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <!-- 可选 OTel 接线（默认关闭）：见 Diagnostics/OpenTelemetryExtensions -->
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
   </ItemGroup>
 
 </Project>

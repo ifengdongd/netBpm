@@ -34,6 +34,12 @@ public sealed class ContinueProcessOperation : IOperation
     /// <inheritdoc />
     public async ValueTask RunAsync(CancellationToken ct = default)
     {
+        // 终止结束事件会在同一命令里删掉整棵执行树；队列里排着的后续操作必须变成空操作
+        if (_execution.IsEnded)
+        {
+            return;
+        }
+
         var currentFlowElement = _execution.CurrentFlowElement
             ?? throw new EngineException(
                 "Programmatic error: no current flow element found or invalid type. Halting.");
