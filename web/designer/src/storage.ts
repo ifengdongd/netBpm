@@ -1,27 +1,34 @@
 /**
- * 流程图列表的本地持久化（流程记录）。
+ * 流程模型列表的持久化（服务端优先，localStorage 兜底）。
  *
- * 后端契约（§6.3）只有部署与回显两个接口，没有"流程图列表"的存取接口，
- * 因此草稿列表先存 localStorage；将来后端补上列表接口后，
- * 只需替换本文件里的 readDiagrams / writeDiagrams 两个函数。
+ * 管理端后端补齐了「流程图列表」的存取接口（见 src/NetBpm.Admin 的 /api/admin/models），
+ * 因此设计器改为优先走服务端：
+ *   GET    /api/admin/models          模型列表（摘要，不含 XML）
+ *   GET    /api/admin/models/{id}     模型详情（含 BPMN XML）
+ *   PUT    /api/admin/models/{id}     保存（upsert）
+ *   DELETE /api/admin/models/{id}     删除
+ *
+ * 独立 `npm run dev`（Vite 代理到 NetBpm.Rest，只有 deploy / 回显接口、没有 /api/admin/models）
+ * 时，首次探测到 404 即自动回退到 localStorage，保证原「草稿 + 部署 + 回显」工作流不受影响。
  *
  * parseProcessMeta / upsertDiagram 是纯函数，可在 Node 单测里直接验证（见 test/designer.test.ts）。
  */
 
+import { credentialHeaders } from './auth';
+
 export interface DiagramRecord {
-  /** 设计器侧唯一 id（UUID），对应 Activiti 的 modelId；用于 ?modelId= 直接打开。 */
+  /** 模型唯一 id（服务端 bpmn_model.id；localStorage 模式 = 旧 modelId，用于 ?modelId= 直接打开）。 */
   modelId: string;
-  /** BPMN process 的 id，列表内的唯一键（同 id 保存即覆盖更新）。 */
+  /** BPMN process 的 id（服务端 processKey），列表内的显示键。 */
   processId: string;
   /** 流程名称（取 process 的 name，没有则退回 id）。 */
   name: string;
-  /** 完整 BPMN XML。 */
+  /** 完整 BPMN XML；列表摘要场景可能为空，编辑 / 部署前需按 modelId 再取详情。 */
   xml: string;
   /** 最近保存时间（ISO 字符串）。 */
   updatedAt: string;
   /**
-   * 已部署版本号；每次「部署」成功由后端返回的版本号覆盖更新。
-   * 0 表示尚未部署过。
+   * 已部署版本号（localStorage 模式）；服务端模式恒为 0，部署版本见「流程部署列表」。
    */
   version: number;
 }
@@ -30,9 +37,54 @@ const STORAGE_KEY = 'netbpm.designer.diagrams.v1';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 
-function defaultStorage(): StorageLike | undefined {
-  return typeof localStorage === 'undefined' ? undefined : localStorage;
+// ─────────────────────────── 服务端 DTO（最小契约）───────────────────────────
+
+interface BpmnModelSummary {
+  id: string;
+  name: string;
+  processKey: string;
+  modifyTime: string;
 }
+
+interface BpmnModelDetail {
+  id: string;
+  name: string;
+  processKey: string;
+  bpmnXml: string;
+  createTime: string;
+  modifyTime: string | null;
+}
+
+interface SaveBpmnModelRequest {
+  name: string;
+  processKey: string;
+  bpmnXml: string;
+}
+
+// ─────────────────────────── 模式探测 ───────────────────────────
+
+/**
+ * 后端是否提供 /api/admin/models。探测一次后缓存：
+ * 独立开发（NetBpm.Rest 宿主无该路由）返回 404 → localStorage 模式。
+ */
+let backendMode: 'server' | 'local' | null = null;
+
+async function resolveMode(): Promise<'server' | 'local'> {
+  if (backendMode !== null) {
+    return backendMode;
+  }
+
+  try {
+    const response = await fetch('/api/admin/models', { method: 'GET', headers: credentialHeaders() });
+    backendMode = response.ok ? 'server' : 'local';
+  } catch {
+    backendMode = 'local';
+  }
+
+  return backendMode;
+}
+
+// ─────────────────────────── 纯函数（供 Node 单测）───────────────────────────
 
 /**
  * 从 BPMN XML 里解析 process 的 id 与 name。
@@ -67,6 +119,8 @@ export function upsertDiagram(records: DiagramRecord[], record: DiagramRecord): 
   return next;
 }
 
+// ─────────────────────────── 工具 ───────────────────────────
+
 /** 生成设计器侧的 modelId（UUID，兜底用时间戳+随机数）。 */
 function newModelId(): string {
   const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
@@ -78,35 +132,138 @@ function newModelId(): string {
   return `m_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** 保存（新增或更新）一条流程记录并写入存储，返回保存后的记录。 */
-export function saveDiagramXml(xml: string, storage: StorageLike | undefined = defaultStorage()): DiagramRecord {
+function defaultStorage(): StorageLike | undefined {
+  return typeof localStorage === 'undefined' ? undefined : localStorage;
+}
+
+function summaryToRecord(summary: BpmnModelSummary): DiagramRecord {
+  return {
+    modelId: summary.id,
+    processId: summary.processKey,
+    name: summary.name,
+    xml: '',
+    updatedAt: summary.modifyTime,
+    version: 0,
+  };
+}
+
+function detailToRecord(detail: BpmnModelDetail): DiagramRecord {
+  return {
+    modelId: detail.id,
+    processId: detail.processKey,
+    name: detail.name,
+    xml: detail.bpmnXml,
+    updatedAt: detail.modifyTime ?? detail.createTime,
+    version: 0,
+  };
+}
+
+/** 把非 2xx 且非 404 的响应归因成可读错误。 */
+function ensureOk(response: Response, action: string): void {
+  if (response.ok || response.status === 404) {
+    return;
+  }
+
+  throw new Error(`${action}失败：HTTP ${response.status} ${response.statusText}`);
+}
+
+// ─────────────────────────── 对外 API（异步）───────────────────────────
+
+/** 模型列表（不含 XML 正文，按最近修改倒序）。 */
+export async function readDiagrams(): Promise<DiagramRecord[]> {
+  if ((await resolveMode()) === 'server') {
+    const response = await fetch('/api/admin/models', { headers: credentialHeaders() });
+
+    ensureOk(response, '加载模型列表');
+
+    const summaries = (await response.json()) as BpmnModelSummary[];
+
+    return summaries.map(summaryToRecord);
+  }
+
+  return readLocal();
+}
+
+/** 按 modelId 取模型（含 XML）；不存在返回 undefined。 */
+export async function findByModelId(modelId: string): Promise<DiagramRecord | undefined> {
+  if ((await resolveMode()) === 'server') {
+    const response = await fetch(`/api/admin/models/${encodeURIComponent(modelId)}`, {
+      headers: credentialHeaders(),
+    });
+
+    if (response.status === 404) {
+      return undefined;
+    }
+
+    ensureOk(response, '加载模型');
+
+    return detailToRecord((await response.json()) as BpmnModelDetail);
+  }
+
+  return readLocal().find((record) => record.modelId === modelId);
+}
+
+/**
+ * 保存（新增或更新）一条流程模型并返回保存后的记录。
+ * 服务端模式：`modelId` 缺省生成新 id（新建），否则 PUT 到该 id（更新）。
+ */
+export async function saveDiagramXml(xml: string, modelId?: string): Promise<DiagramRecord> {
   const meta = parseProcessMeta(xml);
   const processId = meta.processId.length > 0 ? meta.processId : `process_${Date.now().toString(36)}`;
   const name = meta.name.length > 0 ? meta.name : '未命名流程';
 
-  // 同 processId 覆盖更新时，保留原 modelId 与 version，使 ?modelId= 链接在反复保存后依然有效
-  const existing = readDiagrams(storage).find((record) => record.processId === processId);
+  if ((await resolveMode()) === 'server') {
+    const id = modelId ?? newModelId();
+    const payload: SaveBpmnModelRequest = { name, processKey: processId, bpmnXml: xml };
 
-  const record: DiagramRecord = {
-    modelId: existing?.modelId ?? newModelId(),
-    processId,
-    name,
-    xml,
-    updatedAt: new Date().toISOString(),
-    version: existing?.version ?? 0,
-  };
+    const response = await fetch(`/api/admin/models/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...credentialHeaders() },
+      body: JSON.stringify(payload),
+    });
 
-  writeDiagrams(upsertDiagram(readDiagrams(storage), record), storage);
+    ensureOk(response, '保存');
 
-  return record;
+    return { modelId: id, processId, name, xml, updatedAt: new Date().toISOString(), version: 0 };
+  }
+
+  return saveLocal(xml, modelId);
 }
 
-/** 按 modelId 查找草稿（用于 ?modelId= 直接打开）。 */
-export function findByModelId(modelId: string, storage: StorageLike | undefined = defaultStorage()): DiagramRecord | undefined {
-  return readDiagrams(storage).find((record) => record.modelId === modelId);
+/** 按 modelId 删除模型。 */
+export async function deleteDiagram(modelId: string): Promise<void> {
+  if ((await resolveMode()) === 'server') {
+    const response = await fetch(`/api/admin/models/${encodeURIComponent(modelId)}`, {
+      method: 'DELETE',
+      headers: credentialHeaders(),
+    });
+
+    ensureOk(response, '删除');
+
+    return;
+  }
+
+  writeLocal(readLocal().filter((record) => record.modelId !== modelId));
 }
 
-export function readDiagrams(storage: StorageLike | undefined = defaultStorage()): DiagramRecord[] {
+/** 部署成功后用后端返回的版本号覆盖更新草稿的 version（服务端模式为 no-op）。 */
+export async function setDiagramVersion(modelId: string, version: number): Promise<void> {
+  if ((await resolveMode()) === 'local') {
+    const records = readLocal();
+    const index = records.findIndex((record) => record.modelId === modelId);
+
+    if (index >= 0) {
+      records[index] = { ...records[index], version };
+      writeLocal(records);
+    }
+  }
+}
+
+// ─────────────────────────── localStorage 兜底 ───────────────────────────
+
+function readLocal(): DiagramRecord[] {
+  const storage = defaultStorage();
+
   if (storage === undefined) {
     return [];
   }
@@ -121,30 +278,31 @@ export function readDiagrams(storage: StorageLike | undefined = defaultStorage()
   }
 }
 
-export function writeDiagrams(records: DiagramRecord[], storage: StorageLike | undefined = defaultStorage()): void {
-  storage?.setItem(STORAGE_KEY, JSON.stringify(records));
+function writeLocal(records: DiagramRecord[]): void {
+  defaultStorage()?.setItem(STORAGE_KEY, JSON.stringify(records));
 }
 
-export function deleteDiagram(processId: string, storage: StorageLike | undefined = defaultStorage()): void {
-  writeDiagrams(
-    readDiagrams(storage).filter((record) => record.processId !== processId),
-    storage,
-  );
-}
+/** localStorage 模式保存：`modelId` 缺省按 processId 覆盖更新（保留原 modelId）。 */
+function saveLocal(xml: string, modelId?: string): DiagramRecord {
+  const meta = parseProcessMeta(xml);
+  const processId = meta.processId.length > 0 ? meta.processId : `process_${Date.now().toString(36)}`;
+  const name = meta.name.length > 0 ? meta.name : '未命名流程';
 
-/** 部署成功后用后端返回的版本号覆盖更新草稿的 version（不改动 XML/名称）。 */
-export function setDiagramVersion(
-  processId: string,
-  version: number,
-  storage: StorageLike | undefined = defaultStorage(),
-): void {
-  const records = readDiagrams(storage);
-  const index = records.findIndex((record) => record.processId === processId);
+  const records = readLocal();
+  const existing = modelId !== undefined
+    ? records.find((record) => record.modelId === modelId)
+    : records.find((record) => record.processId === processId);
 
-  if (index < 0) {
-    return;
-  }
+  const record: DiagramRecord = {
+    modelId: existing?.modelId ?? modelId ?? newModelId(),
+    processId,
+    name,
+    xml,
+    updatedAt: new Date().toISOString(),
+    version: existing?.version ?? 0,
+  };
 
-  records[index] = { ...records[index], version };
-  writeDiagrams(records, storage);
+  writeLocal(upsertDiagram(records, record));
+
+  return record;
 }

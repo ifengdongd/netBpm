@@ -1,0 +1,31 @@
+.netbpm-diagram {
+  position: relative;
+  width: 100%;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.netbpm-diagram-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+
+/* 已完成节点：浅绿填充 + 绿色描边 */
+.netbpm-diagram .netbpm-hl-completed:not(.djs-connection) .djs-visual > :nth-child(1) {
+  fill: #e6f4ea !important;
+  stroke: #52c41a !important;
+}
+
+/* 当前节点：浅蓝填充 + 蓝色描边（加粗） */
+.netbpm-diagram .netbpm-hl-current:not(.djs-connection) .djs-visual > :nth-child(1) {
+  fill: #e6f0ff !important;
+  stroke: #1677ff !important;
+  stroke-width: 2px !important;
+}

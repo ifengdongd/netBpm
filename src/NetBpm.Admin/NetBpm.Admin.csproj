@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Admin</RootNamespace>
+    <AssemblyName>NetBpm.Admin</AssemblyName>
+    <UserSecretsId>netbpm-admin</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetBpm.Persistence\NetBpm.Persistence.csproj" />
+    <ProjectReference Include="..\NetBpm.Rest\NetBpm.Rest.csproj" />
+    <ProjectReference Include="..\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+</Project>

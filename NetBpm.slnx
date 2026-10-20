@@ -9,6 +9,7 @@
     <Project Path="src/NetBpm.Identity/NetBpm.Identity.csproj" />
     <Project Path="src/NetBpm.Runtime/NetBpm.Runtime.csproj" />
     <Project Path="src/NetBpm.Rest/NetBpm.Rest.csproj" />
+    <Project Path="src/NetBpm.Admin/NetBpm.Admin.csproj" />
     <Project Path="src/NetBpm.Workflow/NetBpm.Workflow.csproj" />
   </Folder>
   <Folder Name="/tests/">

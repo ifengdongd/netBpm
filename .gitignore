@@ -47,3 +47,7 @@ git-credentials
 
 # AI 工具本地工作区数据（不提交）
 .workbuddy/
+
+# Generated admin SPA sourcemaps (large, not needed at runtime)
+src/NetBpm.Admin/wwwroot/**/*.map
+

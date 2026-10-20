@@ -15,6 +15,7 @@
  */
 import Modeler from 'bpmn-js/lib/Modeler';
 import { BpmnPropertiesPanelModule } from 'bpmn-js-properties-panel';
+import { credentialHeaders } from './auth';
 import activitiModdle from './activiti-moddle.json';
 import NetBpmPaletteProvider from './palette';
 import NetBpmPropertiesProvider from './designer/propertiesProvider';
@@ -100,6 +101,9 @@ interface ModelerServices {
 }
 
 let services: ModelerServices | null = null;
+
+/** 当前编辑中的模型 id（服务端模式的 upsert 键；localStorage 模式也用它保持链接稳定）。 */
+let currentModelId: string | null = null;
 
 function ensureModeler(): ModelerServices {
   if (services !== null) {
@@ -188,12 +192,12 @@ function formatTime(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('zh-CN', { hour12: false });
 }
 
-function renderList(): void {
+async function renderList(): Promise<void> {
   if (diagramRowsElement === null) {
     return;
   }
 
-  const records = readDiagrams();
+  const records = await readDiagrams();
   diagramRowsElement.replaceChildren();
 
   if (listEmptyElement !== null) {
@@ -221,29 +225,31 @@ function renderList(): void {
     const editButton = document.createElement('button');
     editButton.type = 'button';
     editButton.textContent = '编辑';
-    editButton.addEventListener('click', () => openRecord(record));
+    editButton.addEventListener('click', () => void openModel(record.modelId));
 
     const exportButton = document.createElement('button');
     exportButton.type = 'button';
     exportButton.textContent = '导出 XML';
-    exportButton.addEventListener('click', () => downloadXml(record.xml, `${record.processId}.bpmn20.xml`));
+    exportButton.addEventListener('click', () => void exportModel(record.modelId, record.processId));
 
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.textContent = '删除';
     deleteButton.className = 'danger';
     deleteButton.addEventListener('click', () => {
-      if (window.confirm(`确定删除流程图「${record.name}」（${record.processId}）吗？`)) {
-        deleteDiagram(record.processId);
-        renderList();
-        setListStatus(`已删除：${record.name}`);
-      }
+      void (async () => {
+        if (window.confirm(`确定删除流程图「${record.name}」（${record.processId}）吗？`)) {
+          await deleteDiagram(record.modelId);
+          await renderList();
+          setListStatus(`已删除：${record.name}`);
+        }
+      })();
     });
 
     const deployButton = document.createElement('button');
     deployButton.type = 'button';
     deployButton.textContent = '部署';
-    deployButton.addEventListener('click', () => void deployRecord(record, deployButton));
+    deployButton.addEventListener('click', () => void deployModel(record.modelId, deployButton));
 
     actionCell.append(editButton, exportButton, deployButton, deleteButton);
     row.append(nameCell, idCell, timeCell, versionCell, actionCell);
@@ -281,7 +287,7 @@ async function renderDeployList(): Promise<void> {
   let definitions: DeployedDefinition[] = [];
 
   try {
-    const response = await fetch('/api/designer/definitions');
+    const response = await fetch('/api/designer/definitions', { headers: credentialHeaders() });
 
     // 先读原始文本：后端异常时可能返回空/非 JSON 响应体，
     // 直接 response.json() 会抛「Unexpected end of JSON input」且丢失状态码信息。
@@ -425,6 +431,7 @@ function syncModelIdToUrl(modelId: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('modelId', modelId);
   url.searchParams.delete('processDefinitionId');
+  url.searchParams.delete('action');
   window.history.replaceState(null, '', url);
 }
 
@@ -435,14 +442,52 @@ function clearModelIdUrl(): void {
   window.history.replaceState(null, '', url);
 }
 
-/** 新建流程图：先落一份草稿（生成 modelId），再进入编辑器。 */
-function openNewEditor(): void {
-  const record = saveDiagramXml(emptyDiagram(randomProcessId()));
+/** 按 modelId 打开模型进入编辑器（先取详情，兼容列表摘要无 XML 的情况）。 */
+async function openModel(modelId: string): Promise<void> {
+  const record = await findByModelId(modelId);
+
+  if (record === undefined) {
+    setListStatus(`模型已失效：${modelId}`, true);
+    await renderList();
+    return;
+  }
+
   openRecord(record);
 }
 
-/** 打开已有草稿进入编辑器，并把 modelId 写进 URL。 */
+/** 按 modelId 导出模型 XML（列表摘要无 XML，需先取详情）。 */
+async function exportModel(modelId: string, fallbackName: string): Promise<void> {
+  const record = await findByModelId(modelId);
+
+  if (record === undefined) {
+    setListStatus(`模型已失效：${modelId}`, true);
+    return;
+  }
+
+  downloadXml(record.xml, `${record.processId.length > 0 ? record.processId : fallbackName}.bpmn20.xml`);
+}
+
+/** 列表操作列的「部署」：先取模型详情（XML），再走本地校验 + 提交后端。 */
+async function deployModel(modelId: string, button: HTMLButtonElement): Promise<void> {
+  const record = await findByModelId(modelId);
+
+  if (record === undefined) {
+    setListStatus(`模型已失效：${modelId}`, true);
+    return;
+  }
+
+  await deployRecord(record, button);
+}
+
+/** 新建流程图：先落一份模型（生成 modelId），再进入编辑器。 */
+async function openNewEditor(): Promise<void> {
+  const record = await saveDiagramXml(emptyDiagram(randomProcessId()));
+  openRecord(record);
+}
+
+/** 打开已有模型进入编辑器，并把 modelId 写进 URL。 */
 function openRecord(record: DiagramRecord): void {
+  currentModelId = record.modelId;
   syncModelIdToUrl(record.modelId);
   showView('editor');
   void loadDiagram(record.xml, record.name);
@@ -458,7 +503,9 @@ async function save(): Promise<void> {
       return;
     }
 
-    const record = saveDiagramXml(xml);
+    const record = await saveDiagramXml(xml, currentModelId ?? undefined);
+
+    currentModelId = record.modelId;
 
     if (editorTitleElement !== null) {
       editorTitleElement.textContent = record.name;
@@ -478,7 +525,7 @@ async function deployXml(xml: string): Promise<{ ok: boolean; message: string; v
   try {
     const response = await fetch('/api/designer/deploy', {
       method: 'POST',
-      headers: { 'Content-Type': 'text/xml' },
+      headers: { 'Content-Type': 'text/xml', ...credentialHeaders() },
       body: xml,
     });
 
@@ -528,8 +575,8 @@ async function deployRecord(record: DiagramRecord, button: HTMLButtonElement): P
 
     if (result.ok && result.version > 0) {
       // 部署成功：用后端返回的版本号更新草稿，列表里版本列自动递增
-      setDiagramVersion(record.processId, result.version);
-      renderList();
+      await setDiagramVersion(record.modelId, result.version);
+      await renderList();
     }
 
     setListStatus(result.message, !result.ok);
@@ -549,7 +596,9 @@ async function loadDefinitionFromQuery(): Promise<boolean> {
 
   showView('editor');
 
-  const response = await fetch(`/api/designer/definition/${encodeURIComponent(definitionId)}/xml`);
+  const response = await fetch(`/api/designer/definition/${encodeURIComponent(definitionId)}/xml`, {
+    headers: credentialHeaders(),
+  });
 
   if (!response.ok) {
     setStatus(`回显失败：${response.statusText}`, true);
@@ -637,7 +686,7 @@ function initPanelResizer(): void {
 // ─────────────────────────── 事件绑定 ───────────────────────────
 
 // 列表：新增 / 导入
-document.querySelector('#btn-new')?.addEventListener('click', () => openNewEditor());
+document.querySelector('#btn-new')?.addEventListener('click', () => void openNewEditor());
 
 document.querySelector('#btn-import')?.addEventListener('click', () => fileInputList?.click());
 
@@ -648,14 +697,14 @@ fileInputList?.addEventListener('change', () => {
     return;
   }
 
-  void file.text().then((xml) => {
+  void file.text().then(async (xml) => {
     if (parseProcessMeta(xml).processId.length === 0) {
       setListStatus(`导入失败：${file.name} 不是有效的 BPMN 流程图（找不到 process 节点）。`, true);
       return;
     }
 
-    const record = saveDiagramXml(xml);
-    renderList();
+    const record = await saveDiagramXml(xml);
+    await renderList();
     setListStatus(`已导入：${record.name}（${record.processId}）`);
   }).finally(() => {
     fileInputList.value = '';
@@ -664,8 +713,9 @@ fileInputList?.addEventListener('change', () => {
 
 // 编辑器：返回
 document.querySelector('#btn-back')?.addEventListener('click', () => {
+  currentModelId = null;
   clearModelIdUrl();
-  renderList();
+  void renderList();
   showView('models');
 });
 
@@ -723,7 +773,7 @@ bindIcon('it-zoom-fit', ({ canvas }) => canvas.zoom('fit-viewport', 'auto'));
 // 左侧菜单：模型列表 / 部署列表
 navModels?.addEventListener('click', (event) => {
   event.preventDefault();
-  renderList();
+  void renderList();
   showView('models');
 });
 
@@ -744,15 +794,21 @@ async function boot(): Promise<void> {
   const modelId = params.get('modelId');
 
   if (modelId !== null) {
-    const record = findByModelId(modelId);
+    const record = await findByModelId(modelId);
 
     if (record !== undefined) {
       openRecord(record);
       return;
     }
 
-    // modelId 失效（草稿已删除）→ 回退到模型列表
+    // modelId 失效（模型已删除）→ 回退到模型列表
     clearModelIdUrl();
+  }
+
+  // 1.5) ?action=new 直接新建流程模型（管理端「新建」入口，避免先跳列表再点一次新增）
+  if (params.get('action') === 'new') {
+    await openNewEditor();
+    return;
   }
 
   // 2) ?processDefinitionId= 回显已部署定义
@@ -762,7 +818,7 @@ async function boot(): Promise<void> {
   }
 
   // 3) 默认显示流程模型列表
-  renderList();
+  await renderList();
   showView('models');
 }
 

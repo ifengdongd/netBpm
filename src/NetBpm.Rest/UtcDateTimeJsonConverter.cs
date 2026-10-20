@@ -12,7 +12,7 @@ namespace NetBpm.Rest;
 /// </para>
 /// <para>反序列化同样把缺省时区按 UTC 处理，保证请求 / 响应口径一致。</para>
 /// </summary>
-internal sealed class UtcDateTimeJsonConverter : JsonConverter<DateTime>
+public sealed class UtcDateTimeJsonConverter : JsonConverter<DateTime>
 {
     public override DateTime Read(
         ref Utf8JsonReader reader,

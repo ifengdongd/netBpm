@@ -4,6 +4,7 @@
 #  产物：artifacts\nuget\*.nupkg        本地 NuGet 源可直接引用
 #        artifacts\netbpm-<ver>\        发行目录（dll / nupkg / db / README.txt）
 #        artifacts\netbpm-<ver>.zip     DLL + nupkg + 两方言 SQL 脚本（Gitee 发布版附件）
+#  管理控制台（NetBpm.Admin 宿主 + 前端）请用 tools\pack-admin.ps1 单独打包。
 # ============================================================================
 param([string]$Configuration = "Release")
 
