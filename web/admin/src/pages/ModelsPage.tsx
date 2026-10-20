@@ -28,13 +28,18 @@ export default function ModelsPage() {
   // 服务端分页 + 关键字过滤（queryKey 含关键字，变更自动重查）
   const modelList = usePagedList<BpmnModelSummary>(
     ['admin', 'models', keyword],
-    (page) =>
-      modelsApi.list({
-        keyword: keyword || undefined,
-        firstResult: (page.current - 1) * page.pageSize,
-        maxResults: page.pageSize,
-      }),
+    (page, signal) =>
+      modelsApi.list(
+        {
+          keyword: keyword || undefined,
+          firstResult: (page.current - 1) * page.pageSize,
+          maxResults: page.pageSize,
+        },
+        signal,
+      ),
     (error) => message.error(`加载模型列表失败：${error.message}`),
+    // 模型列表低频变化（操作后有 invalidate 联动），放宽新鲜度减少来回切换的重拉
+    { staleTime: 30_000 },
   );
 
   const handleSearch = (value: string) => {

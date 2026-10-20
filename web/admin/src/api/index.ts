@@ -30,8 +30,8 @@ import type {
 
 export const modelsApi = {
   /** 分页查模型列表（envelope 信封；`keyword` 模糊匹配名称 / 流程 Key / 描述）。 */
-  list: (params?: { keyword?: string; firstResult?: number; maxResults?: number }) =>
-    list<BpmnModelSummary>('/api/admin/models', params),
+  list: (params?: { keyword?: string; firstResult?: number; maxResults?: number }, signal?: AbortSignal) =>
+    list<BpmnModelSummary>('/api/admin/models', params, { signal }),
   get: (id: string) => http.get<BpmnModelDetail>(`/api/admin/models/${encodeURIComponent(id)}`),
   save: (id: string, request: SaveBpmnModelRequest) =>
     http.put<void>(`/api/admin/models/${encodeURIComponent(id)}`, request),
@@ -120,7 +120,8 @@ export interface TaskQuery {
 
 export const runtimeApi = {
   // 运行实例
-  instances: (params?: InstanceQuery) => list<ProcessInstanceResponse>('/api/runtime/process-instances', params),
+  instances: (params?: InstanceQuery, signal?: AbortSignal) =>
+    list<ProcessInstanceResponse>('/api/runtime/process-instances', params, { signal }),
 
   instance: (processInstanceId: string) =>
     http.get<ProcessInstanceResponse>(`/api/runtime/process-instances/${encodeURIComponent(processInstanceId)}`),
@@ -165,11 +166,12 @@ export const runtimeApi = {
   historicVariables: (processInstanceId: string) =>
     http.get<HistoricVariable[]>(`/api/runtime/history/process-instances/${encodeURIComponent(processInstanceId)}/variables`),
 
-  historicInstances: (params?: InstanceQuery & { finished?: boolean; deleted?: boolean }) =>
-    list<HistoricProcessInstance>('/api/runtime/history/process-instances', params),
+  historicInstances: (params?: InstanceQuery & { finished?: boolean; deleted?: boolean }, signal?: AbortSignal) =>
+    list<HistoricProcessInstance>('/api/runtime/history/process-instances', params, { signal }),
 
   // 任务
-  tasks: (params?: TaskQuery) => list<TaskResponse>('/api/runtime/tasks', params),
+  tasks: (params?: TaskQuery, signal?: AbortSignal) =>
+    list<TaskResponse>('/api/runtime/tasks', params, { signal }),
 
   task: (taskId: string) => http.get<TaskDetail>(`/api/runtime/tasks/${encodeURIComponent(taskId)}`),
 
@@ -206,7 +208,8 @@ export interface AuditQuery {
 
 export const auditApi = {
   /** 分页查管理动作审计（统一 envelope 分页信封 `{ items, total, firstResult, maxResults }`）。 */
-  list: (params?: AuditQuery) => list<AdminAuditItem>('/api/admin/audit', params),
+  list: (params?: AuditQuery, signal?: AbortSignal) =>
+    list<AdminAuditItem>('/api/admin/audit', params, { signal }),
 
   /** 保留策略清理：删除 `before` 之前的记录，返回删除条数。 */
   purge: (params: { before: string; tenantId?: string }) =>

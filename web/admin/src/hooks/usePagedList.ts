@@ -37,6 +37,8 @@ export interface PagedListOptions {
   defaultPageSize?: number;
   /** 轮询间隔毫秒数（自动刷新）；缺省 false 不轮询。 */
   refetchInterval?: number | false;
+  /** 数据新鲜度毫秒数；缺省用全局 5s。低频列表（模型 / 部署）可放宽到 30s-60s。 */
+  staleTime?: number;
 }
 
 /**
@@ -53,7 +55,7 @@ export interface PagedListOptions {
  */
 export function usePagedList<T>(
   queryKey: readonly unknown[],
-  fetcher: (page: PageState) => Promise<PagedResponse<T>>,
+  fetcher: (page: PageState, signal?: AbortSignal) => Promise<PagedResponse<T>>,
   onError: (error: Error) => void,
   options?: PagedListOptions,
 ): PagedList<T> {
@@ -68,10 +70,12 @@ export function usePagedList<T>(
 
   const query = useQuery({
     queryKey: [...queryKey, page],
-    queryFn: () => fetcher(page),
+    // signal 由 TanStack Query 注入：翻页 / 失效后旧请求被 Abort，不再占用服务端
+    queryFn: ({ signal }) => fetcher(page, signal),
     // 翻页时保留上一页数据，避免表格清空闪烁
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchInterval ?? false,
+    staleTime: options?.staleTime,
   });
 
   // 查询失败时提示一次

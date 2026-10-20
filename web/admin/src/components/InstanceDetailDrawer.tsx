@@ -19,9 +19,10 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { runtimeApi } from '../api';
+import { ApiError } from '../api/client';
 import type {
   HistoricProcessInstance,
   HistoricTask,
@@ -48,19 +49,20 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
 
   // 详情查询：6 个数据源一次并行拉取；键含实例 id，
   // 挂起 / 跳转等操作后由 onChanged → invalidateQueries(['runtime']) 联动刷新本抽屉与列表。
-  // 各数据源独立兜底：授权不足 / 历史未启用时不影响基本信息展示。
+  // 各数据源独立兜底：仅 404（实例 / 历史不存在）落空值；
+  // 403（无权查看）与 5xx 上抛走查询错误通路展示，避免「无权」被误读为「没有」。
   const detailQuery = useQuery({
     queryKey: ['runtime', 'instance-detail', instanceId],
     queryFn: async () => {
       const id = instanceId as string;
 
       const [running, hist, vars, histVars, histTasks, diagramResult] = await Promise.all([
-        runtimeApi.instance(id).catch(() => null),
-        runtimeApi.historicInstance(id).catch(() => null),
-        runtimeApi.instanceVariables(id).catch(() => ({}) as Variables),
-        runtimeApi.historicVariables(id).catch(() => [] as HistoricVariable[]),
-        runtimeApi.historicTasks(id).catch(() => [] as HistoricTask[]),
-        runtimeApi.diagram(id).catch(() => null),
+        runtimeApi.instance(id).catch(ignoreNotFound(null)),
+        runtimeApi.historicInstance(id).catch(ignoreNotFound(null)),
+        runtimeApi.instanceVariables(id).catch(ignoreNotFound({} as Variables)),
+        runtimeApi.historicVariables(id).catch(ignoreNotFound([] as HistoricVariable[])),
+        runtimeApi.historicTasks(id).catch(ignoreNotFound([] as HistoricTask[])),
+        runtimeApi.diagram(id).catch(ignoreNotFound(null)),
       ]);
 
       return { running, hist, vars, histVars, histTasks, diagramResult };
@@ -82,6 +84,12 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
 
   const loading = open && detailQuery.isPending;
   const loaded = detailQuery.isSuccess || detailQuery.isError;
+
+  useEffect(() => {
+    if (detailQuery.isError) {
+      message.error(`加载实例详情失败：${(detailQuery.error as Error).message}`);
+    }
+  }, [detailQuery.isError, detailQuery.error, message]);
 
   const toggleSuspend = async () => {
     if (instance === null) {
@@ -364,6 +372,17 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
 }
 
 // ─────────────────────────── 描述信息子组件 ───────────────────────────
+
+/** 仅静默 404（实例 / 历史不存在），403 与 5xx 上抛走查询错误通路展示。 */
+function ignoreNotFound<T>(fallback: T): (error: unknown) => T {
+  return (error) => {
+    if (error instanceof ApiError && error.status === 404) {
+      return fallback;
+    }
+
+    throw error;
+  };
+}
 
 /** 运行实例基本信息（Descriptions）。 */
 function RunningInstanceDescriptions({ instance }: { instance: ProcessInstanceResponse }) {

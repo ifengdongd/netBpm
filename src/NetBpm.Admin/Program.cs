@@ -1,4 +1,5 @@
 using Microsoft.OpenApi;
+using System.Threading.RateLimiting;
 using NetBpm.Admin.Endpoints;
 using NetBpm.Admin.Storage;
 using NetBpm.Persistence;
@@ -53,14 +54,59 @@ builder.Services.AddNetBpmAuditing();
 
 // 审计保留策略（NetBpm:Admin:AuditRetentionDays，默认 0 = 永久保留）
 builder.Services.AddHostedService<AdminAuditCleanupService>();
+builder.Services.AddHostedService<AdminArchiveCleanupService>();
 
 // 可选 OpenTelemetry 接线（NetBpm:Otel:Enabled 或 OTEL_EXPORTER_OTLP_ENDPOINT）
 builder.Services.AddNetBpmOpenTelemetry(builder.Configuration);
+
+// 限流（按客户端 IP 分区，匿名与已认证同口径）：
+//   - 凭据校验探针 /api/admin/info（登录页用）每 IP 30 次/分钟，防密钥爆破；
+//   - 其余 /api 每 IP 600 次/分钟，防脚本失控（正常管理操作远达不到）。
+// 静态资源与 /health 不限流；阈值可经 NetBpm:Admin:RateLimit:ApiPerMinute /
+// ProbePerMinute 覆盖，集成测试宿主用 NetBpm:Admin:RateLimit:Enabled=false 关闭。
+var rateLimitEnabled = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:Enabled", true);
+
+if (rateLimitEnabled)
+{
+    var apiPerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:ApiPerMinute", 600);
+    var probePerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:ProbePerMinute", 30);
+
+    builder.Services.AddRateLimiter(limiter =>
+    {
+        limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+        limiter.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        {
+            var ip = context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+
+            if (context.Request.Path.StartsWithSegments("/api/admin/info"))
+            {
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    $"probe:{ip}",
+                    _ => new FixedWindowRateLimiterOptions { PermitLimit = probePerMinute, Window = TimeSpan.FromMinutes(1) });
+            }
+
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    $"api:{ip}",
+                    _ => new FixedWindowRateLimiterOptions { PermitLimit = apiPerMinute, Window = TimeSpan.FromMinutes(1) });
+            }
+
+            return RateLimitPartition.GetNoLimiter("unlimited");
+        });
+    });
+}
 
 var app = builder.Build();
 var startedAt = DateTime.UtcNow;
 
 app.UseExceptionHandler();
+
+if (rateLimitEnabled)
+{
+    app.UseRateLimiter();
+}
 
 // 鉴权 → 幂等：未配置 NetBpm:Security:ApiKey 时鉴权中间件放行
 app.UseMiddleware<AuthenticationMiddleware>();
@@ -74,6 +120,45 @@ app.MapGet("/health", () => Results.Ok(new
     engine = "NetBpm",
     version = typeof(AdminEndpoints).Assembly.GetName().Version?.ToString(),
 }));
+
+// 存活 / 就绪分离（与 Rest 宿主同口径）：live 判断「要不要重启」，ready 判断「能不能接流量」
+app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
+
+app.MapGet("/health/ready", (IServiceProvider services) =>
+{
+    var options = services.GetRequiredService<NetBpmOptions>();
+
+    if (!options.UsesDatabase)
+    {
+        return Results.Ok(new { status = "ready", database = "in-memory" });
+    }
+
+    try
+    {
+        var factory = services.GetRequiredService<IDbConnectionFactory>();
+
+        // CreateConnection() 已负责打开连接（见 IDbConnectionFactory 契约）
+        using var connection = factory.CreateConnection();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "select 1";
+        command.ExecuteScalar();
+
+        return Results.Ok(new { status = "ready", database = options.DatabaseType.ToString() });
+    }
+    catch (Exception exception)
+    {
+        // 探针面向编排系统与负载均衡，不是排障入口：异常原文可能带服务器地址 / 账号，
+        // 只进日志，响应固定为「数据库不可用」。
+        services.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("NetBpm.Health")
+            .LogError(exception, "就绪探针失败：数据库不可用（{Database}）", options.DatabaseType);
+
+        return Results.Json(
+            new { status = "unavailable", database = options.DatabaseType.ToString(), error = "database unavailable" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
 
 app.MapGet("/api/admin/info", (IServiceProvider services) =>
 {
@@ -96,9 +181,20 @@ app.MapRuntimeEndpoints();
 app.MapIdentityEndpoints();
 app.MapAdminEndpoints();
 
-// React 管理前端：静态文件 + SPA history 路由回退
+// React 管理前端：静态文件 + SPA history 路由回退。
+// hash 文件名的资源（/assets、/designer/assets）长缓存 immutable；
+// 其余（index.html 等）no-cache，保证发版后浏览器立即拿到新入口。
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        context.Context.Response.Headers.CacheControl =
+            context.Context.Request.Path.Value?.Contains("/assets/", StringComparison.Ordinal) == true
+                ? "public, max-age=31536000, immutable"
+                : "no-cache";
+    },
+});
 
 // 未匹配的 /api 路由返回 404（避免被 SPA 回退吞成 index.html）
 app.Map("/api/{**slug}", (HttpContext context) =>

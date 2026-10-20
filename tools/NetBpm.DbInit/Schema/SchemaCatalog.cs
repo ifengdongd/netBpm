@@ -694,7 +694,10 @@ internal static class SchemaCatalog
             C("modify_time", ColType.DateTime, comment: "最后修改时间"),
         ],
         ["id"],
-        [new IndexDef("ix_bpmn_model_key", ["tenant_id", "process_key"])],
+        [
+            new IndexDef("ix_bpmn_model_key", ["tenant_id", "process_key"]),
+            new IndexDef("ix_bpmn_model_modify", ["tenant_id", "modify_time"]),
+        ],
         [], [],
         EngineCharset: false);
 
@@ -743,6 +746,7 @@ internal static class SchemaCatalog
         ["id"],
         [
             new IndexDef("ix_admin_audit_tenant_time", ["tenant_id", "created_at"]),
+            new IndexDef("ix_admin_audit_actor", ["tenant_id", "actor", "created_at"]),
             new IndexDef("ix_admin_audit_action", ["action"]),
             new IndexDef("ix_admin_audit_target", ["target_type", "target_id"]),
             new IndexDef("ix_admin_audit_instance", ["process_instance_id"]),
@@ -771,6 +775,7 @@ internal static class SchemaCatalog
         [
             new IndexDef("ix_admin_history_archive_tenant", ["tenant_id", "end_time"]),
             new IndexDef("ix_admin_history_archive_business", ["business_key"]),
+            new IndexDef("ix_admin_history_archive_archived", ["archived_at"]),
         ],
         [new IndexDef("ux_admin_history_archive_instance", ["process_instance_id"], Unique: true)],
         [],

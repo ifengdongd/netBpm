@@ -141,6 +141,7 @@ create table bpmn_model (
     create_time datetime not null comment '创建时间',
     modify_time datetime comment '最后修改时间',
     primary key (id),
-    index ix_bpmn_model_key (tenant_id, process_key)
+    index ix_bpmn_model_key (tenant_id, process_key),
+    index ix_bpmn_model_modify (tenant_id, modify_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='流程模型表（管理端流程设计器的模型落点；BPMN XML 的编辑源，部署后产生 ACT_RE_PROCDEF 版本）';
 

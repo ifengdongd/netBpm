@@ -62,33 +62,42 @@ export default function MonitoringPage() {
   // 三个列表共用 usePagedList：缓存、去重与失效联动由 queryClient 统一管理
   const instanceList = usePagedList<ProcessInstanceResponse>(
     ['runtime', 'instances'],
-    (page) =>
-      runtimeApi.instances({
-        firstResult: (page.current - 1) * page.pageSize,
-        maxResults: page.pageSize,
-      }),
+    (page, signal) =>
+      runtimeApi.instances(
+        {
+          firstResult: (page.current - 1) * page.pageSize,
+          maxResults: page.pageSize,
+        },
+        signal,
+      ),
     (error) => message.error(`加载运行实例失败：${error.message}`),
     { refetchInterval },
   );
 
   const taskList = usePagedList<TaskResponse>(
     ['runtime', 'tasks'],
-    (page) =>
-      runtimeApi.tasks({
-        firstResult: (page.current - 1) * page.pageSize,
-        maxResults: page.pageSize,
-      }),
+    (page, signal) =>
+      runtimeApi.tasks(
+        {
+          firstResult: (page.current - 1) * page.pageSize,
+          maxResults: page.pageSize,
+        },
+        signal,
+      ),
     (error) => message.error(`加载待办任务失败：${error.message}`),
     { refetchInterval },
   );
 
   const historicList = usePagedList<HistoricProcessInstance>(
     ['runtime', 'historic-instances'],
-    (page) =>
-      runtimeApi.historicInstances({
-        firstResult: (page.current - 1) * page.pageSize,
-        maxResults: page.pageSize,
-      }),
+    (page, signal) =>
+      runtimeApi.historicInstances(
+        {
+          firstResult: (page.current - 1) * page.pageSize,
+          maxResults: page.pageSize,
+        },
+        signal,
+      ),
     (error) => message.error(`加载历史实例失败：${error.message}`),
     { refetchInterval },
   );

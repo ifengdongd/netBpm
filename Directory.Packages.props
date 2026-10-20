@@ -39,6 +39,8 @@
     <!-- 可选 OTel 接线：宿主按配置决定是否经 OTLP 导出管理治理指标（Meter 本身零依赖） -->
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.9.0" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.9.0" />
+    <!-- HTTP 入口链路追踪（WithTracing），默认关闭、随 OTel 开关一起启用 -->
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.9.0" />
   </ItemGroup>
 
   <ItemGroup Label="Testing">

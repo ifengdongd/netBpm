@@ -43,6 +43,9 @@ go
 if not exists (select 1 from sys.indexes where name = 'ix_admin_audit_tenant_time' and object_id = object_id('admin_audit_log'))
 create index ix_admin_audit_tenant_time on admin_audit_log (tenant_id, created_at);
 go
+if not exists (select 1 from sys.indexes where name = 'ix_admin_audit_actor' and object_id = object_id('admin_audit_log'))
+create index ix_admin_audit_actor on admin_audit_log (tenant_id, actor, created_at);
+go
 if not exists (select 1 from sys.indexes where name = 'ix_admin_audit_action' and object_id = object_id('admin_audit_log'))
 create index ix_admin_audit_action on admin_audit_log (action);
 go
@@ -77,6 +80,9 @@ create index ix_admin_history_archive_tenant on admin_history_archive (tenant_id
 go
 if not exists (select 1 from sys.indexes where name = 'ix_admin_history_archive_business' and object_id = object_id('admin_history_archive'))
 create index ix_admin_history_archive_business on admin_history_archive (business_key);
+go
+if not exists (select 1 from sys.indexes where name = 'ix_admin_history_archive_archived' and object_id = object_id('admin_history_archive'))
+create index ix_admin_history_archive_archived on admin_history_archive (archived_at);
 go
 
 -- ─────────────────────────── 表与列注释（扩展属性 MS_Description） ───────────────────────────

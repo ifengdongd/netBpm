@@ -94,7 +94,10 @@ public static partial class AdminEndpoints
         return Results.Ok(new SaveBpmnModelResponse(id, revision, errors, warnings));
     }
 
-    /// <summary>删除模型（连同版本历史；已部署的定义不受影响）。删除写审计 model.delete。</summary>
+    /// <summary>
+    /// 删除模型（连同版本历史；已部署的定义不受影响）。删除写审计 model.delete。
+    /// 模型不存在时 404 且不留审计（与发布一致：「删不存在的模型」不算一次管理动作）。
+    /// </summary>
     private static async Task<IResult> DeleteModelAsync(
         string id,
         RequestContext requestContext,
@@ -102,6 +105,11 @@ public static partial class AdminEndpoints
         AdminActionAuditor auditor,
         CancellationToken ct)
     {
+        if (await store.GetAsync(id, ct).ConfigureAwait(false) is null)
+        {
+            return Results.NotFound();
+        }
+
         var removed = await WithAuditTrailAsync(
             requestContext,
             auditor,
@@ -109,7 +117,7 @@ public static partial class AdminEndpoints
             AdminAuditTargets.Model,
             ResolveTenant(null, requestContext),
             failureDetail: () => new { modelId = id },
-            successDetail: removed => new { modelId = id, removed },
+            successDetail: _ => new { modelId = id, removed = true },
             operation: async token => await store.DeleteAsync(id, token).ConfigureAwait(false),
             ct).ConfigureAwait(false);
 

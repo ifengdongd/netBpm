@@ -96,7 +96,7 @@ export default function AuditPage() {
   // 分页列表状态与加载由 usePagedList 统一管理（缓存 / 失效联动 / 过期响应防护）
   const auditList = usePagedList<AdminAuditItem>(
     ['admin', 'audit'],
-    (target) => auditApi.list(buildQuery(target)),
+    (target, signal) => auditApi.list(buildQuery(target), signal),
     (error) => message.error(`加载审计失败：${error.message}`),
   );
 

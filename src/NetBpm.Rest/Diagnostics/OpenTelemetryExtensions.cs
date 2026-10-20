@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace NetBpm.Rest.Diagnostics;
 
@@ -49,6 +50,10 @@ public static class OpenTelemetryExtensions
                         ?? "unknown"))
             .WithMetrics(metrics => metrics
                 .AddMeter(AdminDiagnostics.MeterName)
+                .AddOtlpExporter())
+            // HTTP 入口 span：每次 /api 请求一条 trace，经 OTLP 导出（采样/过滤交给采集端）
+            .WithTracing(tracing => tracing
+                .AddAspNetCoreInstrumentation()
                 .AddOtlpExporter());
 
         return services;

@@ -100,7 +100,9 @@ function jsonInit(method: string, payload?: unknown): RequestInit {
 }
 
 export const http = {
-  get: <T>(path: string) => request<T>(path, { method: 'GET' }),
+  /** GET；`signal` 供 TanStack Query 取消过期请求（快速翻页时旧请求不再占用服务端）。 */
+  get: <T>(path: string, options?: { signal?: AbortSignal }) =>
+    request<T>(path, { method: 'GET', signal: options?.signal }),
 
   post: <T>(path: string, payload?: unknown) => request<T>(path, jsonInit('POST', payload)),
 
@@ -131,6 +133,10 @@ export function toQueryString(params?: object): string {
 }
 
 /** 列表端点统一走 envelope=true，拿到 items + total，避免读 X-Total-Count 头。 */
-export async function list<T>(path: string, params?: object): Promise<PagedResponse<T>> {
-  return http.get<PagedResponse<T>>(`${path}${toQueryString({ ...params, envelope: 'true' })}`);
+export async function list<T>(
+  path: string,
+  params?: object,
+  options?: { signal?: AbortSignal },
+): Promise<PagedResponse<T>> {
+  return http.get<PagedResponse<T>>(`${path}${toQueryString({ ...params, envelope: 'true' })}`, options);
 }

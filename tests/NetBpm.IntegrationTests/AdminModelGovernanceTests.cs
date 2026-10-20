@@ -186,6 +186,7 @@ public sealed class AdminModelGovernanceTests : IClassFixture<AdminEngineFactory
         Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
 
         Cleanup();
+        CleanModelAudit();
 
         using var client = _factory.CreateClient();
 
@@ -237,6 +238,91 @@ public sealed class AdminModelGovernanceTests : IClassFixture<AdminEngineFactory
         // 模型本身不受影响
         var historyAfterPrune = await HistoryAsync(client);
         Assert.Equal(2, historyAfterPrune.Count);
+
+        // 两次清理（removed=1 与 removed=0）都写 model.history_prune 审计
+        // （同秒内两条的展示顺序不定，按明细断言而不是按位置）
+        var prunes = await AuditAsync(client, "model.history_prune");
+
+        Assert.Equal(2, prunes.Count);
+        Assert.All(prunes, item => Assert.True(item.GetProperty("success").GetBoolean()));
+
+        var details = prunes.Select(item => item.GetProperty("detail").GetString()).ToList();
+
+        Assert.Contains(details, detail => detail!.Contains("\"removed\":1", StringComparison.Ordinal));
+        Assert.Contains(details, detail => detail!.Contains("\"removed\":0", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ModelAuditTrail_ShouldRecordPublishDeleteAndPrune()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        Cleanup();
+        CleanModelAudit();
+
+        using var client = _factory.CreateClient();
+
+        // 保存 + 发布：model.publish 审计留痕（detail 含 definitionId）
+        using (var save = await PutModelAsync(client, V1))
+        {
+            Assert.True(save.IsSuccessStatusCode, await save.Content.ReadAsStringAsync(Ct));
+        }
+
+        _ = await PublishAsync(client);
+
+        var publishes = await AuditAsync(client, "model.publish");
+
+        Assert.Single(publishes);
+        Assert.True(publishes[0].GetProperty("success").GetBoolean());
+        Assert.Contains("governance_process", publishes[0].GetProperty("detail").GetString(), StringComparison.Ordinal);
+
+        // 删除模型：model.delete 审计留痕，且审计独立于被删的模型
+        using (var delete = await client.DeleteAsync(
+            new Uri($"/api/admin/models/{ModelId}", UriKind.Relative), Ct))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
+        }
+
+        var deletes = await AuditAsync(client, "model.delete");
+
+        Assert.Single(deletes);
+        Assert.True(deletes[0].GetProperty("success").GetBoolean());
+
+        // 404（删不存在的模型）不应再追加成功审计
+        using (var deleteAgain = await client.DeleteAsync(
+            new Uri($"/api/admin/models/{ModelId}", UriKind.Relative), Ct))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, deleteAgain.StatusCode);
+        }
+
+        Assert.Single(await AuditAsync(client, "model.delete"));
+    }
+
+    /// <summary>清掉 model.* 审计（审计表跨测试累积，测试需要从确定状态断言计数）。</summary>
+    private static void CleanModelAudit()
+    {
+        if (!MySqlTestDatabase.IsAvailable)
+        {
+            return;
+        }
+
+        using var session = MySqlTestDatabase.CreateSessionFactory().Create();
+        session.Connection.Execute("delete from admin_audit_log where action like 'model.%'");
+    }
+
+    /// <summary>按动作查管理审计（审计查询本身要求 admin scope，用同一测试凭据）。</summary>
+    private static async Task<IReadOnlyList<JsonElement>> AuditAsync(HttpClient client, string action)
+    {
+        using var response = await client.GetAsync(
+            new Uri($"/api/admin/audit?action={action}&maxResults=50", UriKind.Relative),
+            Ct);
+
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.IsSuccessStatusCode, $"查审计失败：{response.StatusCode} {body}");
+
+        using var document = JsonDocument.Parse(body);
+
+        return [.. document.RootElement.GetProperty("items").EnumerateArray().Select(element => element.Clone())];
     }
 
     private async Task<HttpResponseMessage> PutModelAsync(HttpClient client, string xml) =>

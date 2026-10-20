@@ -28,7 +28,8 @@ describe('usePagedList', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(fetcher).toHaveBeenCalledWith({ current: 1, pageSize: 20 });
+    // 第二个参数是 TanStack Query 注入的 AbortSignal（请求取消用）
+    expect(fetcher).toHaveBeenCalledWith({ current: 1, pageSize: 20 }, expect.anything());
     expect(result.current.items).toEqual([1]);
     expect(result.current.total).toBe(10);
     expect(result.current.pagination.current).toBe(1);
@@ -48,7 +49,7 @@ describe('usePagedList', () => {
     act(() => result.current.setPage({ current: 2, pageSize: 20 }));
 
     await waitFor(() => expect(result.current.items).toEqual([2, 22]));
-    expect(fetcher).toHaveBeenLastCalledWith({ current: 2, pageSize: 20 });
+    expect(fetcher).toHaveBeenLastCalledWith({ current: 2, pageSize: 20 }, expect.anything());
     expect(result.current.pagination.current).toBe(2);
   });
 

@@ -26,5 +26,6 @@ public sealed class AdminEngineFactory : WebApplicationFactory<AdminHost::Progra
         builder.UseSetting("NetBpm:AutoMigrate", "false");
         builder.UseSetting("NetBpm:AdminTenantId", "1");
         builder.UseSetting("NetBpm:Timer:Enabled", "false");
+        builder.UseSetting("NetBpm:Admin:RateLimit:Enabled", "false");
     }
 }

@@ -38,6 +38,7 @@ builder.Services.AddNetBpmAuditing();
 
 // 审计保留策略（NetBpm:Admin:AuditRetentionDays，默认 0 = 永久保留）
 builder.Services.AddHostedService<AdminAuditCleanupService>();
+builder.Services.AddHostedService<AdminArchiveCleanupService>();
 
 // 可选 OpenTelemetry 接线（NetBpm:Otel:Enabled 或 OTEL_EXPORTER_OTLP_ENDPOINT）
 builder.Services.AddNetBpmOpenTelemetry(builder.Configuration);

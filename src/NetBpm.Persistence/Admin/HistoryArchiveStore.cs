@@ -94,6 +94,9 @@ public interface IHistoryArchiveStore
 
     /// <summary>按流程实例 id 取归档详情（含 payload）；不存在返回 <see langword="null"/>。</summary>
     ValueTask<HistoryArchiveDetail?> FindAsync(string processInstanceId, CancellationToken ct = default);
+
+    /// <summary>保留策略：删除归档时间早于 <paramref name="before"/> 的记录，返回删除条数。</summary>
+    ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -115,6 +118,9 @@ public sealed class UnsupportedHistoryArchiveStore : IHistoryArchiveStore
     public ValueTask<HistoryArchiveDetail?> FindAsync(
         string processInstanceId,
         CancellationToken ct = default) => throw NotSupported();
+
+    /// <inheritdoc />
+    public ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default) => ValueTask.FromResult(0);
 
     private static EngineNotImplementedException NotSupported() => new(
         "历史归档",
@@ -246,6 +252,17 @@ public sealed class DapperHistoryArchiveStore : IHistoryArchiveStore
         return rows
             .Select(row => new HistoryArchiveDetail(Map(row), row.Payload ?? string.Empty))
             .FirstOrDefault();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default)
+    {
+        await using var connection = _connections.CreateConnection();
+
+        return await connection.ExecuteAsync(new CommandDefinition(
+            "delete from admin_history_archive where archived_at < @before",
+            new { before },
+            cancellationToken: ct)).ConfigureAwait(false);
     }
 
     private static async Task<IReadOnlyList<ArchiveCandidate>> FindCandidatesAsync(

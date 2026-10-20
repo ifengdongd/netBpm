@@ -37,6 +37,7 @@ create table if not exists admin_audit_log (
     created_at datetime(3) not null comment '写入时间（UTC）',
     primary key (id),
     index ix_admin_audit_tenant_time (tenant_id, created_at),
+    index ix_admin_audit_actor (tenant_id, actor, created_at),
     index ix_admin_audit_action (action),
     index ix_admin_audit_target (target_type, target_id),
     index ix_admin_audit_instance (process_instance_id)
@@ -57,6 +58,7 @@ create table if not exists admin_history_archive (
     primary key (id),
     unique key ux_admin_history_archive_instance (process_instance_id),
     index ix_admin_history_archive_tenant (tenant_id, end_time),
-    index ix_admin_history_archive_business (business_key)
+    index ix_admin_history_archive_business (business_key),
+    index ix_admin_history_archive_archived (archived_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='历史归档：已结束实例的 ACT_HI_* 行快照（JSON），原历史行在归档后删除';
 

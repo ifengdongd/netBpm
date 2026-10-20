@@ -20,6 +20,7 @@
     <!-- 可选 OTel 接线（默认关闭）：见 Diagnostics/OpenTelemetryExtensions -->
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
   </ItemGroup>
 
 </Project>

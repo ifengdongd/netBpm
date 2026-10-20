@@ -31,5 +31,6 @@ public sealed class RestEngineFactory : WebApplicationFactory<Program>
         builder.UseSetting("NetBpm:EnableHistory", "true");
         builder.UseSetting("NetBpm:ValidateSchemaOnStartup", "false");
         builder.UseSetting("NetBpm:AutoMigrate", "false");
+        builder.UseSetting("NetBpm:Admin:RateLimit:Enabled", "false");
     }
 }

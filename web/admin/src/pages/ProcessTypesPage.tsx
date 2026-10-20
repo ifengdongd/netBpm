@@ -39,6 +39,8 @@ export default function ProcessTypesPage() {
   const typesQuery = useQuery({
     queryKey: PROCESS_TYPES_KEY,
     queryFn: () => processTypesApi.list(),
+    // 流程类型注册表低频变化（写操作后有 invalidate），放宽新鲜度
+    staleTime: 60_000,
   });
 
   // useMemo 稳定空数组引用，避免下游 useMemo 依赖每次渲染变化

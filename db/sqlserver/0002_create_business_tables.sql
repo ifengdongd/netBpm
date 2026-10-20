@@ -149,6 +149,7 @@ create table bpmn_model (
 );
 
 create index ix_bpmn_model_key on bpmn_model (tenant_id, process_key);
+create index ix_bpmn_model_modify on bpmn_model (tenant_id, modify_time);
 
 -- ─────────────────────────── 表与列注释（扩展属性 MS_Description） ───────────────────────────
 

@@ -29,6 +29,8 @@ export default function DeploymentsPage() {
   const deploymentsQuery = useQuery({
     queryKey: ['designer', 'deployments'],
     queryFn: () => deploymentsApi.list({ firstResult: 0, maxResults: 200 }),
+    // 部署列表低频变化（写操作后有 refetch），放宽新鲜度
+    staleTime: 60_000,
   });
 
   // useMemo 稳定空数组引用，避免下游 useMemo 依赖每次渲染变化

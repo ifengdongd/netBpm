@@ -92,3 +92,38 @@ dotnet run --project tools/NetBpm.DbInit -- \
 | 注释 | SQL Server 补齐业务表（`workflow_type` / `leave_bill` / `sys_*` / `order_bill` / `workflow_parameters`）的表与列 `MS_Description`（原缺失），与 MySQL `comment` 一一对应 |
 | 约束命名 | SQL Server 统一 `pk_<table>` / `df_<table>_<column>`（原流程实例表的 `PK_instances` / `pk__xxx` 自动名统一为小写命名） |
 | 幂等策略 | `0001` / `0002` 及 `0003` 的业务表单（`leave_bill` / `order_bill` / `workflow_parameters`）一次性执行；`0003` 的组织架构（`sys_*`）、`0004` / `0005` 幂等可重复（`apply` 单独执行用） |
+
+## 运维：历史表空间回收（高频归档场景）
+
+历史归档（`POST /api/admin/history/archive`）会在**同一事务**内把 5 张 `ACT_HI_*`
+的行搬进 `admin_history_archive`（JSON 快照）并删除原行——逻辑上历史已转移，
+但 InnoDB / SQL Server 的页内空洞不会自动归还给操作系统，`.ibd` / `.mdf` 文件只增不减。
+长期高频归档的库建议按以下节奏做空间回收（低频归档可忽略）：
+
+```sql
+-- MySQL：先确认碎片率，再决定是否重建
+select table_name, data_free / (data_length + index_length) as frag_ratio
+  from information_schema.tables
+ where table_schema = 'netbpm' and table_name like 'ACT_HI_%';
+
+-- 碎片率高（如 > 30%）时逐表重建（锁表期间业务会阻塞，放维护窗口）：
+optimize table ACT_HI_PROCINST;
+optimize table ACT_HI_ACTINST;
+optimize table ACT_HI_TASKINST;
+optimize table ACT_HI_VARINST;
+optimize table ACT_HI_IDENTITYLINK;
+
+-- SQL Server：重建聚集索引回收页内空洞（ ONLINE = ON 需企业版）
+alter index all on ACT_HI_PROCINST rebuild;
+```
+
+配套的**数据保留**机制（应用层已内置）：
+
+| 数据 | 机制 | 配置 |
+|---|---|---|
+| 管理动作审计 | `AdminAuditCleanupService`（每 6h） | `NetBpm:Admin:AuditRetentionDays`（0=永久） |
+| 历史归档快照 | `AdminArchiveCleanupService`（每 6h） | `NetBpm:Admin:ArchiveRetentionDays`（0=永久） |
+| 模型版本历史 | 端点手动清理 `DELETE /api/admin/models/{id}/history?keepLatest=N` | — |
+
+> ⚠️ 归档记录删除前如需长期留存，请先把 `admin_history_archive.payload`
+> 导出到对象存储 / 冷库——删除后引擎侧 ACT_HI_* 原行已不存在，无法重建。
