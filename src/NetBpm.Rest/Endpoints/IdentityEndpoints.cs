@@ -1,4 +1,5 @@
 using NetBpm.Identity;
+using NetBpm.Rest.Security;
 
 namespace NetBpm.Rest.Endpoints;
 
@@ -27,9 +28,19 @@ public static class IdentityEndpoints
     /// <summary>某用户所属的全部组（用于前端展开「我的候选组待办」）。</summary>
     private static async Task<IResult> FindGroupsByUserAsync(
         string userId,
+        RequestContext requestContext,
         IUserGroupManager identity,
         CancellationToken ct)
     {
+        // 只有本人、管理员或可信服务（API Key / 未启用鉴权）能看别人的组：
+        // 否则任意已登录用户都能枚举组织架构。API Key 与其它鉴权规则一致，代表可信服务。
+        if (requestContext.IsUserPrincipal
+            && !requestContext.IsAdmin
+            && !string.Equals(requestContext.UserId, userId, StringComparison.Ordinal))
+        {
+            throw new ForbiddenException("只能查询自己的组；查询他人组需要管理员权限。");
+        }
+
         var groupIds = await identity.FindGroupIdsByUserAsync(userId, ct).ConfigureAwait(false);
 
         var groups = new List<UserGroupResponse>(groupIds.Count);
@@ -62,6 +73,7 @@ public static class IdentityEndpoints
     /// <summary>组成员（返回用户 id；空集是合法结果，见接口注释）。</summary>
     private static async Task<IResult> FindUsersInGroupAsync(
         string groupId,
+        RequestContext requestContext,
         IUserGroupManager identity,
         CancellationToken ct)
     {
@@ -70,6 +82,20 @@ public static class IdentityEndpoints
         if (group is null)
         {
             return Results.NotFound(new ErrorResponse($"组 '{groupId}' 不存在（身份模块可能未接入）。"));
+        }
+
+        // 管理员 / 可信服务可看任意组；普通 JWT 用户只能看自己所在的组（候选人前端需要展开本组）
+        if (requestContext.IsUserPrincipal && !requestContext.IsAdmin)
+        {
+            var userId = requestContext.UserId
+                ?? throw new ForbiddenException("当前请求没有可识别的用户身份。");
+
+            var memberships = await identity.FindGroupIdsByUserAsync(userId, ct).ConfigureAwait(false);
+
+            if (!memberships.Contains(groupId, StringComparer.Ordinal))
+            {
+                throw new ForbiddenException($"当前用户不在组 '{groupId}' 中，无权查看成员。");
+            }
         }
 
         var userIds = await identity.FindUserIdsByGroupAsync(groupId, ct).ConfigureAwait(false);

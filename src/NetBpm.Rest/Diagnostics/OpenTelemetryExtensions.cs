@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using NetBpm.Engine.Diagnostics;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -50,10 +51,13 @@ public static class OpenTelemetryExtensions
                         ?? "unknown"))
             .WithMetrics(metrics => metrics
                 .AddMeter(AdminDiagnostics.MeterName)
+                .AddMeter(EngineDiagnostics.MeterName)
                 .AddOtlpExporter())
-            // HTTP 入口 span：每次 /api 请求一条 trace，经 OTLP 导出（采样/过滤交给采集端）
+            // HTTP 入口 span：每次 /api 请求一条 trace；
+            // 引擎命令 span（netbpm.command *）由 Runtime 的 ActivitySource 产生，可与 HTTP 串成一条链路。
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation()
+                .AddSource(EngineDiagnostics.ActivitySourceName)
                 .AddOtlpExporter());
 
         return services;

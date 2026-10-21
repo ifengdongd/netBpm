@@ -9,8 +9,10 @@ using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
+using NetBpm.Engine.Diagnostics;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Runtime.Migration;
+using Microsoft.Extensions.Logging;
 
 namespace NetBpm.Runtime;
 
@@ -26,7 +28,9 @@ public sealed class ProcessEngine : IProcessEngine
     private readonly IExecutionManager _executionManager;
     private readonly IHistoryManager _historyManager;
     private readonly ITimerJobManager? _timerJobs;
+    private readonly IAsyncJobManager? _asyncJobs;
     private readonly IMigrationLog? _migrationLog;
+    private readonly ILogger<ProcessEngine>? _logger;
 
     public ProcessEngine(
         ICommandExecutor commandExecutor,
@@ -38,7 +42,9 @@ public sealed class ProcessEngine : IProcessEngine
         IExecutionManager executionManager,
         IHistoryManager historyManager,
         ITimerJobManager? timerJobs = null,
-        IMigrationLog? migrationLog = null)
+        IMigrationLog? migrationLog = null,
+        ILogger<ProcessEngine>? logger = null,
+        IAsyncJobManager? asyncJobs = null)
     {
         ArgumentNullException.ThrowIfNull(commandExecutor);
         ArgumentNullException.ThrowIfNull(xmlConverter);
@@ -58,7 +64,9 @@ public sealed class ProcessEngine : IProcessEngine
         _executionManager = executionManager;
         _historyManager = historyManager;
         _timerJobs = timerJobs;
+        _asyncJobs = asyncJobs;
         _migrationLog = migrationLog;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -79,22 +87,234 @@ public sealed class ProcessEngine : IProcessEngine
         var due = await _timerJobs.FindDueAsync(utcNow, Math.Max(1, maxJobs), ct).ConfigureAwait(false);
 
         var fired = 0;
+        var failed = 0;
 
         foreach (var job in due)
         {
             ct.ThrowIfCancellationRequested();
 
-            // 每条作业一个独立事务：某一条失败（并发完成 / 已删除）不影响其它作业
-            if (await _commandExecutor
-                    .ExecuteAsync(new TriggerTimerJobCommand(job.Id), ct)
-                    .ConfigureAwait(false))
+            try
             {
-                fired++;
+                // 挂起实例的作业本轮让位（数据库宿主已在 SQL 里过滤，内存宿主在这里兜底）：
+                // 否则一条挂起实例的作业会永远占据批次头部，饿死真正该触发的作业。
+                if (_timerJobs is InMemoryTimerJobManager)
+                {
+                    var execution = await _executionManager.FindByIdAsync(job.ExecutionId, ct).ConfigureAwait(false);
+
+                    if (execution is { SuspensionState: not 1 })
+                    {
+                        await _timerJobs.RescheduleAsync(job.Id, utcNow.AddMinutes(1), ct).ConfigureAwait(false);
+                        continue;
+                    }
+                }
+
+                // 每条作业一个独立事务：某一条失败（并发完成 / 已删除 / 数据损坏）不影响其它作业
+                if (await _commandExecutor
+                        .ExecuteAsync(new TriggerTimerJobCommand(job.Id), ct)
+                        .ConfigureAwait(false))
+                {
+                    fired++;
+                }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failed++;
+                await RecordJobFailureAsync(job, exception, utcNow).ConfigureAwait(false);
+            }
+        }
+
+        if (failed > 0)
+        {
+            _logger?.LogWarning(
+                "本轮 {Failed} 条定时作业执行失败（已按退避重试，超过上限进入死信）。",
+                failed);
         }
 
         return fired;
     }
+
+    /// <summary>
+    /// 记录作业失败：递减重试次数、按退避改期；用尽后进死信。
+    /// <para>
+    /// 必须用<b>独立事务</b>写入：失败命令已经回滚，作业行仍在表里；
+    /// 这里再失败（数据库不可用）只记日志，不能让整批轮询停摆。
+    /// </para>
+    /// </summary>
+    private async ValueTask RecordJobFailureAsync(TimerJobEntity job, Exception exception, DateTime utcNow)
+    {
+        try
+        {
+            var failedAttempts = Math.Max(1, TimerJobRetry.DefaultMaxRetries - job.Retries + 1);
+            var remaining = Math.Max(0, job.Retries - 1);
+            var nextDue = remaining == 0 ? utcNow : utcNow + TimerJobRetry.Backoff(failedAttempts);
+
+            await _timerJobs!
+                .MarkFailureAsync(job.Id, exception.Message, utcNow, nextDue, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            EngineDiagnostics.TimerJobFailures.Add(
+                1,
+                new KeyValuePair<string, object?>("dead_letter", remaining == 0));
+
+            _logger?.LogWarning(
+                exception,
+                "定时作业 {JobId} 执行失败（剩余重试 {Remaining}，下次到期 {NextDue:O}）。",
+                job.Id,
+                remaining,
+                nextDue);
+        }
+        catch (Exception markException)
+        {
+            _logger?.LogError(markException, "记录定时作业 {JobId} 失败状态时出错。", job.Id);
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> ExecuteDueAsyncJobsAsync(
+        DateTime utcNow,
+        int maxJobs = 50,
+        CancellationToken ct = default)
+    {
+        if (_asyncJobs is null)
+        {
+            return 0;
+        }
+
+        var due = await _asyncJobs.FindDueAsync(utcNow, Math.Max(1, maxJobs), ct).ConfigureAwait(false);
+
+        var executed = 0;
+        var failed = 0;
+
+        foreach (var job in due)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                // 每条作业一个独立事务：某一条失败（外部系统抖动 / 数据损坏）不影响其它作业
+                if (await _commandExecutor
+                        .ExecuteAsync(new ExecuteAsyncJobCommand(job.Id), ct)
+                        .ConfigureAwait(false))
+                {
+                    executed++;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failed++;
+                await RecordAsyncJobFailureAsync(job, exception, utcNow).ConfigureAwait(false);
+            }
+        }
+
+        if (failed > 0)
+        {
+            _logger?.LogWarning(
+                "本轮 {Failed} 条异步作业执行失败（已按退避重试，超过上限进入死信）。",
+                failed);
+        }
+
+        return executed;
+    }
+
+    /// <summary>记录异步作业失败：递减重试次数、按退避改期；用尽后进死信（独立事务）。</summary>
+    private async ValueTask RecordAsyncJobFailureAsync(AsyncJobEntity job, Exception exception, DateTime utcNow)
+    {
+        try
+        {
+            var failedAttempts = Math.Max(1, AsyncJobRetry.DefaultMaxRetries - job.Retries + 1);
+            var remaining = Math.Max(0, job.Retries - 1);
+            var nextDue = remaining == 0 ? utcNow : utcNow + AsyncJobRetry.Backoff(failedAttempts);
+
+            // 数据库宿主：作业的「抢占删除」随失败命令回滚，行仍在 → 直接改失败状态。
+            // 内存宿主没有事务：抢占删除已经生效 → 用失败前快照重新插回。
+            var existing = await _asyncJobs!.FindByIdAsync(job.Id, CancellationToken.None).ConfigureAwait(false);
+
+            if (existing is null)
+            {
+                job.Retries = remaining;
+                job.ExceptionMessage = exception.Message;
+                job.LastFailureTime = utcNow;
+                job.DueDate = nextDue;
+                job.DeadLetter = remaining == 0;
+
+                await _asyncJobs.InsertAsync(job, CancellationToken.None).ConfigureAwait(false);
+            }
+            else
+            {
+                await _asyncJobs
+                    .MarkFailureAsync(job.Id, exception.Message, utcNow, nextDue, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            EngineDiagnostics.AsyncJobFailures.Add(
+                1,
+                new KeyValuePair<string, object?>("dead_letter", remaining == 0));
+
+            _logger?.LogWarning(
+                exception,
+                "异步作业 {JobId}（{ActivityId}/{Phase}）执行失败（剩余重试 {Remaining}，下次到期 {NextDue:O}）。",
+                job.Id,
+                job.ActivityId,
+                job.PhaseValue,
+                remaining,
+                nextDue);
+        }
+        catch (Exception markException)
+        {
+            _logger?.LogError(markException, "记录异步作业 {JobId} 失败状态时出错。", job.Id);
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> ExecuteAsyncJobAsync(string jobId, CancellationToken ct = default)
+    {
+        if (_asyncJobs is null)
+        {
+            return false;
+        }
+
+        return await _commandExecutor
+            .ExecuteAsync(new ExecuteAsyncJobCommand(jobId), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<AsyncJobEntity?> FindAsyncJobAsync(string jobId, CancellationToken ct = default) =>
+        _asyncJobs is null ? null : await _asyncJobs.FindByIdAsync(jobId, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<AsyncJobEntity>> FindAsyncJobsAsync(
+        AsyncJobQuery query,
+        CancellationToken ct = default) =>
+        _asyncJobs is null
+            ? []
+            : await _asyncJobs.FindAsync(query, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async ValueTask<int> CountAsyncJobsAsync(AsyncJobQuery query, CancellationToken ct = default) =>
+        _asyncJobs is null ? 0 : await _asyncJobs.CountAsync(query, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async ValueTask<int> CountAsyncJobsAsync(CancellationToken ct = default) =>
+        _asyncJobs is null ? 0 : await _asyncJobs.CountAsync(ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async ValueTask<bool> RetryAsyncJobAsync(string jobId, CancellationToken ct = default) =>
+        _asyncJobs is not null
+        && await _asyncJobs.RetryDeadLetterAsync(jobId, DateTime.UtcNow, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async ValueTask<bool> DeleteAsyncJobAsync(string jobId, CancellationToken ct = default) =>
+        _asyncJobs is not null
+        && await _asyncJobs.DeleteDeadLetterAsync(jobId, ct).ConfigureAwait(false);
 
     /// <inheritdoc />
     public async ValueTask<ProcessDefinition> DeployAsync(
@@ -257,6 +477,18 @@ public sealed class ProcessEngine : IProcessEngine
         ProcessInstanceQuery query,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(query.FirstResult, query.MaxResults);
+
+        if (_executionManager is IExecutionQueryManager pushdown)
+        {
+            var filter = await BuildProcessInstanceFilterAsync(query, ct).ConfigureAwait(false);
+
+            return filter is null
+                ? []
+                : await pushdown.QueryProcessInstancesAsync(filter, ct).ConfigureAwait(false);
+        }
+
         var instances = await CollectProcessInstancesAsync(query, ct).ConfigureAwait(false);
 
         return
@@ -274,8 +506,61 @@ public sealed class ProcessEngine : IProcessEngine
     /// <inheritdoc />
     public async ValueTask<int> CountProcessInstancesAsync(
         ProcessInstanceQuery query,
-        CancellationToken ct = default) =>
-        (await CollectProcessInstancesAsync(query, ct).ConfigureAwait(false)).Count;
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(0, null);
+
+        if (_executionManager is IExecutionQueryManager pushdown)
+        {
+            var filter = await BuildProcessInstanceFilterAsync(query, ct).ConfigureAwait(false);
+
+            return filter is null
+                ? 0
+                : await pushdown
+                    .CountProcessInstancesAsync(filter with { FirstResult = 0, MaxResults = null }, ct)
+                    .ConfigureAwait(false);
+        }
+
+        return (await CollectProcessInstancesAsync(query, ct).ConfigureAwait(false)).Count;
+    }
+
+    /// <summary>
+    /// 把门面查询翻译成持久化过滤条件；按 key 解析不出任何定义时返回 <see langword="null"/>
+    /// （语义是「零匹配」，不能退化成「不加过滤」）。
+    /// </summary>
+    private async ValueTask<ProcessInstanceFilter?> BuildProcessInstanceFilterAsync(
+        ProcessInstanceQuery query,
+        CancellationToken ct)
+    {
+        IReadOnlyCollection<string>? definitionIds = null;
+
+        if (!string.IsNullOrWhiteSpace(query.ProcessDefinitionKey))
+        {
+            var resolved = await ResolveDefinitionIdsByKeyAsync(query.ProcessDefinitionKey, query.TenantId, ct)
+                .ConfigureAwait(false);
+
+            if (resolved.Count == 0)
+            {
+                return null;
+            }
+
+            definitionIds = resolved;
+        }
+
+        return new ProcessInstanceFilter(
+            ProcessDefinitionId: query.ProcessDefinitionId,
+            ProcessDefinitionIds: definitionIds,
+            BusinessKey: query.BusinessKey,
+            StartUserId: query.StartUserId,
+            TenantId: query.TenantId,
+            IsActive: query.IsActive,
+            StartedAfter: query.StartedAfter,
+            StartedBefore: query.StartedBefore,
+            FirstResult: query.FirstResult,
+            MaxResults: query.MaxResults,
+            Descending: true);
+    }
 
     private async ValueTask<IReadOnlyList<IExecutionEntity>> CollectProcessInstancesAsync(
         ProcessInstanceQuery query,
@@ -487,6 +772,20 @@ public sealed class ProcessEngine : IProcessEngine
     }
 
     /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<IdentityLinkRecord>> FindProcessInstanceIdentityLinksAsync(
+        string processInstanceId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
+
+        var links = await _taskManager
+            .FindIdentityLinksByProcessInstanceIdAsync(processInstanceId, ct)
+            .ConfigureAwait(false);
+
+        return [.. links];
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IReadOnlyList<IdentityLinkRecord>> FindTaskIdentityLinksAsync(
         string taskId,
         CancellationToken ct = default)
@@ -637,8 +936,46 @@ public sealed class ProcessEngine : IProcessEngine
     /// 排序键取 (CREATE_TIME_, ID_)：创建时间相同（同一毫秒内批量创建）时用 id 兜底。
     /// </para>
     /// </summary>
-    private static IEnumerable<TaskEntity> ApplyPaging(IEnumerable<TaskEntity> tasks, TaskQuery query) =>
-        ApplyPaging(tasks, query.FirstResult, query.MaxResults, task => task.CreateTime, task => task.Id);
+    private static IEnumerable<TaskEntity> ApplyPaging(IEnumerable<TaskEntity> tasks, TaskQuery query)
+    {
+        var sortBy = string.IsNullOrWhiteSpace(query.SortBy) ? "createTime" : query.SortBy;
+
+        if (!TaskQuery.AllowedSortFields.Contains(sortBy, StringComparer.Ordinal))
+        {
+            throw new EngineException(
+                $"不支持的排序字段 '{sortBy}'；可选：{string.Join(" / ", TaskQuery.AllowedSortFields)}。");
+        }
+
+        IOrderedEnumerable<TaskEntity> ordered = sortBy switch
+        {
+            "dueDate" => query.Descending
+                ? tasks.OrderByDescending(task => task.DueDate ?? DateTime.MinValue)
+                    .ThenByDescending(task => task.Id, StringComparer.Ordinal)
+                : tasks.OrderBy(task => task.DueDate ?? DateTime.MinValue)
+                    .ThenBy(task => task.Id, StringComparer.Ordinal),
+
+            "priority" => query.Descending
+                ? tasks.OrderByDescending(task => task.Priority)
+                    .ThenByDescending(task => task.Id, StringComparer.Ordinal)
+                : tasks.OrderBy(task => task.Priority)
+                    .ThenBy(task => task.Id, StringComparer.Ordinal),
+
+            _ => query.Descending
+                ? tasks.OrderByDescending(task => task.CreateTime)
+                    .ThenByDescending(task => task.Id, StringComparer.Ordinal)
+                : tasks.OrderBy(task => task.CreateTime)
+                    .ThenBy(task => task.Id, StringComparer.Ordinal),
+        };
+
+        IEnumerable<TaskEntity> result = ordered;
+
+        if (query.FirstResult > 0)
+        {
+            result = result.Skip(query.FirstResult);
+        }
+
+        return query.MaxResults is int take ? result.Take(take) : result;
+    }
 
     /// <summary>通用分页：稳定排序（时间 → id）后切片。待办与历史任务共用同一口径。</summary>
     /// <param name="items">待切片序列。</param>
@@ -783,7 +1120,8 @@ public sealed class ProcessEngine : IProcessEngine
                     update.Category,
                     update.Owner,
                     update.ClearDueDate,
-                    update.ClearDescription),
+                    update.ClearDescription,
+                    update.ExpectedRevision),
                 ct)
             .ConfigureAwait(false);
     }
@@ -1081,6 +1419,17 @@ public sealed class ProcessEngine : IProcessEngine
         HistoricTaskQuery query,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(query.FirstResult, query.MaxResults);
+        EnsureHistoricTaskCriteria(query);
+
+        if (_historyManager is IHistoricQueryManager pushdown)
+        {
+            return await pushdown
+                .QueryTaskInstancesAsync(ToFilter(query), ct)
+                .ConfigureAwait(false);
+        }
+
         var tasks = await CollectHistoricTasksAsync(query, ct).ConfigureAwait(false);
 
         return [.. ApplyPaging(tasks, query.FirstResult, query.MaxResults, task => task.StartTime, task => task.Id)];
@@ -1091,10 +1440,43 @@ public sealed class ProcessEngine : IProcessEngine
         HistoricTaskQuery query,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(query);
+        EnsureHistoricTaskCriteria(query);
+
+        if (_historyManager is IHistoricQueryManager pushdown)
+        {
+            // 只取计数：不再为得到一个数字把整张历史任务表读进内存
+            return await pushdown.CountTaskInstancesAsync(ToFilter(query) with { MaxResults = null }, ct)
+                .ConfigureAwait(false);
+        }
+
         var tasks = await CollectHistoricTasksAsync(query, ct).ConfigureAwait(false);
 
         return tasks.Count;
     }
+
+    private static void EnsureHistoricTaskCriteria(HistoricTaskQuery query)
+    {
+        if (!query.HasCriteria)
+        {
+            throw new EngineException(
+                "历史任务查询至少需要一个条件（processInstanceId / assignee / processDefinitionId / taskDefinitionKey）。"
+                + "本子集不提供无条件的历史全表扫描。");
+        }
+    }
+
+    private static HistoricTaskFilter ToFilter(HistoricTaskQuery query) =>
+        new(
+            ProcessInstanceId: query.ProcessInstanceId,
+            Assignee: query.Assignee,
+            OnlyFinished: query.OnlyFinished,
+            ProcessDefinitionId: query.ProcessDefinitionId,
+            TaskDefinitionKey: query.TaskDefinitionKey,
+            FinishedAfter: query.FinishedAfter,
+            FinishedBefore: query.FinishedBefore,
+            TenantId: query.TenantId,
+            FirstResult: query.FirstResult,
+            MaxResults: query.MaxResults);
 
     /// <summary>
     /// 取历史任务候选集：先用历史管理器按实例取回，再在内存里做办理人 / 已办过滤
@@ -1145,6 +1527,18 @@ public sealed class ProcessEngine : IProcessEngine
         HistoricProcessInstanceQuery query,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(query.FirstResult, query.MaxResults);
+
+        if (_historyManager is IHistoricQueryManager pushdown)
+        {
+            var filter = await BuildHistoricProcessInstanceFilterAsync(query, ct).ConfigureAwait(false);
+
+            return filter is null
+                ? []
+                : await pushdown.QueryProcessInstancesAsync(filter, ct).ConfigureAwait(false);
+        }
+
         var instances = await CollectHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false);
 
         return
@@ -1162,8 +1556,64 @@ public sealed class ProcessEngine : IProcessEngine
     /// <inheritdoc />
     public async ValueTask<int> CountHistoricProcessInstancesAsync(
         HistoricProcessInstanceQuery query,
-        CancellationToken ct = default) =>
-        (await CollectHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false)).Count;
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(0, null);
+
+        if (_historyManager is IHistoricQueryManager pushdown)
+        {
+            var filter = await BuildHistoricProcessInstanceFilterAsync(query, ct).ConfigureAwait(false);
+
+            return filter is null
+                ? 0
+                : await pushdown
+                    .CountProcessInstancesAsync(filter with { FirstResult = 0, MaxResults = null }, ct)
+                    .ConfigureAwait(false);
+        }
+
+        return (await CollectHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false)).Count;
+    }
+
+    /// <summary>
+    /// 把门面查询翻译成持久化过滤条件；按 key 解析不出任何定义时返回 <see langword="null"/>
+    /// （语义是「零匹配」，不能退化成「不加过滤」）。
+    /// </summary>
+    private async ValueTask<HistoricProcessInstanceFilter?> BuildHistoricProcessInstanceFilterAsync(
+        HistoricProcessInstanceQuery query,
+        CancellationToken ct)
+    {
+        IReadOnlyCollection<string>? definitionIds = null;
+
+        if (!string.IsNullOrWhiteSpace(query.ProcessDefinitionKey))
+        {
+            var resolved = await ResolveDefinitionIdsByKeyAsync(query.ProcessDefinitionKey, query.TenantId, ct)
+                .ConfigureAwait(false);
+
+            if (resolved.Count == 0)
+            {
+                return null;
+            }
+
+            definitionIds = resolved;
+        }
+
+        return new HistoricProcessInstanceFilter(
+            ProcessDefinitionId: query.ProcessDefinitionId,
+            ProcessDefinitionIds: definitionIds,
+            BusinessKey: query.BusinessKey,
+            StartUserId: query.StartUserId,
+            Finished: query.Finished,
+            Deleted: query.Deleted,
+            StartedAfter: query.StartedAfter,
+            StartedBefore: query.StartedBefore,
+            EndedAfter: query.EndedAfter,
+            EndedBefore: query.EndedBefore,
+            TenantId: query.TenantId,
+            FirstResult: query.FirstResult,
+            MaxResults: query.MaxResults,
+            Descending: true);
+    }
 
     private async ValueTask<IReadOnlyList<HistoricProcessInstance>> CollectHistoricProcessInstancesAsync(
         HistoricProcessInstanceQuery query,

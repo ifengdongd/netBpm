@@ -47,7 +47,7 @@ namespace NetBpm.Persistence.Execution;
 /// 故省略；选取的列与行内容完全一致。
 /// </para>
 /// </summary>
-public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticipant
+public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryManager, IDbFlushParticipant
 {
     private readonly IDbSessionProvider _sessions;
     private readonly IIdGenerator _idGenerator;
@@ -55,6 +55,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
     private readonly IVariableInstanceManager _variableInstances;
     private readonly IHistoryManager _historyManager;
     private readonly ITimerJobManager? _timerJobs;
+    private readonly IAsyncJobManager? _asyncJobs;
     private readonly ConditionalWeakTable<IDbSession, SessionCache> _caches = new();
 
     public DapperExecutionManager(
@@ -63,7 +64,8 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         ITaskManager taskManager,
         IVariableInstanceManager variableInstances,
         IHistoryManager historyManager,
-        ITimerJobManager? timerJobs = null)
+        ITimerJobManager? timerJobs = null,
+        IAsyncJobManager? asyncJobs = null)
     {
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(idGenerator);
@@ -77,6 +79,7 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         _variableInstances = variableInstances;
         _historyManager = historyManager;
         _timerJobs = timerJobs;
+        _asyncJobs = asyncJobs;
     }
 
     /// <summary>
@@ -431,6 +434,12 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
             await _timerJobs.DeleteByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
         }
 
+        // 异步作业同理：实例结束后作业必须消失，否则 JobExecutor 会一直捞到陈旧作业
+        if (_asyncJobs is not null)
+        {
+            await _asyncJobs.DeleteByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+        }
+
         // 流程实例级联清理：先摘掉挂在流程实例上的外部引用（这些外键在 DDL 里没有级联删除）
         // 任务与流程实例级身份关系的清理交给任务管理器（对应 TaskEntityManagerImpl.deleteTasksByProcessInstanceId）
         await _taskManager
@@ -586,6 +595,144 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         var states = await QueryStatesAsync(session, SelectProcessInstancesSql, null, ct).ConfigureAwait(false);
 
         return states.Select(state => (IExecutionEntity)Materialize(cache, state)).ToList();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<IExecutionEntity>> QueryProcessInstancesAsync(
+        ProcessInstanceFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var cache = GetCache(session);
+
+        await FlushAsync(session, ct).ConfigureAwait(false);
+
+        var parameters = new DynamicParameters();
+        var where = BuildProcessInstanceWhere(filter, parameters);
+        var direction = filter.Descending ? "desc" : "asc";
+        var paging = BuildPaging(session.DatabaseType, filter.FirstResult, filter.MaxResults, parameters);
+
+        var sql = $"""
+            select {ExecutionColumns.All}
+            from ACT_RU_EXECUTION
+            {where}
+            order by START_TIME_ {direction}, ID_ {direction}
+            {paging}
+            """;
+
+        var states = await QueryStatesAsync(session, sql, parameters, ct).ConfigureAwait(false);
+
+        return states.Select(state => (IExecutionEntity)Materialize(cache, state)).ToList();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> CountProcessInstancesAsync(
+        ProcessInstanceFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        await FlushAsync(session, ct).ConfigureAwait(false);
+
+        var parameters = new DynamicParameters();
+        var where = BuildProcessInstanceWhere(filter, parameters);
+
+        return await session.Connection.ExecuteScalarAsync<int>(new CommandDefinition(
+            $"select count(*) from ACT_RU_EXECUTION {where}",
+            parameters,
+            session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    private static string BuildProcessInstanceWhere(ProcessInstanceFilter filter, DynamicParameters parameters)
+    {
+        var conditions = new List<string> { "PARENT_ID_ is null" };
+
+        if (!string.IsNullOrWhiteSpace(filter.ProcessDefinitionId))
+        {
+            conditions.Add("PROC_DEF_ID_ = @processDefinitionId");
+            parameters.Add("processDefinitionId", filter.ProcessDefinitionId);
+        }
+
+        if (filter.ProcessDefinitionIds is { Count: > 0 })
+        {
+            conditions.Add("PROC_DEF_ID_ in @definitionIds");
+            parameters.Add("definitionIds", filter.ProcessDefinitionIds);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.BusinessKey))
+        {
+            conditions.Add("BUSINESS_KEY_ = @businessKey");
+            parameters.Add("businessKey", filter.BusinessKey);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.StartUserId))
+        {
+            conditions.Add("START_USER_ID_ = @startUserId");
+            parameters.Add("startUserId", filter.StartUserId);
+        }
+
+        if (filter.TenantId is not null)
+        {
+            conditions.Add("coalesce(TENANT_ID_, '') = @tenantId");
+            parameters.Add("tenantId", filter.TenantId);
+        }
+
+        if (filter.IsActive is { } isActive)
+        {
+            conditions.Add("IS_ACTIVE_ = @isActive");
+            parameters.Add("isActive", isActive ? 1 : 0);
+        }
+
+        if (filter.StartedAfter is { } startedAfter)
+        {
+            conditions.Add("START_TIME_ >= @startedAfter");
+            parameters.Add("startedAfter", startedAfter);
+        }
+
+        if (filter.StartedBefore is { } startedBefore)
+        {
+            conditions.Add("START_TIME_ <= @startedBefore");
+            parameters.Add("startedBefore", startedBefore);
+        }
+
+        return " where " + string.Join(" and ", conditions);
+    }
+
+    /// <summary>方言分页子句（空 <paramref name="take"/> 表示调用方显式要求不限条数）。</summary>
+    private static string BuildPaging(
+        DatabaseType databaseType,
+        int firstResult,
+        int? take,
+        DynamicParameters parameters)
+    {
+        var skip = Math.Max(0, firstResult);
+
+        if (take is null)
+        {
+            if (skip == 0)
+            {
+                return string.Empty;
+            }
+
+            parameters.Add("skip", skip);
+            return databaseType == DatabaseType.MySql
+                ? " limit 100000 offset @skip"
+                : " offset @skip rows fetch next 100000 rows only";
+        }
+
+        parameters.Add("skip", skip);
+        parameters.Add("take", Math.Max(1, take.Value));
+
+        return databaseType == DatabaseType.MySql
+            ? " limit @take offset @skip"
+            : " offset @skip rows fetch next @take rows only";
     }
 
     /// <summary>把会话内已跟踪实体的挂起状态与脏检查基线一起改写。</summary>
@@ -755,18 +902,25 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
         // 每个被删的执行都要先收口自己在 ACT_HI_ACTINST 上未结束的行（清理不发事件）
         await _historyManager.RecordActivityEndQuietlyAsync(execution, deleteReason, ct).ConfigureAwait(false);
 
-        await DeleteSingleAsync(session, cache, execution, ct).ConfigureAwait(false);
+        await DeleteSingleAsync(session, cache, execution, deleteReason, ct).ConfigureAwait(false);
     }
 
-    private static async Task DeleteSingleAsync(
+    private async Task DeleteSingleAsync(
         IDbSession session,
         SessionCache cache,
         IExecutionEntity execution,
+        string? deleteReason,
         CancellationToken ct)
     {
         if (cache.Deleted.Contains(execution.Id))
         {
             return;
+        }
+
+        // 单个执行被删（终止结束事件 / 取消活动 / 多实例收口）时，其异步作业一并作废
+        if (_asyncJobs is not null)
+        {
+            await _asyncJobs.DeleteByExecutionAsync(execution.Id, ct).ConfigureAwait(false);
         }
 
         var persisted = cache.InDatabase.Contains(execution.Id) || execution.Revision > 0;
@@ -776,8 +930,19 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
             // 先摘除挂在执行上的外部引用（这些外键在 DDL 里没有级联删除）
             await ExecuteAsync(session, DeleteIdentityLinksByExecutionSql, new { id = execution.Id }, ct)
                 .ConfigureAwait(false);
-            await ExecuteAsync(session, DeleteTasksByExecutionSql, new { id = execution.Id }, ct)
+
+            // 任务必须走任务管理器删除：它负责收口 ACT_HI_TASKINST（结束时间 + 删除原因）、
+            // 清理任务变量与候选关系。直接 delete ACT_RU_TASK 会留下「有开始无结束」的历史行，
+            // 而这条路径被并行 Join、多实例提前完成、取消活动、迁移共用。
+            var tasks = await _taskManager
+                .FindTasksByExecutionIdAsync(execution.Id, ct)
                 .ConfigureAwait(false);
+
+            foreach (var task in tasks)
+            {
+                await _taskManager.DeleteTaskAsync(task, deleteReason, ct).ConfigureAwait(false);
+            }
+
             await DeleteVariablesAndByteArraysAsync(
                 session,
                 CaptureByteArrayIdsByExecutionSql,
@@ -1092,9 +1257,6 @@ public sealed class DapperExecutionManager : IExecutionManager, IDbFlushParticip
                 .ConfigureAwait(false);
         }
     }
-
-    private const string DeleteTasksByExecutionSql =
-        "delete from ACT_RU_TASK where EXECUTION_ID_ = @id";
 
     private const string DeleteIdentityLinksByExecutionSql =
         "delete from ACT_RU_IDENTITYLINK where TASK_ID_ in (select ID_ from ACT_RU_TASK where EXECUTION_ID_ = @id)";

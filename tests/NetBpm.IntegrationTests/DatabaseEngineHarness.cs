@@ -15,6 +15,7 @@ using NetBpm.Identity;
 using NetBpm.Persistence;
 using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Deployment;
+using NetBpm.Persistence.Events;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
 using NetBpm.Persistence.Jobs;
@@ -72,6 +73,8 @@ internal sealed class DatabaseEngineHarness
         VariableInstances = new DapperVariableInstanceManager(sessions, IdGenerator, HistoryManager);
         TaskManager = new DapperTaskManager(sessions, IdGenerator, HistoryManager, VariableInstances);
         TimerJobs = new DapperTimerJobManager(sessions);
+        AsyncJobs = new DapperAsyncJobManager(sessions);
+        Outbox = new DapperEventOutbox(sessions);
         MigrationLog = new DapperMigrationLog(sessions);
         Executions = new DapperExecutionManager(
             sessions, IdGenerator, TaskManager, VariableInstances, HistoryManager, TimerJobs);
@@ -92,7 +95,9 @@ internal sealed class DatabaseEngineHarness
             TaskManager,
             new ProcessDefinitionResolver(Definitions),
             logger: null,
-            TimerJobs);
+            TimerJobs,
+            AsyncJobs,
+            Outbox);
 
         holder = services;
 
@@ -129,6 +134,10 @@ internal sealed class DatabaseEngineHarness
 
     public DapperTimerJobManager TimerJobs { get; }
 
+    public DapperAsyncJobManager AsyncJobs { get; }
+
+    public DapperEventOutbox Outbox { get; }
+
     public DapperMigrationLog MigrationLog { get; }
 
     public DapperProcessDefinitionStore Definitions { get; }
@@ -161,7 +170,8 @@ internal sealed class DatabaseEngineHarness
         Executions,
         HistoryManager,
         TimerJobs,
-        MigrationLog);
+        MigrationLog,
+        asyncJobs: AsyncJobs);
 
     private ProcessEngine? _engine;
 

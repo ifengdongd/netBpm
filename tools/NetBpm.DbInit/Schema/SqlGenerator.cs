@@ -35,6 +35,7 @@ internal static class SqlGenerator
         Emit(directory, dialect, "0007_create_migration_log.sql", RenderMigrationLog(dialect));
         Emit(directory, dialect, "0008_create_model_history.sql", RenderModelHistory(dialect));
         Emit(directory, dialect, "0009_create_admin_governance.sql", RenderAdminGovernance(dialect));
+        Emit(directory, dialect, "0011_engine_upgrade.sql", RenderEngineUpgrade(dialect));
     }
 
     private static void Emit(string directory, Dialect dialect, string fileName, List<string> lines)
@@ -291,6 +292,94 @@ internal static class SqlGenerator
         return lines;
     }
 
+    /// <summary>
+    /// 0011 增量升级：把「老库拿不到新脚本」的缺口补上。
+    /// <para>
+    /// 内容全部幂等，新库（0001-0010 已包含同样结构）执行时是空操作，老库执行时才真正补列 / 扩容。
+    /// 脚本执行记录见 <see cref="SchemaCatalog.SchemaLogTable"/>，由 <c>DatabaseMigrator</c> 维护。
+    /// </para>
+    /// </summary>
+    private static List<string> RenderEngineUpgrade(Dialect dialect)
+    {
+        var lines = new List<string>();
+        lines.AddRange(Banner(dialect));
+        lines.AddRange(dialect == Dialect.MySql ? HeaderUpgradeMySql : HeaderUpgradeSqlServer);
+
+        lines.AddRange(BlankSection("脚本执行日志（增量迁移依据）"));
+        lines.AddRange(RenderCreateTable(SchemaCatalog.SchemaLogTable, dialect, idempotent: true));
+        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.SchemaLogTable, dialect, idempotent: true));
+
+        lines.AddRange(BlankSection("模型大文本列扩容（MySQL text 64KB → mediumtext 16MB）"));
+        if (dialect == Dialect.MySql)
+        {
+            lines.Add("alter table bpmn_model modify column bpmn_xml mediumtext not null;");
+            lines.Add("alter table bpmn_model modify column svg mediumtext;");
+            lines.Add("alter table bpmn_model_history modify column bpmn_xml mediumtext not null;");
+            lines.Add("alter table bpmn_model_history modify column svg mediumtext;");
+        }
+        else
+        {
+            lines.Add("-- SQL Server 的 bpmn_xml / svg 已是 nvarchar(max)，无需扩容。");
+        }
+
+        lines.AddRange(BlankSection("定时作业可靠性列（重试 / 死信 / 失败原因）"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "RETRIES_", "int default 3", "int default 3"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "DEAD_LETTER_", "tinyint default 0", "tinyint default 0"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "EXCEPTION_MSG_", "varchar(1000)", "nvarchar(1000)"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "LAST_FAILURE_", "datetime(3)", "datetime"));
+
+        lines.AddRange(BlankSection("定时作业死信查询索引"));
+        lines.AddRange(RenderEngineIndex(
+            new TableIndexDef("ACT_RU_TIMER_JOB", "ACT_IDX_TIMER_JOB_DEADLINE", ["DEAD_LETTER_", "DUEDATE_"]),
+            dialect,
+            idempotent: true));
+
+        // 迁移审计表的复合索引已归入 0007 建表脚本（新库直接带索引）；
+        // 老库的 ACT_HI_MIGRATION 早已建好，靠这里幂等补齐。
+        lines.AddRange(BlankSection("流程实例迁移审计查询索引"));
+        lines.AddRange(RenderEngineIndex(
+            new TableIndexDef("ACT_HI_MIGRATION", "ACT_IDX_MIGRATION_PROCINST_TIME", ["PROC_INST_ID_", "MIGRATED_AT_"]),
+            dialect,
+            idempotent: true));
+
+        return lines;
+    }
+
+    /// <summary>幂等加列：MySQL 用 information_schema 判重后动态执行，SQL Server 用 sys.columns 判重。</summary>
+    private static List<string> RenderAddColumn(
+        Dialect dialect,
+        string table,
+        string column,
+        string mySqlDefinition,
+        string sqlServerDefinition)
+    {
+        if (dialect == Dialect.MySql)
+        {
+            var add = $"alter table {table} add column {column} {mySqlDefinition}";
+            return
+            [
+                "set @ddl = (select if(count(*) = 0,",
+                $"        '{add}',",
+                "        'select 1')",
+                "    from information_schema.columns",
+                $"    where table_schema = database() and table_name = '{table}'",
+                $"      and column_name = '{column}');",
+                "prepare stmt from @ddl;",
+                "execute stmt;",
+                "deallocate prepare stmt;",
+                string.Empty,
+            ];
+        }
+
+        return
+        [
+            $"if not exists (select 1 from sys.columns where object_id = object_id('{table}') and name = '{column}')",
+            $"    alter table {table} add {column} {sqlServerDefinition};",
+            "go",
+            string.Empty,
+        ];
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     //  DDL 片段
     // ────────────────────────────────────────────────────────────────────────
@@ -424,7 +513,8 @@ internal static class SqlGenerator
         ColType.Timestamp => dialect == Dialect.MySql ? "timestamp(3)" : "datetime",
         ColType.DateTime2 => dialect == Dialect.MySql ? "datetime(3)" : "datetime2(3)",
         ColType.Blob => dialect == Dialect.MySql ? "LONGBLOB" : "varbinary(max)",
-        ColType.LongText => dialect == Dialect.MySql ? "text" : "nvarchar(max)",
+        // 模型 XML / SVG 远超 text 的 64KB 上限；LongText 语义上应取 MySQL 的大文本类型
+        ColType.LongText => dialect == Dialect.MySql ? "mediumtext" : "nvarchar(max)",
         ColType.MediumText => dialect == Dialect.MySql ? "mediumtext" : "nvarchar(max)",
         _ => throw new NotSupportedException($"未知列类型：{column.Type}"),
     };
@@ -810,6 +900,29 @@ internal static class SqlGenerator
         "--  幂等：sys.indexes 判重，可重复执行。",
         "--  对已初始化的库请单独执行本脚本：",
         "--    NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0004_perf_indexes.sql",
+        string.Empty,
+    ];
+
+    private static string[] HeaderUpgradeMySql =>
+    [
+        "--  增量升级脚本（0011）：补齐老库缺失的结构。",
+        "--",
+        "--  背景：此前 migrate 判定「库已初始化」后一条脚本都不执行，导致用 0001 建过的库",
+        "--        永远拿不到 0004 索引、0006 定时作业表与后续扩展表。现在由 ACT_GE_SCHEMA_LOG",
+        "--        记录已执行脚本，migrate 会按文件名补跑未执行的脚本。",
+        "--",
+        "--  本脚本幂等：MySQL 用 information_schema 判重后动态执行；",
+        "--  内容：执行日志表、模型大文本列扩容、定时作业重试/死信列、死信查询索引。",
+        string.Empty,
+    ];
+
+    private static string[] HeaderUpgradeSqlServer =>
+    [
+        "--  增量升级脚本（0011）：补齐老库缺失的结构。",
+        "--",
+        "--  幂等：object_id / sys.columns / sys.indexes 判重，可重复执行。",
+        "--  内容：执行日志表、定时作业重试/死信列、死信查询索引。",
+        "--        （bpmn_xml / svg 在 SQL Server 已是 nvarchar(max)，无需扩容。）",
         string.Empty,
     ];
 

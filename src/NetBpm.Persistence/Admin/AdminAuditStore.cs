@@ -657,6 +657,18 @@ public static class AdminAuditActions
     /// <summary>立即触发定时作业（不等到期，运维手动推进边界定时器）。</summary>
     public const string JobExecute = "job.execute";
 
+    /// <summary>人工重试死信作业（重试次数复位、立即到期）。</summary>
+    public const string JobRetry = "job.retry";
+
+    /// <summary>删除死信作业（确认不再重试）。</summary>
+    public const string JobDelete = "job.delete";
+
+    /// <summary>重试 outbox 死信事件。</summary>
+    public const string OutboxRetry = "outbox.retry";
+
+    /// <summary>删除 outbox 事件（确认不再投递）。</summary>
+    public const string OutboxDelete = "outbox.delete";
+
     /// <summary>部署（发布）流程定义。</summary>
     public const string DeploymentCreate = "deployment.create";
 
@@ -681,6 +693,9 @@ public static class AdminAuditTargets
 {
     /// <summary>任务。</summary>
     public const string Task = "task";
+
+    /// <summary>outbox 事件。</summary>
+    public const string Outbox = "outbox";
 
     /// <summary>流程实例。</summary>
     public const string ProcessInstance = "process_instance";

@@ -135,6 +135,44 @@ public static partial class AdminEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status409Conflict)
             .RequireAdminScope(TaskScopes.AdminJobWrite, "立即触发定时作业");
+        group.MapPost("/jobs/{jobId}/retry", RetryDeadLetterJobAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "重试死信作业");
+        group.MapDelete("/jobs/{jobId}", DeleteDeadLetterJobAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "删除死信作业");
+
+        // ── 异步作业（asyncBefore / asyncAfter）──
+        group.MapGet("/jobs/async", FindAsyncJobsAsync).Produces<AsyncJobSummary>()
+            .Produces<PagedResponse<AsyncJobSummary>>()
+            .RequireAdminScope(TaskScopes.AdminJobRead, "查看异步作业");
+        group.MapPost("/jobs/async/{jobId}/execute", ExecuteAsyncJobAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "立即执行异步作业");
+        group.MapPost("/jobs/async/{jobId}/retry", RetryAsyncJobAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "重试异步死信作业");
+        group.MapDelete("/jobs/async/{jobId}", DeleteAsyncJobAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "删除异步死信作业");
+
+        // ── 事务性 outbox ──
+        group.MapGet("/outbox", FindOutboxEventsAsync).Produces<OutboxEventSummary>()
+            .Produces<PagedResponse<OutboxEventSummary>>()
+            .RequireAdminScope(TaskScopes.AdminJobRead, "查看 outbox 事件");
+        group.MapPost("/outbox/{eventId}/retry", RetryOutboxEventAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "重试 outbox 死信事件");
+        group.MapDelete("/outbox/{eventId}", DeleteOutboxEventAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "删除 outbox 事件");
 
         // ── 历史归档 ──
         group.MapPost("/history/archive", ArchiveHistoryAsync).Produces<HistoryArchiveResult>()

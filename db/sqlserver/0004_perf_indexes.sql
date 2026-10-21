@@ -79,3 +79,43 @@ if not exists (select 1 from sys.indexes where name = 'ACT_IDX_IDENT_LNK_PROCINS
 create index ACT_IDX_IDENT_LNK_PROCINST on ACT_RU_IDENTITYLINK (PROC_INST_ID_);
 go
 
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_TASK_ASSIGNEE_CREATE' and object_id = object_id('ACT_RU_TASK'))
+create index ACT_IDX_TASK_ASSIGNEE_CREATE on ACT_RU_TASK (ASSIGNEE_, CREATE_TIME_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_TASK_PROCINST_DEFKEY' and object_id = object_id('ACT_RU_TASK'))
+create index ACT_IDX_TASK_PROCINST_DEFKEY on ACT_RU_TASK (PROC_INST_ID_, TASK_DEF_KEY_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_TASK_TENANT' and object_id = object_id('ACT_RU_TASK'))
+create index ACT_IDX_TASK_TENANT on ACT_RU_TASK (TENANT_ID_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_TASK_DUEDATE' and object_id = object_id('ACT_RU_TASK'))
+create index ACT_IDX_TASK_DUEDATE on ACT_RU_TASK (DUE_DATE_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_TASK_ASSIGNEE_END' and object_id = object_id('ACT_HI_TASKINST'))
+create index ACT_IDX_HI_TASK_ASSIGNEE_END on ACT_HI_TASKINST (ASSIGNEE_, END_TIME_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_TASK_PROCINST_END' and object_id = object_id('ACT_HI_TASKINST'))
+create index ACT_IDX_HI_TASK_PROCINST_END on ACT_HI_TASKINST (PROC_INST_ID_, END_TIME_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_TASK_DEFKEY' and object_id = object_id('ACT_HI_TASKINST'))
+create index ACT_IDX_HI_TASK_DEFKEY on ACT_HI_TASKINST (TASK_DEF_KEY_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_PROC_TENANT_END' and object_id = object_id('ACT_HI_PROCINST'))
+create index ACT_IDX_HI_PROC_TENANT_END on ACT_HI_PROCINST (TENANT_ID_, END_TIME_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_BYTEARRAY_DEPLOYMENT' and object_id = object_id('ACT_GE_BYTEARRAY'))
+create index ACT_IDX_BYTEARRAY_DEPLOYMENT on ACT_GE_BYTEARRAY (DEPLOYMENT_ID_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_DEPLOYMENT_TIME' and object_id = object_id('ACT_RE_DEPLOYMENT'))
+create index ACT_IDX_DEPLOYMENT_TIME on ACT_RE_DEPLOYMENT (DEPLOY_TIME_);
+go
+

@@ -23,12 +23,6 @@ namespace NetBpm.Rest.Endpoints;
 /// </summary>
 public static class RuntimeEndpoints
 {
-    /// <summary>列表接口的默认页大小。</summary>
-    private const int DefaultPageSize = 20;
-
-    /// <summary>列表接口的页大小上限（防止调用方一次拉全表）。</summary>
-    private const int MaxPageSize = 200;
-
     /// <summary>单次批量操作的条数上限。</summary>
     private const int MaxBatchSize = 200;
 
@@ -60,6 +54,8 @@ public static class RuntimeEndpoints
         group.MapGet("/tasks/{taskId}", GetTaskAsync).Produces<TaskDetailResponse>();
         group.MapGet("/tasks/{taskId}/identity-links", FindTaskIdentityLinksAsync)
             .Produces<IReadOnlyList<IdentityLinkResponse>>();
+        group.MapGet("/process-instances/{processInstanceId}/identity-links", FindProcessInstanceIdentityLinksAsync)
+            .Produces<IReadOnlyList<IdentityLinkResponse>>();
         group.MapPatch("/tasks/{taskId}", UpdateTaskAsync);
         group.MapPost("/tasks/{taskId}/assignee", SetAssigneeAsync);
         group.MapPost("/tasks/{taskId}/candidate-users", AddCandidateUserAsync);
@@ -77,6 +73,7 @@ public static class RuntimeEndpoints
         group.MapGet("/tasks/stats", GetTaskStatsAsync).Produces<TaskStatsResponse>();
         group.MapPost("/tasks/batch/assignee", BatchSetAssigneeAsync).Produces<BatchResultResponse>();
         group.MapPost("/tasks/batch/due-date", BatchSetTaskDueDateAsync).Produces<BatchResultResponse>();
+        group.MapPost("/tasks/batch/complete", BatchCompleteTasksAsync).Produces<BatchResultResponse>();
         group.MapPost("/process-instances/batch/delete", BatchDeleteProcessInstancesAsync)
             .Produces<BatchResultResponse>();
         group.MapPost("/process-instances/batch/suspend", BatchSuspendProcessInstancesAsync)
@@ -290,7 +287,9 @@ public static class RuntimeEndpoints
 
         if (execution is null)
         {
-            return Results.NotFound(new ErrorResponse($"流程实例 '{processInstanceId}' 不存在。"));
+            return Results.NotFound(new ErrorResponse(
+                $"流程实例 '{processInstanceId}' 不存在。",
+                Code: "process_instance_not_found"));
         }
 
         TenantGuard.Ensure(requestContext, execution.TenantId, "流程实例", processInstanceId);
@@ -326,8 +325,10 @@ public static class RuntimeEndpoints
     {
         var tenant = RequestIdentity.Tenant(tenantId, requestContext);
 
-        var first = firstResult ?? 0;
-        var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
+        if (!Paging.TryRead(firstResult, maxResults, out var first, out var size, out var pagingError))
+        {
+            return pagingError!;
+        }
 
         var query = new ProcessInstanceQuery(
             processDefinitionId,
@@ -424,7 +425,7 @@ public static class RuntimeEndpoints
         }
         catch (EngineObjectNotFoundException exception)
         {
-            return Results.NotFound(new ErrorResponse(exception.Message));
+            return Results.NotFound(new ErrorResponse(exception.Message, Code: "not_found"));
         }
         catch (EngineException exception)
         {
@@ -488,7 +489,7 @@ public static class RuntimeEndpoints
         }
         catch (EngineObjectNotFoundException exception)
         {
-            return Results.NotFound(new ErrorResponse(exception.Message));
+            return Results.NotFound(new ErrorResponse(exception.Message, Code: "not_found"));
         }
         catch (EngineException exception)
         {
@@ -622,6 +623,8 @@ public static class RuntimeEndpoints
         bool? suspended,
         DateTime? dueBefore,
         string? tenantId,
+        string? sortBy,
+        string? sortOrder,
         int? firstResult,
         int? maxResults,
         bool? envelope,
@@ -644,8 +647,10 @@ public static class RuntimeEndpoints
             unfiltered = string.IsNullOrWhiteSpace(assignee) && IsAdminPrincipal(requestContext);
         }
 
-        var first = firstResult ?? 0;
-        var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
+        if (!Paging.TryRead(firstResult, maxResults, out var first, out var size, out var pagingError))
+        {
+            return pagingError!;
+        }
 
         var query = new TaskQuery(
             Assignee: assignee,
@@ -659,7 +664,9 @@ public static class RuntimeEndpoints
             Suspended: suspended,
             DueBefore: UtcTime.Normalize(dueBefore),
             TenantId: RequestIdentity.Tenant(tenantId, requestContext),
-            AllUsers: unfiltered);
+            AllUsers: unfiltered,
+            SortBy: sortBy,
+            Descending: string.Equals(sortOrder, "desc", StringComparison.OrdinalIgnoreCase));
 
         var tasks = await engine.FindTasksAsync(query, ct).ConfigureAwait(false);
         var total = await engine.CountTasksAsync(query, ct).ConfigureAwait(false);
@@ -684,7 +691,9 @@ public static class RuntimeEndpoints
 
         if (task is null)
         {
-            return Results.NotFound(new ErrorResponse($"任务 '{taskId}' 不存在（可能已完成或流程已推进）。"));
+            return Results.NotFound(new ErrorResponse(
+                $"任务 '{taskId}' 不存在（可能已完成或流程已推进）。",
+                Code: "task_not_found"));
         }
 
         TenantGuard.Ensure(requestContext, task.TenantId, "任务", taskId);
@@ -705,7 +714,9 @@ public static class RuntimeEndpoints
 
         if (task is null)
         {
-            return Results.NotFound(new ErrorResponse($"任务 '{taskId}' 不存在（可能已完成或流程已推进）。"));
+            return Results.NotFound(new ErrorResponse(
+                $"任务 '{taskId}' 不存在（可能已完成或流程已推进）。",
+                Code: "task_not_found"));
         }
 
         TenantGuard.Ensure(requestContext, task.TenantId, "任务", taskId);
@@ -713,6 +724,85 @@ public static class RuntimeEndpoints
         var identityLinks = await engine.FindTaskIdentityLinksAsync(taskId, ct).ConfigureAwait(false);
 
         return Results.Ok(identityLinks.Select(IdentityLinkResponse.From).ToArray());
+    }
+
+    /// <summary>流程实例级身份关系（参与者 / 发起人 / 候选组）。</summary>
+    private static async Task<IResult> FindProcessInstanceIdentityLinksAsync(
+        string processInstanceId,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        var instance = await executionManager.FindByIdAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        if (instance is null || !string.IsNullOrEmpty(instance.ParentId))
+        {
+            return Results.NotFound(new ErrorResponse(
+                $"流程实例 '{processInstanceId}' 不存在（可能已结束）。",
+                Code: "process_instance_not_found"));
+        }
+
+        TenantGuard.Ensure(requestContext, instance.TenantId, "流程实例", processInstanceId);
+
+        var identityLinks = await engine
+            .FindProcessInstanceIdentityLinksAsync(processInstanceId, ct)
+            .ConfigureAwait(false);
+
+        return Results.Ok(identityLinks.Select(IdentityLinkResponse.From).ToArray());
+    }
+
+    /// <summary>
+    /// 批量完成任务（逐项执行，不是原子操作）。
+    /// <para>
+    /// 每一项都走与单条完成相同的授权校验（办理人 / 候选组 / 管理员），
+    /// 单项失败只影响该条；返回逐项结果，便于前端提示「哪几条没批成功」。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> BatchCompleteTasksAsync(
+        BatchCompleteTasksRequest? request,
+        RequestContext requestContext,
+        IProcessEngine engine,
+        CancellationToken ct)
+    {
+        if (request?.TaskIds is not { Count: > 0 } taskIds)
+        {
+            return Results.BadRequest(new ErrorResponse(
+                "taskIds 不能为空。",
+                Code: "validation_error"));
+        }
+
+        if (taskIds.Count > MaxBatchSize)
+        {
+            return Results.BadRequest(new ErrorResponse(
+                $"单次批量操作最多 {MaxBatchSize} 条。",
+                Code: "validation_error"));
+        }
+
+        var variables = JsonVariableReader.Read(request.Variables);
+        var items = new List<BatchItemResult>(taskIds.Count);
+
+        foreach (var taskId in taskIds)
+        {
+            try
+            {
+                var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
+
+                await TaskAuthorization.EnsureCanCompleteAsync(task, requestContext, engine, ct)
+                    .ConfigureAwait(false);
+
+                await engine.CompleteTaskAsync(taskId, variables, expectedRevision: null, ct)
+                    .ConfigureAwait(false);
+
+                items.Add(new BatchItemResult(taskId, true, null));
+            }
+            catch (EngineException exception)
+            {
+                items.Add(new BatchItemResult(taskId, false, exception.Message));
+            }
+        }
+
+        return Results.Ok(ToBatchResult(items));
     }
 
     /// <summary>
@@ -758,6 +848,7 @@ public static class RuntimeEndpoints
     private static async Task<IResult> UpdateTaskAsync(
         string taskId,
         UpdateTaskRequest? request,
+        HttpRequest httpRequest,
         RequestContext requestContext,
         IExecutionManager executionManager,
         IProcessEngine engine,
@@ -769,6 +860,7 @@ public static class RuntimeEndpoints
             return Results.BadRequest(new ErrorResponse("请求体不能为空。"));
         }
 
+        var expectedRevision = Preconditions.ReadExpectedRevision(httpRequest);
         var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
 
         await TaskAuthorization
@@ -805,7 +897,8 @@ public static class RuntimeEndpoints
                             request.Category,
                             request.Owner,
                             request.ClearDueDate == true,
-                            request.ClearDescription == true),
+                            request.ClearDescription == true,
+                            expectedRevision),
                         ct)
                     .ConfigureAwait(false);
 
@@ -1026,7 +1119,9 @@ public static class RuntimeEndpoints
 
         if (task is null)
         {
-            return Results.NotFound(new ErrorResponse($"任务 '{taskId}' 不存在（可能已完成或流程已推进）。"));
+            return Results.NotFound(new ErrorResponse(
+                $"任务 '{taskId}' 不存在（可能已完成或流程已推进）。",
+                Code: "task_not_found"));
         }
 
         TenantGuard.Ensure(requestContext, task.TenantId, "任务", taskId);
@@ -1046,7 +1141,9 @@ public static class RuntimeEndpoints
             as NetBpm.Bpmn.Model.UserTask;
 
         return userTask is null
-            ? Results.NotFound(new ErrorResponse($"流程定义中找不到用户任务节点 '{task.TaskDefinitionKey}'。"))
+            ? Results.NotFound(new ErrorResponse(
+                $"流程定义中找不到用户任务节点 '{task.TaskDefinitionKey}'。",
+                Code: "form_not_found"))
             : Results.Ok(FormMetadataResponse.From(userTask));
     }
 
@@ -1639,7 +1736,9 @@ public static class RuntimeEndpoints
 
         if (running is null)
         {
-            return Results.NotFound(new ErrorResponse($"流程实例 '{processInstanceId}' 不在运行中（可能已结束或已删除）。"));
+            return Results.NotFound(new ErrorResponse(
+                $"流程实例 '{processInstanceId}' 不在运行中（可能已结束或已删除）。",
+                Code: "process_instance_not_running"));
         }
 
         var variables = await engine.GetVariablesAsync(processInstanceId, ct).ConfigureAwait(false);
@@ -1782,7 +1881,7 @@ public static class RuntimeEndpoints
             new { name, scope = "process_instance" },
             async () => await engine.RemoveVariableAsync(processInstanceId, name, ct).ConfigureAwait(false)
                 ? Results.NoContent()
-                : Results.NotFound(new ErrorResponse($"变量 '{name}' 不存在。")),
+                : Results.NotFound(new ErrorResponse($"变量 '{name}' 不存在。", Code: "variable_not_found")),
             ct).ConfigureAwait(false);
     }
 
@@ -1880,7 +1979,7 @@ public static class RuntimeEndpoints
             new { name, scope = "task", taskId },
             async () => await engine.RemoveTaskVariableAsync(taskId, name, ct).ConfigureAwait(false)
                 ? Results.NoContent()
-                : Results.NotFound(new ErrorResponse($"任务局部变量 '{name}' 不存在。")),
+                : Results.NotFound(new ErrorResponse($"任务局部变量 '{name}' 不存在。", Code: "variable_not_found")),
             ct).ConfigureAwait(false);
     }
 
@@ -1958,8 +2057,10 @@ public static class RuntimeEndpoints
         IProcessEngine engine,
         CancellationToken ct)
     {
-        var first = firstResult ?? 0;
-        var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
+        if (!Paging.TryRead(firstResult, maxResults, out var first, out var size, out var pagingError))
+        {
+            return pagingError!;
+        }
 
         var query = new HistoricProcessInstanceQuery(
             processDefinitionId,
@@ -2060,8 +2161,10 @@ public static class RuntimeEndpoints
             assignee = requestContext.UserId;
         }
 
-        var first = firstResult ?? 0;
-        var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
+        if (!Paging.TryRead(firstResult, maxResults, out var first, out var size, out var pagingError))
+        {
+            return pagingError!;
+        }
 
         var query = new HistoricTaskQuery(
             processInstanceId,

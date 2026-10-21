@@ -370,6 +370,19 @@ internal static class SchemaCatalog
         TI("ACT_IDX_VARIABLE_PROCINST", "ACT_RU_VARIABLE", ["PROC_INST_ID_"]),
         TI("ACT_IDX_VARIABLE_BA", "ACT_RU_VARIABLE", ["BYTEARRAY_ID_"]),
         TI("ACT_IDX_IDENT_LNK_PROCINST", "ACT_RU_IDENTITYLINK", ["PROC_INST_ID_"]),
+        // 待办 / 已办主路径：按办理人取数并按创建时间排序（此前只能全量取回内存排序）
+        TI("ACT_IDX_TASK_ASSIGNEE_CREATE", "ACT_RU_TASK", ["ASSIGNEE_", "CREATE_TIME_"]),
+        TI("ACT_IDX_TASK_PROCINST_DEFKEY", "ACT_RU_TASK", ["PROC_INST_ID_", "TASK_DEF_KEY_"]),
+        TI("ACT_IDX_TASK_TENANT", "ACT_RU_TASK", ["TENANT_ID_"]),
+        TI("ACT_IDX_TASK_DUEDATE", "ACT_RU_TASK", ["DUE_DATE_"]),
+        TI("ACT_IDX_HI_TASK_ASSIGNEE_END", "ACT_HI_TASKINST", ["ASSIGNEE_", "END_TIME_"]),
+        TI("ACT_IDX_HI_TASK_PROCINST_END", "ACT_HI_TASKINST", ["PROC_INST_ID_", "END_TIME_"]),
+        TI("ACT_IDX_HI_TASK_DEFKEY", "ACT_HI_TASKINST", ["TASK_DEF_KEY_"]),
+        TI("ACT_IDX_HI_PROC_TENANT_END", "ACT_HI_PROCINST", ["TENANT_ID_", "END_TIME_"]),
+        // 注意：ACT_HI_MIGRATION 由 0007 建表，索引必须跟着表的脚本走，
+        // 否则新库按 0004 → 0007 顺序执行时会在不存在的表上建索引而失败。
+        TI("ACT_IDX_BYTEARRAY_DEPLOYMENT", "ACT_GE_BYTEARRAY", ["DEPLOYMENT_ID_"]),
+        TI("ACT_IDX_DEPLOYMENT_TIME", "ACT_RE_DEPLOYMENT", ["DEPLOY_TIME_"]),
     ];
 
     // ────────────────────────────────────────────────────────────────────────
@@ -814,12 +827,18 @@ internal static class SchemaCatalog
             C("DUEDATE_", ColType.DateTime3, nullable: false),
             C("TENANT_ID_", ColType.Varchar, 255, def: "''"),
             C("CREATE_TIME_", ColType.DateTime3, nullable: false),
+            // 可靠性列：失败重试与死信（毒作业不能无限重试）
+            C("RETRIES_", ColType.Int, def: "3", comment: "剩余重试次数；0 表示已进死信"),
+            C("DEAD_LETTER_", ColType.TinyInt, def: "0", comment: "1=已进死信，不再参与到期轮询"),
+            C("EXCEPTION_MSG_", ColType.Varchar, 1000, comment: "最后一次失败原因"),
+            C("LAST_FAILURE_", ColType.DateTime3, comment: "最后一次失败时间（UTC）"),
         ],
         ["ID_"],
         [
             new IndexDef("ACT_IDX_TIMER_JOB_DUEDATE", ["DUEDATE_"]),
             new IndexDef("ACT_IDX_TIMER_JOB_EXECUTION", ["EXECUTION_ID_"]),
             new IndexDef("ACT_IDX_TIMER_JOB_PROCINST", ["PROCESS_INSTANCE_ID_"]),
+            new IndexDef("ACT_IDX_TIMER_JOB_DEADLINE", ["DEAD_LETTER_", "DUEDATE_"]),
         ],
         [], [],
         EngineCharset: true);
@@ -839,7 +858,25 @@ internal static class SchemaCatalog
             C("MIGRATED_AT_", ColType.DateTime3, nullable: false),
         ],
         ["ID_"],
-        [new IndexDef("ACT_IDX_MIGRATION_PROCINST", ["PROC_INST_ID_"])],
+        [
+            new IndexDef("ACT_IDX_MIGRATION_PROCINST", ["PROC_INST_ID_"]),
+            // 迁移预演 / 审计按流程实例 + 时间倒序取数
+            new IndexDef("ACT_IDX_MIGRATION_PROCINST_TIME", ["PROC_INST_ID_", "MIGRATED_AT_"]),
+        ],
+        [], [],
+        EngineCharset: true);
+
+    // 0011 增量迁移执行日志：记录每个已应用脚本及其校验和，老库据此补跑新脚本
+    internal static readonly TableDef SchemaLogTable = new(
+        "ACT_GE_SCHEMA_LOG",
+        "数据库脚本执行日志：已应用脚本名 + 校验和（增量迁移的唯一依据）",
+        [
+            C("SCRIPT_", ColType.Varchar, 255, false, comment: "脚本文件名（如 0004_perf_indexes.sql）"),
+            C("CHECKSUM_", ColType.Varchar, 64, comment: "脚本内容的 SHA-256（十六进制）"),
+            C("APPLIED_AT_", ColType.DateTime3, nullable: false, comment: "执行时间（UTC）"),
+        ],
+        ["SCRIPT_"],
+        [new IndexDef("ACT_IDX_SCHEMA_LOG_APPLIED", ["APPLIED_AT_"])],
         [], [],
         EngineCharset: true);
 

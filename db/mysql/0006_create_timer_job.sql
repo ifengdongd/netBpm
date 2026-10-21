@@ -32,9 +32,14 @@ create table if not exists ACT_RU_TIMER_JOB (
     DUEDATE_ datetime(3) not null,
     TENANT_ID_ varchar(255) default '',
     CREATE_TIME_ datetime(3) not null,
+    RETRIES_ int default 3 comment '剩余重试次数；0 表示已进死信',
+    DEAD_LETTER_ tinyint default 0 comment '1=已进死信，不再参与到期轮询',
+    EXCEPTION_MSG_ varchar(1000) comment '最后一次失败原因',
+    LAST_FAILURE_ datetime(3) comment '最后一次失败时间（UTC）',
     primary key (ID_),
     index ACT_IDX_TIMER_JOB_DUEDATE (DUEDATE_),
     index ACT_IDX_TIMER_JOB_EXECUTION (EXECUTION_ID_),
-    index ACT_IDX_TIMER_JOB_PROCINST (PROCESS_INSTANCE_ID_)
+    index ACT_IDX_TIMER_JOB_PROCINST (PROCESS_INSTANCE_ID_),
+    index ACT_IDX_TIMER_JOB_DEADLINE (DEAD_LETTER_, DUEDATE_)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='定时作业表：边界定时器（一次性）到点后触发';
 

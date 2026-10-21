@@ -784,6 +784,13 @@ public sealed record StartBeforeActivityRequest(string? Reason = null);
 public sealed record BatchInstanceSuspensionRequest(
     IReadOnlyList<string>? ProcessInstanceIds = null);
 
+/// <summary>批量完成任务请求（<c>POST /tasks/batch/complete</c>）。</summary>
+/// <param name="TaskIds">任务 id 列表（逐项执行，单项失败不影响其它项）。</param>
+/// <param name="Variables">随每个任务完成写入的变量（同一批共用；按任务 id 单独传变量请逐条调用）。</param>
+public sealed record BatchCompleteTasksRequest(
+    IReadOnlyList<string>? TaskIds = null,
+    IDictionary<string, JsonElement>? Variables = null);
+
 /// <summary>批量改任务到期时间请求（<c>POST /tasks/batch/due-date</c>）。</summary>
 /// <param name="TaskIds">任务 id 列表（逐项执行，单项失败不影响其它项）。</param>
 /// <param name="DueDate">新的到期时间；与 <paramref name="ClearDueDate"/> 二选一。</param>

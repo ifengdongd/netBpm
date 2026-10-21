@@ -2,6 +2,7 @@ using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Agenda;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
+using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Services;
 
 namespace NetBpm.Engine.Operations;
@@ -10,22 +11,33 @@ namespace NetBpm.Engine.Operations;
 /// 推进执行：对流程节点执行其行为，对顺序流则跳转到目标节点。
 /// 对应 Activiti 的 <c>ContinueProcessOperation</c>。
 /// <para>
-/// 子集裁剪：无子流程、多实例、异步作业、边界事件（见 §1.3 的第 1 / 2 / 5 / 7 条）。
-/// 因此 Activiti 的 <c>executeSynchronous</c> 之外的分支全部不存在。
+/// 子集裁剪：无子流程、无边界事件（见 §1.3 的第 1 / 2 条）。
+/// 支持独占异步作业：<c>asyncBefore</c> 时本操作只落作业并返回，由 JobExecutor 在后续命令里重新进入。
 /// </para>
 /// </summary>
 public sealed class ContinueProcessOperation : IOperation
 {
     private readonly IExecutionEntity _execution;
     private readonly IEngineServices _services;
+    private readonly bool _skipAsyncBefore;
 
-    public ContinueProcessOperation(IExecutionEntity execution, IEngineServices services)
+    /// <param name="execution">要推进的执行。</param>
+    /// <param name="services">引擎服务。</param>
+    /// <param name="skipAsyncBefore">
+    /// 仅为 <c>true</c> 时由异步作业恢复执行：表示「这次进入活动是作业推进的」，
+    /// 不能再落一条 <c>asyncBefore</c> 作业，否则自我循环。
+    /// </param>
+    public ContinueProcessOperation(
+        IExecutionEntity execution,
+        IEngineServices services,
+        bool skipAsyncBefore = false)
     {
         ArgumentNullException.ThrowIfNull(execution);
         ArgumentNullException.ThrowIfNull(services);
 
         _execution = execution;
         _services = services;
+        _skipAsyncBefore = skipAsyncBefore;
     }
 
     /// <inheritdoc />
@@ -43,6 +55,21 @@ public sealed class ContinueProcessOperation : IOperation
         var currentFlowElement = _execution.CurrentFlowElement
             ?? throw new EngineException(
                 "Programmatic error: no current flow element found or invalid type. Halting.");
+
+        // asyncBefore：命令提交时就停在这里，活动行为（含历史开始、任务创建、服务调用）
+        // 交给 JobExecutor 在独立事务里执行。作业与「执行停在活动上」在同一事务，天然一致。
+        if (!_skipAsyncBefore
+            && currentFlowElement is Activity { AsyncBefore: true } asyncActivity)
+        {
+            await AsyncJobScheduler.CreateAsync(
+                _services,
+                _execution,
+                asyncActivity,
+                AsyncJobPhase.Before,
+                ct).ConfigureAwait(false);
+
+            return;
+        }
 
         switch (currentFlowElement)
         {

@@ -23,6 +23,7 @@ public sealed class UpdateTaskCommand : ICommand<Unit>
     private readonly string? _owner;
     private readonly bool _clearDueDate;
     private readonly bool _clearDescription;
+    private readonly int? _expectedRevision;
 
     public UpdateTaskCommand(
         string taskId,
@@ -33,7 +34,8 @@ public sealed class UpdateTaskCommand : ICommand<Unit>
         string? category = null,
         string? owner = null,
         bool clearDueDate = false,
-        bool clearDescription = false)
+        bool clearDescription = false,
+        int? expectedRevision = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
 
@@ -46,6 +48,7 @@ public sealed class UpdateTaskCommand : ICommand<Unit>
         _owner = owner;
         _clearDueDate = clearDueDate;
         _clearDescription = clearDescription;
+        _expectedRevision = expectedRevision;
     }
 
     /// <inheritdoc />
@@ -61,6 +64,12 @@ public sealed class UpdateTaskCommand : ICommand<Unit>
 
         var task = await taskManager.FindTaskByIdAsync(_taskId, ct).ConfigureAwait(false)
             ?? throw new EngineObjectNotFoundException($"任务 '{_taskId}' 不存在（可能已完成或已被删除）。");
+
+        if (_expectedRevision is { } expectedRevision && task.Revision != expectedRevision)
+        {
+            throw new OptimisticLockingException(
+                $"任务 '{_taskId}' 已被修改（期望版本 {expectedRevision}，实际 {task.Revision}），请刷新后重试。");
+        }
 
         if (task.SuspensionState != TaskEntity.ActiveSuspensionState)
         {

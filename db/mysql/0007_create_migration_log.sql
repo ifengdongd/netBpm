@@ -31,6 +31,7 @@ create table if not exists ACT_HI_MIGRATION (
     USER_ID_ varchar(255),
     MIGRATED_AT_ datetime(3) not null,
     primary key (ID_),
-    index ACT_IDX_MIGRATION_PROCINST (PROC_INST_ID_)
+    index ACT_IDX_MIGRATION_PROCINST (PROC_INST_ID_),
+    index ACT_IDX_MIGRATION_PROCINST_TIME (PROC_INST_ID_, MIGRATED_AT_)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='流程实例迁移审计表：记录源/目标定义、活动映射、原因与操作人';
 

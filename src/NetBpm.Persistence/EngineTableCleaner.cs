@@ -28,8 +28,10 @@ public static class EngineTableCleaner
         "ACT_HI_TASKINST",
         "ACT_HI_PROCINST",
 
+        "ACT_EVT_OUTBOX",        // 0012 新增；无外键
         "ACT_HI_MIGRATION",
         "ACT_RU_TIMER_JOB",      // 0006 新增；无外键，先于执行删除
+        "ACT_RU_JOB",            // 0012 新增；无外键，先于执行删除
         "ACT_RU_VARIABLE",       // → ACT_RU_EXECUTION
         "ACT_RU_IDENTITYLINK",   // → ACT_RU_TASK / ACT_RU_EXECUTION / ACT_RE_PROCDEF
         "ACT_RU_TASK",           // → ACT_RU_EXECUTION / ACT_RE_PROCDEF

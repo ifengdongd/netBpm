@@ -132,12 +132,16 @@ public sealed class UnsupportedHistoryArchiveStore : IHistoryArchiveStore
 /// 数据库历史归档实现。表结构见 <c>db/{dialect}/0009_create_admin_governance.sql</c>。
 /// </summary>
 /// <remarks>
-/// 每个实例一个事务：快照写入归档表与删除原行同进同退，不会出现「搬了一半」。
-/// 归档行对 <c>process_instance_id</c> 建唯一键，重复归档会被幂等跳过。
+/// 分批事务：每 <see cref="ArchiveChunkSize"/> 个实例一个事务，快照写入与删除原行同进同退；
+/// 单条历史巨大时不会把整个批次锁在同一事务里（此前的实现是每个实例一个事务，
+/// 1000 个实例 = 1000 次提交）。归档行对 <c>process_instance_id</c> 建唯一键，重复归档幂等跳过。
 /// </remarks>
 public sealed class DapperHistoryArchiveStore : IHistoryArchiveStore
 {
     private const int MaxBatchSize = 1000;
+
+    /// <summary>一个归档事务覆盖的实例数。</summary>
+    private const int ArchiveChunkSize = 50;
 
     private static readonly JsonSerializerOptions PayloadJsonOptions = new()
     {
@@ -191,10 +195,22 @@ public sealed class DapperHistoryArchiveStore : IHistoryArchiveStore
 
         var archived = new List<string>(selected.Length);
 
-        foreach (var candidate in selected)
+        // 每 ArchiveChunkSize 个实例一个事务：既不是「一个实例一次提交」，也不是「整批一个大事务」
+        for (var offset = 0; offset < selected.Length; offset += ArchiveChunkSize)
         {
-            await ArchiveOneAsync(connection, candidate, request.Operator, ct).ConfigureAwait(false);
-            archived.Add(candidate.ProcessInstanceId);
+            var end = Math.Min(offset + ArchiveChunkSize, selected.Length);
+
+            await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+            for (var index = offset; index < end; index++)
+            {
+                var candidate = selected[index];
+
+                await ArchiveOneAsync(connection, transaction, candidate, request.Operator, ct).ConfigureAwait(false);
+                archived.Add(candidate.ProcessInstanceId);
+            }
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
 
         // 归档后重新数：并发归档 / 新结束的实例都可能改变剩余量
@@ -329,14 +345,13 @@ public sealed class DapperHistoryArchiveStore : IHistoryArchiveStore
 
     private static async Task ArchiveOneAsync(
         DbConnection connection,
+        DbTransaction transaction,
         ArchiveCandidate candidate,
         string? archivedBy,
         CancellationToken ct)
     {
         var id = Guid.NewGuid().ToString("N");
         var archivedAt = DateTime.UtcNow;
-
-        using var transaction = connection.BeginTransaction();
 
         var payload = await BuildPayloadAsync(connection, transaction, candidate.ProcessInstanceId, ct)
             .ConfigureAwait(false);
@@ -361,8 +376,6 @@ public sealed class DapperHistoryArchiveStore : IHistoryArchiveStore
             cancellationToken: ct)).ConfigureAwait(false);
 
         await DeleteHistoryAsync(connection, transaction, candidate.ProcessInstanceId, ct).ConfigureAwait(false);
-
-        transaction.Commit();
     }
 
     private static async Task<Dictionary<string, object?>> BuildPayloadAsync(

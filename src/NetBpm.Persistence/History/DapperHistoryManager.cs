@@ -34,7 +34,7 @@ namespace NetBpm.Persistence.History;
 /// 本实现在<b>同一事务内即时写库</b>。提交后的可见结果一致，差别仅在事务内的写入时刻。
 /// </para>
 /// </summary>
-public sealed class DapperHistoryManager : IHistoryManager
+public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManager
 {
     private readonly IDbSessionProvider _sessions;
     private readonly IIdGenerator _idGenerator;
@@ -663,6 +663,273 @@ public sealed class DapperHistoryManager : IHistoryManager
         }
 
         return result;
+    }
+
+    // ─────────────────────────── 服务端下推查询 ───────────────────────────
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<HistoricProcessInstance>> QueryProcessInstancesAsync(
+        HistoricProcessInstanceFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var parameters = new DynamicParameters();
+        var where = BuildProcessInstanceWhere(filter, parameters);
+        var direction = filter.Descending ? "desc" : "asc";
+        var paging = BuildPaging(session.DatabaseType, filter.FirstResult, filter.MaxResults, parameters);
+
+        var sql = $"""
+            select ID_, PROC_INST_ID_, BUSINESS_KEY_, PROC_DEF_ID_, START_TIME_, END_TIME_, DURATION_,
+                   START_USER_ID_, START_ACT_ID_, END_ACT_ID_, DELETE_REASON_, NAME_, TENANT_ID_
+            from ACT_HI_PROCINST
+            {where}
+            order by START_TIME_ {direction}, ID_ {direction}
+            {paging}
+            """;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(sql, parameters, session.Transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var result = new List<HistoricProcessInstance>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            result.Add(MapProcessInstance(row));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> CountProcessInstancesAsync(
+        HistoricProcessInstanceFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var parameters = new DynamicParameters();
+        var where = BuildProcessInstanceWhere(filter, parameters);
+
+        return await session.Connection.ExecuteScalarAsync<int>(new CommandDefinition(
+            $"select count(*) from ACT_HI_PROCINST {where}",
+            parameters,
+            session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<HistoricTaskInstance>> QueryTaskInstancesAsync(
+        HistoricTaskFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var parameters = new DynamicParameters();
+        var where = BuildHistoricTaskWhere(filter, parameters);
+        var direction = filter.Descending ? "desc" : "asc";
+        var paging = BuildPaging(session.DatabaseType, filter.FirstResult, filter.MaxResults, parameters);
+
+        var sql = $"""
+            select ID_, PROC_DEF_ID_, TASK_DEF_KEY_, PROC_INST_ID_, EXECUTION_ID_, NAME_, ASSIGNEE_, OWNER_,
+                   PRIORITY_, FORM_KEY_, START_TIME_, END_TIME_, DURATION_, DELETE_REASON_, TENANT_ID_
+            from ACT_HI_TASKINST
+            {where}
+            order by START_TIME_ {direction}, ID_ {direction}
+            {paging}
+            """;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(sql, parameters, session.Transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var result = new List<HistoricTaskInstance>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            result.Add(MapTaskInstance(row));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> CountTaskInstancesAsync(
+        HistoricTaskFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var parameters = new DynamicParameters();
+        var where = BuildHistoricTaskWhere(filter, parameters);
+
+        return await session.Connection.ExecuteScalarAsync<int>(new CommandDefinition(
+            $"select count(*) from ACT_HI_TASKINST {where}",
+            parameters,
+            session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    private static string BuildProcessInstanceWhere(
+        HistoricProcessInstanceFilter filter,
+        DynamicParameters parameters)
+    {
+        var conditions = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(filter.ProcessInstanceId))
+        {
+            conditions.Add("PROC_INST_ID_ = @processInstanceId");
+            parameters.Add("processInstanceId", filter.ProcessInstanceId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.ProcessDefinitionId))
+        {
+            conditions.Add("PROC_DEF_ID_ = @processDefinitionId");
+            parameters.Add("processDefinitionId", filter.ProcessDefinitionId);
+        }
+
+        if (filter.ProcessDefinitionIds is { Count: > 0 })
+        {
+            conditions.Add("PROC_DEF_ID_ in @definitionIds");
+            parameters.Add("definitionIds", filter.ProcessDefinitionIds);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.BusinessKey))
+        {
+            conditions.Add("BUSINESS_KEY_ = @businessKey");
+            parameters.Add("businessKey", filter.BusinessKey);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.StartUserId))
+        {
+            conditions.Add("START_USER_ID_ = @startUserId");
+            parameters.Add("startUserId", filter.StartUserId);
+        }
+
+        if (filter.TenantId is not null)
+        {
+            conditions.Add("coalesce(TENANT_ID_, '') = @tenantId");
+            parameters.Add("tenantId", filter.TenantId);
+        }
+
+        if (filter.Finished is { } finished)
+        {
+            conditions.Add(finished ? "END_TIME_ is not null" : "END_TIME_ is null");
+        }
+
+        if (filter.Deleted is { } deleted)
+        {
+            conditions.Add(deleted ? "DELETE_REASON_ is not null" : "DELETE_REASON_ is null");
+        }
+
+        AddRange(conditions, parameters, "START_TIME_", "startedAfter", ">=", filter.StartedAfter);
+        AddRange(conditions, parameters, "START_TIME_", "startedBefore", "<=", filter.StartedBefore);
+        AddRange(conditions, parameters, "END_TIME_", "endedAfter", ">=", filter.EndedAfter);
+        AddRange(conditions, parameters, "END_TIME_", "endedBefore", "<=", filter.EndedBefore);
+
+        return conditions.Count == 0 ? string.Empty : " where " + string.Join(" and ", conditions);
+    }
+
+    private static string BuildHistoricTaskWhere(HistoricTaskFilter filter, DynamicParameters parameters)
+    {
+        var conditions = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(filter.ProcessInstanceId))
+        {
+            conditions.Add("PROC_INST_ID_ = @processInstanceId");
+            parameters.Add("processInstanceId", filter.ProcessInstanceId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Assignee))
+        {
+            conditions.Add("ASSIGNEE_ = @assignee");
+            parameters.Add("assignee", filter.Assignee);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.ProcessDefinitionId))
+        {
+            conditions.Add("PROC_DEF_ID_ = @processDefinitionId");
+            parameters.Add("processDefinitionId", filter.ProcessDefinitionId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.TaskDefinitionKey))
+        {
+            conditions.Add("TASK_DEF_KEY_ = @taskDefinitionKey");
+            parameters.Add("taskDefinitionKey", filter.TaskDefinitionKey);
+        }
+
+        if (filter.TenantId is not null)
+        {
+            conditions.Add("coalesce(TENANT_ID_, '') = @tenantId");
+            parameters.Add("tenantId", filter.TenantId);
+        }
+
+        if (filter.OnlyFinished)
+        {
+            conditions.Add("END_TIME_ is not null");
+        }
+
+        AddRange(conditions, parameters, "END_TIME_", "finishedAfter", ">=", filter.FinishedAfter);
+        AddRange(conditions, parameters, "END_TIME_", "finishedBefore", "<=", filter.FinishedBefore);
+
+        return conditions.Count == 0 ? string.Empty : " where " + string.Join(" and ", conditions);
+    }
+
+    private static void AddRange(
+        List<string> conditions,
+        DynamicParameters parameters,
+        string column,
+        string parameterName,
+        string comparison,
+        DateTime? value)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        conditions.Add($"{column} {comparison} @{parameterName}");
+        parameters.Add(parameterName, value);
+    }
+
+    /// <summary>方言分页子句。空 <paramref name="take"/> 表示调用方显式要求不限条数。</summary>
+    private static string BuildPaging(
+        DatabaseType databaseType,
+        int firstResult,
+        int? take,
+        DynamicParameters parameters)
+    {
+        var skip = Math.Max(0, firstResult);
+
+        if (take is null)
+        {
+            if (skip == 0)
+            {
+                return string.Empty;
+            }
+
+            // 只跳过、不限制：用一个足够大的上限，避免重新退化成「全表进内存」
+            parameters.Add("skip", skip);
+            return databaseType == DatabaseType.MySql
+                ? " limit 100000 offset @skip"
+                : " offset @skip rows fetch next 100000 rows only";
+        }
+
+        parameters.Add("skip", skip);
+        parameters.Add("take", Math.Max(1, take.Value));
+
+        return databaseType == DatabaseType.MySql
+            ? " limit @take offset @skip"
+            : " offset @skip rows fetch next @take rows only";
     }
 
     // ─────────────────────────── 行映射 ───────────────────────────

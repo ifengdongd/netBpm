@@ -6,6 +6,7 @@ using NetBpm.Engine;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Command.Interceptors;
+using NetBpm.Engine.Events;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
 using NetBpm.Engine.Jobs;
@@ -27,7 +28,9 @@ internal sealed class TestEngine
         InMemoryTaskManager taskManager,
         TestDelegateResolver delegateResolver,
         TestDefinitionResolver definitionResolver,
-        InMemoryTimerJobManager timerJobs)
+        InMemoryTimerJobManager timerJobs,
+        InMemoryAsyncJobManager asyncJobs,
+        InMemoryEventOutbox outbox)
     {
         CommandExecutor = commandExecutor;
         Services = services;
@@ -36,6 +39,8 @@ internal sealed class TestEngine
         DelegateResolver = delegateResolver;
         Resolver = definitionResolver;
         TimerJobs = timerJobs;
+        AsyncJobs = asyncJobs;
+        Outbox = outbox;
     }
 
     public ICommandExecutor CommandExecutor { get; }
@@ -48,6 +53,12 @@ internal sealed class TestEngine
 
     /// <summary>定时作业表（边界定时器测试用）。</summary>
     public InMemoryTimerJobManager TimerJobs { get; }
+
+    /// <summary>异步作业表（asyncBefore / asyncAfter 测试用）。</summary>
+    public InMemoryAsyncJobManager AsyncJobs { get; }
+
+    /// <summary>事务性 outbox（事件外发测试用）。</summary>
+    public InMemoryEventOutbox Outbox { get; }
 
     public TestDelegateResolver DelegateResolver { get; }
 
@@ -67,7 +78,10 @@ internal sealed class TestEngine
         var idGenerator = new InMemoryIdGenerator();
         var taskManager = new InMemoryTaskManager(idGenerator, history);
         var timerJobs = new InMemoryTimerJobManager();
-        var executionManager = new InMemoryExecutionManager(idGenerator, taskManager, history, timerJobs);
+        var asyncJobs = new InMemoryAsyncJobManager();
+        var outbox = new InMemoryEventOutbox();
+        var executionManager = new InMemoryExecutionManager(
+            idGenerator, taskManager, history, timerJobs, asyncJobs);
         var delegateResolver = new TestDelegateResolver();
         var definitionResolver = new TestDefinitionResolver();
         var behaviorFactory = new ActivityBehaviorFactory(() => holder!);
@@ -82,7 +96,9 @@ internal sealed class TestEngine
             taskManager,
             definitionResolver,
             logger: null,
-            timerJobs);
+            timerJobs,
+            asyncJobs,
+            outbox);
 
         holder = services;
 
@@ -101,7 +117,60 @@ internal sealed class TestEngine
             taskManager,
             delegateResolver,
             definitionResolver,
-            timerJobs);
+            timerJobs,
+            asyncJobs,
+            outbox);
+    }
+
+    /// <summary>执行到期异步作业（含失败退避/死信，与 <c>ProcessEngine</c> 同语义）。</summary>
+    public async ValueTask<int> ExecuteDueAsyncJobsAsync(
+        DateTime utcNow,
+        int maxJobs = 50,
+        CancellationToken ct = default)
+    {
+        var due = await AsyncJobs.FindDueAsync(utcNow, maxJobs, ct).ConfigureAwait(false);
+        var executed = 0;
+
+        foreach (var job in due)
+        {
+            try
+            {
+                if (await CommandExecutor
+                        .ExecuteAsync(new ExecuteAsyncJobCommand(job.Id), ct)
+                        .ConfigureAwait(false))
+                {
+                    executed++;
+                }
+            }
+            catch (Exception exception)
+            {
+                var remaining = Math.Max(0, job.Retries - 1);
+                var nextDue = remaining == 0 ? utcNow : utcNow + AsyncJobRetry.Backoff(1);
+
+                // 内存宿主没有事务：命令里的抢占删除已生效，用快照插回
+                if (await AsyncJobs.FindByIdAsync(job.Id, ct).ConfigureAwait(false) is null)
+                {
+                    job.Retries = remaining;
+                    job.ExceptionMessage = exception.Message;
+                    job.LastFailureTime = utcNow;
+                    job.DueDate = nextDue;
+                    job.DeadLetter = remaining == 0;
+
+                    await AsyncJobs.InsertAsync(job, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await AsyncJobs.MarkFailureAsync(
+                        job.Id,
+                        exception.Message,
+                        utcNow,
+                        nextDue,
+                        ct).ConfigureAwait(false);
+                }
+            }
+        }
+
+        return executed;
     }
 
     /// <summary>触发到期的边界定时器（测试可直接传未来时间，无需真的等待）。</summary>

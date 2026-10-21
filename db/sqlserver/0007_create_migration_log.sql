@@ -38,6 +38,9 @@ go
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_MIGRATION_PROCINST' and object_id = object_id('ACT_HI_MIGRATION'))
 create index ACT_IDX_MIGRATION_PROCINST on ACT_HI_MIGRATION (PROC_INST_ID_);
 go
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_MIGRATION_PROCINST_TIME' and object_id = object_id('ACT_HI_MIGRATION'))
+create index ACT_IDX_MIGRATION_PROCINST_TIME on ACT_HI_MIGRATION (PROC_INST_ID_, MIGRATED_AT_);
+go
 
 -- ─────────────────────────── 表与列注释（扩展属性 MS_Description） ───────────────────────────
 

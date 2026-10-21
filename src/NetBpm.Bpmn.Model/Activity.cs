@@ -6,6 +6,23 @@ public abstract class Activity : FlowNode
     /// <summary>默认出流 id（对应 XML 属性 <c>default</c>）。</summary>
     public string? DefaultFlow { get; set; }
 
+    /// <summary>
+    /// 进入活动前先落一条异步作业（<c>activiti:asyncBefore</c>）：命令提交后由 JobExecutor 执行。
+    /// </summary>
+    public bool AsyncBefore { get; set; }
+
+    /// <summary>
+    /// 活动执行完成后不立即离开，而是落一条异步作业（<c>activiti:asyncAfter</c>）。
+    /// </summary>
+    public bool AsyncAfter { get; set; }
+
+    /// <summary>
+    /// 是否独占作业（<c>activiti:exclusive</c>，默认 true）。
+    /// <para>本子集只支持独占：并发作业（exclusive=false）会让同一实例的多条令牌并行推进，</para>
+    /// <para>与当前「一个命令一棵执行树」的并发模型冲突，由 <c>AsyncJobRule</c> 部署期拒绝。</para>
+    /// </summary>
+    public bool Exclusive { get; set; } = true;
+
     /// <summary>是否为补偿活动（本子集恒为 false）。</summary>
     public bool ForCompensation { get; set; }
 

@@ -29,6 +29,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
     private readonly ITaskManager _taskManager;
     private readonly IHistoryManager _historyManager;
     private readonly Jobs.ITimerJobManager? _timerJobs;
+    private readonly Jobs.IAsyncJobManager? _asyncJobs;
     private readonly Dictionary<string, IExecutionEntity> _executions = new(StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
 
@@ -36,7 +37,8 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         IIdGenerator idGenerator,
         ITaskManager taskManager,
         IHistoryManager historyManager,
-        Jobs.ITimerJobManager? timerJobs = null)
+        Jobs.ITimerJobManager? timerJobs = null,
+        Jobs.IAsyncJobManager? asyncJobs = null)
     {
         ArgumentNullException.ThrowIfNull(idGenerator);
         ArgumentNullException.ThrowIfNull(taskManager);
@@ -46,6 +48,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         _taskManager = taskManager;
         _historyManager = historyManager;
         _timerJobs = timerJobs;
+        _asyncJobs = asyncJobs;
     }
 
     /// <summary>当前执行数（诊断用）。</summary>
@@ -325,6 +328,11 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         if (_timerJobs is not null)
         {
             await _timerJobs.DeleteByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+        }
+
+        if (_asyncJobs is not null)
+        {
+            await _asyncJobs.DeleteByProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
         }
 
         await _taskManager

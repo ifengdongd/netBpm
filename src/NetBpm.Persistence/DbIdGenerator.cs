@@ -71,9 +71,15 @@ public sealed class DbIdGenerator : IIdGenerator
 
     private void AcquireNextBlock()
     {
-        while (true)
+        // 理论上 forUpdate 已经把区块分配串行化，CAS 失败只可能是「行锁模式退化 / 并发路径未走本方法」；
+        // 仍然保留有界重试：无界自旋会让一次异常变成线程永久忙等。
+        const int maxAttempts = 20;
+
+        for (var attempt = 0; ; attempt++)
         {
-            var property = _propertyStore.FindProperty(NextDbIdPropertyName)
+            // 必须加锁读：MySQL REPEATABLE READ 下普通 SELECT 读到的是事务开始时的快照，
+            // 冲突后重读永远拿到旧 REV_，会死循环（见 DapperPropertyStore 类注释）。
+            var property = _propertyStore.FindProperty(NextDbIdPropertyName, forUpdate: true)
                 ?? throw new EngineException(
                     $"ACT_GE_PROPERTY 中缺少 '{NextDbIdPropertyName}'，数据库脚本未正确初始化。" +
                     "请执行 db/ 下对应方言的初始化脚本。");
@@ -89,7 +95,15 @@ public sealed class DbIdGenerator : IIdGenerator
 
             if (!_propertyStore.TryUpdateProperty(NextDbIdPropertyName, property.Revision, newValueText))
             {
-                // 乐观锁冲突：另一实例刚占走一块，重读后重试
+                // 乐观锁冲突：另一实例刚占走一块，退避后重读重试
+                if (attempt >= maxAttempts)
+                {
+                    throw new EngineException(
+                        $"ID 区块分配连续冲突 {maxAttempts} 次（ACT_GE_PROPERTY.next.dbid）。" +
+                        "请检查数据库行锁是否被禁用，或并发是否异常升高。");
+                }
+
+                Thread.Sleep(1 + attempt);
                 continue;
             }
 

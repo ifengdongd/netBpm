@@ -106,6 +106,41 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         namespaceUri is null ? reader.GetAttribute(localName) : reader.GetAttribute(localName, namespaceUri);
 
     /// <summary>
+    /// 读取活动公共属性：<c>default</c> 与异步作业配置（<c>asyncBefore</c> / <c>asyncAfter</c> / <c>exclusive</c>）。
+    /// <para>各任务转换器共用；事件与网关没有异步语义，不调用它。</para>
+    /// </summary>
+    protected static void ReadActivityAttributes(XmlReader reader, Activity element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+
+        element.DefaultFlow ??= Attr(reader, "default");
+        element.AsyncBefore = IsTrue(Attr(reader, "asyncBefore", BpmnConstants.ActivitiNamespace));
+        element.AsyncAfter = IsTrue(Attr(reader, "asyncAfter", BpmnConstants.ActivitiNamespace));
+        element.Exclusive = !string.Equals(
+            Attr(reader, "exclusive", BpmnConstants.ActivitiNamespace),
+            "false",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>写出活动公共属性（往返保真）：只在为 true 时写 <c>asyncBefore</c> / <c>asyncAfter</c>。</summary>
+    protected static void WriteActivityAttributes(XmlWriter writer, Activity element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+
+        WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteActivitiAttribute(writer, "asyncBefore", element.AsyncBefore ? "true" : null);
+        WriteActivitiAttribute(writer, "asyncAfter", element.AsyncAfter ? "true" : null);
+
+        if (!element.Exclusive)
+        {
+            WriteActivitiAttribute(writer, "exclusive", "false");
+        }
+    }
+
+    private static bool IsTrue(string? value) =>
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// 子元素扫描循环，并<b>集中处理 <c>extensionElements</c></b>。
     /// <para>
     /// 🔑 必须集中处理：执行监听器、任务监听器、字段注入都挂在 <c>extensionElements</c> 下，

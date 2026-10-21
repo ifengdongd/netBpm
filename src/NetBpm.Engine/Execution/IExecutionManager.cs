@@ -19,7 +19,10 @@ public interface IExecutionManager
         string? startUserId,
         string? tenantId = null);
 
-    /// <summary>创建并发子执行（<c>IsConcurrent = true</c>）。</summary>
+    /// <summary>
+    /// 创建子执行。与 Activiti 行级一致：<b>不</b>置 <c>IS_CONCURRENT_</c>
+    /// （该标志在 Activiti 9 的分支创建路径上同样保持 0，见 <c>InMemoryExecutionManager</c> 类注释）。
+    /// </summary>
     IExecutionEntity CreateChildExecution(IExecutionEntity parent);
 
     ValueTask InsertAsync(IExecutionEntity execution, CancellationToken ct = default);

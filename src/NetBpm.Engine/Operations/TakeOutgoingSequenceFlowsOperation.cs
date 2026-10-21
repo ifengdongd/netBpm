@@ -2,6 +2,7 @@ using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Agenda;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Execution;
+using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Services;
 
 namespace NetBpm.Engine.Operations;
@@ -18,11 +19,19 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
     private readonly IExecutionEntity _execution;
     private readonly IEngineServices _services;
     private readonly bool _evaluateConditions;
+    private readonly bool _skipAsyncAfter;
 
+    /// <param name="execution">要离开的执行。</param>
+    /// <param name="services">引擎服务。</param>
+    /// <param name="evaluateConditions">是否按条件选择出流（网关 / 条件流）。</param>
+    /// <param name="skipAsyncAfter">
+    /// 仅为 <c>true</c> 时由 <c>asyncAfter</c> 作业恢复：表示已经过异步断点，不能再落新作业。
+    /// </param>
     public TakeOutgoingSequenceFlowsOperation(
         IExecutionEntity execution,
         IEngineServices services,
-        bool evaluateConditions)
+        bool evaluateConditions,
+        bool skipAsyncAfter = false)
     {
         ArgumentNullException.ThrowIfNull(execution);
         ArgumentNullException.ThrowIfNull(services);
@@ -30,6 +39,7 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
         _execution = execution;
         _services = services;
         _evaluateConditions = evaluateConditions;
+        _skipAsyncAfter = skipAsyncAfter;
     }
 
     /// <inheritdoc />
@@ -46,6 +56,21 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
 
         var currentFlowElement = _execution.CurrentFlowElement
             ?? throw new EngineException($"执行 '{_execution.Id}' 没有当前流程元素，无法离开。");
+
+        // asyncAfter：活动行为已经执行完（例如服务调用、脚本），但「离开节点」推迟到作业里。
+        // 这样历史结束、节点结束监听器与后续推进都在作业事务中完成，失败可重试。
+        if (!_skipAsyncAfter
+            && currentFlowElement is Activity { AsyncAfter: true } asyncActivity)
+        {
+            await AsyncJobScheduler.CreateAsync(
+                _services,
+                _execution,
+                asyncActivity,
+                AsyncJobPhase.After,
+                ct).ConfigureAwait(false);
+
+            return;
+        }
 
         switch (currentFlowElement)
         {

@@ -40,6 +40,11 @@ namespace NetBpm.Runtime;
 /// 按挂起状态过滤（<see langword="null"/> 不限制）。挂起的任务仍会出现在待办里，但不能完成 / 认领。
 /// </param>
 /// <param name="DueBefore">到期时间上界（含），用于逾期 / 临近超时筛选。</param>
+/// <param name="SortBy">
+/// 排序字段：<c>createTime</c>（默认）/ <c>dueDate</c> / <c>priority</c>。
+/// 非法值显式报错（400），不静默回退。
+/// </param>
+/// <param name="Descending">是否倒序（默认正序，与 Activiti 的 <c>orderBy...asc()</c> 同义）。</param>
 /// <remarks>
 /// <para>
 /// <b>分页口径</b>：先按 (CREATE_TIME_ 升序, ID_ 升序) 排序再切片 —— 排序稳定才能保证
@@ -61,8 +66,13 @@ public sealed record TaskQuery(
     bool? Suspended = null,
     DateTime? DueBefore = null,
     string? TenantId = null,
-    bool AllUsers = false)
+    bool AllUsers = false,
+    string? SortBy = null,
+    bool Descending = false)
 {
+    /// <summary>允许的排序字段。</summary>
+    public static readonly string[] AllowedSortFields = ["createTime", "dueDate", "priority"];
+
     /// <summary>是否至少给了一个查询条件。</summary>
     public bool HasCriteria =>
         !string.IsNullOrWhiteSpace(Assignee)

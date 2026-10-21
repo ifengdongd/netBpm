@@ -242,6 +242,9 @@ public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
         "priority",
         "category",
         "skipExpression",
+        "asyncBefore",
+        "asyncAfter",
+        "exclusive",
     };
 
     public override string ElementName => "userTask";
@@ -259,7 +262,7 @@ public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
         element.Priority = Attr(reader, BpmnConstants.AttributePriority, BpmnConstants.ActivitiNamespace);
         element.Category = Attr(reader, "category", BpmnConstants.ActivitiNamespace);
         element.SkipExpression = Attr(reader, BpmnConstants.AttributeSkipExpression, BpmnConstants.ActivitiNamespace);
-        element.DefaultFlow = Attr(reader, "default");
+        ReadActivityAttributes(reader, element);
 
         FillCsv(element.CandidateUsers, Attr(reader, BpmnConstants.AttributeCandidateUsers, BpmnConstants.ActivitiNamespace));
         FillCsv(element.CandidateGroups, Attr(reader, BpmnConstants.AttributeCandidateGroups, BpmnConstants.ActivitiNamespace));
@@ -353,7 +356,7 @@ public sealed class UserTaskXmlConverter : BaseBpmnXmlConverter<UserTask>
     {
         writer.WriteStartElement("userTask", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
-        WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteActivityAttributes(writer, element);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeAssignee, element.Assignee);
         WriteActivitiAttribute(writer, "owner", element.Owner);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeCandidateUsers, string.Join(',', element.CandidateUsers));
@@ -391,6 +394,9 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
         "delegateExpression",
         "expression",
         "resultVariableName",
+        "asyncBefore",
+        "asyncAfter",
+        "exclusive",
     };
 
     public override string ElementName => "serviceTask";
@@ -405,7 +411,7 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
         element.DelegateExpression = Attr(reader, BpmnConstants.AttributeDelegateExpression, BpmnConstants.ActivitiNamespace);
         element.Expression = Attr(reader, BpmnConstants.AttributeExpression, BpmnConstants.ActivitiNamespace);
         element.ResultVariableName = Attr(reader, BpmnConstants.AttributeResultVariableName, BpmnConstants.ActivitiNamespace);
-        element.DefaultFlow = Attr(reader, "default");
+        ReadActivityAttributes(reader, element);
 
         element.ImplementationType = element.ClassName is not null
             ? ServiceTaskImplementationType.Class
@@ -430,7 +436,7 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
     {
         writer.WriteStartElement("serviceTask", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
-        WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteActivityAttributes(writer, element);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeClass, element.ClassName);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeDelegateExpression, element.DelegateExpression);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeExpression, element.Expression);
@@ -444,11 +450,23 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
 /// <summary>手工任务（<c>manualTask</c>）转换器。</summary>
 public sealed class ManualTaskXmlConverter : BaseBpmnXmlConverter<ManualTask>
 {
+    private static readonly HashSet<string> KnownAttributes = new(StringComparer.Ordinal)
+    {
+        "asyncBefore",
+        "asyncAfter",
+        "exclusive",
+    };
+
     public override string ElementName => "manualTask";
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
 
     protected override ManualTask CreateElement() => new();
 
-    protected override void ConvertXmlToElement(XmlReader reader, ManualTask element, Process process) =>
+    protected override void ConvertXmlToElement(XmlReader reader, ManualTask element, Process process)
+    {
+        ReadActivityAttributes(reader, element);
+
         ReadChildren(reader, element, child =>
         {
             if (child.LocalName == "multiInstanceLoopCharacteristics")
@@ -456,11 +474,13 @@ public sealed class ManualTaskXmlConverter : BaseBpmnXmlConverter<ManualTask>
                 element.LoopCharacteristics = ReadMultiInstanceLoopCharacteristics(child);
             }
         });
+    }
 
     protected override void ConvertElementToXml(XmlWriter writer, ManualTask element)
     {
         writer.WriteStartElement("manualTask", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
+        WriteActivityAttributes(writer, element);
         WriteExtensionElements(writer, element);
         WriteMultiInstanceLoopCharacteristics(writer, element.LoopCharacteristics);
         writer.WriteEndElement();
@@ -474,6 +494,9 @@ public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
     {
         "resultVariable",
         "autoStoreVariables",
+        "asyncBefore",
+        "asyncAfter",
+        "exclusive",
     };
 
     public override string ElementName => "scriptTask";
@@ -485,6 +508,7 @@ public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
     protected override void ConvertXmlToElement(XmlReader reader, ScriptTask element, Process process)
     {
         element.ScriptFormat = Attr(reader, "scriptFormat");
+        ReadActivityAttributes(reader, element);
         element.ResultVariable = Attr(reader, "resultVariable", BpmnConstants.ActivitiNamespace);
         element.AutoStoreVariables = string.Equals(
             Attr(reader, "autoStoreVariables", BpmnConstants.ActivitiNamespace),
@@ -511,6 +535,7 @@ public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
         writer.WriteStartElement("scriptTask", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteAttributeIfPresent(writer, "scriptFormat", element.ScriptFormat);
+        WriteActivityAttributes(writer, element);
         WriteActivitiAttribute(writer, "resultVariable", element.ResultVariable);
         WriteActivitiAttribute(writer, "autoStoreVariables", element.AutoStoreVariables ? "true" : null);
         WriteExtensionElements(writer, element);

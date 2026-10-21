@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NetBpm.Engine.Behavior;
+using NetBpm.Engine.Events;
 using NetBpm.Engine.Execution;
 
 namespace NetBpm.Engine.Services;
@@ -43,6 +45,14 @@ public static class EngineEventDispatcher
         string? entityId,
         CancellationToken ct = default)
     {
+        // 事务性 outbox：先写事件（与业务变更同一事务），再走进程内监听器。
+        // 放在解析器判断之前 —— 即使流程没有声明 activiti:eventListener，也要能外发事件。
+        if (services.EventOutbox is { } outbox)
+        {
+            await EnqueueOutboxAsync(services, outbox, execution, eventType, entityId, ct)
+                .ConfigureAwait(false);
+        }
+
         var resolver = services.ProcessDefinitionResolver;
 
         if (resolver is null || string.IsNullOrEmpty(execution.ProcessDefinitionId))
@@ -83,6 +93,49 @@ public static class EngineEventDispatcher
                     process.Id);
             }
         }
+    }
+
+    private static async ValueTask EnqueueOutboxAsync(
+        IEngineServices services,
+        IEventOutbox outbox,
+        IDelegateExecution execution,
+        string eventType,
+        string? entityId,
+        CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var tenantId = (execution as IExecutionEntity)?.TenantId;
+        var activityId = execution.CurrentActivityId;
+
+        // 载荷只带 id 与类型：订阅方需要更多数据时按 processInstanceId / taskId 回查，
+        // 避免把变量（可能很大 / 敏感）复制进事件表。
+        var payload = JsonSerializer.Serialize(new
+        {
+            eventType,
+            entityId,
+            processInstanceId = execution.ProcessInstanceId,
+            processDefinitionId = execution.ProcessDefinitionId,
+            executionId = execution.Id,
+            activityId,
+            tenantId,
+            occurredAt = now,
+        });
+
+        await outbox.EnqueueAsync(
+            new OutboxEvent
+            {
+                Id = services.IdGenerator.NextId(),
+                EventType = eventType,
+                EntityId = entityId,
+                ProcessInstanceId = execution.ProcessInstanceId,
+                ProcessDefinitionId = execution.ProcessDefinitionId,
+                ExecutionId = execution.Id,
+                ActivityId = activityId,
+                TenantId = tenantId,
+                Payload = payload,
+                CreateTime = now,
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>事件订阅匹配：<see cref="Bpmn.Model.EventListener.Events"/> 为逗号分隔清单。</summary>

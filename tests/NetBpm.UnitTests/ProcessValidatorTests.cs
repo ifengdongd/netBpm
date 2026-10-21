@@ -1,5 +1,6 @@
 using System.Text;
 using NetBpm.Bpmn.Converter;
+using NetBpm.Bpmn.Model;
 using NetBpm.Bpmn.Validation;
 
 namespace NetBpm.UnitTests;
@@ -462,7 +463,7 @@ public sealed class ProcessValidatorTests
                          targetNamespace="http://netbpm/test">
               <process id="p15" isExecutable="true">
                 <startEvent id="start" />
-                <serviceTask id="svc" activiti:delegateExpression="doWork" activiti:asyncBefore="true" />
+                <serviceTask id="svc" activiti:delegateExpression="doWork" activiti:mysteryFlag="true" />
                 <endEvent id="end" />
                 <sequenceFlow id="f1" sourceRef="start" targetRef="svc" />
                 <sequenceFlow id="f2" sourceRef="svc" targetRef="end" />
@@ -476,6 +477,65 @@ public sealed class ProcessValidatorTests
             && result.Rule == "unknown-activiti-attribute"
             && result.Severity == ValidationSeverity.Warning);
         Assert.DoesNotContain(results, result => result.Severity == ValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void AsyncJobAttributes_ShouldBeParsedAndAccepted()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="p-async" isExecutable="true">
+                <startEvent id="start" />
+                <serviceTask id="svc" activiti:delegateExpression="doWork"
+                             activiti:asyncBefore="true" activiti:asyncAfter="true" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="svc" />
+                <sequenceFlow id="f2" sourceRef="svc" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml);
+        var task = Assert.Single(process.FindFlowElementsOfType<ServiceTask>());
+
+        Assert.True(task.AsyncBefore);
+        Assert.True(task.AsyncAfter);
+        Assert.True(task.Exclusive);
+
+        var results = Validator.Validate(process);
+
+        Assert.DoesNotContain(results, result => result.Rule == "unknown-activiti-attribute");
+        Assert.DoesNotContain(results, result => result.Rule == "async-job");
+    }
+
+    [Fact]
+    public void AsyncJobOnMultiInstance_ShouldBeRejected()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="p-async-mi" isExecutable="true">
+                <startEvent id="start" />
+                <userTask id="approve" activiti:asyncBefore="true">
+                  <multiInstanceLoopCharacteristics isSequential="false" activiti:collection="assignees" />
+                </userTask>
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="approve" />
+                <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var results = Validator.Validate(Parse(xml));
+
+        Assert.Contains(results, result => result.ElementId == "approve"
+            && result.Rule == "async-job"
+            && result.IsError);
     }
 
     [Fact]

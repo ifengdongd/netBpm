@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
+using NetBpm.Engine.Diagnostics;
 
 namespace NetBpm.Engine.Command;
 
@@ -73,6 +75,15 @@ public sealed class CommandExecutor : ICommandExecutor
         }
 
         // ── 最外层命令：新建上下文 ──────────────────────────────────
+        var commandName = command.GetType().Name;
+        using var activity = EngineDiagnostics.ActivitySource.StartActivity(
+            $"netbpm.command {commandName}",
+            ActivityKind.Internal);
+
+        activity?.SetTag("netbpm.command", commandName);
+
+        var startedAt = Stopwatch.GetTimestamp();
+        var result = "success";
         var context = _contextFactory();
         var previous = CommandContext.Swap(context);
 
@@ -82,14 +93,23 @@ public sealed class CommandExecutor : ICommandExecutor
         }
         catch (Exception ex)
         {
+            result = "error";
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.SetTag("netbpm.error_type", ex.GetType().Name);
+
             // 命令失败 ⇒ 事务回滚 ⇒ 队列中未执行的操作必须丢弃，
             // 否则残留操作会被后续命令（同一上下文）误执行。
-            _logger.LogWarning(ex, "命令 {Command} 执行失败，清空议程队列。", command.GetType().Name);
+            _logger.LogWarning(ex, "命令 {Command} 执行失败，清空议程队列。", commandName);
             context.Agenda.Clear();
             throw;
         }
         finally
         {
+            var elapsedMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+
+            EngineDiagnostics.CommandsExecuted.Add(1, new KeyValuePair<string, object?>("command", commandName), new KeyValuePair<string, object?>("result", result));
+            EngineDiagnostics.CommandDuration.Record(elapsedMs, new KeyValuePair<string, object?>("command", commandName));
+
             // 命令级资源（数据库连接 / 事务）随命令结束一并释放。
             // 重试拦截器可能已换过事务，这里释放的是「最后一次尝试」的那一个。
             try

@@ -8,6 +8,7 @@ using NetBpm.Engine;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Command.Interceptors;
+using NetBpm.Engine.Events;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
 using NetBpm.Engine.Jobs;
@@ -19,6 +20,7 @@ using NetBpm.Persistence;
 using NetBpm.Persistence.Admin;
 using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Deployment;
+using NetBpm.Persistence.Events;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
 using NetBpm.Persistence.Idempotency;
@@ -31,6 +33,106 @@ namespace NetBpm.Runtime;
 /// <summary>引擎组合根：把各模块装配成可用的服务图。</summary>
 public static class NetBpmServiceCollectionExtensions
 {
+    /// <summary>
+    /// 注册异步作业后台执行器（<c>asyncBefore</c> / <c>asyncAfter</c>）。
+    /// <para>不注册时作业仍会落库，但只有调用 <c>IProcessEngine.ExecuteDueAsyncJobsAsync</c> 才会推进。</para>
+    /// </summary>
+    public static IServiceCollection AddNetBpmAsyncJobExecutor(
+        this IServiceCollection services,
+        Action<Hosting.AsyncJobExecutorOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var options = services.AddOptions<Hosting.AsyncJobExecutorOptions>();
+
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        services.AddHostedService<Hosting.AsyncJobExecutorService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// 注册 outbox 后台发布器。只有同时开启 <see cref="NetBpmOptions.EnableOutbox"/> 才有事件可发；
+    /// 宿主需要注册 <c>IOutboxEventHandler</c> 实现，否则发布器只告警不消费。
+    /// </summary>
+    public static IServiceCollection AddNetBpmOutboxPublisher(
+        this IServiceCollection services,
+        Action<Hosting.OutboxPublisherOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var options = services.AddOptions<Hosting.OutboxPublisherOptions>();
+
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        services.AddHostedService<Hosting.OutboxPublisherService>();
+
+        return services;
+    }
+
+    /// <summary>注册异步作业执行器，参数从 <c>NetBpm:Jobs</c> 读取。</summary>
+    public static IServiceCollection AddNetBpmAsyncJobExecutor(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return services.AddNetBpmAsyncJobExecutor(options =>
+        {
+            var section = configuration.GetSection("NetBpm:Jobs");
+
+            if (bool.TryParse(section["Enabled"], out var enabled))
+            {
+                options.Enabled = enabled;
+            }
+
+            if (int.TryParse(section["BatchSize"], out var batchSize) && batchSize > 0)
+            {
+                options.BatchSize = batchSize;
+            }
+
+            if (int.TryParse(section["PollIntervalSeconds"], out var pollSeconds) && pollSeconds > 0)
+            {
+                options.PollInterval = TimeSpan.FromSeconds(pollSeconds);
+            }
+        });
+    }
+
+    /// <summary>注册 outbox 发布器，参数从 <c>NetBpm:Outbox</c> 读取。</summary>
+    public static IServiceCollection AddNetBpmOutboxPublisher(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return services.AddNetBpmOutboxPublisher(options =>
+        {
+            var section = configuration.GetSection("NetBpm:Outbox");
+
+            if (bool.TryParse(section["Enabled"], out var enabled))
+            {
+                options.Enabled = enabled;
+            }
+
+            if (int.TryParse(section["BatchSize"], out var batchSize) && batchSize > 0)
+            {
+                options.BatchSize = batchSize;
+            }
+
+            if (int.TryParse(section["PollIntervalSeconds"], out var pollSeconds) && pollSeconds > 0)
+            {
+                options.PollInterval = TimeSpan.FromSeconds(pollSeconds);
+            }
+        });
+    }
+
     /// <summary>
     /// 注册 NetBpm 引擎。
     /// <para>拦截器链顺序（§5.6）：Log → Transaction → CommandContext。</para>
@@ -71,6 +173,27 @@ public static class NetBpmServiceCollectionExtensions
 
         // ── P5：持久化（按模式切换内存 / 数据库）──────────────────────
         RegisterPersistence(services, options);
+
+        // ── 异步作业与事务性 outbox ─────────────────────────────────
+        // 作业存储总是注册（模型里可以没有 async 标记，注册本身无成本）；
+        // 是否真正启用 outbox 由 EnableOutbox 决定：关闭时不注册 IEventOutbox，
+        // 事件分发器只走进程内监听器，避免给每个事件增加一次写入。
+        if (options.UsesDatabase)
+        {
+            services.AddSingleton<IAsyncJobManager, DapperAsyncJobManager>();
+            services.AddSingleton<IEventOutboxStore, Persistence.Events.DapperEventOutbox>();
+        }
+        else
+        {
+            services.AddSingleton<IAsyncJobManager, InMemoryAsyncJobManager>();
+            services.AddSingleton<IEventOutboxStore, InMemoryEventOutbox>();
+        }
+
+        if (options.EnableOutbox)
+        {
+            services.AddSingleton<IEventOutbox>(
+                provider => provider.GetRequiredService<IEventOutboxStore>());
+        }
 
         // ── HTTP 幂等：内存宿主单进程去重，数据库宿主跨实例去重 ─────────
         if (options.UsesDatabase)
@@ -115,7 +238,9 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetRequiredService<ITaskManager>(),
             provider.GetRequiredService<IProcessDefinitionResolver>(),
             provider.GetService<ILoggerFactory>()?.CreateLogger("NetBpm.Engine"),
-            provider.GetRequiredService<ITimerJobManager>()));
+            provider.GetRequiredService<ITimerJobManager>(),
+            provider.GetRequiredService<IAsyncJobManager>(),
+            provider.GetService<IEventOutbox>()));
 
         // ── 命令与拦截器 ────────────────────────────────────────────
         // 链序：Log → Retry → Transaction → CommandContext
@@ -196,6 +321,11 @@ public static class NetBpmServiceCollectionExtensions
             if (bool.TryParse(section["AutoMigrate"], out var autoMigrate))
             {
                 options.AutoMigrate = autoMigrate;
+            }
+
+            if (bool.TryParse(section["EnableOutbox"], out var enableOutbox))
+            {
+                options.EnableOutbox = enableOutbox;
             }
         });
     }

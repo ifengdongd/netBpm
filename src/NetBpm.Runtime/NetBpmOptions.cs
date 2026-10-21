@@ -22,6 +22,16 @@ public sealed class NetBpmOptions
     public bool EnableHistory { get; set; }
 
     /// <summary>
+    /// 启用事务性 outbox（<c>ACT_EVT_OUTBOX</c>）：引擎事件与业务变更同事务落库，
+    /// 由后台发布器投递给 <see cref="NetBpm.Engine.Events.IOutboxEventHandler"/>。
+    /// <para>
+    /// 默认关闭：关闭时事件只走进程内 <c>activiti:eventListener</c>，不做跨进程投递。
+    /// 开启后每个事件多一次 insert（同命令事务，不额外开连接）。
+    /// </para>
+    /// </summary>
+    public bool EnableOutbox { get; set; }
+
+    /// <summary>
     /// 使用内存执行树（无数据库宿主）。
     /// <para>
     /// <see langword="false"/> 时进入数据库模式：执行树 / 流程定义走 Dapper 仓储，

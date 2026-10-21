@@ -377,6 +377,52 @@ public sealed class UnsupportedCapabilityRule : IProcessValidationRule
 }
 
 /// <summary>
+/// 规则：异步作业（<c>activiti:asyncBefore</c> / <c>asyncAfter</c>）的配置边界。
+/// <para>
+/// 本子集支持「独占异步作业」：同一实例的作业串行执行，一个作业 = 一个命令。
+/// 多实例与 <c>exclusive=false</c> 会让同一命令内并行推进多条令牌，
+/// 与当前执行树模型冲突 —— 部署期显式拒绝，而不是按独占语义静默执行。
+/// </para>
+/// </summary>
+public sealed class AsyncJobRule : IProcessValidationRule
+{
+    /// <summary>规则名。</summary>
+    public string Name => "async-job";
+
+    /// <inheritdoc />
+    public IEnumerable<ValidationError> Validate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        foreach (var task in process.FindFlowElementsOfType<NetBpm.Bpmn.Model.Task>())
+        {
+            if (!task.AsyncBefore && !task.AsyncAfter)
+            {
+                continue;
+            }
+
+            if (task.LoopCharacteristics is not null)
+            {
+                yield return new ValidationError(
+                    Name,
+                    task.Id,
+                    task.GetType().Name,
+                    "多实例活动暂不支持 asyncBefore / asyncAfter。");
+            }
+
+            if (!task.Exclusive)
+            {
+                yield return new ValidationError(
+                    Name,
+                    task.Id,
+                    task.GetType().Name,
+                    "异步作业只支持 exclusive=\"true\"（并发异步作业未实现）。");
+            }
+        }
+    }
+}
+
+/// <summary>
 /// 规则 11：多实例（会签 / 串签）只允许配在用户任务上，且实例来源必须明确。
 /// <para>
 /// 原因：本子集的多实例语义按「审批会签」设计（<c>MultiInstanceUserTaskBehavior</c>）——

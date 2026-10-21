@@ -21,6 +21,12 @@ builder.Services.AddNetBpm(builder.Configuration);
 // 定时边界事件：后台轮询 ACT_RU_TIMER_JOB（NetBpm:Timer 可调间隔 / 关闭）
 builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
 
+// 异步作业（asyncBefore / asyncAfter）：后台轮询 ACT_RU_JOB（NetBpm:Jobs 可调间隔 / 关闭）
+builder.Services.AddNetBpmAsyncJobExecutor(builder.Configuration);
+
+// 事务性 outbox：需要 NetBpm:EnableOutbox=true 且宿主注册 IOutboxEventHandler 才会真正投递
+builder.Services.AddNetBpmOutboxPublisher(builder.Configuration);
+
 // 全局异常处理：未处理异常（如数据库不可达）返回带信息的 JSON 错误体，
 // 而非纯文本 "Internal Server Error"（前端部署列表的「加载失败」提示来源）。
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();

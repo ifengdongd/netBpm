@@ -32,7 +32,11 @@ public sealed class TimerJobStore
         BOUNDARY_EVENT_ID_   as BoundaryEventId,
         DUEDATE_             as DueDate,
         TENANT_ID_           as TenantId,
-        CREATE_TIME_         as CreateTime
+        CREATE_TIME_         as CreateTime,
+        RETRIES_             as Retries,
+        DEAD_LETTER_         as DeadLetter,
+        EXCEPTION_MSG_       as ExceptionMessage,
+        LAST_FAILURE_        as LastFailureTime
         """;
 
     /// <summary>按条件分页查作业（到期时间升序）。</summary>
@@ -79,7 +83,11 @@ public sealed class TimerJobStore
                 row.BoundaryEventId,
                 AsUtc(row.DueDate),
                 row.TenantId,
-                AsUtc(row.CreateTime)))],
+                AsUtc(row.CreateTime),
+                row.Retries ?? 0,
+                row.DeadLetter == 1,
+                row.ExceptionMessage,
+                row.LastFailureTime is null ? null : AsUtc(row.LastFailureTime.Value)))],
             total);
     }
 
@@ -105,7 +113,11 @@ public sealed class TimerJobStore
                 row.BoundaryEventId,
                 AsUtc(row.DueDate),
                 row.TenantId,
-                AsUtc(row.CreateTime));
+                AsUtc(row.CreateTime),
+                row.Retries ?? 0,
+                row.DeadLetter == 1,
+                row.ExceptionMessage,
+                row.LastFailureTime is null ? null : AsUtc(row.LastFailureTime.Value));
     }
 
     /// <summary>作业统计：总数、已到期、一小时内到期、最近到期时间。</summary>
@@ -124,9 +136,10 @@ public sealed class TimerJobStore
         var stats = await connection.QuerySingleAsync<TimerJobStatsRow>(new CommandDefinition(
             $"""
              select count(*) as Total,
-                    sum(case when DUEDATE_ <= @Now then 1 else 0 end) as Overdue,
-                    sum(case when DUEDATE_ > @Now and DUEDATE_ <= @Soon then 1 else 0 end) as DueWithinHour,
-                    min(DUEDATE_) as NextDueAt
+                    sum(case when DEAD_LETTER_ = 0 and DUEDATE_ <= @Now then 1 else 0 end) as Overdue,
+                    sum(case when DEAD_LETTER_ = 0 and DUEDATE_ > @Now and DUEDATE_ <= @Soon then 1 else 0 end) as DueWithinHour,
+                    sum(case when DEAD_LETTER_ = 1 then 1 else 0 end) as DeadLetter,
+                    min(case when DEAD_LETTER_ = 0 then DUEDATE_ end) as NextDueAt
                from ACT_RU_TIMER_JOB{where}
              """,
             parameters,
@@ -136,7 +149,8 @@ public sealed class TimerJobStore
             stats.Total,
             stats.Overdue ?? 0,
             stats.DueWithinHour ?? 0,
-            stats.NextDueAt is null ? null : AsUtc(stats.NextDueAt.Value));
+            stats.NextDueAt is null ? null : AsUtc(stats.NextDueAt.Value),
+            stats.DeadLetter ?? 0);
     }
 
     /// <summary>改期：只更新到期时间；返回是否命中（作业可能已被触发 / 删除）。</summary>
@@ -149,6 +163,40 @@ public sealed class TimerJobStore
         var affected = await connection.ExecuteAsync(new CommandDefinition(
             "update ACT_RU_TIMER_JOB set DUEDATE_ = @DueDate where ID_ = @Id",
             new { Id = jobId, DueDate = dueDate },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return affected == 1;
+    }
+
+    /// <summary>人工重试死信作业：复位重试次数并立即到期；返回是否命中死信行。</summary>
+    public async Task<bool> RetryDeadLetterAsync(string jobId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        await using var connection = _connections.CreateConnection();
+
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            """
+            update ACT_RU_TIMER_JOB
+            set RETRIES_ = 3, DEAD_LETTER_ = 0, EXCEPTION_MSG_ = null, DUEDATE_ = @Now
+            where ID_ = @Id and DEAD_LETTER_ = 1
+            """,
+            new { Id = jobId, Now = DateTime.UtcNow },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return affected == 1;
+    }
+
+    /// <summary>删除死信作业（确认不再重试）；普通作业不受影响，返回是否命中。</summary>
+    public async Task<bool> DeleteDeadLetterAsync(string jobId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        await using var connection = _connections.CreateConnection();
+
+        var affected = await connection.ExecuteAsync(new CommandDefinition(
+            "delete from ACT_RU_TIMER_JOB where ID_ = @Id and DEAD_LETTER_ = 1",
+            new { Id = jobId },
             cancellationToken: ct)).ConfigureAwait(false);
 
         return affected == 1;
@@ -183,6 +231,12 @@ public sealed class TimerJobStore
             parameters.Add("DueBefore", dueBefore);
         }
 
+        if (filter.DeadLetter is { } deadLetter)
+        {
+            clauses.Add("DEAD_LETTER_ = @DeadLetter");
+            parameters.Add("DeadLetter", deadLetter ? 1 : 0);
+        }
+
         var where = clauses.Count == 0 ? string.Empty : " where " + string.Join(" and ", clauses);
 
         return (where, parameters);
@@ -208,6 +262,14 @@ public sealed class TimerJobStore
         public string? TenantId { get; set; }
 
         public DateTime CreateTime { get; set; }
+
+        public int? Retries { get; set; }
+
+        public int? DeadLetter { get; set; }
+
+        public string? ExceptionMessage { get; set; }
+
+        public DateTime? LastFailureTime { get; set; }
     }
 
     private sealed class TimerJobStatsRow
@@ -217,6 +279,8 @@ public sealed class TimerJobStore
         public int? Overdue { get; set; }
 
         public int? DueWithinHour { get; set; }
+
+        public int? DeadLetter { get; set; }
 
         public DateTime? NextDueAt { get; set; }
     }
@@ -231,7 +295,8 @@ public sealed record TimerJobFilter(
     string? ProcessInstanceId = null,
     string? ProcessDefinitionId = null,
     string? TenantId = null,
-    DateTime? DueBefore = null);
+    DateTime? DueBefore = null,
+    bool? DeadLetter = null);
 
 /// <summary>定时作业摘要。</summary>
 public sealed record TimerJobSummary(
@@ -242,10 +307,19 @@ public sealed record TimerJobSummary(
     string BoundaryEventId,
     DateTime DueDate,
     string? TenantId,
-    DateTime CreateTime);
+    DateTime CreateTime,
+    int Retries = 0,
+    bool DeadLetter = false,
+    string? ExceptionMessage = null,
+    DateTime? LastFailureTime = null);
 
 /// <summary>作业分页结果。</summary>
 public sealed record TimerJobPage(IReadOnlyList<TimerJobSummary> Items, int Total);
 
 /// <summary>作业统计。</summary>
-public sealed record TimerJobStats(int Total, int Overdue, int DueWithinHour, DateTime? NextDueAt);
+public sealed record TimerJobStats(
+    int Total,
+    int Overdue,
+    int DueWithinHour,
+    DateTime? NextDueAt,
+    int DeadLetter = 0);

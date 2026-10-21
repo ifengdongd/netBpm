@@ -192,8 +192,10 @@ public static class DesignerEndpoints
     {
         var tenant = RequestIdentity.Tenant(tenantId, requestContext);
 
-        var first = firstResult ?? 0;
-        var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
+        if (!Paging.TryRead(firstResult, maxResults, out var first, out var size, out var pagingError))
+        {
+            return pagingError!;
+        }
 
         var query = new ProcessDefinitionQuery(key, tenant, first, size);
 
@@ -223,8 +225,10 @@ public static class DesignerEndpoints
     {
         var tenant = RequestIdentity.Tenant(tenantId, requestContext);
 
-        var first = firstResult ?? 0;
-        var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
+        if (!Paging.TryRead(firstResult, maxResults, out var first, out var size, out var pagingError))
+        {
+            return pagingError!;
+        }
 
         // 版本列表按 version 排序 —— 必须「先排序再分页」。
         // 引擎的通用分页按 DeployTime 排序，回填 / 迁移数据时部署时间与版本号可能不一致，
@@ -381,8 +385,10 @@ public static class DesignerEndpoints
     {
         var tenant = RequestIdentity.Tenant(tenantId, requestContext);
 
-        var first = firstResult ?? 0;
-        var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
+        if (!Paging.TryRead(firstResult, maxResults, out var first, out var size, out var pagingError))
+        {
+            return pagingError!;
+        }
 
         var definitions = await engine
             .FindProcessDefinitionsAsync(new ProcessDefinitionQuery(TenantId: tenant), ct)

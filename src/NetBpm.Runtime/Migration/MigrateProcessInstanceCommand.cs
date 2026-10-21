@@ -67,6 +67,15 @@ public sealed class MigrateProcessInstanceCommand : ICommand<MigrationPlan>
             execution.ProcessDefinitionId = plan.TargetProcessDefinitionId;
         }
 
+        // 旧异步作业属于旧定义：迁移后一律作废，避免 JobExecutor 用旧定义恢复执行
+        if (services.AsyncJobManager is { } asyncJobs)
+        {
+            foreach (var execution in details.AllExecutions)
+            {
+                await asyncJobs.DeleteByExecutionAsync(execution.Id, ct).ConfigureAwait(false);
+            }
+        }
+
         // 2. 旧待办 / 旧定时器 / 旧活动收口，并把有活动的执行挪到目标节点
         foreach (var move in details.Moves)
         {

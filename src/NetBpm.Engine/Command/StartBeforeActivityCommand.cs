@@ -67,9 +67,10 @@ public sealed class StartBeforeActivityCommand : ICommand<Unit>
                 $"元素 '{_activityId}' 不是可执行的流节点（当前类型 {target.GetType().Name}），无法在其之前启动。");
         }
 
-        // 新令牌：并发子执行挂在流程实例下，共享实例级变量作用域
+        // 新令牌：子执行挂在流程实例下，共享实例级变量作用域。
+        // 不置 IS_CONCURRENT_：全引擎（并行/包含网关分叉）刻意保持该列为 0，
+        // 以保证与 Activiti 的库级对拍一致；这里是唯一会额外建令牌的入口，不能开先例。
         var child = executionManager.CreateChildExecution(instance);
-        child.IsConcurrent = true;
         child.CurrentFlowElement = target;
 
         await executionManager.InsertAsync(child, ct).ConfigureAwait(false);

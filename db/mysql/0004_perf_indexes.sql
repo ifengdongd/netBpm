@@ -180,3 +180,103 @@ prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
 
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_TASK_ASSIGNEE_CREATE on ACT_RU_TASK (ASSIGNEE_, CREATE_TIME_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_RU_TASK'
+      and index_name = 'ACT_IDX_TASK_ASSIGNEE_CREATE');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_TASK_PROCINST_DEFKEY on ACT_RU_TASK (PROC_INST_ID_, TASK_DEF_KEY_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_RU_TASK'
+      and index_name = 'ACT_IDX_TASK_PROCINST_DEFKEY');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_TASK_TENANT on ACT_RU_TASK (TENANT_ID_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_RU_TASK'
+      and index_name = 'ACT_IDX_TASK_TENANT');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_TASK_DUEDATE on ACT_RU_TASK (DUE_DATE_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_RU_TASK'
+      and index_name = 'ACT_IDX_TASK_DUEDATE');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_HI_TASK_ASSIGNEE_END on ACT_HI_TASKINST (ASSIGNEE_, END_TIME_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_HI_TASKINST'
+      and index_name = 'ACT_IDX_HI_TASK_ASSIGNEE_END');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_HI_TASK_PROCINST_END on ACT_HI_TASKINST (PROC_INST_ID_, END_TIME_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_HI_TASKINST'
+      and index_name = 'ACT_IDX_HI_TASK_PROCINST_END');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_HI_TASK_DEFKEY on ACT_HI_TASKINST (TASK_DEF_KEY_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_HI_TASKINST'
+      and index_name = 'ACT_IDX_HI_TASK_DEFKEY');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_HI_PROC_TENANT_END on ACT_HI_PROCINST (TENANT_ID_, END_TIME_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_HI_PROCINST'
+      and index_name = 'ACT_IDX_HI_PROC_TENANT_END');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_BYTEARRAY_DEPLOYMENT on ACT_GE_BYTEARRAY (DEPLOYMENT_ID_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_GE_BYTEARRAY'
+      and index_name = 'ACT_IDX_BYTEARRAY_DEPLOYMENT');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_DEPLOYMENT_TIME on ACT_RE_DEPLOYMENT (DEPLOY_TIME_)',
+        'select 1')
+    from information_schema.statistics
+    where table_schema = database() and table_name = 'ACT_RE_DEPLOYMENT'
+      and index_name = 'ACT_IDX_DEPLOYMENT_TIME');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+

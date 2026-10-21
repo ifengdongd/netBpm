@@ -70,7 +70,7 @@ create table workflow_parameters (
     tenant_id bigint not null comment '多租户id',
     workflow_instance_id varchar(64) not null comment '流程实例id（对应 instances.workflow_instance_id）',
     param_name varchar(100) not null comment '参数名（如 days / reason / product_name）',
-    param_value text comment '参数值（null = 显式置空）',
+    param_value mediumtext comment '参数值（null = 显式置空）',
     create_time datetime not null comment '创建时间',
     modify_time datetime comment '最后修改时间',
     primary key (workflow_instance_id, param_name),

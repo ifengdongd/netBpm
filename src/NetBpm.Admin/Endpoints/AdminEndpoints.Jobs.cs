@@ -27,6 +27,7 @@ public static partial class AdminEndpoints
         string? processInstanceId,
         string? processDefinitionId,
         DateTime? dueBefore,
+        bool? deadLetter,
         int? firstResult,
         int? maxResults,
         bool? envelope,
@@ -42,7 +43,8 @@ public static partial class AdminEndpoints
             processInstanceId,
             processDefinitionId,
             ResolveTenant(null, requestContext),
-            UtcTime.Normalize(dueBefore));
+            UtcTime.Normalize(dueBefore),
+            deadLetter);
 
         var page = await store.FindAsync(filter, first, size, ct).ConfigureAwait(false);
 
@@ -93,6 +95,57 @@ public static partial class AdminEndpoints
         return updated
             ? Results.NoContent()
             : Results.NotFound(new ErrorResponse($"定时作业 '{jobId}' 不存在或已被触发。"));
+    }
+
+    /// <summary>
+    /// 人工重试死信作业：复位重试次数、清除失败原因、立即到期。
+    /// <para>只对 <c>DEAD_LETTER_ = 1</c> 的作业生效；普通作业返回 404（避免误把正在退避的作业提前触发）。</para>
+    /// </summary>
+    private static async Task<IResult> RetryDeadLetterJobAsync(
+        string jobId,
+        RequestContext requestContext,
+        TimerJobStore store,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        var retried = await WithAuditTrailAsync(
+            requestContext,
+            auditor,
+            AdminAuditActions.JobRetry,
+            AdminAuditTargets.Job,
+            ResolveTenant(null, requestContext),
+            failureDetail: () => new { jobId },
+            successDetail: changed => new { jobId, changed },
+            operation: async token => await store.RetryDeadLetterAsync(jobId, token).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
+
+        return retried
+            ? Results.NoContent()
+            : Results.NotFound(new ErrorResponse($"死信作业 '{jobId}' 不存在（或不是死信状态）。"));
+    }
+
+    /// <summary>删除死信作业（确认不再重试）；普通作业不受影响。</summary>
+    private static async Task<IResult> DeleteDeadLetterJobAsync(
+        string jobId,
+        RequestContext requestContext,
+        TimerJobStore store,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        var deleted = await WithAuditTrailAsync(
+            requestContext,
+            auditor,
+            AdminAuditActions.JobDelete,
+            AdminAuditTargets.Job,
+            ResolveTenant(null, requestContext),
+            failureDetail: () => new { jobId },
+            successDetail: changed => new { jobId, changed },
+            operation: async token => await store.DeleteDeadLetterAsync(jobId, token).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
+
+        return deleted
+            ? Results.NoContent()
+            : Results.NotFound(new ErrorResponse($"死信作业 '{jobId}' 不存在。"));
     }
 
     /// <summary>

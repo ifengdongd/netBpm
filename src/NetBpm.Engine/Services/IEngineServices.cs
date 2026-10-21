@@ -44,6 +44,18 @@ public interface IEngineServices
     Jobs.ITimerJobManager? TimerJobManager { get; }
 
     /// <summary>
+    /// 异步作业存储（<c>asyncBefore</c> / <c>asyncAfter</c>）。未注入时流程模型一旦使用异步标记，
+    /// 运行到该节点会显式报错，而不是静默退化为同步执行。
+    /// </summary>
+    Jobs.IAsyncJobManager? AsyncJobManager { get; }
+
+    /// <summary>
+    /// 事务性 outbox。未启用时事件只走进程内监听器（<c>activiti:eventListener</c>），
+    /// 不产生跨进程投递记录。
+    /// </summary>
+    Events.IEventOutbox? EventOutbox { get; }
+
+    /// <summary>
     /// 引擎日志（可空）。事件监听器 throwOnFailure=false 的失败通过它记警告；
     /// 未注入时此类失败会响亮抛出，避免静默丢失语义。
     /// </summary>

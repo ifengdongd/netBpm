@@ -33,6 +33,10 @@ if object_id('ACT_RU_TIMER_JOB', 'U') is null
     DUEDATE_ datetime not null,
     TENANT_ID_ nvarchar(255) default '',
     CREATE_TIME_ datetime not null,
+    RETRIES_ int default 3,
+    DEAD_LETTER_ tinyint default 0,
+    EXCEPTION_MSG_ nvarchar(1000),
+    LAST_FAILURE_ datetime,
     primary key (ID_)
     )
 go
@@ -46,11 +50,27 @@ go
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_TIMER_JOB_PROCINST' and object_id = object_id('ACT_RU_TIMER_JOB'))
 create index ACT_IDX_TIMER_JOB_PROCINST on ACT_RU_TIMER_JOB (PROCESS_INSTANCE_ID_);
 go
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_TIMER_JOB_DEADLINE' and object_id = object_id('ACT_RU_TIMER_JOB'))
+create index ACT_IDX_TIMER_JOB_DEADLINE on ACT_RU_TIMER_JOB (DEAD_LETTER_, DUEDATE_);
+go
 
 -- ─────────────────────────── 表与列注释（扩展属性 MS_Description） ───────────────────────────
 
 exec sp_addextendedproperty @name = N'MS_Description', @value = N'定时作业表：边界定时器（一次性）到点后触发',
     @level0type = N'SCHEMA', @level0name = N'dbo',
     @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB';
+
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'剩余重试次数；0 表示已进死信',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+    @level2type = N'COLUMN', @level2name = N'RETRIES_';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=已进死信，不再参与到期轮询',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+    @level2type = N'COLUMN', @level2name = N'DEAD_LETTER_';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败原因',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+    @level2type = N'COLUMN', @level2name = N'EXCEPTION_MSG_';
+exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败时间（UTC）',
+    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+    @level2type = N'COLUMN', @level2name = N'LAST_FAILURE_';
 
 go

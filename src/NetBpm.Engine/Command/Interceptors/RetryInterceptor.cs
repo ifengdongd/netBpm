@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using NetBpm.Engine.Diagnostics;
 
 namespace NetBpm.Engine.Command.Interceptors;
 
@@ -62,6 +63,10 @@ public sealed class RetryInterceptor : ICommandInterceptor
                     attempt,
                     _policy.MaxAttempts,
                     exception.GetType().Name);
+
+                EngineDiagnostics.OptimisticLockRetries.Add(
+                    1,
+                    new KeyValuePair<string, object?>("command", command.GetType().Name));
 
                 _policy.OnRetry?.Invoke(attempt, exception);
                 commandContext.ResetForRetry();

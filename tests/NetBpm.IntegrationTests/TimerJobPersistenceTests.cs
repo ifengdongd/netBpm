@@ -90,6 +90,73 @@ public sealed class TimerJobPersistenceTests
     }
 
     [Fact]
+    public async Task TimerJob_ShouldEnterDeadLetter_AndBeRetryable()
+    {
+        var harness = new DatabaseEngineHarness();
+        harness.Reset();
+
+        var model = harness.XmlConverter.ConvertToBpmnModel(
+            new MemoryStream(System.Text.Encoding.UTF8.GetBytes(TimerProcess)));
+
+        var definition = await harness.Definitions.DeployAsync(model, "timer-dead-letter.bpmn20.xml");
+
+        await harness.Executor.ExecuteAsync(
+            new StartProcessInstanceCommand(model.GetMainProcess()!, definition.Id, "biz-dl", "alice"));
+
+        var job = Assert.Single(await harness.TimerJobs.FindDueAsync(DateTime.UtcNow.AddHours(3), 10));
+
+        // 连续失败 3 次（默认上限）→ 进死信，不再参与到期轮询
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var remaining = Math.Max(0, job.Retries - 1);
+            await harness.TimerJobs.MarkFailureAsync(
+                job.Id,
+                $"boom-{attempt}",
+                DateTime.UtcNow,
+                remaining == 0 ? DateTime.UtcNow : DateTime.UtcNow.AddMinutes(attempt));
+        }
+
+        Assert.Empty(await harness.TimerJobs.FindDueAsync(DateTime.UtcNow.AddHours(3), 10));
+
+        var dead = Assert.Single(await harness.TimerJobs.FindDeadLettersAsync(10));
+        Assert.True(dead.DeadLetter);
+        Assert.Equal(0, dead.Retries);
+        Assert.Equal("boom-3", dead.ExceptionMessage);
+
+        // 人工重试：复位重试次数、立即到期
+        Assert.True(await harness.TimerJobs.RetryDeadLetterAsync(job.Id, DateTime.UtcNow));
+
+        var revived = Assert.Single(await harness.TimerJobs.FindDueAsync(DateTime.UtcNow, 10));
+        Assert.False(revived.DeadLetter);
+        Assert.Equal(TimerJobRetry.DefaultMaxRetries, revived.Retries);
+    }
+
+    [Fact]
+    public async Task SuspendedInstanceJob_ShouldNotOccupyDueBatch()
+    {
+        var harness = new DatabaseEngineHarness();
+        harness.Reset();
+
+        var model = harness.XmlConverter.ConvertToBpmnModel(
+            new MemoryStream(System.Text.Encoding.UTF8.GetBytes(TimerProcess)));
+
+        var definition = await harness.Definitions.DeployAsync(model, "timer-suspended.bpmn20.xml");
+
+        var processInstanceId = await harness.Executor.ExecuteAsync(
+            new StartProcessInstanceCommand(model.GetMainProcess()!, definition.Id, "biz-suspend", "alice"));
+
+        await harness.Engine.SuspendProcessInstanceAsync(processInstanceId);
+
+        // 挂起实例的作业被 SQL 过滤掉，不会反复占据批次头部
+        Assert.Empty(await harness.TimerJobs.FindDueAsync(DateTime.UtcNow.AddHours(3), 10));
+        Assert.Equal(0, await harness.Engine.TriggerDueTimersAsync(DateTime.UtcNow.AddHours(3), 10));
+
+        await harness.Engine.ActivateProcessInstanceAsync(processInstanceId);
+
+        Assert.Single(await harness.TimerJobs.FindDueAsync(DateTime.UtcNow.AddHours(3), 10));
+    }
+
+    [Fact]
     public async Task TerminateEndEvent_ShouldPersistDeleteReason_OnRealDatabase()
     {
         const string xml = """

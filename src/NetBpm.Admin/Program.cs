@@ -38,6 +38,12 @@ builder.Services.AddNetBpm(builder.Configuration);
 // 定时边界事件：后台轮询 ACT_RU_TIMER_JOB（NetBpm:Timer 可调间隔 / 关闭）
 builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
 
+// 异步作业（asyncBefore / asyncAfter）：后台轮询 ACT_RU_JOB（NetBpm:Jobs 可调间隔 / 关闭）
+builder.Services.AddNetBpmAsyncJobExecutor(builder.Configuration);
+
+// 事务性 outbox：需要 NetBpm:EnableOutbox=true 且宿主注册 IOutboxEventHandler 才会真正投递
+builder.Services.AddNetBpmOutboxPublisher(builder.Configuration);
+
 // 管理端业务存储：流程模型 + 流程类型注册表
 builder.Services.AddAdminStores();
 

@@ -40,7 +40,8 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 
 行为类规模：Activiti 58 个 → NetBpm 12 个 + 3 个基类。
 
-**明确不做**（占 Activiti 全部复杂度 70% 以上）：子流程 / 调用活动、**非中断型边界事件**、定时/消息启动事件、中间捕获/抛出事件、消息 / 信号 / 错误 / 补偿事件、事件子流程、**用户任务以外的多实例**（服务/脚本/手工任务）、异步作业、泳道协作池、动态流程修改、表单引擎、PNG 图形生成、其余 6 种数据库方言。
+**明确不做**（占 Activiti 全部复杂度 70% 以上）：子流程 / 调用活动、**非中断型边界事件**、定时/消息启动事件、中间捕获/抛出事件、消息 / 信号 / 错误 / 补偿事件、事件子流程、**用户任务以外的多实例**（服务/脚本/手工任务）、泳道协作池、动态流程修改、表单引擎、PNG 图形生成、其余 6 种数据库方言。
+（**独占异步作业 `asyncBefore` / `asyncAfter` 已支持**，见「异步作业与事务性 outbox」；并发异步作业 `exclusive="false"` 仍不支持。）
 （用户任务的多实例会签/串签**已支持**，见下文「多实例会签 / 串签」；中断型定时边界事件与终止结束事件**已支持**，见「边界定时器」与「终止结束事件」。）
 
 ---
@@ -178,6 +179,48 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
   `businessCalendarName` 不在子集内）。
 - 设计器：选中用户任务 → 调色板「边界定时器」→ 在右侧属性面板改时长/时间点。
 
+### 异步作业（asyncBefore / asyncAfter）
+
+```xml
+<serviceTask id="call_erp" activiti:delegateExpression="erpDelegate"
+             activiti:asyncBefore="true" activiti:asyncAfter="true" />
+```
+
+- `asyncBefore`：令牌到达活动时**不执行行为**，只落一条 `ACT_RU_JOB`；命令提交后由
+  `AsyncJobExecutorService` 在独立事务里执行。「进入活动」的历史、任务创建、服务调用都发生在作业事务中。
+- `asyncAfter`：活动行为在当前命令内执行完，但「离开节点」推迟到作业（历史结束、节点 end 监听器、出流都在作业事务中）。
+- 两个属性可同时使用：先 `before` 作业，再 `after` 作业，各一个事务。
+- 作业语义：条件删除抢占（多宿主只会执行一次）、失败按 5/10/20… 秒退避、3 次后进死信；
+  死信可人工重试/删除（见管理端 API）。**至少一次**：作业重试会重复调用委托，外部副作用需幂等。
+- 配置：
+
+  ```json
+  "NetBpm": {
+    "Jobs": { "Enabled": true, "BatchSize": 50, "PollIntervalSeconds": 2 }
+  }
+  ```
+
+- 限制：只支持独占作业；多实例活动与 `exclusive="false"` 在部署期拒绝（`async-job` 规则）。
+- 宿主未注册 `IAsyncJobManager`（`AddNetBpm` 会注册）或未启动执行器时，作业会停留在表里，
+  流程停在该节点；可调用 `IProcessEngine.ExecuteDueAsyncJobsAsync` 手动推进。
+
+### 事务性 outbox（事件外发）
+
+开启后（`NetBpm:EnableOutbox=true`），每条引擎事件在**业务命令的同一事务**里写入
+`ACT_EVT_OUTBOX`，由 `OutboxPublisherService` 投递给宿主注册的 `IOutboxEventHandler`：
+
+```csharp
+builder.Services.AddSingleton<IOutboxEventHandler, WebhookOutboxHandler>(); // 可注册多个
+builder.Services.AddNetBpmOutboxPublisher(builder.Configuration);
+```
+
+- 事件类型与 `activiti:eventListener` 一致：`PROCESS_STARTED` / `PROCESS_COMPLETED` /
+  `ACTIVITY_STARTED` / `ACTIVITY_COMPLETED` / `TASK_CREATED` / `TASK_COMPLETED`。
+- 载荷是 JSON（事件类型 + 各类 id），不含变量；订阅方按 `processInstanceId` / `taskId` 回查。
+- **至少一次**：以 `OutboxEvent.Id` 做幂等；发布失败按 5/10/20… 秒退避，5 次后进死信。
+- 关闭时（默认）不产生任何写入，事件只走进程内 `activiti:eventListener`。
+- 运维 API：`GET /api/admin/outbox`、`POST /api/admin/outbox/{id}/retry`、`DELETE /api/admin/outbox/{id}`。
+
 ### 终止结束事件（terminateEventDefinition）
 
 ```xml
@@ -233,7 +276,7 @@ POST /api/runtime/process-instances/{id}/migrate
 - 历史口径：`ACT_HI_PROCINST.PROC_DEF_ID_` 保持启动时的定义；迁移事实查
   `GET /api/runtime/process-instances/{id}/migrations`（`ACT_HI_MIGRATION`）。
 - 支持回退迁移（再指回旧版本）；禁止用 SQL 直接改 `PROC_DEF_ID_` / `ACT_ID_`。
-- 已有库需执行 `db/{dialect}/0007_create_migration_log.sql`（新库 `migrate` 自动包含）。
+- 已有库直接跑 `migrate` 即会自动补上 `0007_create_migration_log.sql`（增量迁移，见 [`db/README.md`](db/README.md)）。
 
 ### 流程模型治理（草稿 / 版本 / 回滚 / 发布）
 
@@ -256,9 +299,9 @@ POST /api/runtime/process-instances/{id}/migrate
 - 保存与历史写入在**同一事务**内，不会出现「模型更新了、历史没记」。
 - 草稿可含阻断级问题（方便保存半成品），但**发布会 400 并逐条返回问题**。
 - 「模型是否已发布 / 有无未发布修改」由版本水位计算：最新 revision 与最近一次 `action=publish` 快照比较，列表接口一并返回。
-- 同一租户下 `process_key` 唯一（`ux_bpm_model_key`）：已有库需执行 `db/{dialect}/0010_model_key_unique.sql`；
+- 同一租户下 `process_key` 唯一（`ux_bpm_model_key`）：已有库跑 `migrate` 会自动补上 `0010_model_key_unique.sql`；
   新建 / 改 key / 导入 / 复制撞名都会 409，并指出占用该 key 的模型 id。
-- 已有库另需 `0008_create_model_history.sql`（新库 `migrate` 自动包含）。
+- `0008_create_model_history.sql` 同样由 `migrate` 自动补跑。
 
 ### 管理治理：细粒度授权 / 审计 / 指标与归档
 
@@ -308,7 +351,9 @@ POST /api/runtime/process-instances/{id}/migrate
 | 活动 modify | `instance.activity_cancel` / `instance.activity_start` | `.../activities/{activityId}/cancel|start-before`（成功与失败都记） |
 | 模型 / 发布 | `model.create` / `model.delete` / `model.publish` / `model.history_prune` | `/api/admin/models/**` 的写操作 |
 | 流程类型 | `process_type.create` / `update` / `delete` | `/api/admin/process-types/**` |
-| 定时作业 | `job.reschedule` / `job.execute` | `/api/admin/jobs/{id}/due-date|execute` |
+| 定时作业 | `job.reschedule` / `job.execute` / `job.retry` / `job.delete` | `/api/admin/jobs/{id}/due-date|execute|retry`、`DELETE /api/admin/jobs/{id}`（仅死信） |
+| 异步作业 | 同上（`job.execute` / `job.retry` / `job.delete`） | `/api/admin/jobs/async/{id}/execute|retry`、`DELETE /api/admin/jobs/async/{id}` |
+| outbox | `outbox.retry` / `outbox.delete` | `/api/admin/outbox/{id}/retry`、`DELETE /api/admin/outbox/{id}` |
 | 删除实例 | `instance.delete` / `instance.batch_delete` | `DELETE /process-instances/{id}`、`.../batch/delete`（逐项记） |
 | 挂起 / 激活 | `instance.suspend` / `instance.activate` | `.../suspend`、`.../activate` |
 | 变量直写 | `variable.write` / `variable.delete` / `task_variable.*` | 实例变量与任务局部变量的 PUT / DELETE |
@@ -350,12 +395,15 @@ POST /api/runtime/process-instances/{id}/migrate
 - 归档行对 `process_instance_id` 建唯一键：重复归档幂等跳过；`batchSize` 单次上限 1000（默认 200）。
 - 查询：`GET /api/admin/history/archives`（列表，不含 payload）、`GET /api/admin/history/archives/{processInstanceId}`（含快照）。
 - 内存宿主没有持久化历史：归档相关接口返回 **501**，指标里的归档量为 `null`。
-- 已有库需执行 `db/{dialect}/0009_create_admin_governance.sql`（新库 `migrate` 自动包含）。
+- 已有库跑 `migrate` 会自动补上 `0009_create_admin_governance.sql`。
 
 **④ 可观测性（OpenTelemetry 指标）**
 
 管理治理三件套（RBAC / 审计 / 清理）各自埋了标准 OTel 计数器（Meter 名 `NetBpm.Admin`，
-零 SDK 依赖的 `System.Diagnostics.Metrics`）：
+零 SDK 依赖的 `System.Diagnostics.Metrics`）。引擎侧另有独立 Meter `NetBpm.Engine`
+（`netbpm.command.executed` / `netbpm.command.duration` / `netbpm.command.retry` /
+`netbpm.timer_job.failure` / `netbpm.async_job.failure` / `netbpm.outbox.failure`）与 ActivitySource `NetBpm.Engine`（每个最外层命令一条
+`netbpm.command <CommandName>` span，可与 HTTP span 串成完整链路）：
 
 | 指标 | 标签 | 含义 |
 |---|---|---|
@@ -455,7 +503,8 @@ dotnet run --project tools/NetBpm.DbInit -- \
 ```
 
 脚本由单一数据源 `tools/NetBpm.DbInit/Schema/SchemaCatalog.cs` 生成（分层见 [`db/README.md`](db/README.md)），
-引擎表为 13 张 `ACT_*` 表（外加 `0006` 的 `ACT_RU_TIMER_JOB`、`0007` 的 `ACT_HI_MIGRATION` 两张引擎扩展表，以及 `0008` 的 `bpmn_model_history` 模型版本表），与 Activiti 表结构对齐。运维动作（探库 / 清库 / 校验 / 单脚本执行）用
+引擎表为 13 张基础 `ACT_*` 表（外加 `0006` 的 `ACT_RU_TIMER_JOB`、`0007` 的 `ACT_HI_MIGRATION`、
+`0012` 的 `ACT_RU_JOB` / `ACT_EVT_OUTBOX` 引擎扩展表，以及 `0008` 的 `bpmn_model_history` 模型版本表），与 Activiti 表结构对齐。运维动作（探库 / 清库 / 校验 / 单脚本执行）用
 `NetBpm.DbMigrate` 的 `probe` / `purge` / `check` / `apply` 子命令，`--provider` 可选 `mysql` 或 `sqlserver`。
 
 ### 启动 REST 服务
@@ -545,13 +594,8 @@ API Key 模式代表可信服务，不做任务级校验。令牌支持 `groups`
 
 **幂等**：改变状态的请求可带 `Idempotency-Key`。同键同请求回放首次响应（`Idempotency-Replayed: true`），
 同键不同请求返回 409。数据库宿主使用 `ACT_IDEMPOTENCY` 表跨实例去重；过期记录由宿主每小时清理一次
-（`IdempotencyCleanupService`，启动后延迟 1 分钟首轮执行）。已初始化的库需执行：
-
-```bash
-dotnet run --project tools/NetBpm.DbMigrate -- apply --provider mysql \
-  --connection "Server=127.0.0.1;Database=netbpm;User ID=root;Password=;" \
-  --script db/mysql/0005_create_idempotency.sql
-```
+（`IdempotencyCleanupService`，启动后延迟 1 分钟首轮执行）。已初始化的库跑 `migrate` 会自动补上
+`0005_create_idempotency.sql`（也可用 `apply --script` 单独执行，脚本幂等）。
 
 **分页信封**：列表端点默认返回裸数组 + `X-Total-Count`；加 `?envelope=true` 返回
 `{ items, total, firstResult, maxResults }`。`maxResults` 统一默认 20、上限 200。
@@ -749,6 +793,13 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | GET | `/api/admin/jobs/stats` | 作业统计（总数 / 已到期 / 一小时内到期 / 最近到期） |
 | POST | `/api/admin/jobs/{jobId}/due-date` | 改期（只改到期时间，触发仍由宿主轮询负责） |
 | POST | `/api/admin/jobs/{jobId}/execute` | 立即触发（与轮询同一抢占语义；未推进 → 409） |
+| GET | `/api/admin/jobs/async` | 异步作业列表（实例 / 死信 + 分页 + `envelope`） |
+| POST | `/api/admin/jobs/async/{jobId}/execute` | 立即执行异步作业 |
+| POST | `/api/admin/jobs/async/{jobId}/retry` | 重试异步死信作业 |
+| DELETE | `/api/admin/jobs/async/{jobId}` | 删除异步死信作业 |
+| GET | `/api/admin/outbox` | outbox 事件列表（实例 / 已发布 / 死信 + 分页） |
+| POST | `/api/admin/outbox/{eventId}/retry` | 重试 outbox 死信事件 |
+| DELETE | `/api/admin/outbox/{eventId}` | 删除 outbox 事件 |
 | GET | `/api/admin/audit/options` | 审计筛选项（distinct action / targetType / actor） |
 | GET | `/api/admin/audit/export` | 审计导出（CSV，与查询同过滤条件） |
 | POST | `/api/designer/deploy` | 部署 BPMN XML 定义（`?resourceName=` / `?deploymentName=` / `?tenantId=`） |
@@ -771,9 +822,10 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | POST | `/api/runtime/process-instances/{id}/activities/{activityId}/start-before` | 在活动之前新开一条令牌（目标活动真正开始执行；现有多分支不动） |
 | POST | `/api/runtime/process-instances/{id}/migrate` | 迁移到其它定义版本（`validateOnly` 预演；活动映射 + 待办重建） |
 | GET | `/api/runtime/process-instances/{id}/migrations` | 实例迁移记录 |
-| GET | `/api/runtime/tasks` | 查询任务列表（`assignee`/`candidateUser`/`candidateGroup`/实例 + 分页） |
+| GET | `/api/runtime/tasks` | 查询任务列表（`assignee`/`candidateUser`/`candidateGroup`/实例 + `taskDefinitionKey`/`suspended`/`dueBefore` + 分页 + `sortBy`/`sortOrder`） |
 | GET | `/api/runtime/tasks/{taskId}` | 任务详情（含描述 / 分类 / 业务主键 / 委派状态 / 身份关系） |
 | GET | `/api/runtime/tasks/{taskId}/identity-links` | 任务身份关系（候选人 / 候选组） |
+| GET | `/api/runtime/process-instances/{id}/identity-links` | 流程实例身份关系（参与者 / 发起人 / 候选组） |
 | PATCH | `/api/runtime/tasks/{taskId}` | 修改任务字段（名称 / 描述 / 优先级 / 到期 / 分类 / 所有者；`clearDueDate` / `clearDescription` 显式清空） |
 | POST | `/api/runtime/tasks/{taskId}/assignee` | 转办 / 退回未分配 |
 | POST | `/api/runtime/tasks/{taskId}/candidate-users` | 加候选用户 |
@@ -789,6 +841,7 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | GET | `/api/runtime/tasks/stats` | 待办统计（总数 / 逾期 / 今天到期 / 按流程 key 分组；`timeZoneOffsetMinutes` 指定「今天」的时区） |
 | POST | `/api/runtime/tasks/batch/assignee` | 批量转办（逐项结果，非原子） |
 | POST | `/api/runtime/tasks/batch/due-date` | 批量改到期时间 / 清空到期（逐项结果，非原子） |
+| POST | `/api/runtime/tasks/batch/complete` | 批量完成（逐项授权与结果，非原子） |
 | POST | `/api/runtime/process-instances/batch/delete` | 批量删除实例（逐项结果，非原子） |
 | POST | `/api/runtime/process-instances/batch/suspend` `/activate` | 批量挂起 / 激活实例（逐项结果） |
 | POST | `/api/runtime/process-instances/batch/migrate` | 批量迁移到同一目标定义版本（逐项结果） |

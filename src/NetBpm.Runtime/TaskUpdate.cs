@@ -27,4 +27,5 @@ public sealed record TaskUpdate(
     string? Category = null,
     string? Owner = null,
     bool ClearDueDate = false,
-    bool ClearDescription = false);
+    bool ClearDescription = false,
+    int? ExpectedRevision = null);

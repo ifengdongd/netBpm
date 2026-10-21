@@ -3,6 +3,7 @@ using NetBpm.Bpmn.Validation;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 using NetBpm.Persistence.Deployment;
@@ -45,6 +46,41 @@ public interface IProcessEngine
         DateTime utcNow,
         int maxJobs = 50,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 执行到期的异步作业（<c>asyncBefore</c> / <c>asyncAfter</c>，宿主后台轮询调用）。
+    /// <para>每条作业一个独立命令；失败按退避重试，超过上限进入死信。未注册作业存储时返回 0。</para>
+    /// </summary>
+    /// <param name="utcNow">当前 UTC 时间（测试可传未来时间）。</param>
+    /// <param name="maxJobs">本轮最多处理的作业数。</param>
+    /// <returns>实际执行成功的作业数。</returns>
+    ValueTask<int> ExecuteDueAsyncJobsAsync(
+        DateTime utcNow,
+        int maxJobs = 50,
+        CancellationToken ct = default);
+
+    /// <summary>立即执行一条异步作业（运维手动触发；不做失败记录）。</summary>
+    ValueTask<bool> ExecuteAsyncJobAsync(string jobId, CancellationToken ct = default);
+
+    /// <summary>按 id 查异步作业。</summary>
+    ValueTask<AsyncJobEntity?> FindAsyncJobAsync(string jobId, CancellationToken ct = default);
+
+    /// <summary>分页查异步作业（运维诊断）。</summary>
+    ValueTask<IReadOnlyList<AsyncJobEntity>> FindAsyncJobsAsync(
+        AsyncJobQuery query,
+        CancellationToken ct = default);
+
+    /// <summary>按条件数异步作业。</summary>
+    ValueTask<int> CountAsyncJobsAsync(AsyncJobQuery query, CancellationToken ct = default);
+
+    /// <summary>异步作业总数（含死信）。</summary>
+    ValueTask<int> CountAsyncJobsAsync(CancellationToken ct = default);
+
+    /// <summary>人工重试死信作业。</summary>
+    ValueTask<bool> RetryAsyncJobAsync(string jobId, CancellationToken ct = default);
+
+    /// <summary>删除死信作业（人工确认不再重试）。</summary>
+    ValueTask<bool> DeleteAsyncJobAsync(string jobId, CancellationToken ct = default);
 
     /// <summary>
     /// 部署流程定义（解析 → 校验 → 落库）。
@@ -229,6 +265,17 @@ public interface IProcessEngine
     /// <summary>查任务的身份关系（候选人 / 候选组 / 办理人 / 所有者）。</summary>
     ValueTask<IReadOnlyList<IdentityLinkRecord>> FindTaskIdentityLinksAsync(
         string taskId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 查流程实例级身份关系（参与者 / 发起人 / 候选组）。
+    /// <para>
+    /// 对应 Activiti 的 <c>runtimeService.getIdentityLinksByProcessInstanceId</c>：
+    /// 与任务级关系分开，用于「这个流程有哪些人参与过」的追溯。
+    /// </para>
+    /// </summary>
+    ValueTask<IReadOnlyList<IdentityLinkRecord>> FindProcessInstanceIdentityLinksAsync(
+        string processInstanceId,
         CancellationToken ct = default);
 
     /// <summary>

@@ -43,6 +43,34 @@ public sealed class TimerJobEntity
 
     /// <summary>创建时间（UTC，<c>CREATE_TIME_</c>）。</summary>
     public DateTime CreateTime { get; set; }
+
+    /// <summary>剩余重试次数（<c>RETRIES_</c>）；0 表示已进死信。</summary>
+    public int Retries { get; set; } = TimerJobRetry.DefaultMaxRetries;
+
+    /// <summary>是否已进死信（<c>DEAD_LETTER_</c>）：不再参与到期轮询，需人工重试。</summary>
+    public bool DeadLetter { get; set; }
+
+    /// <summary>最后一次失败原因（<c>EXCEPTION_MSG_</c>）。</summary>
+    public string? ExceptionMessage { get; set; }
+
+    /// <summary>最后一次失败时间（UTC，<c>LAST_FAILURE_</c>）。</summary>
+    public DateTime? LastFailureTime { get; set; }
+}
+
+/// <summary>定时作业重试策略的公共常量。</summary>
+public static class TimerJobRetry
+{
+    /// <summary>默认最大重试次数。</summary>
+    public const int DefaultMaxRetries = 3;
+
+    /// <summary>
+    /// 第 <paramref name="failedAttempts"/> 次失败后的退避时长：1、2、4… 分钟，上限 30 分钟。
+    /// </summary>
+    public static TimeSpan Backoff(int failedAttempts)
+    {
+        var minutes = Math.Min(30, Math.Pow(2, Math.Clamp(failedAttempts - 1, 0, 5)));
+        return TimeSpan.FromMinutes(minutes);
+    }
 }
 
 /// <summary>
@@ -78,6 +106,31 @@ public interface ITimerJobManager
 
     /// <summary>作业总数（诊断与测试用）。</summary>
     ValueTask<int> CountAsync(CancellationToken ct = default);
+
+    /// <summary>把作业的到期时间改到指定时刻（挂起实例的作业让位给正常作业）。</summary>
+    ValueTask RescheduleAsync(string jobId, DateTime dueDate, CancellationToken ct = default);
+
+    /// <summary>
+    /// 记录一次执行失败：递减重试次数、写入失败原因、按退避设置下次到期时间；
+    /// 重试次数用尽时置死信（<c>DEAD_LETTER_ = 1</c>）。
+    /// </summary>
+    ValueTask MarkFailureAsync(
+        string jobId,
+        string reason,
+        DateTime nowUtc,
+        DateTime nextDueUtc,
+        CancellationToken ct = default);
+
+    /// <summary>查死信作业（按失败时间倒序，最多 <paramref name="maxCount"/> 条）。</summary>
+    ValueTask<IReadOnlyList<TimerJobEntity>> FindDeadLettersAsync(
+        int maxCount,
+        CancellationToken ct = default);
+
+    /// <summary>把死信作业重置为可执行（重试次数复位、到期时间置为当前），成功返回 true。</summary>
+    ValueTask<bool> RetryDeadLetterAsync(string jobId, DateTime nowUtc, CancellationToken ct = default);
+
+    /// <summary>删除死信作业（人工确认不再重试），返回是否删到。</summary>
+    ValueTask<bool> DeleteDeadLetterAsync(string jobId, CancellationToken ct = default);
 }
 
 /// <summary>单进程定时作业存储（内存宿主 / 单元测试）。</summary>
@@ -114,7 +167,7 @@ public sealed class InMemoryTimerJobManager : ITimerJobManager
         CancellationToken ct = default)
     {
         IReadOnlyList<TimerJobEntity> due = _jobs.Values
-            .Where(job => job.DueDate <= utcNow)
+            .Where(job => !job.DeadLetter && job.DueDate <= utcNow)
             .OrderBy(job => job.DueDate)
             .ThenBy(job => job.Id, StringComparer.Ordinal)
             .Take(Math.Max(1, maxCount))
@@ -159,6 +212,101 @@ public sealed class InMemoryTimerJobManager : ITimerJobManager
 
     /// <inheritdoc />
     public ValueTask<int> CountAsync(CancellationToken ct = default) => ValueTask.FromResult(_jobs.Count);
+
+    /// <inheritdoc />
+    public ValueTask RescheduleAsync(string jobId, DateTime dueDate, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        if (_jobs.TryGetValue(jobId, out var job))
+        {
+            lock (job)
+            {
+                job.DueDate = dueDate;
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask MarkFailureAsync(
+        string jobId,
+        string reason,
+        DateTime nowUtc,
+        DateTime nextDueUtc,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        if (_jobs.TryGetValue(jobId, out var job))
+        {
+            lock (job)
+            {
+                job.Retries = Math.Max(0, job.Retries - 1);
+                job.ExceptionMessage = reason;
+                job.LastFailureTime = nowUtc;
+                job.DueDate = nextDueUtc;
+                job.DeadLetter = job.Retries <= 0;
+
+                if (job.DeadLetter)
+                {
+                    job.DueDate = nowUtc;
+                }
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<TimerJobEntity>> FindDeadLettersAsync(
+        int maxCount,
+        CancellationToken ct = default)
+    {
+        IReadOnlyList<TimerJobEntity> dead = _jobs.Values
+            .Where(job => job.DeadLetter)
+            .OrderByDescending(job => job.LastFailureTime ?? job.DueDate)
+            .ThenBy(job => job.Id, StringComparer.Ordinal)
+            .Take(Math.Max(1, maxCount))
+            .ToList();
+
+        return ValueTask.FromResult(dead);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> RetryDeadLetterAsync(string jobId, DateTime nowUtc, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        if (!_jobs.TryGetValue(jobId, out var job) || !job.DeadLetter)
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (job)
+        {
+            job.DeadLetter = false;
+            job.Retries = TimerJobRetry.DefaultMaxRetries;
+            job.ExceptionMessage = null;
+            job.DueDate = nowUtc;
+        }
+
+        return ValueTask.FromResult(true);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DeleteDeadLetterAsync(string jobId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        if (!_jobs.TryGetValue(jobId, out var job) || !job.DeadLetter)
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        return ValueTask.FromResult(_jobs.TryRemove(jobId, out _));
+    }
 
     private int RemoveAll(IEnumerable<string> keys)
     {
