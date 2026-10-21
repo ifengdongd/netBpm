@@ -73,6 +73,7 @@ public sealed partial class DatabaseScriptTests
         "bpmn_model_history",
         "admin_audit_log",
         "admin_history_archive",
+        "admin_user",
     ];
 
     [Theory]
