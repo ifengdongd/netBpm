@@ -4,7 +4,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 
 /**
  * 内嵌设计器的全屏编辑页。设计器由同一宿主托管在 /designer/index.html，
- * 通过 ?modelId= 打开已有模型、?action=new 新建模型。
+ * 通过 ?modelId= 打开已有模型、?action=new 新建模型；
+ * ?embed=1 让设计器隐藏自带的「流程管理」菜单与返回按钮（与本页重复）。
  */
 export default function ModelEditorPage() {
   const navigate = useNavigate();
@@ -20,6 +21,8 @@ export default function ModelEditorPage() {
   } else if (action !== null) {
     designerParams.set('action', action);
   }
+
+  designerParams.set('embed', '1');
 
   const designerSrc = `/designer/index.html?${designerParams.toString()}`;
 

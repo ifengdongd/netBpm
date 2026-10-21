@@ -6,23 +6,27 @@ import {
   PauseCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  RocketOutlined,
 } from '@ant-design/icons';
-import { App, Button, Input, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd';
+import { Alert, App, Button, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { deploymentsApi } from '../api';
+import { deploymentsApi, runtimeApi } from '../api';
 import type {
   DeploymentDefinitionResponse,
   DeploymentResource,
   DeploymentSummaryResponse,
   ProcessDefinitionResponse,
+  Variables,
 } from '../api/types';
 import { formatTime } from '../utils';
 
 export default function DeploymentsPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
+  const navigate = useNavigate();
 
   const [keyword, setKeyword] = useState('');
 
@@ -67,6 +71,11 @@ export default function DeploymentsPage() {
   const [xmlTarget, setXmlTarget] = useState<DeploymentDefinitionResponse | null>(null);
   const [versionsKey, setVersionsKey] = useState<string | null>(null);
   const [resourcesTarget, setResourcesTarget] = useState<DeploymentSummaryResponse | null>(null);
+
+  // 发起实例（部署列表 → 指定版本 → 表单）
+  const [startTarget, setStartTarget] = useState<DeploymentDefinitionResponse | null>(null);
+  const [startSubmitting, setStartSubmitting] = useState(false);
+  const [startForm] = Form.useForm<{ businessKey?: string; startUserId?: string; variables?: string }>();
 
   const xmlQuery = useQuery({
     queryKey: ['designer', 'definition-xml', xmlTarget?.processDefinitionId],
@@ -120,6 +129,67 @@ export default function DeploymentsPage() {
     }
   };
 
+  /** 打开发起实例表单（清掉上一次输入，避免带到另一个定义）。 */
+  const openStart = (definition: DeploymentDefinitionResponse) => {
+    startForm.resetFields();
+    setStartTarget(definition);
+  };
+
+  /** 发起实例：按 processDefinitionId 精确发起当前这一版，不随新版本漂移。 */
+  const startInstance = async () => {
+    if (startTarget === null) {
+      return;
+    }
+
+    let values: { businessKey?: string; startUserId?: string; variables?: string };
+
+    try {
+      values = await startForm.validateFields();
+    } catch {
+      // 字段校验失败时 antd 已就地展示错误
+      return;
+    }
+
+    setStartSubmitting(true);
+
+    try {
+      const started = await runtimeApi.startInstance({
+        processDefinitionId: startTarget.processDefinitionId,
+        businessKey: values.businessKey?.trim() || undefined,
+        startUserId: values.startUserId?.trim() || undefined,
+        variables: parseVariables(values.variables),
+      });
+
+      setStartTarget(null);
+
+      modal.success({
+        title: `已发起：${startTarget.key} v${startTarget.version}`,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Typography.Text>
+              流程实例 ID：
+              <Typography.Text code copyable>
+                {started.processInstanceId}
+              </Typography.Text>
+            </Typography.Text>
+            <Button
+              type="primary"
+              onClick={() =>
+                navigate(`/monitoring?instanceId=${encodeURIComponent(started.processInstanceId)}`)
+              }
+            >
+              查看实例详情
+            </Button>
+          </Space>
+        ),
+      });
+    } catch (error) {
+      message.error(`发起失败：${(error as Error).message}`);
+    } finally {
+      setStartSubmitting(false);
+    }
+  };
+
   const downloadDefinition = async (definition: DeploymentDefinitionResponse) => {
     try {
       const content = await deploymentsApi.definitionXml(definition.processDefinitionId);
@@ -154,9 +224,20 @@ export default function DeploymentsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 340,
+      width: 430,
       render: (_, record) => (
         <Space>
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            icon={<RocketOutlined />}
+            disabled={record.isSuspended}
+            title={record.isSuspended ? '已挂起的流程定义不能发起实例，请先激活' : undefined}
+            onClick={() => openStart(record)}
+          >
+            发起
+          </Button>
           <Button
             size="small"
             icon={record.isSuspended ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
@@ -333,8 +414,73 @@ export default function DeploymentsPage() {
           ]}
         />
       </Modal>
+
+      <Modal
+        title={startTarget ? `发起实例：${startTarget.key} v${startTarget.version}` : ''}
+        open={startTarget !== null}
+        confirmLoading={startSubmitting}
+        okText="发起"
+        cancelText="取消"
+        onOk={() => void startInstance()}
+        onCancel={() => setStartTarget(null)}
+        destroyOnClose
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message={`按流程定义 ${startTarget?.processDefinitionId ?? ''} 发起（精确到该版本，不随新版本漂移）。`}
+          />
+          <Form form={startForm} layout="vertical" preserve={false}>
+            <Form.Item name="businessKey" label="业务主键（可选）">
+              <Input placeholder="如 ORDER-20261021-001" autoComplete="off" />
+            </Form.Item>
+            <Form.Item
+              name="startUserId"
+              label="发起人（可选）"
+              extra="留空则使用当前登录身份；JWT 模式下填写值必须与令牌 sub 一致，否则 403。"
+            >
+              <Input placeholder="如 zhangsan" autoComplete="off" />
+            </Form.Item>
+            <Form.Item
+              name="variables"
+              label="初始变量（JSON 对象，可留空）"
+              rules={[{ validator: validateVariables }]}
+            >
+              <Input.TextArea rows={5} placeholder='{ "amount": 1200, "applicant": "zhangsan" }' />
+            </Form.Item>
+          </Form>
+        </Space>
+      </Modal>
     </Space>
   );
+}
+
+/** 解析发起实例的初始变量：空 → undefined；必须是 JSON 对象（与服务端 JsonVariableReader 口径一致）。 */
+function parseVariables(text?: string): Variables | undefined {
+  const trimmed = text?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(trimmed) as unknown;
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('变量必须是 JSON 对象');
+  }
+
+  return parsed as Variables;
+}
+
+/** 表单校验：提前把 JSON 语法错误挡在提交之前。 */
+function validateVariables(_: unknown, value?: string): Promise<void> {
+  try {
+    parseVariables(value);
+    return Promise.resolve();
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error('变量必须是 JSON 对象'));
+  }
 }
 
 /** 触发浏览器下载文本文件（BPMN XML / 资源清单等）。 */

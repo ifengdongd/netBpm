@@ -76,6 +76,183 @@ function randomProcessId(): string {
   return `process_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// ─────────────────────────── 缺失图形信息（BPMN DI）的兜底 ───────────────────────────
+
+const BpmnNs = 'http://www.omg.org/spec/BPMN/20100524/MODEL';
+const BpmnDiNs = 'http://www.omg.org/spec/BPMN/20100524/DI';
+const DcNs = 'http://www.omg.org/spec/DD/20100524/DC';
+const DiNs = 'http://www.omg.org/spec/DD/20100524/DI';
+
+/** 需要画出来的流节点（网关 / 事件 / 任务；子流程等也按默认尺寸兜底）。 */
+const FlowNodeTags = new Set([
+  'startEvent',
+  'endEvent',
+  'intermediateThrowEvent',
+  'intermediateCatchEvent',
+  'boundaryEvent',
+  'task',
+  'userTask',
+  'serviceTask',
+  'scriptTask',
+  'manualTask',
+  'receiveTask',
+  'sendTask',
+  'businessRuleTask',
+  'callActivity',
+  'subProcess',
+  'exclusiveGateway',
+  'inclusiveGateway',
+  'parallelGateway',
+  'eventBasedGateway',
+  'complexGateway',
+]);
+
+/** 各类节点的默认尺寸（与 bpmn-js 调色板默认值一致，避免保存后图形突变）。 */
+function defaultSize(tag: string): { width: number; height: number } {
+  if (tag.endsWith('Event')) {
+    return { width: 36, height: 36 };
+  }
+
+  if (tag.endsWith('Gateway')) {
+    return { width: 50, height: 50 };
+  }
+
+  return { width: 100, height: 80 };
+}
+
+/**
+ * 只有语义、没有图形（<c>bpmndi:BPMNDiagram</c>）的 BPMN —— 例如外部工具生成或测试用的 XML ——
+ * bpmn-js 会以 <c>no diagram to display</c> 拒绝载入，编辑器直接打不开。
+ * 这里补一份最小 DI（按文档顺序横向排布 + 连线取两端中心），让用户能进编辑器调整并保存，
+ * 保存后完整图形信息即写入模型；返回 <c>null</c> 表示无需补（已有 DI）或补不了（解析失败）。
+ */
+function withGeneratedDiagramInterchange(xml: string): string | null {
+  if (/<(\w+:)?BPMNDiagram\b/.test(xml)) {
+    return null;
+  }
+
+  const document_ = new DOMParser().parseFromString(xml, 'application/xml');
+
+  if (document_.getElementsByTagName('parsererror').length > 0) {
+    return null;
+  }
+
+  const definitions = document_.documentElement;
+  const process =
+    document_.getElementsByTagNameNS(BpmnNs, 'process')[0] ??
+    document_.getElementsByTagName('process')[0];
+
+  if (!process || !definitions) {
+    return null;
+  }
+
+  const processId = process.getAttribute('id') ?? '';
+
+  if (processId.length === 0) {
+    return null;
+  }
+
+  const nodes: Element[] = [];
+  const flows: Element[] = [];
+
+  for (const child of Array.from(process.children)) {
+    const tag = child.localName ?? child.nodeName;
+
+    if (tag === 'sequenceFlow') {
+      flows.push(child);
+    } else if (FlowNodeTags.has(tag)) {
+      nodes.push(child);
+    }
+  }
+
+  if (nodes.length === 0) {
+    return null;
+  }
+
+  // 命名空间声明：缺什么补什么，不影响已有前缀
+  const ensureNs = (prefix: string, uri: string) => {
+    if (!definitions.hasAttribute(`xmlns:${prefix}`)) {
+      definitions.setAttributeNS('http://www.w3.org/2000/xmlns/', `xmlns:${prefix}`, uri);
+    }
+  };
+
+  ensureNs('bpmndi', BpmnDiNs);
+  ensureNs('dc', DcNs);
+  ensureNs('di', DiNs);
+
+  const create = (ns: string, name: string) => document_.createElementNS(ns, `bpmndi:${name}`);
+
+  const diagram = create(BpmnDiNs, 'BPMNDiagram');
+  diagram.setAttribute('id', 'BPMNDiagram_generated');
+
+  const plane = create(BpmnDiNs, 'BPMNPlane');
+  plane.setAttribute('id', 'BPMNPlane_generated');
+  plane.setAttribute('bpmnElement', processId);
+
+  const boxes = new Map<string, { x: number; y: number; width: number; height: number }>();
+  let x = 160;
+
+  for (const node of nodes) {
+    const id = node.getAttribute('id') ?? '';
+
+    if (id.length === 0) {
+      continue;
+    }
+
+    const size = defaultSize(node.localName ?? node.nodeName);
+    const box = { x, y: 120, width: size.width, height: size.height };
+    boxes.set(id, box);
+
+    const shape = create(BpmnDiNs, 'BPMNShape');
+    shape.setAttribute('id', `${id}_di`);
+    shape.setAttribute('bpmnElement', id);
+
+    const bounds = document_.createElementNS(DcNs, 'dc:Bounds');
+    bounds.setAttribute('x', String(box.x));
+    bounds.setAttribute('y', String(box.y));
+    bounds.setAttribute('width', String(box.width));
+    bounds.setAttribute('height', String(box.height));
+    shape.appendChild(bounds);
+
+    plane.appendChild(shape);
+
+    x += size.width + 90;
+  }
+
+  for (const flow of flows) {
+    const id = flow.getAttribute('id') ?? '';
+    const source = flow.getAttribute('sourceRef') ?? '';
+    const target = flow.getAttribute('targetRef') ?? '';
+
+    if (id.length === 0 || !boxes.has(source) || !boxes.has(target)) {
+      continue;
+    }
+
+    const from = boxes.get(source)!;
+    const to = boxes.get(target)!;
+
+    const edge = create(BpmnDiNs, 'BPMNEdge');
+    edge.setAttribute('id', `${id}_di`);
+    edge.setAttribute('bpmnElement', id);
+
+    const start = document_.createElementNS(DiNs, 'di:waypoint');
+    start.setAttribute('x', String(from.x + from.width));
+    start.setAttribute('y', String(from.y + from.height / 2));
+
+    const end = document_.createElementNS(DiNs, 'di:waypoint');
+    end.setAttribute('x', String(to.x));
+    end.setAttribute('y', String(to.y + to.height / 2));
+
+    edge.append(start, end);
+    plane.appendChild(edge);
+  }
+
+  diagram.appendChild(plane);
+  definitions.appendChild(diagram);
+
+  return new XMLSerializer().serializeToString(document_);
+}
+
 // ─────────────────────────── DOM 引用 ───────────────────────────
 
 const modelListView = document.querySelector<HTMLElement>('#model-list-view');
@@ -94,6 +271,18 @@ const statusElement = document.querySelector<HTMLSpanElement>('#status');
 const issuesElement = document.querySelector<HTMLElement>('#issues');
 const fileInputList = document.querySelector<HTMLInputElement>('#file-input-list');
 const fileInputEditor = document.querySelector<HTMLInputElement>('#file-input-editor');
+
+/**
+ * 嵌入模式（?embed=1）：被管理控制台 iframe 内嵌时隐藏左侧「流程管理」菜单
+ * （模型列表 / 部署列表）与编辑器内的「返回列表」——控制台有自己的导航与返回按钮，
+ * 两套入口并存会让人误以为又跳回了另一个管理页。
+ */
+const embedMode = new URLSearchParams(window.location.search).get('embed') === '1';
+
+if (embedMode) {
+  document.querySelector('.sidebar')?.remove();
+  document.querySelector('#btn-back')?.remove();
+}
 
 // ─────────────────────────── 模型器（首次进入编辑器时才创建）───────────────────────────
 
@@ -439,22 +628,59 @@ function focusElement(elementId: string): void {
   services.canvas.scrollToElement(element);
 }
 
+/**
+ * 载入流程图。
+ * <para>没有图形信息（<c>bpmndi:BPMNDiagram</c>）的 XML 会被 bpmn-js 拒载（no diagram to display）——
+ * 先补一份最小 DI 再试，让「只有语义」的模型也能进编辑器调整并保存。</para>
+ */
 async function loadDiagram(xml: string, source: string): Promise<void> {
   try {
-    await ensureModeler().modeler.importXML(xml);
+    await importDiagram(xml, source);
+  } catch (error) {
+    const patched = withGeneratedDiagramInterchange(xml);
 
-    const meta = parseProcessMeta(xml);
-
-    if (editorTitleElement !== null) {
-      editorTitleElement.textContent = meta.name.length > 0 ? meta.name : '未命名流程';
+    if (patched === null) {
+      console.error('[netbpm] 载入失败堆栈：', error);
+      setStatus(`载入失败：${describeImportFailure(error)}`, true);
+      return;
     }
 
-    setStatus(`已载入：${source}`);
-    refreshValidation();
-  } catch (error) {
-    console.error('[netbpm] 载入失败堆栈：', error);
-    setStatus(`载入失败：${(error as Error).message}`, true);
+    try {
+      await importDiagram(patched, source, '已自动生成布局（原 XML 缺少图形信息），保存后写入完整图形信息。');
+    } catch (retryError) {
+      console.error('[netbpm] 载入失败堆栈：', retryError);
+      setStatus(`载入失败：${describeImportFailure(retryError)}`, true);
+    }
   }
+}
+
+/** 真正导入并刷新标题 / 校验清单。 */
+async function importDiagram(xml: string, source: string, notice?: string): Promise<void> {
+  await ensureModeler().modeler.importXML(xml);
+
+  const meta = parseProcessMeta(xml);
+
+  if (editorTitleElement !== null) {
+    editorTitleElement.textContent = meta.name.length > 0 ? meta.name : '未命名流程';
+  }
+
+  setStatus(notice ?? `已载入：${source}`);
+  refreshValidation();
+}
+
+/** 把 bpmn-js 的英文导入错误翻译成可操作的中文提示。 */
+function describeImportFailure(error: unknown): string {
+  const message = (error as Error)?.message ?? String(error);
+
+  if (/no diagram to display/i.test(message)) {
+    return '该 XML 没有图形信息（bpmndi:BPMNDiagram），无法渲染；请改用含图形的流程图，或在编辑器里手动布局后保存。';
+  }
+
+  if (/no process/i.test(message)) {
+    return '该 XML 里找不到 process 节点，不是有效的 BPMN 流程图。';
+  }
+
+  return message;
 }
 
 async function exportXml(): Promise<string> {
@@ -567,11 +793,27 @@ async function save(): Promise<void> {
   }
 }
 
+/** 部署端点响应体（见 src/NetBpm.Rest/Contracts.cs 的 DeployResponse）。 */
+interface DeployPayload {
+  processDefinitionId?: string;
+  version?: number;
+  message?: string;
+  warnings?: { rule?: string; message?: string }[] | null;
+}
+
+/** 部署结果：提示级问题（不阻断部署，但实例跑到对应节点可能失败）单独带出来。 */
+interface DeployOutcome {
+  ok: boolean;
+  message: string;
+  version: number;
+  warnings: string[];
+}
+
 /**
  * 把一段 BPMN XML 提交到后端部署（§6.3 的 POST /api/designer/deploy）。
  * 后端做权威校验，这里只负责上报结果。
  */
-async function deployXml(xml: string): Promise<{ ok: boolean; message: string; version: number }> {
+async function deployXml(xml: string): Promise<DeployOutcome> {
   try {
     const response = await fetch('/api/designer/deploy', {
       method: 'POST',
@@ -579,7 +821,7 @@ async function deployXml(xml: string): Promise<{ ok: boolean; message: string; v
       body: xml,
     });
 
-    const payload = await response.json();
+    const payload = (await response.json()) as DeployPayload;
 
     if (!response.ok) {
       return {
@@ -590,17 +832,37 @@ async function deployXml(xml: string): Promise<{ ok: boolean; message: string; v
           MODEL_WRITE_SCOPE,
         )}`,
         version: 0,
+        warnings: [],
       };
     }
 
+    const warnings = (payload.warnings ?? [])
+      .map((warning) => (warning.message ?? '').trim())
+      .filter((message) => message.length > 0);
+
     return {
       ok: true,
-      message: `部署成功：${payload.processDefinitionId}（v${payload.version}）`,
+      message: `部署成功：${payload.processDefinitionId ?? ''}（v${payload.version ?? 0}）`,
       version: Number(payload.version) || 0,
+      warnings,
     };
   } catch (error) {
-    return { ok: false, message: `部署失败：${(error as Error).message}`, version: 0 };
+    return { ok: false, message: `部署失败：${(error as Error).message}`, version: 0, warnings: [] };
   }
+}
+
+/**
+ * 部署提示的一行摘要（状态栏只有一行）：完整明细写控制台，清单里给出条数与第一条。
+ * 提示级问题不阻断部署，但「部署成功、实例跑到该节点才失败」正是要避免的事，必须露出来。
+ */
+function describeDeployWarnings(warnings: string[]): string {
+  if (warnings.length === 0) {
+    return '';
+  }
+
+  const first = warnings[0].length > 120 ? `${warnings[0].slice(0, 120)}…` : warnings[0];
+
+  return `；${warnings.length} 条提示：${first}`;
 }
 
 /** 把 XML 临时导入（隐藏的）模型器，复用同一套本地校验规则跑一遍。 */
@@ -637,7 +899,12 @@ async function deployRecord(record: DiagramRecord, button: HTMLButtonElement): P
       await renderList();
     }
 
-    setListStatus(result.message, !result.ok);
+    if (result.warnings.length > 0) {
+      // 明细可能较长，状态栏放不下：完整内容写控制台，工具栏只留摘要
+      console.warn(`[netbpm] 部署提示（${record.name}）：`, result.warnings);
+    }
+
+    setListStatus(`${result.message}${describeDeployWarnings(result.warnings)}`, !result.ok);
   } finally {
     button.disabled = false;
   }

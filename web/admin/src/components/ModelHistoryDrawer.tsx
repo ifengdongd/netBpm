@@ -1,11 +1,12 @@
-import { HistoryOutlined } from '@ant-design/icons';
-import { App, Button, Drawer, InputNumber, Popconfirm, Space, Table, Tag, Typography } from 'antd';
+import { FileImageOutlined, HistoryOutlined } from '@ant-design/icons';
+import { App, Button, Drawer, InputNumber, Modal, Popconfirm, Space, Spin, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { modelsApi } from '../api';
 import type { BpmnModelRevisionSummary } from '../api/types';
+import BpmnDiagram from './BpmnDiagram';
 import { formatTime } from '../utils';
 
 interface Props {
@@ -32,11 +33,20 @@ export default function ModelHistoryDrawer({ modelId, modelName, open, onClose }
   const [keepLatest, setKeepLatest] = useState<number>(DEFAULT_KEEP_LATEST);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
   const [pruning, setPruning] = useState(false);
+  /** 正在查看流程图的版本（null 表示弹窗关闭）。 */
+  const [viewing, setViewing] = useState<BpmnModelRevisionSummary | null>(null);
 
   const historyQuery = useQuery({
     queryKey: ['admin', 'model-history', modelId],
     queryFn: () => modelsApi.history(modelId as string),
     enabled: open && modelId !== null,
+  });
+
+  /** 查看流程图：拉取该版本的 XML 快照（弹窗打开时才查）。 */
+  const revisionQuery = useQuery({
+    queryKey: ['admin', 'model-history', modelId, viewing?.id],
+    queryFn: () => modelsApi.revision(modelId as string, (viewing as BpmnModelRevisionSummary).id),
+    enabled: viewing !== null && modelId !== null,
   });
 
   const revisions = historyQuery.data ?? [];
@@ -100,7 +110,8 @@ export default function ModelHistoryDrawer({ modelId, modelName, open, onClose }
       dataIndex: 'action',
       key: 'action',
       width: 100,
-      render: (action: string) => (action === 'rollback' ? <Tag color="orange">回滚</Tag> : <Tag>保存</Tag>),
+      render: (action: string) =>
+        action === 'rollback' ? <Tag color="orange">回滚</Tag> : action === 'publish' ? <Tag color="green">部署</Tag> : <Tag>保存</Tag>,
     },
     { title: '流程名称', dataIndex: 'name', key: 'name', ellipsis: true },
     { title: '操作人', dataIndex: 'operator', key: 'operator', width: 130, render: (v?: string | null) => v ?? '—' },
@@ -114,19 +125,24 @@ export default function ModelHistoryDrawer({ modelId, modelName, open, onClose }
     {
       title: '操作',
       key: 'actions',
-      width: 90,
+      width: 150,
       render: (_, record) => (
-        <Popconfirm
-          title={`回滚到 v${record.revision}？`}
-          description="该版本内容将作为新版本写入，历史保留。"
-          okText="回滚"
-          cancelText="取消"
-          onConfirm={() => void handleRollback(record)}
-        >
-          <Button size="small" loading={rollingBack === record.id}>
-            回滚
+        <Space>
+          <Button size="small" icon={<FileImageOutlined />} onClick={() => setViewing(record)}>
+            流程图
           </Button>
-        </Popconfirm>
+          <Popconfirm
+            title={`回滚到 v${record.revision}？`}
+            description="该版本内容将作为新版本写入，历史保留。"
+            okText="回滚"
+            cancelText="取消"
+            onConfirm={() => void handleRollback(record)}
+          >
+            <Button size="small" loading={rollingBack === record.id}>
+              回滚
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -172,6 +188,34 @@ export default function ModelHistoryDrawer({ modelId, modelName, open, onClose }
           pagination={false}
         />
       </Space>
+
+      <Modal
+        title={`流程图 · v${viewing?.revision ?? ''} ${viewing?.name ?? ''}`}
+        open={viewing !== null}
+        footer={null}
+        width={900}
+        onCancel={() => setViewing(null)}
+        destroyOnClose
+      >
+        {revisionQuery.isPending ? (
+          <Spin style={{ display: 'block', margin: '80px auto' }} />
+        ) : revisionQuery.isError ? (
+          <Typography.Text type="danger">
+            加载失败：{(revisionQuery.error as Error).message}
+          </Typography.Text>
+        ) : revisionQuery.data?.svg ? (
+          // 部署（publish）版本带部署时生成的流程图图片：直接展示快照，保证与部署当时一致
+          <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, overflow: 'auto' }}>
+            <img
+              src={`data:image/svg+xml;utf8,${encodeURIComponent(revisionQuery.data.svg)}`}
+              alt={`v${revisionQuery.data.revision} 流程图`}
+              style={{ width: '100%' }}
+            />
+          </div>
+        ) : (
+          <BpmnDiagram xml={revisionQuery.data?.bpmnXml ?? ''} activities={[]} height={520} />
+        )}
+      </Modal>
     </Drawer>
   );
 }

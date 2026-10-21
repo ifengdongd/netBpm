@@ -46,7 +46,7 @@ export interface BpmnModelRevisionSummary {
   name: string;
   processKey: string;
   description?: string | null;
-  /** save / rollback。 */
+  /** save / rollback / publish。 */
   action: string;
   operator?: string | null;
   createdAt: string;
@@ -63,6 +63,18 @@ export interface ModelHistoryPruneResponse {
   removed: number;
   modelId: string;
   keepLatest: number;
+}
+
+/** 部署（发布）响应：引擎侧解析 + 校验 + 版本递增的结果。 */
+export interface DeployResponse {
+  processDefinitionId: string;
+  processDefinitionKey: string;
+  version: number;
+  deploymentId: string;
+  resourceName: string;
+  deploymentName?: string | null;
+  /** 提示级问题（部署成功，但建议检查）；null 表示没有任何提示。 */
+  warnings?: { rule: string; message: string }[] | null;
 }
 
 // ─────────────────────────── 管理端 · 流程类型 ───────────────────────────
@@ -280,6 +292,24 @@ export interface TaskDetail {
 
 /** 运行态变量：键值对（值由服务端按变量类型解码）。 */
 export type Variables = Record<string, unknown>;
+
+/** 启动流程实例请求（`POST /api/runtime/process-instances`）。 */
+export interface StartProcessInstanceRequest {
+  /** 精确指定版本；与 `processDefinitionKey` 都给时以 id 为准。 */
+  processDefinitionId?: string;
+  /** 按 key 启动最新版本。 */
+  processDefinitionKey?: string;
+  businessKey?: string;
+  /** 发起人；JWT 模式下必须与令牌 sub 一致。 */
+  startUserId?: string;
+  tenantId?: string;
+  variables?: Variables;
+}
+
+/** 启动流程实例响应。 */
+export interface StartProcessInstanceResponse {
+  processInstanceId: string;
+}
 
 // ─────────────────────────── 通用 ───────────────────────────
 

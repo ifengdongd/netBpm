@@ -1,5 +1,6 @@
 import { DeleteOutlined, PauseCircleOutlined, PlayCircleOutlined, SwapOutlined } from '@ant-design/icons';
 import {
+  Alert,
   App,
   Button,
   Descriptions,
@@ -278,9 +279,12 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
     },
   ];
 
+  // 「不存在」只在查询成功且运行态 / 历史都没有数据时才成立：
+  // 查询失败（403 无权 / 5xx）时 data 也是 undefined，此时再显示"实例不存在"会把
+  //「无权查看」误报成「没有这条实例」——错误通路由下方 Alert 承担。
   const isRunning = instance !== null;
   const isHistoric = !isRunning && historic !== null;
-  const notFound = loaded && !isRunning && !isHistoric;
+  const notFound = detailQuery.isSuccess && !isRunning && !isHistoric;
 
   const title = isRunning
     ? `实例详情 · ${instance.processDefinitionKey ?? instance.processDefinitionId}`
@@ -291,6 +295,16 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
   return (
     <Drawer title={title} open={open} width={760} onClose={onClose} destroyOnClose>
       {!loaded && <Spin style={{ display: 'block', margin: '120px auto' }} />}
+
+      {detailQuery.isError && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginTop: 60 }}
+          message="加载实例详情失败"
+          description={(detailQuery.error as Error).message}
+        />
+      )}
 
       {notFound && <Empty description="实例不存在（可能已删除且没有历史记录）" style={{ padding: 60 }} />}
 

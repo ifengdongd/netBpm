@@ -5,8 +5,10 @@ import type {
   AdminMetricsResponse,
   BpmnModelDetail,
   BpmnModelSummary,
+  BpmnModelRevisionDetail,
   BpmnModelRevisionSummary,
   BatchResultResponse,
+  DeployResponse,
   DeploymentSummaryResponse,
   DeploymentResource,
   Diagram,
@@ -20,6 +22,8 @@ import type {
   ProcessType,
   SaveBpmnModelRequest,
   SaveProcessTypeRequest,
+  StartProcessInstanceRequest,
+  StartProcessInstanceResponse,
   TaskDetail,
   TaskResponse,
   TaskStatsResponse,
@@ -41,6 +45,12 @@ export const modelsApi = {
   history: (id: string) =>
     http.get<BpmnModelRevisionSummary[]>(`/api/admin/models/${encodeURIComponent(id)}/history`),
 
+  /** 版本详情（含 BPMN XML 快照）：版本历史里查看该版本的流程图用。 */
+  revision: (id: string, revisionId: string) =>
+    http.get<BpmnModelRevisionDetail>(
+      `/api/admin/models/${encodeURIComponent(id)}/history/${encodeURIComponent(revisionId)}`,
+    ),
+
   /** 回滚到指定版本：该版本内容作为新版本写入（历史只增不删）。 */
   rollback: (id: string, revisionId: string) =>
     http.post<BpmnModelDetail>(
@@ -51,6 +61,16 @@ export const modelsApi = {
   pruneHistory: (id: string, keepLatest: number) =>
     http.del<ModelHistoryPruneResponse>(
       `/api/admin/models/${encodeURIComponent(id)}/history?keepLatest=${keepLatest}`,
+    ),
+
+  /**
+   * 部署（发布）模型：引擎侧解析 + 校验 + 版本递增；阻断级问题 400（message 带校验明细）。
+   * `svg` 为部署前渲染的流程图图片 —— 提供时后端把当前 XML 连同图片写入 `publish` 版本快照。
+   */
+  publish: (id: string, svg?: string) =>
+    http.post<DeployResponse>(
+      `/api/admin/models/${encodeURIComponent(id)}/publish`,
+      svg ? { svg } : undefined,
     ),
 };
 
@@ -120,6 +140,13 @@ export interface TaskQuery {
 
 export const runtimeApi = {
   // 运行实例
+  /**
+   * 启动流程实例：`processDefinitionId` 精确指定版本，只给 key 时启动最新版本。
+   * 控制台「部署管理」的发起入口用 id，保证发起的就是当前看到的那一版。
+   */
+  startInstance: (request: StartProcessInstanceRequest) =>
+    http.post<StartProcessInstanceResponse>('/api/runtime/process-instances', request),
+
   instances: (params?: InstanceQuery, signal?: AbortSignal) =>
     list<ProcessInstanceResponse>('/api/runtime/process-instances', params, { signal }),
 

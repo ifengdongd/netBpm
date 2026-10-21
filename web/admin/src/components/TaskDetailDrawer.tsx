@@ -11,9 +11,11 @@ interface Props {
   taskId: string | null;
   open: boolean;
   onClose: () => void;
+  /** 点「流程实例」时切到实例详情（由列表页负责关闭本抽屉并打开实例抽屉）。 */
+  onOpenInstance?: (processInstanceId: string) => void;
 }
 
-export default function TaskDetailDrawer({ taskId, open, onClose }: Props) {
+export default function TaskDetailDrawer({ taskId, open, onClose, onOpenInstance }: Props) {
   const { message } = App.useApp();
 
   // 详情查询：键含任务 id，由 queryClient 统一缓存；任务操作后 invalidate ['runtime'] 即可联动刷新
@@ -58,8 +60,23 @@ export default function TaskDetailDrawer({ taskId, open, onClose }: Props) {
             <Descriptions.Item label="任务 ID" span={2}>
               {task.id}
             </Descriptions.Item>
+            <Descriptions.Item label="流程实例" span={2}>
+              {task.processInstanceId !== null && onOpenInstance !== undefined ? (
+                <Typography.Link
+                  title="在实例详情中查看完整流程图与历史"
+                  onClick={() => onOpenInstance(task.processInstanceId as string)}
+                >
+                  {task.processInstanceId}
+                </Typography.Link>
+              ) : (
+                (task.processInstanceId ?? '—')
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="流程 Key">{task.processDefinitionKey ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="节点 Key">{task.taskDefinitionKey ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="流程定义 ID" span={2}>
+              {task.processDefinitionId ?? '—'}
+            </Descriptions.Item>
             <Descriptions.Item label="办理人">{task.assignee ?? '未认领'}</Descriptions.Item>
             <Descriptions.Item label="所有者">{task.owner ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="优先级">{task.priority}</Descriptions.Item>
@@ -68,6 +85,12 @@ export default function TaskDetailDrawer({ taskId, open, onClose }: Props) {
             <Descriptions.Item label="到期时间">{formatTime(task.dueDate)}</Descriptions.Item>
             <Descriptions.Item label="认领时间">{formatTime(task.claimTime)}</Descriptions.Item>
             <Descriptions.Item label="业务主键">{task.businessKey ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="表单 Key">{task.formKey ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="分类">{task.category ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="租户">{task.tenantId ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="挂起状态">
+              {task.isSuspended ? <Tag color="warning">已挂起</Tag> : <Tag color="success">正常</Tag>}
+            </Descriptions.Item>
             <Descriptions.Item label="描述" span={2}>
               {task.description ?? '—'}
             </Descriptions.Item>

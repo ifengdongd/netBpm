@@ -8,6 +8,7 @@ import {
   Input,
   Modal,
   Row,
+  Select,
   Space,
   Statistic,
   Switch,
@@ -18,6 +19,8 @@ import {
 } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { runtimeApi } from '../api';
 import type {
@@ -36,6 +39,31 @@ interface TaskActionState {
   task: TaskResponse;
 }
 
+/** 运行实例筛选条件（对应 ProcessInstanceQuery 的可用字段）。 */
+interface InstanceFilter {
+  processDefinitionKey?: string;
+  businessKey?: string;
+  startUserId?: string;
+}
+
+/** 待办筛选条件（后端要求至少给 assignee / candidateUser / processInstanceId 之一）。 */
+interface TaskFilter {
+  assignee?: string;
+  candidateUser?: string;
+  processInstanceId?: string;
+  taskDefinitionKey?: string;
+}
+
+/** 历史实例状态筛选（映射到 finished / deleted 两个后端条件）。 */
+type HistoricState = 'finished' | 'running' | 'deleted';
+
+interface HistoricFilter {
+  processDefinitionKey?: string;
+  businessKey?: string;
+  startUserId?: string;
+  state?: HistoricState;
+}
+
 export default function MonitoringPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -44,6 +72,15 @@ export default function MonitoringPage() {
   // 自动刷新：开启后统计 + 三个列表每 30s 轮询（抽屉详情跟随 invalidate 联动，不单独轮询）
   const [autoRefresh, setAutoRefresh] = useState(false);
   const refetchInterval = autoRefresh ? 30_000 : false;
+
+  // 三个列表的服务端筛选：draft 是输入框里的值，filter 是点「查询」后生效的值。
+  // 输入即查询会每敲一个字发一次请求，也容易把半截输入当成条件误查。
+  const [instanceDraft, setInstanceDraft] = useState<InstanceFilter>({});
+  const [instanceFilter, setInstanceFilter] = useState<InstanceFilter>({});
+  const [taskDraft, setTaskDraft] = useState<TaskFilter>({});
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>({});
+  const [historicDraft, setHistoricDraft] = useState<HistoricFilter>({});
+  const [historicFilter, setHistoricFilter] = useState<HistoricFilter>({});
 
   // 统计
   const statsQuery = useQuery({
@@ -59,12 +96,14 @@ export default function MonitoringPage() {
     }
   }, [statsQuery.isError, statsQuery.error, message]);
 
-  // 三个列表共用 usePagedList：缓存、去重与失效联动由 queryClient 统一管理
+  // 三个列表共用 usePagedList：缓存、去重与失效联动由 queryClient 统一管理。
+  // 条件进 queryKey：改条件即换缓存键，自动重新拉取且不会命中旧条件的缓存。
   const instanceList = usePagedList<ProcessInstanceResponse>(
-    ['runtime', 'instances'],
+    ['runtime', 'instances', instanceFilter],
     (page, signal) =>
       runtimeApi.instances(
         {
+          ...instanceFilter,
           firstResult: (page.current - 1) * page.pageSize,
           maxResults: page.pageSize,
         },
@@ -75,10 +114,11 @@ export default function MonitoringPage() {
   );
 
   const taskList = usePagedList<TaskResponse>(
-    ['runtime', 'tasks'],
+    ['runtime', 'tasks', taskFilter],
     (page, signal) =>
       runtimeApi.tasks(
         {
+          ...taskFilter,
           firstResult: (page.current - 1) * page.pageSize,
           maxResults: page.pageSize,
         },
@@ -89,30 +129,136 @@ export default function MonitoringPage() {
   );
 
   const historicList = usePagedList<HistoricProcessInstance>(
-    ['runtime', 'historic-instances'],
-    (page, signal) =>
-      runtimeApi.historicInstances(
+    ['runtime', 'historic-instances', historicFilter],
+    (page, signal) => {
+      // 状态下拉映射成后端的 finished / deleted；其余字段原样透传
+      const { state, ...rest } = historicFilter;
+
+      return runtimeApi.historicInstances(
         {
+          ...rest,
+          finished: state === 'finished' ? true : state === 'running' ? false : undefined,
+          deleted: state === 'deleted' ? true : undefined,
           firstResult: (page.current - 1) * page.pageSize,
           maxResults: page.pageSize,
         },
         signal,
-      ),
+      );
+    },
     (error) => message.error(`加载历史实例失败：${error.message}`),
     { refetchInterval },
   );
 
   // 抽屉 / 弹窗
-  const [detailInstanceId, setDetailInstanceId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // 支持 ?instanceId=xxx 深链：从「部署管理 → 发起实例」的成功提示跳过来时直接打开详情。
+  // 地址栏是外部数据源，直接派生打开状态（不再用 effect 回写 state，避免级联渲染）；
+  // 用户从列表手动点开的实例用独立 state 覆盖它。
+  const instanceIdFromQuery = searchParams.get('instanceId');
+  const [manualInstanceId, setManualInstanceId] = useState<string | null>(null);
+  const detailInstanceId = manualInstanceId ?? instanceIdFromQuery;
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
   const [taskAction, setTaskAction] = useState<TaskActionState | null>(null);
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
+  /** 关闭实例详情：同时清掉地址栏的 instanceId，避免刷新后又弹出来。 */
+  const closeInstanceDetail = () => {
+    setManualInstanceId(null);
+
+    if (searchParams.has('instanceId')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('instanceId');
+      setSearchParams(next, { replace: true });
+    }
+  };
+
   // 所有 runtime 查询（统计 / 三个列表 / 两个抽屉详情）统一失效刷新
   const refreshAll = () => {
     setSelectedIds([]);
     void queryClient.invalidateQueries({ queryKey: ['runtime'] });
+  };
+
+  // ─────────────────────────── 列表筛选 ───────────────────────────
+
+  const hasInstanceFilter = hasTextFilter(instanceFilter);
+  const hasTaskFilter = hasTextFilter(taskFilter);
+  const hasHistoricFilter = hasTextFilter(historicFilter) || historicFilter.state !== undefined;
+
+  /** 应用筛选：条件生效 + 回到第一页（否则可能停在已不存在的页上）+ 清空跨页勾选。 */
+  const applyInstanceFilter = () => {
+    const next = normalizeFilters(instanceDraft);
+
+    // 条件没变时按「刷新」语义处理：否则 queryKey 值相同，React Query 不会重新拉取
+    if (isSameFilter(next, instanceFilter)) {
+      instanceList.reload();
+      return;
+    }
+
+    setInstanceFilter(next);
+    setSelectedIds([]);
+
+    if (instanceList.page.current !== 1) {
+      instanceList.setPage({ ...instanceList.page, current: 1 });
+    }
+  };
+
+  const resetInstanceFilter = () => {
+    setInstanceDraft({});
+    setInstanceFilter({});
+    setSelectedIds([]);
+
+    if (instanceList.page.current !== 1) {
+      instanceList.setPage({ ...instanceList.page, current: 1 });
+    }
+  };
+
+  const applyTaskFilter = () => {
+    const next = normalizeFilters(taskDraft);
+
+    if (isSameFilter(next, taskFilter)) {
+      taskList.reload();
+      return;
+    }
+
+    setTaskFilter(next);
+
+    if (taskList.page.current !== 1) {
+      taskList.setPage({ ...taskList.page, current: 1 });
+    }
+  };
+
+  const resetTaskFilter = () => {
+    setTaskDraft({});
+    setTaskFilter({});
+
+    if (taskList.page.current !== 1) {
+      taskList.setPage({ ...taskList.page, current: 1 });
+    }
+  };
+
+  const applyHistoricFilter = () => {
+    const next = normalizeFilters(historicDraft);
+
+    if (isSameFilter(next, historicFilter)) {
+      historicList.reload();
+      return;
+    }
+
+    setHistoricFilter(next);
+
+    if (historicList.page.current !== 1) {
+      historicList.setPage({ ...historicList.page, current: 1 });
+    }
+  };
+
+  const resetHistoricFilter = () => {
+    setHistoricDraft({});
+    setHistoricFilter({});
+
+    if (historicList.page.current !== 1) {
+      historicList.setPage({ ...historicList.page, current: 1 });
+    }
   };
 
   // ─────────────────────────── 实例操作 ───────────────────────────
@@ -212,7 +358,7 @@ export default function MonitoringPage() {
   // ─────────────────────────── 表格列（定义见 monitoring/columns.tsx）───────────────────────────
 
   const instanceColumns = buildInstanceColumns({
-    onDetail: setDetailInstanceId,
+    onDetail: setManualInstanceId,
     onToggleSuspension: (instance) => void toggleInstanceSuspension(instance),
     onRemove: (instance) => void removeInstance(instance),
   });
@@ -224,7 +370,7 @@ export default function MonitoringPage() {
   });
 
   const historicColumns = buildHistoricColumns({
-    onDetail: setDetailInstanceId,
+    onDetail: setManualInstanceId,
   });
 
   const tabItems = [
@@ -233,6 +379,36 @@ export default function MonitoringPage() {
       label: `运行实例（${instanceList.total}）`,
       children: (
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <FilterBar
+            active={hasInstanceFilter}
+            onSearch={applyInstanceFilter}
+            onReset={resetInstanceFilter}
+          >
+            <Input
+              allowClear
+              placeholder="流程 Key"
+              style={{ width: 160 }}
+              value={instanceDraft.processDefinitionKey ?? ''}
+              onChange={(event) => setInstanceDraft({ ...instanceDraft, processDefinitionKey: event.target.value })}
+              onPressEnter={applyInstanceFilter}
+            />
+            <Input
+              allowClear
+              placeholder="业务主键"
+              style={{ width: 180 }}
+              value={instanceDraft.businessKey ?? ''}
+              onChange={(event) => setInstanceDraft({ ...instanceDraft, businessKey: event.target.value })}
+              onPressEnter={applyInstanceFilter}
+            />
+            <Input
+              allowClear
+              placeholder="发起人"
+              style={{ width: 140 }}
+              value={instanceDraft.startUserId ?? ''}
+              onChange={(event) => setInstanceDraft({ ...instanceDraft, startUserId: event.target.value })}
+              onPressEnter={applyInstanceFilter}
+            />
+          </FilterBar>
           <Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0} onClick={() => void batchDelete()}>
             批量删除选中（{selectedIds.length}）
           </Button>
@@ -251,26 +427,107 @@ export default function MonitoringPage() {
       key: 'tasks',
       label: `待办任务（${taskList.total}）`,
       children: (
-        <Table<TaskResponse>
-          rowKey="id"
-          columns={taskColumns}
-          dataSource={taskList.items}
-          loading={taskList.loading}
-          pagination={taskList.pagination}
-        />
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <FilterBar active={hasTaskFilter} onSearch={applyTaskFilter} onReset={resetTaskFilter}>
+            <Input
+              allowClear
+              placeholder="办理人"
+              style={{ width: 140 }}
+              value={taskDraft.assignee ?? ''}
+              onChange={(event) => setTaskDraft({ ...taskDraft, assignee: event.target.value })}
+              onPressEnter={applyTaskFilter}
+            />
+            <Input
+              allowClear
+              placeholder="候选人"
+              style={{ width: 140 }}
+              value={taskDraft.candidateUser ?? ''}
+              onChange={(event) => setTaskDraft({ ...taskDraft, candidateUser: event.target.value })}
+              onPressEnter={applyTaskFilter}
+            />
+            <Input
+              allowClear
+              placeholder="流程实例 ID"
+              style={{ width: 220 }}
+              value={taskDraft.processInstanceId ?? ''}
+              onChange={(event) => setTaskDraft({ ...taskDraft, processInstanceId: event.target.value })}
+              onPressEnter={applyTaskFilter}
+            />
+            <Input
+              allowClear
+              placeholder="节点 Key（可选）"
+              title="节点 Key 需配合办理人 / 候选人 / 实例 ID 使用：后端要求至少给出其中一个身份或实例条件。"
+              style={{ width: 170 }}
+              value={taskDraft.taskDefinitionKey ?? ''}
+              onChange={(event) => setTaskDraft({ ...taskDraft, taskDefinitionKey: event.target.value })}
+              onPressEnter={applyTaskFilter}
+            />
+          </FilterBar>
+          <Table<TaskResponse>
+            rowKey="id"
+            columns={taskColumns}
+            dataSource={taskList.items}
+            loading={taskList.loading}
+            pagination={taskList.pagination}
+          />
+        </Space>
       ),
     },
     {
       key: 'historic',
       label: `历史实例（${historicList.total}）`,
       children: (
-        <Table<HistoricProcessInstance>
-          rowKey="processInstanceId"
-          columns={historicColumns}
-          dataSource={historicList.items}
-          loading={historicList.loading}
-          pagination={historicList.pagination}
-        />
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <FilterBar
+            active={hasHistoricFilter}
+            onSearch={applyHistoricFilter}
+            onReset={resetHistoricFilter}
+          >
+            <Input
+              allowClear
+              placeholder="流程 Key"
+              style={{ width: 160 }}
+              value={historicDraft.processDefinitionKey ?? ''}
+              onChange={(event) => setHistoricDraft({ ...historicDraft, processDefinitionKey: event.target.value })}
+              onPressEnter={applyHistoricFilter}
+            />
+            <Input
+              allowClear
+              placeholder="业务主键"
+              style={{ width: 180 }}
+              value={historicDraft.businessKey ?? ''}
+              onChange={(event) => setHistoricDraft({ ...historicDraft, businessKey: event.target.value })}
+              onPressEnter={applyHistoricFilter}
+            />
+            <Input
+              allowClear
+              placeholder="发起人"
+              style={{ width: 140 }}
+              value={historicDraft.startUserId ?? ''}
+              onChange={(event) => setHistoricDraft({ ...historicDraft, startUserId: event.target.value })}
+              onPressEnter={applyHistoricFilter}
+            />
+            <Select<HistoricState>
+              allowClear
+              placeholder="状态"
+              style={{ width: 130 }}
+              value={historicDraft.state}
+              onChange={(value) => setHistoricDraft({ ...historicDraft, state: value })}
+              options={[
+                { value: 'running', label: '未结束' },
+                { value: 'finished', label: '已结束' },
+                { value: 'deleted', label: '已删除' },
+              ]}
+            />
+          </FilterBar>
+          <Table<HistoricProcessInstance>
+            rowKey="processInstanceId"
+            columns={historicColumns}
+            dataSource={historicList.items}
+            loading={historicList.loading}
+            pagination={historicList.pagination}
+          />
+        </Space>
       ),
     },
   ];
@@ -337,11 +594,20 @@ export default function MonitoringPage() {
       <InstanceDetailDrawer
         instanceId={detailInstanceId}
         open={detailInstanceId !== null}
-        onClose={() => setDetailInstanceId(null)}
+        onClose={closeInstanceDetail}
         onChanged={refreshAll}
       />
 
-      <TaskDetailDrawer taskId={detailTaskId} open={detailTaskId !== null} onClose={() => setDetailTaskId(null)} />
+      <TaskDetailDrawer
+        taskId={detailTaskId}
+        open={detailTaskId !== null}
+        onClose={() => setDetailTaskId(null)}
+        onOpenInstance={(instanceId) => {
+          // 两个抽屉不同时叠着：先关任务详情，再打开实例详情
+          setDetailTaskId(null);
+          setManualInstanceId(instanceId);
+        }}
+      />
 
       <Modal
         title={taskAction?.mode === 'assignee' ? `转办任务「${taskAction.task.name ?? taskAction.task.id}」` : `完成任务「${taskAction?.task.name ?? taskAction?.task.id ?? ''}」`}
@@ -396,4 +662,67 @@ function validateVariables(_: unknown, value?: string): Promise<void> {
   } catch (error) {
     return Promise.reject(error instanceof Error ? error : new Error('变量必须是 JSON 对象'));
   }
+}
+
+/** 去掉筛选值的首尾空白，空串直接丢弃（查询串与缓存键都不该带空条件）。 */
+function normalizeFilters<T extends object>(filter: T): T {
+  const result: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(filter)) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+
+    const trimmed = value.trim();
+
+    if (trimmed.length > 0) {
+      result[key] = trimmed;
+    }
+  }
+
+  return result as T;
+}
+
+/** 两组筛选条件在值上是否等价（undefined 与空串视为相同）。 */
+function isSameFilter(left: object, right: object): boolean {
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+
+  return [...keys].every((key) => (a[key] ?? '') === (b[key] ?? ''));
+}
+
+/** 筛选条件是否非空（字符串字段去空白后判断，空串视同未填）。 */
+function hasTextFilter(filter: object): boolean {
+  return Object.values(filter).some((value) => typeof value === 'string' && value.trim().length > 0);
+}
+
+/**
+ * 三个列表共用的筛选行：左侧放各列表自己的输入项，右侧统一「查询 / 重置」。
+ * 条件只在点查询（或回车）时生效，避免每敲一个字都发一次请求。
+ */
+function FilterBar({
+  children,
+  active,
+  onSearch,
+  onReset,
+}: {
+  children: ReactNode;
+  /** 是否已有生效中的条件（控制「重置」可用态与提示）。 */
+  active: boolean;
+  onSearch: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <Space wrap>
+      {children}
+      <Button type="primary" onClick={onSearch}>
+        查询
+      </Button>
+      <Button onClick={onReset} disabled={!active}>
+        重置
+      </Button>
+      {active && <Typography.Text type="secondary">已按条件筛选</Typography.Text>}
+    </Space>
+  );
 }
