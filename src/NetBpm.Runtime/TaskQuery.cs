@@ -5,6 +5,7 @@ namespace NetBpm.Runtime;
 /// <para>
 /// ⚠️ <b>必须至少给一个条件</b>：本子集不提供「查全部任务」——
 /// 全表扫描在真实部署里是事故源，因此返回空/报错而不是全量。
+/// 例外见 <paramref name="AllUsers"/>：管理视图（实例监控的全量待办统计）显式声明后才放行。
 /// </para>
 /// </summary>
 /// <param name="Assignee">按办理人查（对应 <c>TaskQuery.taskAssignee</c>）。</param>
@@ -59,7 +60,8 @@ public sealed record TaskQuery(
     string? CandidateGroup = null,
     bool? Suspended = null,
     DateTime? DueBefore = null,
-    string? TenantId = null)
+    string? TenantId = null,
+    bool AllUsers = false)
 {
     /// <summary>是否至少给了一个查询条件。</summary>
     public bool HasCriteria =>
@@ -67,4 +69,11 @@ public sealed record TaskQuery(
         || !string.IsNullOrWhiteSpace(CandidateUser)
         || !string.IsNullOrWhiteSpace(CandidateGroup)
         || !string.IsNullOrWhiteSpace(ProcessInstanceId);
+
+    /// <summary>
+    /// 是否放行「无条件的全量待办」。只应由 REST 层在确认调用方具备管理能力
+    /// （开发模式 / API Key / 持有 <c>netbpm.admin</c>）后设置 ——
+    /// 实例监控的全量待办统计是唯一合法用途；防呆默认仍然生效。
+    /// </summary>
+    public bool AllowsUnfiltered => AllUsers;
 }

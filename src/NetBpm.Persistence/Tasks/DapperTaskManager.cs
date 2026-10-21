@@ -148,6 +148,17 @@ public sealed class DapperTaskManager : ITaskManager
     }
 
     /// <inheritdoc />
+    public async ValueTask<IList<TaskEntity>> FindAllOpenTasksAsync(CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var states = await QueryTasksAsync(session, SelectAllSql, null, ct).ConfigureAwait(false);
+
+        return states.Select(state => state.ToEntity()).ToList();
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IList<TaskEntity>> FindTasksByProcessInstanceIdAsync(
         string processInstanceId,
         CancellationToken ct = default)
@@ -1063,6 +1074,9 @@ public sealed class DapperTaskManager : ITaskManager
 
     private const string SelectByAssigneeSql =
         "select " + TaskColumns.All + " from ACT_RU_TASK where ASSIGNEE_ = @assignee";
+
+    private const string SelectAllSql =
+        "select " + TaskColumns.All + " from ACT_RU_TASK";
 
     private const string SelectByProcessInstanceIdSql =
         "select " + TaskColumns.All + " from ACT_RU_TASK where PROC_INST_ID_ = @processInstanceId";

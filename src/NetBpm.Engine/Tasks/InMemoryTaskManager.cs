@@ -159,6 +159,15 @@ public sealed class InMemoryTaskManager : ITaskManager
     }
 
     /// <inheritdoc />
+    public ValueTask<IList<TaskEntity>> FindAllOpenTasksAsync(CancellationToken ct = default)
+    {
+        lock (_syncRoot)
+        {
+            return ValueTask.FromResult<IList<TaskEntity>>(_tasks.Values.ToList());
+        }
+    }
+
+    /// <inheritdoc />
     public ValueTask<IList<TaskEntity>> FindTasksByProcessInstanceIdAsync(
         string processInstanceId,
         CancellationToken ct = default)

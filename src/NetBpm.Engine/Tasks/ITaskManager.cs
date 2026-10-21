@@ -24,6 +24,12 @@ public interface ITaskManager
     ValueTask<IList<TaskEntity>> FindTasksByAssigneeAsync(string assignee, CancellationToken ct = default);
 
     /// <summary>
+    /// 查全部待办（<b>全表</b>）。仅供管理视图的全量待办统计使用
+    /// （<c>TaskQuery.AllUsers</c> 显式放行后才可达）；引擎的防呆校验默认仍拒绝无条件查询。
+    /// </summary>
+    ValueTask<IList<TaskEntity>> FindAllOpenTasksAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// 查某流程实例的全部待办（对应 <c>TaskQuery.processInstanceId</c>）。
     /// <para>
     /// 用途有两个：对拍脚本的「完成任一待办」动作（两条引擎必须看到同一批待办），

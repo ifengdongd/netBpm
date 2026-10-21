@@ -1,11 +1,15 @@
 using System.Text;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using NetBpm.Admin.Storage;
 using NetBpm.Bpmn.Converter;
+using NetBpm.Persistence.Deployment;
 using NetBpm.Bpmn.Validation;
 using NetBpm.Engine;
 using NetBpm.Persistence.Admin;
 using NetBpm.Rest;
 using NetBpm.Rest.Auditing;
+using NetBpm.Rest.Diagnostics;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 
@@ -182,17 +186,35 @@ public static partial class AdminEndpoints
     }
 
     /// <summary>
-    /// 发布模型：用当前 XML 走引擎部署（校验/版本递增与设计器部署完全一致）。
-    /// 发布属高危管理动作，写审计 model.publish；模型不存在时 404 且不留审计。
+    /// 发布模型：用当前 XML 走引擎部署（解析 + 校验 + 版本递增，与设计器部署同一套口径）。
+    /// <para>
+    /// 阻断级校验问题返回 400（<c>ProcessValidationException</c> → 400 + errors 明细），
+    /// 提示级问题随响应 warnings 返回。请求体可省略；带 <c>svg</c> 时（管理端部署前用
+    /// bpmn-js 渲染的流程图图片），把当前 XML 连同图片写入一条 <c>publish</c> 版本快照 ——
+    /// 版本历史里即可查看「部署当时」的流程图。
+    /// </para>
+    /// <para>发布属高危管理动作，写审计 model.publish；模型不存在时 404 且不留审计。</para>
     /// </summary>
     private static async Task<IResult> PublishModelAsync(
         string id,
+        HttpRequest httpRequest,
         RequestContext requestContext,
         BpmnModelStore store,
         IProcessEngine engine,
         AdminActionAuditor auditor,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
+        // 请求体可选：有 JSON body 才解析（无 body 的旧调用方 / 测试照常工作）。
+        // 不用「可空 body 参数」绑定 —— 无 Content-Type 的 POST 会被推断为缺失 body 而拿不到正确响应。
+        PublishModelRequest? request = null;
+
+        if (httpRequest.ContentLength is > 0)
+        {
+            request = await httpRequest.ReadFromJsonAsync<PublishModelRequest>(ct).ConfigureAwait(false);
+        }
+
         var model = await store.GetAsync(id, ct).ConfigureAwait(false);
 
         if (model is null)
@@ -200,7 +222,11 @@ public static partial class AdminEndpoints
             return Results.NotFound();
         }
 
-        var definition = await WithAuditTrailAsync(
+        ProcessDefinition definition = null!;
+        IReadOnlyList<NetBpm.Bpmn.Validation.ValidationError> deployWarnings =
+            Array.Empty<NetBpm.Bpmn.Validation.ValidationError>();
+
+        definition = await WithAuditTrailAsync(
             requestContext,
             auditor,
             AdminAuditActions.ModelPublish,
@@ -219,15 +245,54 @@ public static partial class AdminEndpoints
             {
                 using var stream = new MemoryStream(Encoding.UTF8.GetBytes(model.BpmnXml));
 
-                return await engine
-                    .DeployAsync(
+                var result = await engine
+                    .DeployWithValidationAsync(
                         stream,
                         $"{model.Id}.bpmn20.xml",
                         $"模型发布：{model.Name}",
                         ct: token)
                     .ConfigureAwait(false);
+
+                deployWarnings = result.Warnings;
+
+                // 部署成功后落一条 publish 版本快照（含流程图图片）：
+                // 版本历史里即可查看「部署当时」的图；快照失败不影响部署结果本身。
+                if (!string.IsNullOrWhiteSpace(request?.Svg))
+                {
+                    await store
+                        .SaveAsync(
+                            id,
+                            new SaveBpmnModelRequest
+                            {
+                                Name = model.Name,
+                                ProcessKey = model.ProcessKey,
+                                Description = model.Description,
+                                BpmnXml = model.BpmnXml,
+                                Svg = request.Svg,
+                            },
+                            requestContext.UserId,
+                            "publish",
+                            token)
+                        .ConfigureAwait(false);
+                }
+
+                return result.ProcessDefinition;
             },
             ct).ConfigureAwait(false);
+
+        // 发布后自检：委托（服务任务 / 各类监听器）能否解析 —— 解析不到时随响应回给调用方，
+        // 避免「发布成功、实例跑到该节点才发现没实现」。
+        var precheck = await DeploymentDelegatePrecheck.VerifyAsync(
+                httpContext.RequestServices,
+                engine,
+                definition!.Id,
+                loggerFactory.CreateLogger(nameof(AdminEndpoints)),
+                ct)
+            .ConfigureAwait(false);
+
+        // 提示级校验 + 委托自检合并返回；全空时给 null（契约里「无提示」的语义）
+        var warnings = (deployWarnings.Concat(precheck ?? Array.Empty<NetBpm.Bpmn.Validation.ValidationError>()))
+            .ToArray();
 
         return Results.Ok(new DeployResponse(
             definition.Id,
@@ -235,7 +300,8 @@ public static partial class AdminEndpoints
             definition.Version,
             definition.DeploymentId,
             definition.ResourceName,
-            $"模型发布：{model.Name}"));
+            $"模型发布：{model.Name}",
+            Warnings: warnings.Length == 0 ? null : warnings));
     }
 
     private static async Task<IReadOnlyList<ProcessType>> ListProcessTypesAsync(

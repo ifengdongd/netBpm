@@ -60,6 +60,16 @@ public sealed class SaveBpmnModelRequest
 public sealed record ModelHistoryPruneResponse(int Removed, string ModelId, int KeepLatest);
 
 /// <summary>
+/// 发布模型请求体（<c>POST /api/admin/models/{id}/publish</c>，<b>可省略</b>）。
+/// </summary>
+/// <param name="Svg">
+/// 部署时的流程图图片（SVG 文本，由管理端在部署前用 bpmn-js 渲染生成）。
+/// 提供时随部署把当前 XML 连同图片写入一条 <c>publish</c> 版本快照，
+/// 版本历史里即可直接查看「部署当时」的流程图。
+/// </param>
+public sealed record PublishModelRequest(string? Svg = null);
+
+/// <summary>
 /// 保存模型的结果（含新版本号与校验明细）。
 /// <para>
 /// 保存是<b>草稿</b>语义：阻断级问题不会拒绝保存（否则用户没法保存半成品），
@@ -91,7 +101,7 @@ public sealed class BpmnModelRevisionSummary
 
     public string? Description { get; set; }
 
-    /// <summary>save / rollback。</summary>
+    /// <summary>save / rollback / publish。</summary>
     public string Action { get; set; } = string.Empty;
 
     public string? Operator { get; set; }

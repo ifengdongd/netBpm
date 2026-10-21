@@ -181,6 +181,23 @@ public sealed class EngineFacadeTests
     }
 
     [Fact]
+    public async Task FindTasks_WithExplicitAllUsers_ShouldReturnAllOpenTasks()
+    {
+        // 管理视图的显式全量：跨实例的全部待办（实例监控统计是唯一合法用途）
+        var (engine, host) = Create();
+        var definition = await DeployAsync(engine, host, ThreeParallelTasksProcess);
+        var first = await engine.StartProcessInstanceAsync(definition.Id, ct: Ct);
+        var second = await engine.StartProcessInstanceAsync(definition.Id, ct: Ct);
+
+        var tasks = await engine.FindTasksAsync(new TaskQuery(AllUsers: true), Ct);
+
+        Assert.Equal(6, tasks.Count); // 2 个实例 × 3 个并行待办
+
+        var instanceIds = new[] { first, second };
+        Assert.All(tasks, task => Assert.Contains(task.ProcessInstanceId, instanceIds));
+    }
+
+    [Fact]
     public async Task FindTasks_ShouldNarrowByDefinitionAndTaskKey()
     {
         var (engine, host) = Create();

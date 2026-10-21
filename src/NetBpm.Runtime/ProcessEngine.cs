@@ -506,11 +506,11 @@ public sealed class ProcessEngine : IProcessEngine
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        if (!query.HasCriteria)
+        if (!query.HasCriteria && !query.AllowsUnfiltered)
         {
             throw new EngineException(
                 "任务查询至少需要一个条件（assignee / candidateUser / processInstanceId）。" +
-                "本子集不提供「查全部任务」，避免全表扫描。");
+                "本子集不提供「查全部任务」，避免全表扫描；管理视图的全量待办请显式声明 TaskQuery.AllUsers。");
         }
 
         ValidatePaging(query.FirstResult, query.MaxResults);
@@ -556,6 +556,12 @@ public sealed class ProcessEngine : IProcessEngine
             candidates = await _taskManager
                 .FindTasksByCandidateGroupAsync(query.CandidateGroup, ct)
                 .ConfigureAwait(false);
+        }
+        else if (query.AllowsUnfiltered)
+        {
+            // 管理视图的显式全量（TaskQuery.AllUsers）：整张待办表作候选集，
+            // 剩余过滤（定义 / 节点 / 挂起 / 租户…）仍走统一的 Matches
+            candidates = await _taskManager.FindAllOpenTasksAsync(ct).ConfigureAwait(false);
         }
         else
         {

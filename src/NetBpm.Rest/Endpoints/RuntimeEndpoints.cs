@@ -490,12 +490,17 @@ public static class RuntimeEndpoints
         CancellationToken ct)
     {
         // 「我的待办」：一个条件都不给时，用鉴权上下文里的操作人兜底
+        var unfiltered = false;
+
         if (string.IsNullOrWhiteSpace(assignee)
             && string.IsNullOrWhiteSpace(candidateUser)
             && string.IsNullOrWhiteSpace(candidateGroup)
             && string.IsNullOrWhiteSpace(processInstanceId))
         {
             assignee = requestContext.UserId;
+
+            // 管理视图（实例监控的待办列表）：兜不了底时放行全量，语义与统计端点一致
+            unfiltered = string.IsNullOrWhiteSpace(assignee) && IsAdminPrincipal(requestContext);
         }
 
         var first = firstResult ?? 0;
@@ -512,7 +517,8 @@ public static class RuntimeEndpoints
             CandidateGroup: candidateGroup,
             Suspended: suspended,
             DueBefore: UtcTime.Normalize(dueBefore),
-            TenantId: RequestIdentity.Tenant(tenantId, requestContext));
+            TenantId: RequestIdentity.Tenant(tenantId, requestContext),
+            AllUsers: unfiltered);
 
         var tasks = await engine.FindTasksAsync(query, ct).ConfigureAwait(false);
         var total = await engine.CountTasksAsync(query, ct).ConfigureAwait(false);
@@ -988,7 +994,12 @@ public static class RuntimeEndpoints
 
     /// <summary>
     /// 待办统计：总数 / 逾期 / 今天到期 / 按定义分组。
-    /// <para>条件与 <c>GET /tasks</c> 同口径（assignee / candidateUser / candidateGroup 至少一个）。</para>
+    /// <para>
+    /// 条件与 <c>GET /tasks</c> 同口径（assignee / candidateUser / candidateGroup 至少一个）；
+    /// 条件全空时用操作人兜底（「我的待办」统计）。调用方具备管理能力且没有可兜底的身份时
+    /// （开发模式匿名 / API Key 服务 / 持 <c>netbpm.admin</c> 的管理员），放行显式全量统计 ——
+    /// 实例监控的全局「待办总数」本来就该跨办理人。
+    /// </para>
     /// </summary>
     private static async Task<IResult> GetTaskStatsAsync(
         string? assignee,
@@ -1001,11 +1012,16 @@ public static class RuntimeEndpoints
         IProcessEngine engine,
         CancellationToken ct)
     {
+        var unfiltered = false;
+
         if (string.IsNullOrWhiteSpace(assignee)
             && string.IsNullOrWhiteSpace(candidateUser)
             && string.IsNullOrWhiteSpace(candidateGroup))
         {
             assignee = requestContext.UserId;
+
+            // 「我的待办」兜不了底（匿名 / 服务身份没有操作人）→ 管理方放行全量，普通用户仍被引擎防呆拦下
+            unfiltered = string.IsNullOrWhiteSpace(assignee) && IsAdminPrincipal(requestContext);
         }
 
         // 统计与列表同口径：强制带租户，避免跨租户数字泄露
@@ -1014,7 +1030,8 @@ public static class RuntimeEndpoints
             CandidateUser: candidateUser,
             ProcessDefinitionId: processDefinitionId,
             CandidateGroup: candidateGroup,
-            TenantId: RequestIdentity.Tenant(tenantId, requestContext));
+            TenantId: RequestIdentity.Tenant(tenantId, requestContext),
+            AllUsers: unfiltered);
 
         var tasks = await engine.FindTasksAsync(query, ct).ConfigureAwait(false);
 
@@ -1197,6 +1214,15 @@ public static class RuntimeEndpoints
         await VariableAuthorization
             .EnsureCanAccessInstanceVariablesAsync(instance, processInstanceId, requestContext, engine, ct)
             .ConfigureAwait(false);
+
+        // 运行态变量只对「还在跑」的实例成立：实例已结束 / 已删除时返回 404，
+        // 调用方（管理端实例详情抽屉）据此回落到历史变量，而不是把它当成一次失败。
+        var running = instance ?? await executionManager.FindByIdAsync(processInstanceId, ct).ConfigureAwait(false);
+
+        if (running is null)
+        {
+            return Results.NotFound(new ErrorResponse($"流程实例 '{processInstanceId}' 不在运行中（可能已结束或已删除）。"));
+        }
 
         var variables = await engine.GetVariablesAsync(processInstanceId, ct).ConfigureAwait(false);
         return Results.Ok(variables);
@@ -1671,6 +1697,14 @@ public static class RuntimeEndpoints
             ct);
 
     // ─────────────────────────── 租户隔离辅助 ───────────────────────────
+
+    /// <summary>
+    /// 当前请求是否具备管理能力（判定口径与 <see cref="AdminAuthorization"/> 一致）：
+    /// 未启用凭据（开发 / 单机演示）或 API Key 可信服务视为管理方；JWT 用户必须持 <c>netbpm.admin</c>。
+    /// 用于「全量待办视图」的显式放行 —— 引擎对无条件任务查询的防呆仍然默认生效。
+    /// </summary>
+    private static bool IsAdminPrincipal(RequestContext requestContext) =>
+        !requestContext.IsUserPrincipal || requestContext.HasAdminScope(TaskScopes.Admin);
 
     /// <summary>
     /// 按 id 校验运行态实例的租户归属（仅受限身份生效），返回实例供变量授权复用。

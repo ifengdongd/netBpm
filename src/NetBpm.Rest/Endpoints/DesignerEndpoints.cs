@@ -1,8 +1,11 @@
 using System.Text;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using NetBpm.Engine;
 using NetBpm.Persistence.Admin;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Rest.Auditing;
+using NetBpm.Rest.Diagnostics;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 
@@ -70,6 +73,8 @@ public static class DesignerEndpoints
         RequestContext requestContext,
         IProcessEngine engine,
         AdminActionAuditor auditor,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         // JWT 下租户只能来自令牌；API Key / 开发模式下显式传参优先
@@ -118,6 +123,20 @@ public static class DesignerEndpoints
             success: true,
             ct: ct).ConfigureAwait(false);
 
+        // 部署后自检：委托（服务任务 / 各类监听器）能否解析 —— 解析不到时把提示随响应回给调用方，
+        // 避免「部署成功、实例跑到该节点才发现没实现」。
+        var precheck = await DeploymentDelegatePrecheck.VerifyAsync(
+                httpContext.RequestServices,
+                engine,
+                definition.Id,
+                loggerFactory.CreateLogger(nameof(DesignerEndpoints)),
+                ct)
+            .ConfigureAwait(false);
+
+        var warnings = precheck is null
+            ? result.Warnings
+            : result.Warnings.Concat(precheck).ToArray();
+
         return Results.Created(
             $"/api/designer/definitions/{definition.Id}",
             new DeployResponse(
@@ -127,7 +146,7 @@ public static class DesignerEndpoints
                 definition.DeploymentId,
                 definition.ResourceName,
                 DeploymentName: string.IsNullOrWhiteSpace(deploymentName) ? null : deploymentName,
-                Warnings: result.Warnings.Count == 0 ? null : result.Warnings));
+                Warnings: warnings.Count == 0 ? null : warnings));
     }
 
     /// <summary>

@@ -60,3 +60,7 @@ web/admin/openapi.local.json
 
 # Temporary build output (ad-hoc diagnostics)
 .tmp-dbtools/
+# 本地联调留下的临时文件：主机日志 / 进程号 / 浏览器脚本产物
+.tmp-host-*.log
+.tmp-host.pid
+.tmp-browser/

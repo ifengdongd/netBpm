@@ -2,6 +2,7 @@ using Microsoft.OpenApi;
 using System.Threading.RateLimiting;
 using NetBpm.Admin.Endpoints;
 using NetBpm.Admin.Storage;
+using NetBpm.Admin.Workflow;
 using NetBpm.Persistence;
 using NetBpm.Rest;
 using NetBpm.Rest.Auditing;
@@ -39,6 +40,14 @@ builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
 
 // 管理端业务存储：流程模型 + 流程类型注册表
 builder.Services.AddAdminStores();
+
+// 内置占位委托：示例流程（请假 / 订单审批）的 delegateExpression 在管理宿主没有业务实现，
+// 默认登记只记日志的占位实现，保证「部署 → 发起 → 审批 → 流程图回显」能在控制台端到端跑通；
+// 接入了业务宿主的部署用 NetBpm:Admin:BuiltInDelegates:Enabled=false 关掉，改用业务自己的实现。
+if (builder.Configuration.GetValue("NetBpm:Admin:BuiltInDelegates:Enabled", true))
+{
+    builder.Services.AddServiceTaskDelegates(typeof(BuiltInApprovalCompletionDelegate).Assembly);
+}
 
 // 全局异常处理 + 时间口径
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();

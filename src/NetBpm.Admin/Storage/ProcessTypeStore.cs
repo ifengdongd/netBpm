@@ -23,11 +23,11 @@ public sealed class ProcessTypeStore
         _tenantId = configuration.GetValue(AdminStorageDefaults.TenantConfigKey, AdminStorageDefaults.DefaultTenantId);
         _describe = connections.DatabaseType == DatabaseType.SqlServer ? "[describe]" : "`describe`";
 
-        // List / Get 共用的列投影（方言差异只有 describe 保留字的引用方式）
+        // List / Get 共用的列投影（describe 是 MySQL/SQL Server 的保留字：列名与别名都必须按方言加引号）
         _selectProjection = $"""
             id          as Id,
             name        as Name,
-            {_describe} as Describe,
+            {_describe} as {_describe},
             view_url    as ViewUrl,
             approve_url as ApproveUrl,
             sort_order  as SortOrder,
