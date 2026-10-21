@@ -1,5 +1,6 @@
 import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -26,7 +27,7 @@ import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { jobsApi, runtimeApi } from '../api';
-import { newIdempotencyKey } from '../api/client';
+import { ApiError, newIdempotencyKey } from '../api/client';
 import type {
   HistoricProcessInstance,
   ProcessInstanceResponse,
@@ -39,6 +40,18 @@ import TaskDetailDrawer from '../components/TaskDetailDrawer';
 import { usePagedList } from '../hooks/usePagedList';
 import { formatTime } from '../utils';
 import { buildHistoricColumns, buildInstanceColumns, buildTaskColumns } from './monitoring/columns';
+
+/**
+ * 管理端点只在 Admin 宿主提供（/api/admin/**）。
+ * Rest 宿主（默认 5080）只有 designer / runtime / identity，打到它会得到 404。
+ */
+const WRONG_HOST_HINT =
+  '当前后端不是 Admin 宿主（缺少 /api/admin 端点），请把控制台指向 NetBpm.Admin（默认 5081）';
+
+/** 404 = 端点不存在。用于识别「控制台代理指错宿主」，而不是「确实没有数据」。 */
+function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
 
 interface TaskActionState {
   mode: 'assignee' | 'complete';
@@ -176,7 +189,15 @@ export default function MonitoringPage() {
         },
         signal,
       ),
-    (error) => message.error(`加载定时作业失败：${error.message}`),
+    (error) => {
+      // 404 = 代理到了 Rest 宿主：面板内已有常驻 Alert 提示，这里不再弹 toast，
+      // 否则 30s 自动刷新会反复打扰。
+      if (isNotFound(error)) {
+        return;
+      }
+
+      message.error(`加载定时作业失败：${error.message}`);
+    },
     { refetchInterval },
   );
 
@@ -189,6 +210,9 @@ export default function MonitoringPage() {
       }),
     refetchInterval,
   });
+
+  // 作业端点 404 说明控制台没有指向 Admin 宿主；派生自错误状态，恢复后提示自动消失。
+  const jobHostMismatch = isNotFound(jobList.error) || isNotFound(jobStats.error);
 
   // 抽屉 / 弹窗
   const [searchParams, setSearchParams] = useSearchParams();
@@ -898,6 +922,14 @@ export default function MonitoringPage() {
       label: `定时作业（${jobStats.data?.total ?? jobList.total}）`,
       children: (
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          {jobHostMismatch && (
+            <Alert
+              type="error"
+              showIcon
+              message={WRONG_HOST_HINT}
+              description="定时作业属于管理端点（/api/admin/jobs）。Rest 宿主（默认 5080）只有 designer / runtime / identity，请改用 NETBPM_API_TARGET=http://localhost:5081 指向 NetBpm.Admin 后重启控制台（或刷新页面）。"
+            />
+          )}
           <FilterBar active={hasJobFilter} onSearch={applyJobFilter} onReset={resetJobFilter}>
             <Input
               allowClear
@@ -924,10 +956,14 @@ export default function MonitoringPage() {
               onChange={(event) => setJobDraft({ ...jobDraft, dueBefore: event.target.value })}
             />
           </FilterBar>
-          <Typography.Text type="secondary">
-            共 {jobStats.data?.total ?? 0} 条 · 已到期 {jobStats.data?.overdue ?? 0} 条 · 1 小时内{' '}
-            {jobStats.data?.dueWithinHour ?? 0} 条 · 最近到期 {formatTime(jobStats.data?.nextDueAt)}
-          </Typography.Text>
+          {/* 宿主不对时统计也是 0，显示「共 0 条」会误导，直接不渲染 */}
+          {!jobHostMismatch && (
+            <Typography.Text type="secondary">
+              共 {jobStats.data?.total ?? 0} 条 · 已到期 {jobStats.data?.overdue ?? 0} 条 · 1 小时内{' '}
+              {jobStats.data?.dueWithinHour ?? 0} 条 · 最近到期{' '}
+              {formatTime(jobStats.data?.nextDueAt)}
+            </Typography.Text>
+          )}
           <Table<TimerJobSummary>
             rowKey="id"
             columns={jobColumns}

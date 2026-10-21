@@ -23,6 +23,11 @@ export interface PagedList<T> {
   total: number;
   page: PageState;
   loading: boolean;
+  /**
+   * 最近一次查询的错误（成功 / 未查询过为 null）。
+   * 供调用方区分「确实没有数据」与「请求失败」，例如按 status 识别宿主不对（404）。
+   */
+  error: Error | null;
   /** 翻页 / 改页大小。 */
   setPage: (page: PageState) => void;
   /** 按当前页码重新拉取（刷新按钮 / 操作后同步）。 */
@@ -90,6 +95,7 @@ export function usePagedList<T>(
     total: query.data?.total ?? 0,
     page,
     loading: query.isPending || query.isFetching,
+    error: query.error ?? null,
     setPage,
     reload: () => void query.refetch(),
     pagination: {

@@ -1,8 +1,12 @@
 import { defineConfig } from 'vite';
 
-// 开发期把 /api 代理到 NetBpm.Rest，避免跨域：
+// 开发期把 /api 代理到后端，避免跨域：
 //   POST /api/designer/deploy            提交 BPMN XML
 //   GET  /api/designer/definition/{id}/xml  回显 BPMN XML
+//   GET  /api/admin/models               供「从已有模型导入」下拉（管理端点）
+//
+// 端口别指错：Rest=5080 只有 designer / runtime / identity，管理端点（/api/admin/**）
+// 只在 Admin=5081 提供；需要 /api/admin/models 时目标必须是 5081。
 export default defineConfig({
   // 部署在管理宿主的 /designer/ 子路径下，base 必须是 /designer/，否则资源会请求到 /assets/（管理端）
   base: '/designer/',

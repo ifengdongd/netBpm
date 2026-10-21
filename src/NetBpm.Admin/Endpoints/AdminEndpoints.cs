@@ -52,9 +52,11 @@ public static partial class AdminEndpoints
         group.MapPost("/models", CreateModelAsync).Accepts<SaveBpmnModelRequest>("application/json")
             .Produces<SaveBpmnModelResponse>(StatusCodes.Status201Created)
             .RequireAdminScope(TaskScopes.AdminModelWrite, "新建流程模型");
+        // ⚠️ 两个媒体类型必须写在**同一次** Accepts 调用里：
+        // 连写两次 Accepts 时只有最后一个会被路由匹配，text/xml 的请求会直接 404
+        // （控制台 postXml 发的就是 text/xml; charset=utf-8）。
         group.MapPost("/models/import", ImportModelAsync)
-            .Accepts<string>("text/xml")
-            .Accepts<string>("application/xml")
+            .Accepts<string>("text/xml", "application/xml")
             .Produces<SaveBpmnModelResponse>(StatusCodes.Status201Created)
             .RequireAdminScope(TaskScopes.AdminModelWrite, "导入流程模型");
         group.MapPost("/models/from-definition/{processDefinitionId}", CreateModelFromDefinitionAsync)

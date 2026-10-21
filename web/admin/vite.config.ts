@@ -2,6 +2,10 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
 // 开发期把 /api 代理到 NetBpm.Admin 宿主（引擎 REST + 管理端端点都在同一个宿主）。
+//
+// 端口别指错：Rest=5080 只有 designer / runtime / identity，管理端点（/api/admin/**，
+// 如定时作业 /api/admin/jobs）只在 Admin=5081 提供。指到 5080 时管理页会 404。
+//
 // 目标地址默认 http://localhost:5081，可用环境变量 NETBPM_API_TARGET 覆盖，例如：
 //   NETBPM_API_TARGET=http://localhost:6001 npm run dev
 // 生产构建直接输出到 src/NetBpm.Admin/wwwroot，由该宿主的 UseStaticFiles 托管。
