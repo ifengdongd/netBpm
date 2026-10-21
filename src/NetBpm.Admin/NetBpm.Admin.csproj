@@ -17,4 +17,21 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
   </ItemGroup>
 
+  <!--
+    NetBpm.Rest 同为 Web SDK 宿主，它的 appsettings*.json 会经 ProjectReference 作为传递内容
+    进入本项目，与本项目同名文件在发布输出里撞车（NETSDK1152）。
+    管理控制台使用自己的配置，这里剔除来自 Rest 宿主的传递项（不影响 Rest 自身发布）。
+  -->
+  <Target Name="DropRestHostAppsettingsFromPublish" AfterTargets="GetCopyToPublishDirectoryItems">
+    <ItemGroup>
+      <_RestHostAppsettingsCandidate
+          Include="@(_SourceItemsToCopyToPublishDirectoryAlways);@(_SourceItemsToCopyToPublishDirectory);@(_SourceItemsToCopyToPublishDirectoryIfDifferent)"
+          Condition="$([System.String]::Copy('%(FullPath)').Replace('\','/').Contains('/NetBpm.Rest/')) and $([System.String]::Copy('%(Filename)').StartsWith('appsettings'))" />
+
+      <_SourceItemsToCopyToPublishDirectoryAlways Remove="@(_RestHostAppsettingsCandidate)" />
+      <_SourceItemsToCopyToPublishDirectory Remove="@(_RestHostAppsettingsCandidate)" />
+      <_SourceItemsToCopyToPublishDirectoryIfDifferent Remove="@(_RestHostAppsettingsCandidate)" />
+    </ItemGroup>
+  </Target>
+
 </Project>

@@ -10,7 +10,7 @@ param([string]$Configuration = "Release")
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$version = "0.1.1"
+$version = "0.1.2"
 $nugetDir = Join-Path $root "artifacts\nuget"
 $distDir = Join-Path $root "artifacts\netbpm-$version"
 $dllDir = Join-Path $distDir "dll"

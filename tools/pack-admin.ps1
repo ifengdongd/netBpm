@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 
 # 与 tools\pack.ps1 的 $version 保持一致
-$version = "0.1.1"
+$version = "0.1.2"
 
 $adminProject = Join-Path $root "src\NetBpm.Admin\NetBpm.Admin.csproj"
 $distDir = Join-Path $root "artifacts\netbpm-admin-$version"
