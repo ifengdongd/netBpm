@@ -208,9 +208,10 @@ export default function MonitoringPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editForm] = Form.useForm<{ dueDate?: string; priority?: number }>();
 
-  // 定时作业改期
+  // 定时作业改期 / 立即触发
   const [jobReschedule, setJobReschedule] = useState<TimerJobSummary | null>(null);
   const [jobSubmitting, setJobSubmitting] = useState(false);
+  const [executingJobId, setExecutingJobId] = useState<string | null>(null);
   const [jobForm] = Form.useForm<{ dueDate?: string }>();
 
   // 批量改任务到期时间
@@ -218,6 +219,11 @@ export default function MonitoringPage() {
   const [batchDueOpen, setBatchDueOpen] = useState(false);
   const [batchDueSubmitting, setBatchDueSubmitting] = useState(false);
   const [batchDueForm] = Form.useForm<{ dueDate?: string; clearDueDate?: boolean }>();
+
+  // 批量转办（清空办理人 = 退回候选池）
+  const [batchAssigneeOpen, setBatchAssigneeOpen] = useState(false);
+  const [batchAssigneeSubmitting, setBatchAssigneeSubmitting] = useState(false);
+  const [batchAssigneeForm] = Form.useForm<{ assignee?: string; clearAssignee?: boolean }>();
 
   /** 关闭实例详情：同时清掉地址栏的 instanceId，避免刷新后又弹出来。 */
   const closeInstanceDetail = () => {
@@ -428,8 +434,52 @@ export default function MonitoringPage() {
     }
   };
 
+  /** 批量转办：逐项执行；传空办理人表示退回候选池（清空 assignee）。 */
+  const submitBatchAssignee = async () => {
+    let values: { assignee?: string; clearAssignee?: boolean };
+
+    try {
+      values = await batchAssigneeForm.validateFields();
+    } catch {
+      return;
+    }
+
+    const assignee = values.assignee?.trim();
+
+    if (values.clearAssignee !== true && (assignee === undefined || assignee.length === 0)) {
+      message.error('请填写新的办理人，或勾选「退回候选池」');
+      return;
+    }
+
+    setBatchAssigneeSubmitting(true);
+
+    try {
+      const result = await runtimeApi.batchSetTaskAssignee(
+        selectedTaskIds,
+        values.clearAssignee === true ? undefined : assignee,
+      );
+
+      if (result.failed > 0) {
+        message.warning(`批量转办完成：成功 ${result.succeeded} 条，失败 ${result.failed} 条`);
+      } else {
+        message.success(`批量转办完成：${result.succeeded} 条`);
+      }
+
+      setBatchAssigneeOpen(false);
+      setSelectedTaskIds([]);
+      batchAssigneeForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['runtime'] });
+    } catch (error) {
+      message.error(`批量转办失败：${(error as Error).message}`);
+    } finally {
+      setBatchAssigneeSubmitting(false);
+    }
+  };
+
   /** 立即触发定时作业：不等到期，走与轮询相同的抢占语义（重复点击只有一个生效）。 */
   const executeJob = async (job: TimerJobSummary) => {
+    setExecutingJobId(job.id);
+
     try {
       await jobsApi.execute(job.id);
       message.success('已触发定时作业');
@@ -438,6 +488,8 @@ export default function MonitoringPage() {
       void queryClient.invalidateQueries({ queryKey: ['runtime'] });
     } catch (error) {
       message.error(`触发失败：${(error as Error).message}`);
+    } finally {
+      setExecutingJobId(null);
     }
   };
 
@@ -651,7 +703,12 @@ export default function MonitoringPage() {
           <Button size="small" onClick={() => openJobReschedule(record)}>
             改期
           </Button>
-          <Button size="small" onClick={() => void executeJob(record)}>
+          <Button
+            size="small"
+            loading={executingJobId === record.id}
+            disabled={executingJobId !== null && executingJobId !== record.id}
+            onClick={() => void executeJob(record)}
+          >
             立即触发
           </Button>
         </Space>
@@ -760,6 +817,9 @@ export default function MonitoringPage() {
           <Space wrap>
             <Button disabled={selectedTaskIds.length === 0} onClick={() => setBatchDueOpen(true)}>
               批量改到期时间（{selectedTaskIds.length}）
+            </Button>
+            <Button disabled={selectedTaskIds.length === 0} onClick={() => setBatchAssigneeOpen(true)}>
+              批量转办（{selectedTaskIds.length}）
             </Button>
           </Space>
           <Table<TaskResponse>
@@ -1054,6 +1114,30 @@ export default function MonitoringPage() {
             extra="按本地时区填写；逐项执行，单条失败不影响其它条。"
           >
             <Input type="datetime-local" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`批量转办（${selectedTaskIds.length} 条）`}
+        open={batchAssigneeOpen}
+        confirmLoading={batchAssigneeSubmitting}
+        okText="保存"
+        cancelText="取消"
+        onOk={() => void submitBatchAssignee()}
+        onCancel={() => setBatchAssigneeOpen(false)}
+        destroyOnClose
+      >
+        <Form form={batchAssigneeForm} layout="vertical" preserve={false}>
+          <Form.Item name="clearAssignee" valuePropName="checked">
+            <Checkbox>退回候选池（清空办理人）</Checkbox>
+          </Form.Item>
+          <Form.Item
+            name="assignee"
+            label="新的办理人"
+            extra="填写用户 id；逐项执行，单条失败不影响其它条。"
+          >
+            <Input placeholder="user id" />
           </Form.Item>
         </Form>
       </Modal>

@@ -2,14 +2,18 @@ import { DeleteOutlined, PauseCircleOutlined, PlayCircleOutlined, SwapOutlined }
 import {
   Alert,
   App,
+  AutoComplete,
   Button,
+  Checkbox,
   Descriptions,
+  Divider,
   Drawer,
   Empty,
   Form,
   Input,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Spin,
   Table,
@@ -22,7 +26,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
-import { runtimeApi } from '../api';
+import { deploymentsApi, runtimeApi } from '../api';
 import { ApiError } from '../api/client';
 import type {
   HistoricProcessInstance,
@@ -88,6 +92,34 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
   const [varsSubmitting, setVarsSubmitting] = useState(false);
   const [varsForm] = Form.useForm<{ variables: string }>();
 
+  // 活动实例 modify：取消 / 在活动之前启动（activityId 允许手填，便于并行 / 多实例场景）
+  const [modifyActivityId, setModifyActivityId] = useState('');
+  const [modifying, setModifying] = useState(false);
+
+  // 实例迁移：先预演（validateOnly）再执行，避免点错目标版本后无法回退
+  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [migrateForm] = Form.useForm<{
+    targetProcessDefinitionId: string;
+    reason?: string;
+    validateOnly?: boolean;
+  }>();
+
+  // 目标定义候选：从部署列表摊平（部署 → 定义），够用且不额外加接口
+  const definitionsQuery = useQuery({
+    queryKey: ['designer', 'deployments', 'migrate-targets'],
+    queryFn: () => deploymentsApi.list({ maxResults: 200 }),
+    enabled: open && instanceId !== null,
+  });
+
+  /** 迁移目标候选：只给 id + key + 版本，避免顺手选错。 */
+  const definitionOptions = (definitionsQuery.data?.items ?? []).flatMap((deployment) =>
+    deployment.definitions.map((definition) => ({
+      value: definition.processDefinitionId,
+      label: `${definition.key} v${definition.version}${definition.isSuspended ? '（已挂起）' : ''}`,
+    })),
+  );
+
   const loading = open && detailQuery.isPending;
   const loaded = detailQuery.isSuccess || detailQuery.isError;
 
@@ -137,6 +169,78 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
       message.error(`跳转失败：${(error as Error).message}`);
     } finally {
       setJumping(false);
+    }
+  };
+
+  /**
+   * 活动级 modify：
+   * - cancel：该活动上的待办 / 定时作业 / 历史一并收口，其它并行分支不受影响；
+   * - start-before：额外开一条分支，目标活动会真正开始执行（不是「挪动」现有令牌）。
+   */
+  const runModify = async (action: 'cancel' | 'start-before') => {
+    const activityId = modifyActivityId.trim();
+
+    if (instance === null || activityId.length === 0) {
+      return;
+    }
+
+    setModifying(true);
+
+    try {
+      if (action === 'cancel') {
+        await runtimeApi.cancelActivity(instance.id, activityId, '控制台取消活动');
+        message.success(`已取消活动 ${activityId}`);
+      } else {
+        await runtimeApi.startBeforeActivity(instance.id, activityId, '控制台活动前启动');
+        message.success(`已在 ${activityId} 之前启动新分支`);
+      }
+
+      setModifyActivityId('');
+      onChanged();
+    } catch (error) {
+      message.error(`操作失败：${(error as Error).message}`);
+    } finally {
+      setModifying(false);
+    }
+  };
+
+  /** 实例迁移：`validateOnly` 只算计划；真正执行后待办会按映射重建。 */
+  const submitMigrate = async () => {
+    if (instance === null) {
+      return;
+    }
+
+    let values: { targetProcessDefinitionId: string; reason?: string; validateOnly?: boolean };
+
+    try {
+      values = await migrateForm.validateFields();
+    } catch {
+      return;
+    }
+
+    setMigrating(true);
+
+    try {
+      await runtimeApi.migrateInstance(
+        instance.id,
+        values.targetProcessDefinitionId.trim(),
+        values.reason,
+        undefined,
+        values.validateOnly === true,
+      );
+
+      if (values.validateOnly === true) {
+        message.success('迁移预演通过（未落库），确认无误后取消勾选再执行');
+      } else {
+        message.success('迁移完成');
+        setMigrateOpen(false);
+        migrateForm.resetFields();
+        onChanged();
+      }
+    } catch (error) {
+      message.error(`迁移失败：${(error as Error).message}`);
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -401,6 +505,7 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
               >
                 变量直写
               </Button>
+              <Button onClick={() => setMigrateOpen(true)}>迁移定义</Button>
               <Popconfirm
                 title="删除该实例？"
                 description="待办 / 变量将被清理，历史保留。"
@@ -414,6 +519,45 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
                 </Button>
               </Popconfirm>
             </Space>
+          )}
+
+          {isRunning && (
+            <>
+              <Divider orientation="left" plain style={{ margin: '4px 0 8px' }}>
+                活动实例（modify）
+              </Divider>
+              <Space wrap>
+                <AutoComplete
+                  style={{ width: 280 }}
+                  placeholder="活动 id（可从当前节点里选，也可手填）"
+                  value={modifyActivityId}
+                  onChange={(value) => setModifyActivityId(value)}
+                  options={activities
+                    .filter((activity) => activity.isActive)
+                    .map((activity) => ({
+                      value: activity.activityId,
+                      label: `${activity.activityName ?? activity.activityId}（${activity.activityId}）`,
+                    }))}
+                  allowClear
+                />
+                <Button
+                  danger
+                  disabled={modifying || modifyActivityId.trim().length === 0}
+                  onClick={() => void runModify('cancel')}
+                >
+                  取消活动
+                </Button>
+                <Button
+                  disabled={modifying || modifyActivityId.trim().length === 0}
+                  onClick={() => void runModify('start-before')}
+                >
+                  在活动前启动
+                </Button>
+              </Space>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                取消：结束该活动的待办 / 定时作业并收口历史；在活动前启动：额外开一条分支，目标活动会重新执行。
+              </Typography.Text>
+            </>
           )}
 
           <Tabs items={tabItems} />
@@ -468,6 +612,46 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
             rules={[{ required: true, whitespace: true, message: '请输入 JSON 对象' }]}
           >
             <Input.TextArea rows={12} placeholder={'{\n  "approved": true\n}'} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="迁移流程实例"
+        open={migrateOpen}
+        confirmLoading={migrating}
+        onOk={() => void submitMigrate()}
+        onCancel={() => setMigrateOpen(false)}
+        okText="执行"
+        cancelText="取消"
+        width={640}
+        destroyOnClose
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="迁移不可逆：目标定义的活动需与新版本对齐，待办会按映射重建。建议先勾选「仅预演」核对计划。"
+        />
+        <Form form={migrateForm} layout="vertical" initialValues={{ validateOnly: true }}>
+          <Form.Item
+            name="targetProcessDefinitionId"
+            label="目标流程定义"
+            rules={[{ required: true, whitespace: true, message: '请选择目标定义版本' }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder={definitionsQuery.isLoading ? '加载定义中…' : '选择目标定义版本'}
+              options={definitionOptions}
+              loading={definitionsQuery.isLoading}
+            />
+          </Form.Item>
+          <Form.Item name="reason" label="迁移原因（可选）">
+            <Input placeholder="写入迁移记录与审计" />
+          </Form.Item>
+          <Form.Item name="validateOnly" valuePropName="checked">
+            <Checkbox>仅预演（只算迁移计划，不落库）</Checkbox>
           </Form.Item>
         </Form>
       </Modal>

@@ -3,7 +3,8 @@ import type { ColumnsType } from 'antd/es/table';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import { runtimeApi } from '../api';
+import { identityApi, runtimeApi } from '../api';
+import { ApiError } from '../api/client';
 import type { FormProperty, IdentityLink, Variables } from '../api/types';
 import { formatTime, formatValue } from '../utils';
 
@@ -29,6 +30,37 @@ export default function TaskDetailDrawer({ taskId, open, onClose, onOpenInstance
     queryFn: () => runtimeApi.taskForm(taskId as string),
     enabled: open && taskId !== null,
   });
+
+  /**
+   * 加候选组前先查身份组：组不存在时给出明确提示（引擎不会校验组是否存在，
+   * 直接加会得到一个永远匹配不到待办的「幽灵候选组」）。
+   */
+  const addCandidateGroup = async () => {
+    const groupId = actorId.trim();
+
+    if (task === null || groupId.length === 0) {
+      return;
+    }
+
+    setActing(true);
+
+    try {
+      const group = await identityApi.group(groupId);
+      await runtimeApi.addCandidateGroup(task.id, groupId);
+
+      message.success(`已加候选组「${group.name ?? group.id}」`);
+      setActorId('');
+      void queryClient.invalidateQueries({ queryKey: ['runtime'] });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        message.error(`组 '${groupId}' 不存在：请先在身份模块建组，再加为候选组`);
+      } else {
+        message.error(`操作失败：${(error as Error).message}`);
+      }
+    } finally {
+      setActing(false);
+    }
+  };
 
   const runAction = async (action: () => Promise<void>, success: string) => {
     setActing(true);
@@ -194,10 +226,7 @@ export default function TaskDetailDrawer({ taskId, open, onClose, onOpenInstance
             </Button>
             <Button
               disabled={acting || actorId.trim().length === 0}
-              onClick={() => void runAction(
-                () => runtimeApi.addCandidateGroup(task.id, actorId.trim()),
-                '已加候选组',
-              )}
+              onClick={() => void addCandidateGroup()}
             >
               加候选组
             </Button>

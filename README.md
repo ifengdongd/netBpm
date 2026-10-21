@@ -241,15 +241,24 @@ POST /api/runtime/process-instances/{id}/migrate
 
 | 动作 | 接口 | 语义 |
 |---|---|---|
-| 保存草稿 | `PUT /api/admin/models/{id}` | 允许保存半成品；返回 `revision` + 校验 `errors/warnings` |
-| 版本历史 | `GET /api/admin/models/{id}/history` | 每次保存/回滚追加一版（含操作人、时间） |
+| 新建 | `POST /api/admin/models` | 服务端生成 id，`201` 返回 `revision`；同一租户 `process_key` 唯一（重名 409） |
+| 保存草稿 | `PUT` / `PATCH` `/api/admin/models/{id}` | PUT 全量 upsert；**PATCH 只覆盖提交的字段**（设计器走 PATCH，不会清空描述/SVG） |
+| 复制 / 导入 / 反建 | `POST /api/admin/models/{id}/duplicate`、`/models/import`、`/models/from-definition/{defId}` | 副本自动换 key（`{key}_copy`）并同步改写 XML 的 `process/@id` |
+| 并发控制 | 保存 / 回滚 / 发布 + `If-Match: "<revision>"` | 版本不一致 **409** + 当前 `currentRevision`；不带该头保持旧行为（兼容旧客户端） |
+| 版本历史 | `GET /api/admin/models/{id}/history` | 分页（默认 20、上限 200，`?envelope=true` 返回信封）；每次保存/回滚/发布追加一版 |
 | 版本详情 | `GET /api/admin/models/{id}/history/{revisionId}` | 取该版 XML/SVG（用于对比） |
 | 回滚 | `POST /api/admin/models/{id}/rollback/{revisionId}` | 把旧版内容作为**新版本**写回（历史只增不删） |
-| 发布 | `POST /api/admin/models/{id}/publish` | 用当前 XML 走引擎部署：**部署期校验强制拦截**，成功返回定义 id/版本 |
+| 发布前预检 | `POST /api/admin/models/{id}/validate` | 与发布同口径的解析 + 结构/表达式校验，返回 `errors/warnings`，不落库 |
+| 发布 | `POST /api/admin/models/{id}/publish` | 用当前 XML 走引擎部署：**部署期校验强制拦截**，成功返回定义 id/版本；`{"skipIfUnchanged":true}` 时内容没变直接回放线上版本（`skipped=true`），不再多造定义版本 |
+| 发布历史 | `GET /api/admin/models/{id}/publications` | 每次发布的 `revision` / 定义 id / 版本 / 部署 id / 时间 / 操作人 |
+| 清理历史 | `DELETE /api/admin/models/{id}/history?keepRevisions=` | 按保留版本数裁剪（需要 `netbpm.admin.model.write`） |
 
 - 保存与历史写入在**同一事务**内，不会出现「模型更新了、历史没记」。
 - 草稿可含阻断级问题（方便保存半成品），但**发布会 400 并逐条返回问题**。
-- 已有库需执行 `db/{dialect}/0008_create_model_history.sql`（新库 `migrate` 自动包含）。
+- 「模型是否已发布 / 有无未发布修改」由版本水位计算：最新 revision 与最近一次 `action=publish` 快照比较，列表接口一并返回。
+- 同一租户下 `process_key` 唯一（`ux_bpm_model_key`）：已有库需执行 `db/{dialect}/0010_model_key_unique.sql`；
+  新建 / 改 key / 导入 / 复制撞名都会 409，并指出占用该 key 的模型 id。
+- 已有库另需 `0008_create_model_history.sql`（新库 `migrate` 自动包含）。
 
 ### 管理治理：细粒度授权 / 审计 / 指标与归档
 
@@ -296,6 +305,10 @@ POST /api/runtime/process-instances/{id}/migrate
 | 转办 | `task.reassign` / `task.batch_reassign` | `POST /api/runtime/tasks/{id}/assignee`、批量转办 |
 | 改任务 / 候选关系 | `task.update` / `task.candidate_add` / `task.candidate_remove` | `PATCH /tasks/{id}`、`/candidate-users`、`/candidate-groups` |
 | 跳转 / 迁移 | `instance.jump` / `instance.migrate` | `.../jump`、`.../migrate`（预演不记） |
+| 活动 modify | `instance.activity_cancel` / `instance.activity_start` | `.../activities/{activityId}/cancel|start-before`（成功与失败都记） |
+| 模型 / 发布 | `model.create` / `model.delete` / `model.publish` / `model.history_prune` | `/api/admin/models/**` 的写操作 |
+| 流程类型 | `process_type.create` / `update` / `delete` | `/api/admin/process-types/**` |
+| 定时作业 | `job.reschedule` / `job.execute` | `/api/admin/jobs/{id}/due-date|execute` |
 | 删除实例 | `instance.delete` / `instance.batch_delete` | `DELETE /process-instances/{id}`、`.../batch/delete`（逐项记） |
 | 挂起 / 激活 | `instance.suspend` / `instance.activate` | `.../suspend`、`.../activate` |
 | 变量直写 | `variable.write` / `variable.delete` / `task_variable.*` | 实例变量与任务局部变量的 PUT / DELETE |
@@ -569,6 +582,20 @@ npm run lint      # ESLint
 npm test          # vitest 单元测试
 ```
 
+控制台页面与主要能力：
+
+| 页面 | 能力 |
+|---|---|
+| 流程模型 | 新建 / 导入 / 复制 / 反建、关键字搜索、设计器跳转、发布前预检、发布（内容未变自动跳过）、发布历史、版本历史与回滚、If-Match 并发冲突提示 |
+| 部署与定义 | 部署列表（定义数 / 最新版本 / 挂起数）与关键字过滤、定义版本、挂起 / 激活、删除部署、下载 XML |
+| 监控 / 实例 | 多条件筛选、挂起 / 激活 / 删除、跳转节点、**取消活动 / 活动前启动**、变量直写（JSON 合并写 + 审计提示）、流程图与历史 |
+| 监控 / 任务 | 改到期时间 / 优先级、转办与取消认领、候选人 / 候选组增删、委派与解决、批量转办、**批量改到期时间**、表单元数据（formKey + formProperty） |
+| 监控 / 作业 | 边界定时作业查询与统计、改期、**立即触发** |
+| 审计 / 指标 | 分页查询（动作 / 操作人 / 实例 / 成功失败）、筛选项、CSV 导出、保留策略清理、总量与待办分布 |
+
+控制台所有变更类操作都会复用后端审计（`/api/admin/audit` 可回放）；发布 / 发起 / 完成带 `Idempotency-Key`，
+重复点击或代理重试不会产生重复版本 / 重复实例。
+
 ⚠️ `src/NetBpm.Admin/wwwroot/` 是**构建产物，不入库**（设计器与管理台共用该目录，
 分别由 `web/designer` 与 `web/admin` 的 `npm run build` 产出）。首次拉取代码或清理后，
 需先在两个前端目录各执行一次 `npm run build` 再启动宿主，否则页面 404。
@@ -701,11 +728,34 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | GET | `/api/admin/history/archives` | 归档记录列表（不含 payload） |
 | GET | `/api/admin/history/archives/{processInstanceId}` | 归档详情（含历史行 JSON 快照） |
 | GET | `/openapi/v1.json` | OpenAPI 文档 |
+| GET | `/api/admin/models` | 模型列表（`keyword` + 分页 + `envelope`；含发布状态与「有未发布修改」） |
+| POST | `/api/admin/models` | 新建模型（服务端生成 id；`process_key` 重名 409） |
+| GET | `/api/admin/models/{id}` | 模型详情（XML / SVG / `revision` / 发布状态） |
+| PUT / PATCH | `/api/admin/models/{id}` | 保存草稿（PUT 全量 / PATCH 局部）；支持 `If-Match` 乐观并发（409） |
+| DELETE | `/api/admin/models/{id}` | 删除模型（连同版本历史，不影响已部署定义） |
+| POST | `/api/admin/models/{id}/validate` | 发布前预检（errors / warnings，不落库） |
+| POST | `/api/admin/models/{id}/publish` | 发布：部署期校验强制拦截；`skipIfUnchanged` 内容未变时跳过 |
+| GET | `/api/admin/models/{id}/publications` | 发布历史（revision / 定义 id / 版本 / 部署 id / 时间 / 操作人） |
+| GET | `/api/admin/models/{id}/history` | 版本历史（分页；不含 XML/SVG 正文） |
+| GET | `/api/admin/models/{id}/history/{revisionId}` | 版本详情（含 XML/SVG） |
+| POST | `/api/admin/models/{id}/rollback/{revisionId}` | 回滚为**新版本**（历史只增不删） |
+| DELETE | `/api/admin/models/{id}/history` | 裁剪历史（按保留版本数） |
+| POST | `/api/admin/models/{id}/duplicate` | 复制模型（自动换 key 并改写 XML process id） |
+| POST | `/api/admin/models/import` | 导入 BPMN XML 为模型（`text/xml`，process id 作为 key） |
+| POST | `/api/admin/models/from-definition/{processDefinitionId}` | 从已部署定义反建模型 |
+| GET / POST | `/api/admin/process-types` | 流程类型列表 / 新建 |
+| GET / PUT / DELETE | `/api/admin/process-types/{id}` | 流程类型详情 / 修改 / 删除 |
+| GET | `/api/admin/jobs` | 定时作业列表（实例 / 定义 / 到期前 + 分页 + `envelope`） |
+| GET | `/api/admin/jobs/stats` | 作业统计（总数 / 已到期 / 一小时内到期 / 最近到期） |
+| POST | `/api/admin/jobs/{jobId}/due-date` | 改期（只改到期时间，触发仍由宿主轮询负责） |
+| POST | `/api/admin/jobs/{jobId}/execute` | 立即触发（与轮询同一抢占语义；未推进 → 409） |
+| GET | `/api/admin/audit/options` | 审计筛选项（distinct action / targetType / actor） |
+| GET | `/api/admin/audit/export` | 审计导出（CSV，与查询同过滤条件） |
 | POST | `/api/designer/deploy` | 部署 BPMN XML 定义（`?resourceName=` / `?deploymentName=` / `?tenantId=`） |
 | POST | `/api/designer/validate` | 试校验 BPMN XML（不落库，返回 errors / warnings） |
 | GET | `/api/designer/definitions` | 定义列表（`tenantId`/`key` 过滤 + 分页） |
 | GET | `/api/designer/definitions/{key}/versions` | 按 key 查全部版本（版本倒序） |
-| GET | `/api/designer/deployments` | 部署列表（按部署聚合定义，`tenantId` 过滤） |
+| GET | `/api/designer/deployments` | 部署列表（按部署聚合定义，`keyword` / `tenantId` + 分页；含 `definitionCount` / `latestVersion` / `suspendedCount`） |
 | GET | `/api/designer/deployments/{deploymentId}/resources` | 部署资源清单（资源名 → 定义 id） |
 | GET | `/api/designer/definition/{id}/xml` | 获取定义 XML |
 | POST | `/api/designer/definitions/{id}/suspend` | 挂起定义（`?suspendProcessInstances=`） |
@@ -717,6 +767,10 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | DELETE | `/api/runtime/process-instances/{id}` | 删除（撤销）实例 |
 | POST | `/api/runtime/process-instances/{id}/suspend` `/activate` | 挂起 / 激活实例 |
 | POST | `/api/runtime/process-instances/{id}/jump` | 跳转到指定节点（管理动作） |
+| POST | `/api/runtime/process-instances/{id}/activities/{activityId}/cancel` | 取消该活动上的活动实例（任务 / 定时作业 / 历史一并收口；无活动执行 → 409；取消最后一个分支后实例结束） |
+| POST | `/api/runtime/process-instances/{id}/activities/{activityId}/start-before` | 在活动之前新开一条令牌（目标活动真正开始执行；现有多分支不动） |
+| POST | `/api/runtime/process-instances/{id}/migrate` | 迁移到其它定义版本（`validateOnly` 预演；活动映射 + 待办重建） |
+| GET | `/api/runtime/process-instances/{id}/migrations` | 实例迁移记录 |
 | GET | `/api/runtime/tasks` | 查询任务列表（`assignee`/`candidateUser`/`candidateGroup`/实例 + 分页） |
 | GET | `/api/runtime/tasks/{taskId}` | 任务详情（含描述 / 分类 / 业务主键 / 委派状态 / 身份关系） |
 | GET | `/api/runtime/tasks/{taskId}/identity-links` | 任务身份关系（候选人 / 候选组） |
@@ -734,7 +788,10 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | POST | `/api/runtime/tasks/{taskId}/complete` | 完成任务 |
 | GET | `/api/runtime/tasks/stats` | 待办统计（总数 / 逾期 / 今天到期 / 按流程 key 分组；`timeZoneOffsetMinutes` 指定「今天」的时区） |
 | POST | `/api/runtime/tasks/batch/assignee` | 批量转办（逐项结果，非原子） |
+| POST | `/api/runtime/tasks/batch/due-date` | 批量改到期时间 / 清空到期（逐项结果，非原子） |
 | POST | `/api/runtime/process-instances/batch/delete` | 批量删除实例（逐项结果，非原子） |
+| POST | `/api/runtime/process-instances/batch/suspend` `/activate` | 批量挂起 / 激活实例（逐项结果） |
+| POST | `/api/runtime/process-instances/batch/migrate` | 批量迁移到同一目标定义版本（逐项结果） |
 | GET | `/api/runtime/process-instances/{id}/variables` | 查询流程变量 |
 | PUT | `/api/runtime/process-instances/{id}/variables/{name}` | 写流程变量（请求体即 JSON 值） |
 | PUT | `/api/runtime/process-instances/{id}/variables` | 批量写流程变量（同一事务） |

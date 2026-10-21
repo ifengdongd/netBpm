@@ -211,6 +211,23 @@ export const runtimeApi = {
       reason,
     }),
 
+  /**
+   * 取消指定活动上的活动实例（modify）：该活动的待办 / 定时作业 / 历史一并收口，
+   * 其它并行分支不受影响；活动已结束或被并发取消时后端回 409。
+   */
+  cancelActivity: (processInstanceId: string, activityId: string, reason?: string) =>
+    http.post<void>(
+      `/api/runtime/process-instances/${encodeURIComponent(processInstanceId)}/activities/${encodeURIComponent(activityId)}/cancel`,
+      { reason },
+    ),
+
+  /** 在指定活动之前新开一条令牌（modify）：目标活动会真正开始执行。 */
+  startBeforeActivity: (processInstanceId: string, activityId: string, reason?: string) =>
+    http.post<void>(
+      `/api/runtime/process-instances/${encodeURIComponent(processInstanceId)}/activities/${encodeURIComponent(activityId)}/start-before`,
+      { reason },
+    ),
+
   removeInstance: (processInstanceId: string, deleteReason?: string) =>
     http.del<void>(`/api/runtime/process-instances/${encodeURIComponent(processInstanceId)}${deleteReason ? `?deleteReason=${encodeURIComponent(deleteReason)}` : ''}`),
 
@@ -347,16 +364,20 @@ export const runtimeApi = {
       `/api/runtime/process-instances/${encodeURIComponent(processInstanceId)}/variables/${encodeURIComponent(name)}`,
     ),
 
-  /** 迁移到指定定义版本（迁移不可逆；支持活动映射）。 */
+  /**
+   * 迁移到指定定义版本（迁移不可逆；支持活动映射）。
+   * `validateOnly=true` 只算迁移计划、不落库，用于执行前预演。
+   */
   migrateInstance: (
     processInstanceId: string,
     targetProcessDefinitionId: string,
     reason?: string,
     activityMappings?: Record<string, string>,
+    validateOnly = false,
   ) =>
     http.post<unknown>(
       `/api/runtime/process-instances/${encodeURIComponent(processInstanceId)}/migrate`,
-      { targetProcessDefinitionId, reason, activityMappings },
+      { targetProcessDefinitionId, reason, activityMappings, validateOnly },
     ),
 
   taskStats: (params?: { timeZoneOffsetMinutes?: number }) =>
