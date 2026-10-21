@@ -51,7 +51,7 @@ public sealed class PerformanceOptimizationIntegrationTests
 
             Assert.True(
                 exists > 0,
-                $"缺少索引 {index}。已初始化的库请执行 db/{provider}/0004_perf_indexes.sql 后再跑本用例。");
+                $"缺少索引 {index}。请先执行 db/{provider}/netbpm_init.sql（幂等，可补齐索引）后再跑本用例。");
         }
     }
 

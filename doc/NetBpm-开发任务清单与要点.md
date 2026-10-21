@@ -153,12 +153,12 @@
 
 | # | 任务 | 交付物 | 要点 |
 |---|---|---|---|
-| T6.1 | 双方言 DDL | `db/{mysql,sqlserver}/0001..0005` | 引擎表**恰好 13 张** `ACT_*`；`0001` 不得出现被裁掉的 12 张表名（有测试守着）；表注释：MySQL 内联、SQL Server 用 `sp_addextendedproperty` |
+| T6.1 | 双方言 DDL | `db/{mysql,sqlserver}/netbpm_init.sql`（单一数据源 `SchemaCatalog` 生成） | 引擎表**恰好 13 张** `ACT_*`；脚本不得出现被裁掉的 12 张表名（有测试守着）；**全幂等**（建表 / 索引 / 外键 / 注释都带方言守卫），可重复执行；表注释：MySQL 内联、SQL Server 用 `sp_addextendedproperty`（判重后再加） |
 | T6.2 | ID 区块生成器 | `DbIdGenerator` | 从 `ACT_GE_PROPERTY.next.dbid` **一次占 2500**、`REV_` 乐观锁更新、进程内自增发放；改成 UUID/自增会**让库级对拍全线失败** |
 | T6.3 | 仓储族 | `DapperExecutionManager` / `DapperTaskManager` / `DapperVariableInstanceManager` / `DapperHistoryManager` / `DapperProcessDefinitionStore` | **Dapper 不做下划线→驼峰映射** → 所有手工 SQL 显式 `as` 别名；保留字要反引号；别用 `select *` |
 | T6.4 | 变量类型映射 | `VariableTypeMapper` | 列布局：`string`→`TEXT_`；整数→`LONG_` **和** `TEXT_`；`double`→只 `DOUBLE_`；`bool`→只 `LONG_`；`date`→`LONG_`（UTC 毫秒）；`null`→`TYPE_='null'` 且值列全空。`TEXT2_` **不是**截断列，是 json 类型类全名辅助列。超 4000 字符串 / bytes / serializable **响亮失败，绝不截断** |
 | T6.5 | 会话与事务 | `DbSession` / `IDbSession` / `TransactionInterceptor` | 一个命令 = 一个事务；历史行**同事务内即时写**（与 Activiti 的一级缓存 flush 等效，提交后可见结果一致） |
-| T6.6 | 迁移与校验工具 | `NetBpm.DbMigrate`（`migrate` / `check` / `probe` / `purge`）+ `DatabaseMigrator` / `EngineTableCleaner` | **无迁移记录表**：靠"`ACT_GE_PROPERTY` 是否存在 + `schema.version` 匹配"判幂等 ⇒ 已初始化的库不会再跑脚本，改动必须手工 `ALTER`。清库顺序：身份关系**先于**任务（外键约束） |
+| T6.6 | 迁移与校验工具 | `NetBpm.DbMigrate`（`migrate` / `check` / `probe` / `purge`）+ `DatabaseMigrator` / `EngineTableCleaner` | **无增量迁移记录表**（脚本曾短暂用过 `ACT_GE_SCHEMA_LOG` + 校验和，已由「单文件全幂等」取代）：每次 `migrate` 都完整执行 `netbpm_init.sql`，靠脚本内的方言守卫收敛 ⇒ 新库一次建成、老库只补缺失；初值只在缺失时插入，`next.dbid` 不会被重置。清库顺序：身份关系**先于**任务（外键约束） |
 
 ### WP7 引擎运行时（P6）★★ 全部难点所在
 

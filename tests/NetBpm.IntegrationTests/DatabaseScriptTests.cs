@@ -4,8 +4,11 @@ using NetBpm.Persistence;
 namespace NetBpm.IntegrationTests;
 
 /// <summary>
-/// 数据库脚本自检：无需 Docker 即可运行，用于守住 §7.2 的「25 张 → 13 张」边界，
-/// 并交叉校验脚本初值与引擎期望值一致（§7.3）。
+/// 初始化脚本自检：无需数据库即可运行。
+/// <para>
+/// 守住三件事：① §7.2 的「25 张 → 13 张」边界与扩展表集合；
+/// ② 脚本初值与引擎期望值一致（§7.3）；③ 单文件脚本必须**全幂等**（否则生产环境无法重复执行）。
+/// </para>
 /// </summary>
 public sealed partial class DatabaseScriptTests
 {
@@ -50,30 +53,47 @@ public sealed partial class DatabaseScriptTests
         "ACT_EVT_OUTBOX",
     ];
 
+    /// <summary>业务 / Demo / 应用层扩展表（合并脚本里也必须都建出来）。</summary>
+    private static readonly string[] ApplicationTables =
+    [
+        "instances",
+        "instance_current_task",
+        "deal_history",
+        "workflow_type",
+        "bpmn_model",
+        "leave_bill",
+        "order_bill",
+        "workflow_parameters",
+        "sys_dept",
+        "sys_emp",
+        "sys_emp_group",
+        "sys_emp_group_member",
+        "ACT_IDEMPOTENCY",
+        "ACT_HI_MIGRATION",
+        "bpmn_model_history",
+        "admin_audit_log",
+        "admin_history_archive",
+    ];
+
     [Theory]
     [InlineData("sqlserver")]
     [InlineData("mysql")]
-    public void SchemaScript_ShouldCreateExactlyTheKeptTables(string dialect)
+    public void InitScript_ShouldCreateAllExpectedTables(string dialect)
     {
-        var script = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_engine_schema.sql"));
+        var created = CreatedTables(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect)));
 
-        var created = CreateTableRegex()
-            .Matches(script)
-            .Select(match => match.Groups["table"].Value.ToUpperInvariant())
-            .Distinct(StringComparer.Ordinal)
-            .ToHashSet(StringComparer.Ordinal);
-
-        Assert.Equal(KeptTables.Length, created.Count);
         Assert.All(KeptTables, table => Assert.Contains(table, created));
+        Assert.All(AddedTables, table => Assert.Contains(table, created));
+        Assert.All(ApplicationTables, table => Assert.Contains(table, created));
     }
 
     [Theory]
     [InlineData("sqlserver")]
     [InlineData("mysql")]
-    public void SchemaScript_ShouldNotReferenceRemovedTables(string dialect)
+    public void InitScript_ShouldNotReferenceRemovedTables(string dialect)
     {
         // 只看 DDL 语句本身：脚本头部的注释会逐一列出被裁剪的表名（那是文档，不是建表）
-        var script = StripComments(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_engine_schema.sql")));
+        var script = StripComments(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect)));
 
         foreach (var removed in RemovedTables)
         {
@@ -84,67 +104,77 @@ public sealed partial class DatabaseScriptTests
     [Theory]
     [InlineData("sqlserver")]
     [InlineData("mysql")]
-    public void SchemaScript_ShouldAlignWithEngineExpectations(string dialect)
+    public void InitScript_ShouldAlignWithEngineExpectations(string dialect)
     {
-        // 初值与建表已合并到同一脚本（原 0001 + 0002）
-        var schemaScript = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0001_create_engine_schema.sql"));
+        var script = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect));
 
         // schema.version 必须与 DatabaseSchemaChecker 的期望值一致，否则引擎启动即失败
-        Assert.Contains(
-            $"'{DatabaseSchemaChecker.ExpectedSchemaVersion}'",
-            schemaScript,
-            StringComparison.Ordinal);
+        Assert.Contains($"'{DatabaseSchemaChecker.ExpectedSchemaVersion}'", script, StringComparison.Ordinal);
 
         // §7.3：ID 生成器的区块游标初值
-        Assert.Contains($"'{DbIdGenerator.NextDbIdPropertyName}'", schemaScript, StringComparison.Ordinal);
-        Assert.Contains("'schema.history'", schemaScript, StringComparison.Ordinal);
+        Assert.Contains($"'{DbIdGenerator.NextDbIdPropertyName}'", script, StringComparison.Ordinal);
+        Assert.Contains("'schema.history'", script, StringComparison.Ordinal);
 
         // ROOT_PROC_INST_ID_ 的索引名在 MySQL 上游脚本里就是 ACT_IDC_EXEC_ROOT（保持原样）
-        Assert.Contains("ROOT_PROC_INST_ID_", schemaScript, StringComparison.Ordinal);
+        Assert.Contains("ROOT_PROC_INST_ID_", script, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("sqlserver")]
     [InlineData("mysql")]
-    public void TimerJobScript_ShouldCreateExactlyTheAddedTables(string dialect)
+    public void InitScript_ShouldGuardEveryCreateTable(string dialect)
     {
-        var script = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0006_create_timer_job.sql"));
+        var script = StripComments(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect)));
 
-        var created = CreateTableRegex()
-            .Matches(script)
-            .Select(match => match.Groups["table"].Value.ToUpperInvariant())
-            .Distinct(StringComparer.Ordinal)
-            .ToHashSet(StringComparer.Ordinal);
+        var creates = CreateTableRegex().Matches(script);
+        Assert.NotEmpty(creates);
 
-        // 0006 只负责定时作业表；异步作业与 outbox 在 0012
-        var table = Assert.Single(created);
-        Assert.Equal("ACT_RU_TIMER_JOB", table);
+        if (dialect == "mysql")
+        {
+            // MySQL：每条建表都必须带 if not exists
+            Assert.DoesNotMatch(UnguardedCreateTableRegex(), script);
+        }
+        else
+        {
+            // SQL Server：每条 create table 前面都必须是 if object_id(...) is null 守卫
+            Assert.Equal(creates.Count, GuardedCreateTableRegex().Matches(script).Count);
+        }
     }
 
     [Theory]
     [InlineData("sqlserver")]
     [InlineData("mysql")]
-    public void UpgradeScript_ShouldBeIncrementalAndIdempotent(string dialect)
+    public void InitScript_ShouldBeRepeatable(string dialect)
     {
-        var script = StripComments(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0011_engine_upgrade.sql")));
+        var script = File.ReadAllText(RepositoryLayout.DatabaseScript(dialect));
 
-        // 执行日志表：增量迁移的唯一依据
-        Assert.Contains("ACT_GE_SCHEMA_LOG", script, StringComparison.OrdinalIgnoreCase);
+        // 建库段必须存在，且生成器与 SqlScriptReader 用同一对标记（工具执行时跳过该段）
+        var begin = script.IndexOf(SqlScriptReader.BootstrapBeginMarker, StringComparison.Ordinal);
+        var end = script.IndexOf(SqlScriptReader.BootstrapEndMarker, StringComparison.Ordinal);
 
-        // 定时作业可靠性列
-        Assert.Contains("RETRIES_", script, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("DEAD_LETTER_", script, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("EXCEPTION_MSG_", script, StringComparison.OrdinalIgnoreCase);
+        Assert.True(begin >= 0, "缺少建库引导段开始标记");
+        Assert.True(end > begin, "建库引导段结束标记缺失或顺序错误");
+        Assert.Contains("create database", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("use ", script, StringComparison.OrdinalIgnoreCase);
 
-        // 幂等：MySQL 用 information_schema 判重，SQL Server 用 sys.columns 判重
-        var guard = dialect == "mysql" ? "information_schema.columns" : "sys.columns";
+        // 幂等守卫：MySQL 靠 information_schema / insert ignore；SQL Server 靠 sys.* 判重
+        var guard = dialect == "mysql" ? "information_schema" : "sys.";
         Assert.Contains(guard, script, StringComparison.OrdinalIgnoreCase);
+
+        if (dialect == "mysql")
+        {
+            Assert.Contains("insert ignore into ACT_GE_PROPERTY", script, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // 老库补齐：模型大文本扩容与定时作业可靠性列
+        Assert.Contains("ACT_RU_TIMER_JOB", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("RETRIES_", script, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void MySqlScript_ShouldUseMediumTextForBpmnModel()
     {
-        var script = File.ReadAllText(RepositoryLayout.DatabaseScript("mysql", "0002_create_business_tables.sql"));
+        var script = File.ReadAllText(RepositoryLayout.DatabaseScript("mysql"));
 
         // text 只有 64KB，大模型 + SVG 会被截断/写入失败；LongText 必须映射到 mediumtext
         Assert.Contains("bpmn_xml mediumtext", script, StringComparison.OrdinalIgnoreCase);
@@ -155,23 +185,13 @@ public sealed partial class DatabaseScriptTests
     [Theory]
     [InlineData("sqlserver")]
     [InlineData("mysql")]
-    public void AsyncJobOutboxScript_ShouldCreateJobAndOutboxTables(string dialect)
+    public void InitScript_ShouldNotContainLegacySchemaLogTable(string dialect)
     {
-        var script = StripComments(
-            File.ReadAllText(RepositoryLayout.DatabaseScript(dialect, "0012_async_jobs_outbox.sql")));
+        // 脚本级增量机制（ACT_GE_SCHEMA_LOG + 校验和）已移除：单文件全幂等取代它。
+        // 老库残留的 ACT_GE_SCHEMA_LOG 表不再被读写，可手工 drop。
+        var script = StripComments(File.ReadAllText(RepositoryLayout.DatabaseScript(dialect)));
 
-        var created = CreateTableRegex()
-            .Matches(script)
-            .Select(match => match.Groups["table"].Value.ToUpperInvariant())
-            .Distinct(StringComparer.Ordinal)
-            .ToHashSet(StringComparer.Ordinal);
-
-        Assert.Contains("ACT_RU_JOB", created);
-        Assert.Contains("ACT_EVT_OUTBOX", created);
-
-        // 幂等：MySQL 用 create table if not exists，SQL Server 用 object_id 判重
-        var guard = dialect == "mysql" ? "if not exists" : "object_id";
-        Assert.Contains(guard, script, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ACT_GE_SCHEMA_LOG", script, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -183,8 +203,22 @@ public sealed partial class DatabaseScriptTests
         Assert.Equal(3, AddedTables.Length);
     }
 
+    private static HashSet<string> CreatedTables(string script) =>
+        CreateTableRegex()
+            .Matches(StripComments(script))
+            .Select(match => match.Groups["table"].Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     [GeneratedRegex(@"create\s+table\s+(?:if\s+not\s+exists\s+)?(?<table>\w+)", RegexOptions.IgnoreCase)]
     private static partial Regex CreateTableRegex();
+
+    /// <summary>MySQL：没有 <c>if not exists</c> 的建表语句（应为 0 条）。</summary>
+    [GeneratedRegex(@"create\s+table\s+(?!if\s+not\s+exists)", RegexOptions.IgnoreCase)]
+    private static partial Regex UnguardedCreateTableRegex();
+
+    /// <summary>SQL Server：<c>if object_id(N'X', N'U') is null</c> 守卫 + 建表。</summary>
+    [GeneratedRegex(@"if\s+object_id\(N?'\w+',\s*N?'U'\)\s+is\s+null\s+create\s+table", RegexOptions.IgnoreCase)]
+    private static partial Regex GuardedCreateTableRegex();
 
     private static string StripComments(string script) =>
         string.Join(

@@ -31,8 +31,9 @@ public sealed class MySqlPersistenceTests
 
         var result = migrator.Migrate();
 
+        // 幂等脚本每次都完整执行（靠脚本内的守卫收敛），因此 AppliedScripts 恒为初始化脚本本身
         Assert.True(result.AlreadyInitialized);
-        Assert.Empty(result.AppliedScripts);
+        Assert.Contains(RepositoryLayout.DatabaseScriptFileName, result.AppliedScripts);
     }
 
     [Fact]

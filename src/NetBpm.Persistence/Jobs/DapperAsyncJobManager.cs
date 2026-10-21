@@ -5,7 +5,7 @@ using NetBpm.Persistence.Database;
 namespace NetBpm.Persistence.Jobs;
 
 /// <summary>
-/// 数据库异步作业存储。表结构见 <c>db/{dialect}/0012_async_jobs_outbox.sql</c>。
+/// 数据库异步作业存储。表结构见 <c>db/{dialect}/netbpm_init.sql</c>。
 /// <para>
 /// 到期查询在 SQL 里完成过滤与分页，并用 left join 排除挂起实例的作业；
 /// 执行时以 <c>delete ... where ID_ = @id</c> 的影响行数做抢占（与定时作业同构）。

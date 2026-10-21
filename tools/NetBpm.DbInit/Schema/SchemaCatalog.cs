@@ -689,7 +689,8 @@ internal static class SchemaCatalog
             [1L, "3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7", "leave_process", "请假申请流程", "/bill.html?process=leave_process&businessId={businessId}", "/approve.html?process=leave_process&taskId={taskId}", 2L, 1L, Now],
         ],
         ["id"],
-        []);
+        // 流程类型是「配置型」种子：重复执行时把可变字段同步成脚本里的值（create_time 保留）
+        ["name", "describe", "view_url", "approve_url", "sort_order", "enabled", "modify_time"]);
 
     // 管理端 · 流程模型表（设计器草稿/模型的服务端落点，随 0002 业务表一起建）
     internal static readonly TableDef BpmnModelTable = new(
@@ -866,17 +867,62 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: true);
 
-    // 0011 增量迁移执行日志：记录每个已应用脚本及其校验和，老库据此补跑新脚本
-    internal static readonly TableDef SchemaLogTable = new(
-        "ACT_GE_SCHEMA_LOG",
-        "数据库脚本执行日志：已应用脚本名 + 校验和（增量迁移的唯一依据）",
+    // 异步作业表（引擎扩展：asyncBefore / asyncAfter；一个作业 = 一个命令）
+    internal static readonly TableDef AsyncJobTable = new(
+        "ACT_RU_JOB",
+        "异步作业表：asyncBefore / asyncAfter 作业（独占，一个作业 = 一个命令）",
         [
-            C("SCRIPT_", ColType.Varchar, 255, false, comment: "脚本文件名（如 0004_perf_indexes.sql）"),
-            C("CHECKSUM_", ColType.Varchar, 64, comment: "脚本内容的 SHA-256（十六进制）"),
-            C("APPLIED_AT_", ColType.DateTime3, nullable: false, comment: "执行时间（UTC）"),
+            C("ID_", ColType.Varchar, 64, nullable: false, comment: "作业 id（IIdGenerator 分配）"),
+            C("REV_", ColType.Int, nullable: false, def: "1", comment: "乐观锁版本"),
+            C("EXECUTION_ID_", ColType.Varchar, 64, nullable: false, comment: "执行 id"),
+            C("PROCESS_INSTANCE_ID_", ColType.Varchar, 64, nullable: false, comment: "流程实例 id"),
+            C("PROC_DEF_ID_", ColType.Varchar, 255, comment: "流程定义 id"),
+            C("ACTIVITY_ID_", ColType.Varchar, 255, nullable: false, comment: "活动 id"),
+            C("PHASE_", ColType.Varchar, 16, nullable: false, comment: "before / after"),
+            C("DUEDATE_", ColType.DateTime3, nullable: false, comment: "到期时间（UTC）"),
+            C("TENANT_ID_", ColType.Varchar, 64, nullable: false, def: "''", comment: "租户"),
+            C("CREATE_TIME_", ColType.DateTime3, nullable: false, comment: "创建时间（UTC）"),
+            C("RETRIES_", ColType.Int, nullable: false, def: "3", comment: "剩余重试次数"),
+            C("DEAD_LETTER_", ColType.TinyInt, nullable: false, def: "0", comment: "1=已进死信"),
+            C("EXCEPTION_MSG_", ColType.Varchar, 1000, comment: "最后一次失败原因"),
+            C("LAST_FAILURE_", ColType.DateTime3, comment: "最后一次失败时间（UTC）"),
         ],
-        ["SCRIPT_"],
-        [new IndexDef("ACT_IDX_SCHEMA_LOG_APPLIED", ["APPLIED_AT_"])],
+        ["ID_"],
+        [
+            new IndexDef("ACT_IDX_JOB_DUE", ["DUEDATE_", "DEAD_LETTER_"]),
+            new IndexDef("ACT_IDX_JOB_EXECUTION", ["EXECUTION_ID_"]),
+            new IndexDef("ACT_IDX_JOB_PROC_INST", ["PROCESS_INSTANCE_ID_"]),
+        ],
+        [], [],
+        EngineCharset: true);
+
+    // 事务性 outbox（引擎事件的事务性外发队列，至少一次投递）
+    internal static readonly TableDef EventOutboxTable = new(
+        "ACT_EVT_OUTBOX",
+        "事务性事件 outbox：引擎事件与业务写入同事务落库，由发布器至少一次投递",
+        [
+            C("ID_", ColType.Varchar, 64, nullable: false, comment: "事件 id（订阅方幂等键）"),
+            C("EVENT_TYPE_", ColType.Varchar, 64, nullable: false, comment: "事件类型（PROCESS_COMPLETED / TASK_CREATED ...）"),
+            C("ENTITY_ID_", ColType.Varchar, 64, comment: "实体 id（任务 / 活动 / 实例）"),
+            C("PROCESS_INSTANCE_ID_", ColType.Varchar, 64, comment: "流程实例 id"),
+            C("PROC_DEF_ID_", ColType.Varchar, 255, comment: "流程定义 id"),
+            C("EXECUTION_ID_", ColType.Varchar, 64, comment: "执行 id"),
+            C("ACTIVITY_ID_", ColType.Varchar, 255, comment: "活动 id"),
+            C("TENANT_ID_", ColType.Varchar, 64, nullable: false, def: "''", comment: "租户"),
+            C("PAYLOAD_", ColType.MediumText, comment: "事件载荷（JSON）"),
+            C("CREATE_TIME_", ColType.DateTime3, nullable: false, comment: "创建时间（UTC）"),
+            C("PUBLISHED_", ColType.TinyInt, nullable: false, def: "0", comment: "1=已发布"),
+            C("PUBLISH_ATTEMPTS_", ColType.Int, nullable: false, def: "0", comment: "发布尝试次数"),
+            C("DEAD_LETTER_", ColType.TinyInt, nullable: false, def: "0", comment: "1=投递失败进死信"),
+            C("LAST_ERROR_", ColType.Varchar, 1000, comment: "最后一次发布失败原因"),
+            C("NEXT_ATTEMPT_", ColType.DateTime3, comment: "下次可发布时间（UTC）"),
+            C("PUBLISHED_TIME_", ColType.DateTime3, comment: "发布时间（UTC）"),
+        ],
+        ["ID_"],
+        [
+            new IndexDef("ACT_IDX_OUTBOX_PENDING", ["PUBLISHED_", "DEAD_LETTER_", "CREATE_TIME_"]),
+            new IndexDef("ACT_IDX_OUTBOX_PROC_INST", ["PROCESS_INSTANCE_ID_"]),
+        ],
         [], [],
         EngineCharset: true);
 

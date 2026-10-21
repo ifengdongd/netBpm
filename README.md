@@ -166,7 +166,7 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
   在**任务创建时**求值 —— 发起人可以在表单里决定"几小时不处理就转办"。
 - 到点后的语义：删除待办（`ACT_HI_TASKINST.DELETE_REASON_ = boundary timer`）、
   收口该用户任务的历史活动行（`ACT_HI_ACTINST` 结束时间 + 删除原因）、沿边界事件出流继续。
-- **作业存储**：`ACT_RU_TIMER_JOB`（`db/{dialect}/0006_create_timer_job.sql`）。任务完成 / 跳转 /
+- **作业存储**：`ACT_RU_TIMER_JOB`（`db/{dialect}/netbpm_init.sql`）。任务完成 / 跳转 /
   实例结束 / 终止时作业一并删除；任务先完成则到点作业自动作废。
 - **调度**：宿主后台服务轮询（`TimerJobSchedulerService`），配置节：
 
@@ -276,7 +276,7 @@ POST /api/runtime/process-instances/{id}/migrate
 - 历史口径：`ACT_HI_PROCINST.PROC_DEF_ID_` 保持启动时的定义；迁移事实查
   `GET /api/runtime/process-instances/{id}/migrations`（`ACT_HI_MIGRATION`）。
 - 支持回退迁移（再指回旧版本）；禁止用 SQL 直接改 `PROC_DEF_ID_` / `ACT_ID_`。
-- 已有库直接跑 `migrate` 即会自动补上 `0007_create_migration_log.sql`（增量迁移，见 [`db/README.md`](db/README.md)）。
+- `ACT_HI_MIGRATION` 由初始化脚本（`db/<dialect>/netbpm_init.sql`）建表；已有库重复执行该脚本会自动补齐缺失表（幂等，见 [`db/README.md`](db/README.md)）。
 
 ### 流程模型治理（草稿 / 版本 / 回滚 / 发布）
 
@@ -299,9 +299,9 @@ POST /api/runtime/process-instances/{id}/migrate
 - 保存与历史写入在**同一事务**内，不会出现「模型更新了、历史没记」。
 - 草稿可含阻断级问题（方便保存半成品），但**发布会 400 并逐条返回问题**。
 - 「模型是否已发布 / 有无未发布修改」由版本水位计算：最新 revision 与最近一次 `action=publish` 快照比较，列表接口一并返回。
-- 同一租户下 `process_key` 唯一（`ux_bpm_model_key`）：已有库跑 `migrate` 会自动补上 `0010_model_key_unique.sql`；
+- 同一租户下 `process_key` 唯一（`ux_bpm_model_key`）：由初始化脚本建表 / 建索引，已有库重复执行脚本会自动补齐；
   新建 / 改 key / 导入 / 复制撞名都会 409，并指出占用该 key 的模型 id。
-- `0008_create_model_history.sql` 同样由 `migrate` 自动补跑。
+- `bpmn_model_history`（模型版本历史）同样由初始化脚本建表，重复执行幂等。
 
 ### 管理治理：细粒度授权 / 审计 / 指标与归档
 
@@ -366,7 +366,7 @@ POST /api/runtime/process-instances/{id}/migrate
 - **不记录变量值**（可能是敏感数据，也会让审计表膨胀），只记变量名与 `valueType`；任务描述同理，只记「是否改动」。
 - 被 **403 拒绝**的越权请求不会写审计（未进入执行阶段）；审计只记录真正执行过的管理动作及其结果。
 - 运行时端点与设计器端点共用同一套「执行 → 按结果留痕」封装（`AuditedAction`），不会出现两套口径。
-- 审计写入失败**不影响业务**（只记 warning），但 `0009` 脚本未执行时审计会丢失。
+- 审计写入失败**不影响业务**（只记 warning），但初始化脚本未执行（`admin_audit_log` 缺表）时审计会丢失。
 - 查询：`GET /api/admin/audit?action=&actor=&processInstanceId=&success=&since=&until=&firstResult=&maxResults=`。
 
 **保留策略**（审计只增不删会持续膨胀）：
@@ -395,7 +395,7 @@ POST /api/runtime/process-instances/{id}/migrate
 - 归档行对 `process_instance_id` 建唯一键：重复归档幂等跳过；`batchSize` 单次上限 1000（默认 200）。
 - 查询：`GET /api/admin/history/archives`（列表，不含 payload）、`GET /api/admin/history/archives/{processInstanceId}`（含快照）。
 - 内存宿主没有持久化历史：归档相关接口返回 **501**，指标里的归档量为 `null`。
-- 已有库跑 `migrate` 会自动补上 `0009_create_admin_governance.sql`。
+- 已有库重复执行初始化脚本（`db/<dialect>/netbpm_init.sql`）会自动补上 `admin_audit_log` / `admin_history_archive`。
 
 **④ 可观测性（OpenTelemetry 指标）**
 
@@ -452,8 +452,8 @@ NetBpm/
 │   └── NetBpm.Demo/              # 合并审批 Demo（订单 + 请假；公共应用层 + 通用端点的完整接入示例）
 ├── web/designer/                 # 流程设计器（bpmn-js 18 + Vite 6 + TS）
 ├── db/
-│   ├── mysql/                    # 0001-0008 建表脚本（单一数据源生成，请勿手改）
-│   └── sqlserver/                # 同上（两方言结构一一对应，仅语法差异）
+│   ├── mysql/netbpm_init.sql     # 初始化脚本（建库 + 建表 + 初值，单一数据源生成，请勿手改）
+│   └── sqlserver/netbpm_init.sql # 同上（两方言结构一一对应，仅语法差异）
 ├── docs/
 │   └── process-design-guide.md   # 流程设计操作指引（以请假 / 订单流程为例）
 ├── tools/
@@ -502,9 +502,11 @@ dotnet run --project tools/NetBpm.DbInit -- \
   --create-database
 ```
 
-脚本由单一数据源 `tools/NetBpm.DbInit/Schema/SchemaCatalog.cs` 生成（分层见 [`db/README.md`](db/README.md)），
-引擎表为 13 张基础 `ACT_*` 表（外加 `0006` 的 `ACT_RU_TIMER_JOB`、`0007` 的 `ACT_HI_MIGRATION`、
-`0012` 的 `ACT_RU_JOB` / `ACT_EVT_OUTBOX` 引擎扩展表，以及 `0008` 的 `bpmn_model_history` 模型版本表），与 Activiti 表结构对齐。运维动作（探库 / 清库 / 校验 / 单脚本执行）用
+脚本由单一数据源 `tools/NetBpm.DbInit/Schema/SchemaCatalog.cs` 生成（内容分层见 [`db/README.md`](db/README.md)）：
+每方言一份 `db/<dialect>/netbpm_init.sql`（建库 + 建表 + 索引外键 + 初值数据，**全幂等可重复执行**），
+引擎表为 13 张基础 `ACT_*` 表（外加 `ACT_RU_TIMER_JOB`、`ACT_HI_MIGRATION`、`ACT_RU_JOB` /
+`ACT_EVT_OUTBOX` 引擎扩展表，以及 `bpmn_model_history` 模型版本表），与 Activiti 表结构对齐。
+运维动作（探库 / 清库 / 校验 / 单脚本执行）用
 `NetBpm.DbMigrate` 的 `probe` / `purge` / `check` / `apply` 子命令，`--provider` 可选 `mysql` 或 `sqlserver`。
 
 ### 启动 REST 服务
@@ -594,8 +596,8 @@ API Key 模式代表可信服务，不做任务级校验。令牌支持 `groups`
 
 **幂等**：改变状态的请求可带 `Idempotency-Key`。同键同请求回放首次响应（`Idempotency-Replayed: true`），
 同键不同请求返回 409。数据库宿主使用 `ACT_IDEMPOTENCY` 表跨实例去重；过期记录由宿主每小时清理一次
-（`IdempotencyCleanupService`，启动后延迟 1 分钟首轮执行）。已初始化的库跑 `migrate` 会自动补上
-`0005_create_idempotency.sql`（也可用 `apply --script` 单独执行，脚本幂等）。
+（`IdempotencyCleanupService`，启动后延迟 1 分钟首轮执行）。`ACT_IDEMPOTENCY` 表由初始化脚本建，
+已有库重复执行脚本会自动补上（脚本幂等）。
 
 **分页信封**：列表端点默认返回裸数组 + `X-Total-Count`；加 `?envelope=true` 返回
 `{ items, total, firstResult, maxResults }`。`maxResults` 统一默认 20、上限 200。
@@ -647,9 +649,10 @@ CI（`.github/workflows/ci.yml`）会在 Build 前完成两段前端构建。
 
 ### 引擎启动步骤（其它 .NET 项目接入）
 
-1. **建库**：执行 `db/mysql/` 或 `db/sqlserver/` 建表脚本（分层与顺序见 [`db/README.md`](db/README.md)；
-   引擎必跑 `0001 → 0002`（引擎基础表 + 流程实例/流程类型表），Demo 业务表 `0003` 按需；
-   REST 宿主启用 HTTP 幂等时还需 `0005_create_idempotency.sql`）；
+1. **建库**：执行 `db/mysql/netbpm_init.sql` 或 `db/sqlserver/netbpm_init.sql`
+   （一份脚本搞定建库 + 建表 + 初值，幂等可重复执行；内容分层见 [`db/README.md`](db/README.md)。
+   只接引擎、不要业务表的项目忽略 ② ③ 段建出来的表即可；
+   库名默认 `netbpm`，改脚本顶部「⓪ 建库 / 选库」两行，或用 `NetBpm.DbInit --create-database` 按连接串建库）；
 2. **引用引擎包**：`dotnet pack` 产出见下节「打包分发」，或直接引用 `src/` 各项目；
 3. **组合根注册**（详见 [`samples/NetBpm.Demo/README.md`](samples/NetBpm.Demo/README.md)）：
 
@@ -660,7 +663,7 @@ builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly); // 收口委
 ```
 
 4. **启动即部署**：`WorkflowProcessBootstrapper.DeployAsync(...)` 把 BPMN 定义灌进引擎
-   （`NetBpm.Rest` 宿主亦可 `AutoMigrate=true` 自动建表）；
+   （`NetBpm.Rest` 宿主亦可 `AutoMigrate=true` 在启动时执行同一份初始化脚本）；
 5. **验证**：`/openapi/v1.json` 查看端点；`ACT_*` 表与业务表开始产生数据。
 
 ### 打包分发
@@ -672,7 +675,7 @@ powershell -File tools/pack.ps1 -Configuration Release
 产物（`artifacts/`，已 gitignore）：
 
 - `nuget/*.nupkg` —— 9 个引擎包（接入入口 `NetBpm.Workflow`，依赖链自动带上；
-  `NetBpm.Persistence` 包内含两方言建表脚本）；
+  `NetBpm.Persistence` 包内含两方言初始化脚本）；
 - `netbpm-<版本>.zip` —— nupkg + 两方言 SQL 脚本 + 接入说明（`README.txt`），
   供其它 .NET 项目离线引用（本地 NuGet 源：`dotnet nuget add source <目录> -n netbpm`）。
 

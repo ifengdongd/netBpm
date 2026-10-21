@@ -5,7 +5,7 @@ using NetBpm.Persistence.Database;
 namespace NetBpm.Persistence.Events;
 
 /// <summary>
-/// 数据库事务性 outbox。表结构见 <c>db/{dialect}/0012_async_jobs_outbox.sql</c>。
+/// 数据库事务性 outbox。表结构见 <c>db/{dialect}/netbpm_init.sql</c>。
 /// <para>
 /// <see cref="EnqueueAsync"/> 使用当前命令的会话与事务（由 <see cref="IDbSessionProvider"/> 提供），
 /// 因此事件与业务变更同生共死。

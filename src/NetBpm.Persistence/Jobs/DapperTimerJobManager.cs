@@ -5,7 +5,7 @@ using NetBpm.Persistence.Database;
 namespace NetBpm.Persistence.Jobs;
 
 /// <summary>
-/// 数据库定时作业存储。表结构见 <c>db/{dialect}/0006_create_timer_job.sql</c>。
+/// 数据库定时作业存储。表结构见 <c>db/{dialect}/netbpm_init.sql</c>。
 /// <para>
 /// 与其它仓储一致：语句全部带 <c>session.Transaction</c>（命令内与命令同事务；命令外由会话自己提交）。
 /// 到点查询不做方言分页：<c>where DUEDATE_ &lt;= @utcNow order by DUEDATE_</c>，

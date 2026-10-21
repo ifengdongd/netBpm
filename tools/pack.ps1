@@ -61,12 +61,13 @@ NetBpm 流程引擎 · 发行包（$version）
 一、内容
   dll\     引擎全部 DLL（net10.0，含第三方依赖闭包）—— 不经 NuGet 直接引用用这个
   nuget\   9 个引擎 NuGet 包（NetBpm.Workflow 为接入入口，其余为依赖链）
-  db\      两方言建表脚本（引擎基础表 + 流程实例业务表 + 流程类型表 + Demo 业务表）
+  db\      两方言初始化脚本 netbpm_init.sql（建库 + 建表 + 初值数据；可重复执行）
 
 二、其它 .NET 项目接入步骤
-  1. 建库并执行 db 脚本（必跑 0001 → 0002；Demo 业务表 0003 按需）：
-     mysql  : mysql -u<user> -p <db> < db\mysql\0001_create_engine_schema.sql （逐个执行）
-     sqlserver: 逐个执行 db\sqlserver\000x_*.sql（统一 dbo schema）
+  1. 初始化数据库（一份脚本搞定建库/建表/初值，幂等可重复执行）：
+     mysql  : mysql -u<user> -p < db\mysql\netbpm_init.sql（脚本自带建库与 use）
+     sqlserver: 用 sqlcmd / SSMS 连 master 执行 db\sqlserver\netbpm_init.sql
+     库名默认 netbpm：改脚本顶部「⓪ 建库 / 选库」一段即可（测试 / 生产可用不同库名）
   2. 引擎引用（任选其一）：
      - NuGet 包（推荐）：本地源 dotnet nuget add source "<本目录绝对路径>\nuget" -n netbpm；
        或把 nuget\*.nupkg 拷到项目内，在 csproj 加
@@ -82,9 +83,14 @@ NetBpm 流程引擎 · 发行包（$version）
   4. 流程设计器（画流程导出 BPMN 放进 processes/ 即可被部署）：
      http://localhost:5273/?modelId=<模型 id>（源码 web/designer，npm run dev 启动）
 
-三、SQL 脚本分层
-  0001/0002 引擎基础表；0003 流程实例业务表（workflow_type_id 存流程类型 id）；
-  0008 流程类型表；0004/0005/0006/0007 为 Demo 业务表，按需取舍。
+三、SQL 脚本内容
+  netbpm_init.sql 一份到底，按序包含：
+    ① 13 张引擎 ACT_* 基础表 + 索引/外键 + ACT_GE_PROPERTY 初值
+    ② 流程实例业务表（instances / instance_current_task / deal_history）+ workflow_type + bpmn_model
+    ③ Demo 业务表（leave_bill / order_bill / workflow_parameters）+ 组织架构 sys_* + 演示数据
+    ④ 运行期查询索引  ⑤ 应用层扩展表（幂等键/定时作业/迁移审计/模型历史/治理/异步作业/outbox）
+    ⑥ 老库兼容补齐
+  不要业务表 / Demo 表的项目，执行整份脚本后忽略对应表即可（对引擎无影响）。
 "@
 Set-Content -Path (Join-Path $distDir "README.txt") -Value $distReadme -Encoding UTF8
 

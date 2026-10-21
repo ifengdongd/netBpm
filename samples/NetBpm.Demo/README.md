@@ -16,13 +16,14 @@ dotnet run --project samples/NetBpm.Demo
 **存储落真库（默认 MySQL 127.0.0.1，库 `netbpm_demo`；可切 SQL Server）**：
 方言随 `NetBpm:DatabaseType`，引擎落 ACT_* 表（`UseInMemoryExecutionTree=false`），
 业务数据落 `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` + `order_bill`
-（双方言同库同 schema：业务表与引擎 ACT_* 表表名逐字相同）。启动时自动建库（若缺）并幂等执行
-`db/<dialect>` 全部脚本，重复启动跳过。
+（双方言同库同 schema：业务表与引擎 ACT_* 表表名逐字相同）。启动时自动建库（若缺）并执行
+`db/<dialect>/netbpm_init.sql` 一份脚本（建表 + 初值，全幂等），重复启动只补齐缺失结构。
 ⚠️ 引擎与业务数据是一体的 —— 内存执行树的流程实例 id 每次重启从 1 重新开始，会与真库累积行撞号。
 ⚠️ 数据库连接要求 **TLS 1.2 及以上**：MySQL 客户端已锁定 `TlsVersion=TLS 1.2, TLS 1.3`（连接串显式写 1.0/1.1 会启动失败）；
 SQL Server 请使用支持 TLS 1.2+ 的实例（只支持 TLS 1.0 的老实例会产生「非安全协议」告警并建议淘汰）。
 
-前置脚本（按序执行，现由启动序列自动执行）：`db/<dialect>/0001 → 0002 → … → 0005`。
+前置脚本（现由启动序列自动执行，也可手工跑）：`db/<dialect>/netbpm_init.sql`
+（引擎 ACT_* 表 + 业务表 + 流程类型 / 模型表 + Demo 业务表与组织架构，含演示种子数据）。
 
 ## 流程设计
 

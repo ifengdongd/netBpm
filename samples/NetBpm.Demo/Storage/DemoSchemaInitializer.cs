@@ -8,12 +8,12 @@ namespace NetBpm.Demo.Storage;
 
 /// <summary>
 /// Demo 启动期的建库 + 迁移：库缺就建（SqlServer 连 master 建库；MySQL 无库名直连建库），
-/// 然后按 <c>NetBpm:DatabaseType</c> 幂等执行 <c>db/&lt;dialect&gt;</c> 全部脚本
+/// 然后按 <c>NetBpm:DatabaseType</c> 执行 <c>db/&lt;dialect&gt;/netbpm_init.sql</c>
 /// （引擎 ACT_* 表 + 业务表，双方言同库同 schema，见 <see cref="DatabaseMigrator"/>）。
 /// </summary>
 /// <remarks>
-/// <see cref="DatabaseMigrator"/> 以「ACT_GE_PROPERTY 是否存在 + schema.version 是否匹配」判断幂等：
-/// 已初始化的库直接跳过，重复启动不重复建表。
+/// 初始化脚本自带方言幂等守卫：已存在的表 / 索引 / 行一律跳过，
+/// 重复启动只会补齐缺失结构，不会重建表或覆盖已有数据（含 <c>next.dbid</c> 游标）。
 /// </remarks>
 public static class DemoSchemaInitializer
 {

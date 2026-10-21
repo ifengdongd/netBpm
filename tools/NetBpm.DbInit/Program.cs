@@ -18,8 +18,9 @@ using NetBpm.Persistence.Database;
 //   # 只重新生成脚本（不连库）
 //   dotnet run --project tools/NetBpm.DbInit -- --generate-only
 //
-// 说明：不引入 DbUp 之类的迁移库 —— 脚本形态固定（建表 + 初值数据），
-// 幂等性由「ACT_GE_PROPERTY 是否存在 + schema.version」判定（见 DatabaseMigrator）。
+// 说明：不引入 DbUp 之类的迁移库 —— 脚本形态固定（单个 netbpm_init.sql：建库 + 建表 + 初值），
+// 幂等性由脚本内的方言守卫保证（create table if not exists / information_schema 判重），
+// 因此可以重复执行：新库一次建成，老库只补缺失部分（见 DatabaseMigrator）。
 
 var options = Options.Parse(args);
 
@@ -67,8 +68,8 @@ Console.WriteLine($"脚本目录：{scriptDirectory}");
 var result = new DatabaseMigrator(sessionFactory, scriptDirectory).Migrate();
 
 Console.WriteLine(result.AlreadyInitialized
-    ? "数据库已初始化，跳过建表脚本。"
-    : $"已执行脚本：{string.Join(", ", result.AppliedScripts)}");
+    ? $"数据库已存在，已按幂等脚本补齐结构：{string.Join(", ", result.AppliedScripts)}"
+    : $"已执行数据库初始化脚本：{string.Join(", ", result.AppliedScripts)}");
 
 // 5. 校验结构版本
 var checker = new DatabaseSchemaChecker(

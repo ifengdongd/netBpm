@@ -148,9 +148,9 @@ static int Migrate(CommandLineOptions options)
 
     var result = new DatabaseMigrator(sessionFactory, scriptDirectory).Migrate();
 
-    Console.WriteLine(result.AppliedScripts.Count == 0
-        ? "没有待执行的脚本（结构与 ACT_GE_SCHEMA_LOG 一致）。"
-        : $"已执行脚本：{string.Join(", ", result.AppliedScripts)}");
+    Console.WriteLine(result.AlreadyInitialized
+        ? $"数据库已存在，已按幂等脚本补齐结构：{string.Join(", ", result.AppliedScripts)}"
+        : $"已执行数据库初始化脚本：{string.Join(", ", result.AppliedScripts)}");
 
     var checker = new DatabaseSchemaChecker(
         new DapperPropertyStore(new CommandScopedDbSessionProvider(sessionFactory)));

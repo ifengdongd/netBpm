@@ -43,7 +43,7 @@ public sealed class NetBpmOptions
     /// <summary>启动时校验 <c>ACT_GE_PROPERTY.schema.version</c>。</summary>
     public bool ValidateSchemaOnStartup { get; set; } = true;
 
-    /// <summary>启动时自动执行 <c>db/&lt;dialect&gt;</c> 下的脚本（库已初始化则跳过）。</summary>
+    /// <summary>启动时执行 <c>db/&lt;dialect&gt;/netbpm_init.sql</c>（幂等：库里缺什么补什么）。</summary>
     public bool AutoMigrate { get; set; }
 
     /// <summary>是否使用数据库持久化。</summary>

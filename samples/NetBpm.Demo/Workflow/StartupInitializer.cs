@@ -39,8 +39,8 @@ internal static class StartupInitializer
     }
 
     /// <summary>
-    /// 建库（若缺）+ 幂等执行 db/&lt;dialect&gt; 脚本（引擎 ACT_* 表 + 业务表，双方言同库同 schema）。
-    /// 已初始化的库直接跳过，重复启动不重复建表。
+    /// 建库（若缺）+ 执行 db/&lt;dialect&gt;/netbpm_init.sql（引擎 ACT_* 表 + 业务表，双方言同库同 schema）。
+    /// 脚本全幂等：重复启动只会补齐缺失结构，不会重建或覆盖已有数据。
     /// </summary>
     private static void EnsureDatabaseSchema(WebApplication app)
     {
@@ -56,12 +56,15 @@ internal static class StartupInitializer
 
         if (migration.AlreadyInitialized)
         {
-            app.Logger.LogInformation("数据库已初始化（{Dialect}），跳过建表脚本。", databaseType);
+            app.Logger.LogInformation(
+                "数据库已存在（{Dialect}），已按幂等脚本校验并补齐结构：{Scripts}",
+                databaseType,
+                string.Join(", ", migration.AppliedScripts));
         }
         else
         {
             app.Logger.LogInformation(
-                "已执行建表脚本（{Dialect}）：{Scripts}",
+                "已执行数据库初始化脚本（{Dialect}）：{Scripts}",
                 databaseType,
                 string.Join(", ", migration.AppliedScripts));
         }

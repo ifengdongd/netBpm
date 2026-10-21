@@ -126,7 +126,7 @@ app.MapDesignerEndpoints();
 app.MapRuntimeEndpoints();
 app.MapIdentityEndpoints();
 
-// 数据库模式：先按需建库/建表，再校验 ACT_GE_PROPERTY.schema.version（P5 验收标准之一）
+// 数据库模式：执行幂等初始化脚本（库里缺什么补什么），再校验 ACT_GE_PROPERTY.schema.version（P5 验收标准之一）
 var netBpmOptions = app.Services.GetRequiredService<NetBpmOptions>();
 
 if (netBpmOptions.UsesDatabase)
@@ -137,11 +137,15 @@ if (netBpmOptions.UsesDatabase)
 
         if (migration.AlreadyInitialized)
         {
-            app.Logger.LogInformation("数据库已初始化，跳过建表脚本。");
+            app.Logger.LogInformation(
+                "数据库已存在，已按幂等脚本校验并补齐结构：{Scripts}",
+                string.Join(", ", migration.AppliedScripts));
         }
         else
         {
-            app.Logger.LogInformation("已执行建表脚本：{Scripts}", string.Join(", ", migration.AppliedScripts));
+            app.Logger.LogInformation(
+                "已执行数据库初始化脚本：{Scripts}",
+                string.Join(", ", migration.AppliedScripts));
         }
     }
 

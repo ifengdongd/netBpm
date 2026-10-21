@@ -1,14 +1,31 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using NetBpm.Persistence;
 
 namespace NetBpm.DbInit.Schema;
 
 /// <summary>
-/// 把 <see cref="SchemaCatalog"/> 渲染成 <c>db/mysql</c> 与 <c>db/sqlserver</c> 两套脚本。
+/// 把 <see cref="SchemaCatalog"/> 渲染成两方言的<b>单文件初始化脚本</b>：
+/// <c>db/mysql/netbpm_init.sql</c> / <c>db/sqlserver/netbpm_init.sql</c>。
+/// <para>
+/// 脚本 = 建库 + 建表 + 索引 / 外键 + 初值数据，<b>全部幂等</b>：
+/// 新库一次建成，老库重复执行只补缺失部分（空操作不报错）。
+/// 因此不再有「编号脚本 + 脚本执行日志」的增量机制。
+/// </para>
+/// <para>
+/// 库名由脚本顶部的建库段决定（默认 <see cref="DefaultDatabaseName"/>）；
+/// 工具执行时会跳过该段，改由连接串指定库（见 <see cref="SqlScriptReader"/>）。
+/// </para>
 /// </summary>
 internal static class SqlGenerator
 {
+    /// <summary>单文件初始化脚本的文件名（两方言同名，分别落 db/mysql 与 db/sqlserver）。</summary>
+    internal const string InitScriptFileName = "netbpm_init.sql";
+
+    /// <summary>手工执行时的默认库名（测试 / 生产用不同库名时改脚本顶部这一处，或用工具按连接串建库）。</summary>
+    internal const string DefaultDatabaseName = "netbpm";
+
     private enum Dialect
     {
         MySql,
@@ -26,16 +43,18 @@ internal static class SqlGenerator
         var directory = Path.Combine(repoRoot, "db", folder);
         Directory.CreateDirectory(directory);
 
-        Emit(directory, dialect, "0001_create_engine_schema.sql", RenderEngineSchema(dialect));
-        Emit(directory, dialect, "0002_create_business_tables.sql", RenderBusinessTables(dialect));
-        Emit(directory, dialect, "0003_create_demo_tables.sql", RenderDemoTables(dialect));
-        Emit(directory, dialect, "0004_perf_indexes.sql", RenderPerfIndexes(dialect));
-        Emit(directory, dialect, "0005_create_idempotency.sql", RenderIdempotency(dialect));
-        Emit(directory, dialect, "0006_create_timer_job.sql", RenderTimerJob(dialect));
-        Emit(directory, dialect, "0007_create_migration_log.sql", RenderMigrationLog(dialect));
-        Emit(directory, dialect, "0008_create_model_history.sql", RenderModelHistory(dialect));
-        Emit(directory, dialect, "0009_create_admin_governance.sql", RenderAdminGovernance(dialect));
-        Emit(directory, dialect, "0011_engine_upgrade.sql", RenderEngineUpgrade(dialect));
+        // 单脚本模型：编号脚本已全部合并。目录里残留的旧脚本会被 DatabaseMigrator 一并执行，
+        // 因此这里主动清理（db/<dialect> 目录是生成物，不该手写文件）。
+        foreach (var stale in Directory.EnumerateFiles(directory, "*.sql")
+                     .Where(path => !string.Equals(
+                         Path.GetFileName(path),
+                         InitScriptFileName,
+                         StringComparison.OrdinalIgnoreCase)))
+        {
+            File.Delete(stale);
+        }
+
+        Emit(directory, dialect, InitScriptFileName, RenderInitScript(dialect));
     }
 
     private static void Emit(string directory, Dialect dialect, string fileName, List<string> lines)
@@ -50,103 +69,66 @@ internal static class SqlGenerator
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  各脚本渲染
+    //  整份初始化脚本
     // ────────────────────────────────────────────────────────────────────────
 
-    private static List<string> RenderEngineSchema(Dialect dialect)
+    private static List<string> RenderInitScript(Dialect dialect)
     {
         var lines = new List<string>();
         lines.AddRange(Banner(dialect));
-        lines.AddRange(HeaderEngineSchema);
+        lines.AddRange(HeaderInit);
+        lines.AddRange(RenderBootstrap(dialect));
 
+        // ① 引擎基础表
+        lines.AddRange(BlankSection("① 引擎基础表（13 张 ACT_*，与 Activiti 逐字一致）"));
+        lines.AddRange(EngineSchemaNotes);
         foreach (var table in SchemaCatalog.EngineTables)
         {
-            lines.AddRange(RenderCreateTable(table, dialect, idempotent: false));
+            lines.AddRange(RenderCreateTable(table, dialect, idempotent: true));
         }
 
-        lines.AddRange(BlankSection("索引"));
+        lines.AddRange(BlankSection("①-1 引擎表索引"));
         foreach (var index in SchemaCatalog.EngineIndexes)
         {
-            lines.AddRange(RenderEngineIndex(index, dialect, idempotent: false));
+            lines.AddRange(RenderEngineIndex(index, dialect, idempotent: true));
+            lines.Add(string.Empty);
         }
 
-        lines.AddRange(BlankSection("唯一约束与外键"));
+        lines.AddRange(BlankSection("①-2 引擎表唯一约束与外键"));
         foreach (var table in SchemaCatalog.EngineTables)
         {
             foreach (var unique in table.UniqueKeys)
             {
                 if (unique.Name.Length > 0)
                 {
-                    lines.AddRange(RenderAlterUnique(table.Name, unique));
+                    lines.AddRange(RenderGuardedUnique(table.Name, unique, dialect));
                 }
             }
         }
 
         foreach (var fk in SchemaCatalog.EngineForeignKeys)
         {
-            lines.AddRange(RenderForeignKey(fk, dialect));
+            lines.AddRange(RenderGuardedForeignKey(fk, dialect));
         }
 
-        lines.AddRange(BlankSection("引擎初值（ACT_GE_PROPERTY）"));
-        foreach (var row in SchemaCatalog.PropertySeeds)
-        {
-            var values = string.Join(", ", RowValues(row, dialect));
-            lines.Add($"insert into ACT_GE_PROPERTY values ({values});");
-        }
+        lines.AddRange(BlankSection("①-3 引擎初值（ACT_GE_PROPERTY：仅在缺失时插入）"));
+        lines.AddRange(RenderPropertySeeds(dialect));
 
-        if (dialect == Dialect.SqlServer)
-        {
-            lines.AddRange(RenderTableComments(SchemaCatalog.EngineTables));
-            lines.Add("go");
-        }
-
-        return lines;
-    }
-
-    private static List<string> RenderBusinessTables(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(HeaderBusinessTables);
-
+        // ② 流程实例业务表 / 流程类型 / 流程模型
+        lines.AddRange(BlankSection("② 流程实例业务表 / 流程类型 / 流程模型"));
+        lines.AddRange(BusinessNotes);
         foreach (var table in SchemaCatalog.InstanceTables)
         {
-            lines.AddRange(RenderCreateTable(table, dialect, idempotent: false));
-            lines.AddRange(RenderTableScopedIndexes(table, dialect, idempotent: false));
+            lines.AddRange(RenderTableSection(table, dialect));
         }
 
-        lines.AddRange(BlankSection("流程类型表"));
-        lines.AddRange(RenderCreateTable(SchemaCatalog.WorkflowTypeTable, dialect, idempotent: false));
-        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.WorkflowTypeTable, dialect, idempotent: false));
+        lines.AddRange(RenderTableSection(SchemaCatalog.WorkflowTypeTable, dialect));
+        lines.AddRange(RenderSeed(SchemaCatalog.WorkflowTypeSeeds, dialect, idempotent: true));
+        lines.AddRange(RenderTableSection(SchemaCatalog.BpmnModelTable, dialect));
 
-        lines.AddRange(BlankSection("种子数据：订单审批 / 请假审批两条流程"));
-        lines.AddRange(RenderSeed(SchemaCatalog.WorkflowTypeSeeds, dialect, idempotent: false));
-
-        lines.AddRange(BlankSection("流程模型表（管理端设计器）"));
-        lines.AddRange(RenderCreateTable(SchemaCatalog.BpmnModelTable, dialect, idempotent: false));
-        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.BpmnModelTable, dialect, idempotent: false));
-
-        if (dialect == Dialect.SqlServer)
-        {
-            var tables = new List<TableDef>(SchemaCatalog.InstanceTables)
-            {
-                SchemaCatalog.WorkflowTypeTable,
-                SchemaCatalog.BpmnModelTable,
-            };
-            lines.AddRange(RenderTableComments(tables));
-            lines.Add("go");
-        }
-
-        return lines;
-    }
-
-    private static List<string> RenderDemoTables(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(HeaderDemoTables);
-
-        // 业务表单（一次性建表）
+        // ③ Demo 业务表 + 组织架构
+        lines.AddRange(BlankSection("③ Demo 业务表与组织架构（含演示种子数据）"));
+        lines.AddRange(DemoNotes);
         foreach (var table in new[]
         {
             SchemaCatalog.LeaveBillTable,
@@ -154,195 +136,168 @@ internal static class SqlGenerator
             SchemaCatalog.WorkflowParametersTable,
         })
         {
-            lines.AddRange(RenderCreateTable(table, dialect, idempotent: false));
-            lines.AddRange(RenderTableScopedIndexes(table, dialect, idempotent: false));
+            lines.AddRange(RenderTableSection(table, dialect));
         }
 
-        // 组织架构表（幂等，可重复执行）
-        lines.AddRange(BlankSection("组织架构表（sys_*，幂等可重复执行）"));
         foreach (var table in SchemaCatalog.OrgTables)
         {
-            lines.AddRange(RenderCreateTable(table, dialect, idempotent: true));
-            lines.AddRange(RenderTableScopedIndexes(table, dialect, idempotent: true));
+            lines.AddRange(RenderTableSection(table, dialect));
         }
 
-        lines.AddRange(BlankSection("种子数据（演示用，可重复执行）"));
+        lines.AddRange(BlankSection("③-1 组织架构种子数据"));
         foreach (var seed in SchemaCatalog.OrgSeeds)
         {
             lines.AddRange(RenderSeed(seed, dialect, idempotent: true));
         }
 
-        if (dialect == Dialect.SqlServer)
-        {
-            var tables = new List<TableDef>
-            {
-                SchemaCatalog.LeaveBillTable,
-                SchemaCatalog.OrderBillTable,
-                SchemaCatalog.WorkflowParametersTable,
-            };
-            tables.AddRange(SchemaCatalog.OrgTables);
-            lines.AddRange(RenderTableComments(tables));
-            lines.Add("go");
-        }
-
-        return lines;
-    }
-
-    private static List<string> RenderPerfIndexes(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(dialect == Dialect.MySql ? HeaderPerfIndexesMySql : HeaderPerfIndexesSqlServer);
-
+        // ④ 运行期查询索引
+        lines.AddRange(BlankSection("④ 运行期查询索引（性能增强，不影响行内容）"));
+        lines.AddRange(PerfIndexesNotes);
         foreach (var index in SchemaCatalog.PerfIndexes)
         {
             lines.AddRange(RenderEngineIndex(index, dialect, idempotent: true));
             lines.Add(string.Empty);
         }
 
-        return lines;
-    }
-
-    private static List<string> RenderIdempotency(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(dialect == Dialect.MySql ? HeaderIdempotencyMySql : HeaderIdempotencySqlServer);
-
-        lines.AddRange(RenderCreateTable(SchemaCatalog.IdempotencyTable, dialect, idempotent: true));
-        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.IdempotencyTable, dialect, idempotent: true));
-
-        return lines;
-    }
-
-    private static List<string> RenderTimerJob(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(dialect == Dialect.MySql ? HeaderTimerJobMySql : HeaderTimerJobSqlServer);
-
-        lines.AddRange(RenderCreateTable(SchemaCatalog.TimerJobTable, dialect, idempotent: true));
-        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.TimerJobTable, dialect, idempotent: true));
-
-        if (dialect == Dialect.SqlServer)
+        // ⑤ 应用层扩展表
+        lines.AddRange(BlankSection("⑤ 应用层扩展表（幂等键 / 定时作业 / 迁移审计 / 模型历史 / 治理 / 异步作业）"));
+        lines.AddRange(ExtensionsNotes);
+        foreach (var table in ExtensionTables)
         {
-            lines.AddRange(RenderTableComments([SchemaCatalog.TimerJobTable]));
-            lines.Add("go");
-        }
-
-        return lines;
-    }
-
-    private static List<string> RenderMigrationLog(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(dialect == Dialect.MySql ? HeaderMigrationMySql : HeaderMigrationSqlServer);
-
-        lines.AddRange(RenderCreateTable(SchemaCatalog.MigrationTable, dialect, idempotent: true));
-        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.MigrationTable, dialect, idempotent: true));
-
-        if (dialect == Dialect.SqlServer)
-        {
-            lines.AddRange(RenderTableComments([SchemaCatalog.MigrationTable]));
-            lines.Add("go");
-        }
-
-        return lines;
-    }
-
-    private static List<string> RenderModelHistory(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(dialect == Dialect.MySql ? HeaderModelHistoryMySql : HeaderModelHistorySqlServer);
-
-        lines.AddRange(RenderCreateTable(SchemaCatalog.ModelHistoryTable, dialect, idempotent: true));
-        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.ModelHistoryTable, dialect, idempotent: true));
-
-        if (dialect == Dialect.SqlServer)
-        {
-            lines.AddRange(RenderTableComments([SchemaCatalog.ModelHistoryTable]));
-            lines.Add("go");
-        }
-
-        return lines;
-    }
-
-    private static List<string> RenderAdminGovernance(Dialect dialect)
-    {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(dialect == Dialect.MySql ? HeaderAdminGovernanceMySql : HeaderAdminGovernanceSqlServer);
-
-        TableDef[] tables = [SchemaCatalog.AdminAuditTable, SchemaCatalog.HistoryArchiveTable];
-
-        foreach (var table in tables)
-        {
-            lines.AddRange(RenderCreateTable(table, dialect, idempotent: true));
-            lines.AddRange(RenderTableScopedIndexes(table, dialect, idempotent: true));
+            lines.AddRange(RenderTableSection(table, dialect));
         }
 
         if (dialect == Dialect.SqlServer)
         {
-            lines.AddRange(RenderTableComments(tables));
-            lines.Add("go");
+            lines.AddRange(BlankSection("⑤-1 表与列注释（扩展属性 MS_Description，已存在则跳过）"));
+            lines.AddRange(RenderTableComments(AllTables));
         }
 
+        // ⑥ 老库兼容补齐
+        lines.AddRange(BlankSection("⑥ 老库兼容补齐（幂等；新库执行为空操作）"));
+        lines.AddRange(RenderTransitionalUpgrade(dialect));
+
+        lines.AddRange(Footer(dialect));
         return lines;
     }
+
+    /// <summary>应用层扩展表（都不属于 Activiti 的 13 张引擎表）。</summary>
+    private static readonly IReadOnlyList<TableDef> ExtensionTables =
+    [
+        SchemaCatalog.IdempotencyTable,
+        SchemaCatalog.TimerJobTable,
+        SchemaCatalog.MigrationTable,
+        SchemaCatalog.ModelHistoryTable,
+        SchemaCatalog.AdminAuditTable,
+        SchemaCatalog.HistoryArchiveTable,
+        SchemaCatalog.AsyncJobTable,
+        SchemaCatalog.EventOutboxTable,
+    ];
+
+    /// <summary>脚本内出现过的全部表（SQL Server 注释渲染用）。</summary>
+    private static IReadOnlyList<TableDef> AllTables =>
+    [
+        .. SchemaCatalog.EngineTables,
+        .. SchemaCatalog.InstanceTables,
+        SchemaCatalog.WorkflowTypeTable,
+        SchemaCatalog.BpmnModelTable,
+        SchemaCatalog.LeaveBillTable,
+        SchemaCatalog.OrderBillTable,
+        SchemaCatalog.WorkflowParametersTable,
+        .. SchemaCatalog.OrgTables,
+        .. ExtensionTables,
+    ];
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  建库 / 老库补齐
+    // ────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// 0011 增量升级：把「老库拿不到新脚本」的缺口补上。
-    /// <para>
-    /// 内容全部幂等，新库（0001-0010 已包含同样结构）执行时是空操作，老库执行时才真正补列 / 扩容。
-    /// 脚本执行记录见 <see cref="SchemaCatalog.SchemaLogTable"/>，由 <c>DatabaseMigrator</c> 维护。
-    /// </para>
+    /// 建库 + 选库。手工执行（mysql 客户端 / SSMS）时生效；
+    /// 工具执行时整段被 <see cref="SqlScriptReader"/> 跳过（库名取自连接串，必要时用 --create-database 建库）。
     /// </summary>
-    private static List<string> RenderEngineUpgrade(Dialect dialect)
+    private static List<string> RenderBootstrap(Dialect dialect)
     {
-        var lines = new List<string>();
-        lines.AddRange(Banner(dialect));
-        lines.AddRange(dialect == Dialect.MySql ? HeaderUpgradeMySql : HeaderUpgradeSqlServer);
+        var lines = new List<string>
+        {
+            string.Empty,
+            "-- ─────────────────── ⓪ 建库 / 选库（仅手工执行时生效）───────────────────",
+            "--",
+            $"--  库名默认 {DefaultDatabaseName}：测试环境 / 生产环境用不同库名时，改下面两行即可。",
+            "--  工具执行（NetBpm.DbInit / DbMigrate / 宿主 AutoMigrate）会跳过本段：",
+            "--  库名取自连接串，首次建库用 DbInit / DbMigrate 的 --create-database。",
+            string.Empty,
+            SqlScriptReader.BootstrapBeginMarker,
+        };
 
-        lines.AddRange(BlankSection("脚本执行日志（增量迁移依据）"));
-        lines.AddRange(RenderCreateTable(SchemaCatalog.SchemaLogTable, dialect, idempotent: true));
-        lines.AddRange(RenderTableScopedIndexes(SchemaCatalog.SchemaLogTable, dialect, idempotent: true));
-
-        lines.AddRange(BlankSection("模型大文本列扩容（MySQL text 64KB → mediumtext 16MB）"));
         if (dialect == Dialect.MySql)
         {
-            lines.Add("alter table bpmn_model modify column bpmn_xml mediumtext not null;");
-            lines.Add("alter table bpmn_model modify column svg mediumtext;");
-            lines.Add("alter table bpmn_model_history modify column bpmn_xml mediumtext not null;");
-            lines.Add("alter table bpmn_model_history modify column svg mediumtext;");
+            // 与工具建库语句保持同一字符集/排序规则（引擎表 utf8_bin）
+            lines.Add($"create database if not exists `{DefaultDatabaseName}` character set utf8 collate utf8_bin;");
+            lines.Add($"use `{DefaultDatabaseName}`;");
         }
         else
         {
-            lines.Add("-- SQL Server 的 bpmn_xml / svg 已是 nvarchar(max)，无需扩容。");
+            lines.Add($"if db_id(N'{DefaultDatabaseName}') is null create database [{DefaultDatabaseName}];");
+            lines.Add("go");
+            lines.Add($"use [{DefaultDatabaseName}];");
+            lines.Add("go");
         }
 
-        lines.AddRange(BlankSection("定时作业可靠性列（重试 / 死信 / 失败原因）"));
+        lines.Add(SqlScriptReader.BootstrapEndMarker);
+        return lines;
+    }
+
+    /// <summary>老库补齐：新库执行是空操作，老库才真正扩列 / 扩文本。</summary>
+    private static List<string> RenderTransitionalUpgrade(Dialect dialect)
+    {
+        var lines = new List<string>
+        {
+            "--  这一节只为「用旧版脚本建过库」的环境准备：",
+            "--    · 模型大文本列仍是 text（64KB）→ 扩容到 mediumtext；",
+            "--    · 定时作业表缺重试 / 死信列 → 补列。",
+            "--  新库在上面已经把表建成最终形态，这里全部是空操作。",
+            string.Empty,
+        };
+
+        if (dialect == Dialect.MySql)
+        {
+            lines.AddRange(RenderMySqlEnsureMediumText("bpmn_model", "bpmn_xml", notNull: true));
+            lines.AddRange(RenderMySqlEnsureMediumText("bpmn_model", "svg", notNull: false));
+            lines.AddRange(RenderMySqlEnsureMediumText("bpmn_model_history", "bpmn_xml", notNull: true));
+            lines.AddRange(RenderMySqlEnsureMediumText("bpmn_model_history", "svg", notNull: false));
+        }
+        else
+        {
+            lines.Add("-- bpmn_xml / svg 在 SQL Server 已是 nvarchar(max)，无需扩容。");
+            lines.Add(string.Empty);
+        }
+
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "RETRIES_", "int default 3", "int default 3"));
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "DEAD_LETTER_", "tinyint default 0", "tinyint default 0"));
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "EXCEPTION_MSG_", "varchar(1000)", "nvarchar(1000)"));
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "LAST_FAILURE_", "datetime(3)", "datetime"));
 
-        lines.AddRange(BlankSection("定时作业死信查询索引"));
-        lines.AddRange(RenderEngineIndex(
-            new TableIndexDef("ACT_RU_TIMER_JOB", "ACT_IDX_TIMER_JOB_DEADLINE", ["DEAD_LETTER_", "DUEDATE_"]),
-            dialect,
-            idempotent: true));
-
-        // 迁移审计表的复合索引已归入 0007 建表脚本（新库直接带索引）；
-        // 老库的 ACT_HI_MIGRATION 早已建好，靠这里幂等补齐。
-        lines.AddRange(BlankSection("流程实例迁移审计查询索引"));
-        lines.AddRange(RenderEngineIndex(
-            new TableIndexDef("ACT_HI_MIGRATION", "ACT_IDX_MIGRATION_PROCINST_TIME", ["PROC_INST_ID_", "MIGRATED_AT_"]),
-            dialect,
-            idempotent: true));
-
         return lines;
+    }
+
+    /// <summary>MySQL：仅当列还不是 mediumtext / longtext 时才改类型（避免每次执行都重建表）。</summary>
+    private static List<string> RenderMySqlEnsureMediumText(string table, string column, bool notNull)
+    {
+        var alter = notNull
+            ? $"alter table {table} modify column {column} mediumtext not null"
+            : $"alter table {table} modify column {column} mediumtext";
+
+        return
+        [
+            $"set @ddl = ifnull((select if(data_type in ('mediumtext', 'longtext'), 'select 1', '{alter}')",
+            "    from information_schema.columns",
+            $"    where table_schema = database() and table_name = '{table}' and column_name = '{column}'), 'select 1');",
+            "prepare stmt from @ddl;",
+            "execute stmt;",
+            "deallocate prepare stmt;",
+            string.Empty,
+        ];
     }
 
     /// <summary>幂等加列：MySQL 用 information_schema 判重后动态执行，SQL Server 用 sys.columns 判重。</summary>
@@ -355,20 +310,9 @@ internal static class SqlGenerator
     {
         if (dialect == Dialect.MySql)
         {
-            var add = $"alter table {table} add column {column} {mySqlDefinition}";
-            return
-            [
-                "set @ddl = (select if(count(*) = 0,",
-                $"        '{add}',",
-                "        'select 1')",
-                "    from information_schema.columns",
-                $"    where table_schema = database() and table_name = '{table}'",
-                $"      and column_name = '{column}');",
-                "prepare stmt from @ddl;",
-                "execute stmt;",
-                "deallocate prepare stmt;",
-                string.Empty,
-            ];
+            return RenderMySqlGuardedAlter(
+                $"alter table {table} add column {column} {mySqlDefinition}",
+                $"from information_schema.columns where table_schema = database() and table_name = '{table}' and column_name = '{column}'");
         }
 
         return
@@ -381,8 +325,37 @@ internal static class SqlGenerator
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    //  DDL 片段
+    //  表 / 索引 / 约束
     // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>一张表：建表 + 索引（MySQL 内联后又幂等补齐，SQL Server 独立渲染）。</summary>
+    private static List<string> RenderTableSection(TableDef table, Dialect dialect)
+    {
+        var lines = new List<string>();
+        lines.AddRange(RenderCreateTable(table, dialect, idempotent: true));
+        lines.AddRange(RenderTableScopedIndexes(table, dialect, idempotent: true));
+
+        if (dialect == Dialect.MySql)
+        {
+            // 已有库（表已存在）不会因 create table if not exists 补到内联索引，这里按索引名幂等补齐
+            foreach (var unique in table.UniqueKeys)
+            {
+                if (unique.Name.Length > 0 && !table.EngineCharset)
+                {
+                    lines.AddRange(RenderMySqlIdempotentIndex(
+                        new TableIndexDef(table.Name, unique.Name, unique.Columns),
+                        unique: true));
+                }
+            }
+
+            foreach (var index in table.Indexes)
+            {
+                lines.AddRange(RenderMySqlIdempotentIndex(new TableIndexDef(table.Name, index.Name, index.Columns)));
+            }
+        }
+
+        return lines;
+    }
 
     private static List<string> RenderCreateTable(TableDef table, Dialect dialect, bool idempotent)
     {
@@ -398,7 +371,7 @@ internal static class SqlGenerator
 
             foreach (var unique in table.UniqueKeys)
             {
-                // 引擎表具名唯一键（ACT_UNIQ_PROCDEF）走 alter table，不内联；
+                // 引擎表具名唯一键（ACT_UNIQ_PROCDEF）走独立 alter table，不内联；
                 // 业务表具名唯一键内联为 unique key。
                 if (unique.Name.Length == 0)
                 {
@@ -444,7 +417,7 @@ internal static class SqlGenerator
         var sqlServerLines = new List<string>();
         if (idempotent)
         {
-            sqlServerLines.Add($"if object_id('{table.Name}', 'U') is null");
+            sqlServerLines.Add($"if object_id(N'{table.Name}', N'U') is null");
             sqlServerLines.Add($"    create table {table.Name} (");
         }
         else
@@ -453,7 +426,7 @@ internal static class SqlGenerator
         }
 
         sqlServerLines.AddRange(JoinWithComma(body));
-        sqlServerLines.Add(idempotent ? "    )" : ");");
+        sqlServerLines.Add(idempotent ? "    );" : ");");
 
         if (idempotent)
         {
@@ -566,7 +539,7 @@ internal static class SqlGenerator
         return lines;
     }
 
-    /// <summary>引擎表（0001）/ 性能索引（0009）的独立索引，索引名即显式给出所属表。</summary>
+    /// <summary>引擎表 / 性能索引的独立索引，索引名即显式给出所属表。</summary>
     private static List<string> RenderEngineIndex(TableIndexDef index, Dialect dialect, bool idempotent)
     {
         if (dialect == Dialect.MySql && idempotent)
@@ -582,21 +555,31 @@ internal static class SqlGenerator
         return [$"create index {index.Name} on {index.Table}({string.Join(", ", index.Columns)});"];
     }
 
-    private static List<string> RenderMySqlIdempotentIndex(TableIndexDef index)
+    private static List<string> RenderMySqlIdempotentIndex(TableIndexDef index, bool unique = false)
     {
-        var columns = string.Join(", ", index.Columns);
-        var create = $"create index {index.Name} on {index.Table} ({columns})";
+        var create = $"create {(unique ? "unique " : string.Empty)}index {index.Name} on {index.Table} ({string.Join(", ", index.Columns)})";
+
+        return RenderMySqlGuardedAlter(
+            create,
+            $"from information_schema.statistics where table_schema = database() and table_name = '{index.Table}' and index_name = '{index.Name}'");
+    }
+
+    /// <summary>
+    /// MySQL 的幂等 DDL 外壳：查 <paramref name="guard"/> 得 0 行才动态执行 <paramref name="statement"/>。
+    /// 依赖连接串的 <c>Allow User Variables=true</c>（<c>@ddl</c> 是用户变量）。
+    /// </summary>
+    private static List<string> RenderMySqlGuardedAlter(string statement, string guard)
+    {
         return
         [
             "set @ddl = (select if(count(*) = 0,",
-            $"        '{create}',",
+            $"        '{statement}',",
             "        'select 1')",
-            "    from information_schema.statistics",
-            $"    where table_schema = database() and table_name = '{index.Table}'",
-            $"      and index_name = '{index.Name}');",
+            $"    {guard});",
             "prepare stmt from @ddl;",
             "execute stmt;",
             "deallocate prepare stmt;",
+            string.Empty,
         ];
     }
 
@@ -617,18 +600,31 @@ internal static class SqlGenerator
         ];
     }
 
-    private static List<string> RenderAlterUnique(string table, IndexDef unique)
+    /// <summary>幂等唯一约束（引擎表的 ACT_UNIQ_PROCDEF）。</summary>
+    private static List<string> RenderGuardedUnique(string table, IndexDef unique, Dialect dialect)
     {
         var columns = string.Join(", ", unique.Columns);
+
+        if (dialect == Dialect.MySql)
+        {
+            return RenderMySqlGuardedAlter(
+                $"alter table {table} add constraint {unique.Name} unique ({columns})",
+                $"from information_schema.table_constraints where constraint_schema = database() and table_name = '{table}' and constraint_name = '{unique.Name}'");
+        }
+
         return
         [
-            $"alter table {table}",
-            $"    add constraint {unique.Name}",
-            $"    unique ({columns});",
+            $"if not exists (select 1 from sys.objects where name = '{unique.Name}' and parent_object_id = object_id('{table}'))",
+            $"    alter table {table}",
+            $"        add constraint {unique.Name}",
+            $"        unique ({columns});",
+            "go",
+            string.Empty,
         ];
     }
 
-    private static List<string> RenderForeignKey(ForeignKeyDef fk, Dialect dialect)
+    /// <summary>幂等外键。</summary>
+    private static List<string> RenderGuardedForeignKey(ForeignKeyDef fk, Dialect dialect)
     {
         var cascade = string.Empty;
         if (dialect == Dialect.MySql)
@@ -644,13 +640,60 @@ internal static class SqlGenerator
             }
         }
 
+        var statement =
+            $"alter table {fk.Table} add constraint {fk.Name} foreign key ({fk.Column}) references {fk.ReferencedTable} ({fk.ReferencedColumn}){cascade}";
+
+        if (dialect == Dialect.MySql)
+        {
+            return RenderMySqlGuardedAlter(
+                statement,
+                $"from information_schema.table_constraints where constraint_schema = database() and table_name = '{fk.Table}' and constraint_name = '{fk.Name}'");
+        }
+
         return
         [
-            $"alter table {fk.Table}",
-            $"    add constraint {fk.Name}",
-            $"    foreign key ({fk.Column})",
-            $"    references {fk.ReferencedTable} ({fk.ReferencedColumn}){cascade};",
+            $"if not exists (select 1 from sys.foreign_keys where name = '{fk.Name}' and parent_object_id = object_id('{fk.Table}'))",
+            $"    alter table {fk.Table}",
+            $"        add constraint {fk.Name}",
+            $"        foreign key ({fk.Column})",
+            $"        references {fk.ReferencedTable} ({fk.ReferencedColumn});",
+            "go",
+            string.Empty,
         ];
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  初值 / 注释
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 引擎初值：<b>只在缺失时插入</b>。绝不能用 upsert —— 否则重复执行会把
+    /// <c>next.dbid</c> 重置回 1，导致 id 重用。
+    /// </summary>
+    private static List<string> RenderPropertySeeds(Dialect dialect)
+    {
+        const string columns = "(NAME_, VALUE_, REV_)";
+        var lines = new List<string>();
+
+        foreach (var row in SchemaCatalog.PropertySeeds)
+        {
+            var name = (string)row[0]!;
+            var values = string.Join(", ", RowValues(row, dialect));
+
+            if (dialect == Dialect.MySql)
+            {
+                lines.Add($"insert ignore into ACT_GE_PROPERTY {columns} values ({values});");
+            }
+            else
+            {
+                lines.Add($"if not exists (select 1 from ACT_GE_PROPERTY where NAME_ = '{name}')");
+                lines.Add($"    insert into ACT_GE_PROPERTY {columns} values ({values});");
+                lines.Add("go");
+            }
+        }
+
+        lines.Add(string.Empty);
+        return lines;
     }
 
     private static List<string> RenderSeed(SeedTable seed, Dialect dialect, bool idempotent)
@@ -661,13 +704,24 @@ internal static class SqlGenerator
         if (dialect == Dialect.MySql)
         {
             var values = string.Join(",\n       ", seed.Rows.Select(row => $"({string.Join(", ", RowValues(row, dialect))})"));
-            lines.Add($"insert into {seed.TableName} ({columns})");
+
+            if (idempotent && seed.UpsertUpdateColumns.Count == 0)
+            {
+                // 没有「可更新字段」的种子（如组织架构成员关系）只需保证存在
+                lines.Add($"insert ignore into {seed.TableName} ({columns})");
+            }
+            else
+            {
+                lines.Add($"insert into {seed.TableName} ({columns})");
+            }
+
             lines.Add($"values {values}");
 
-            if (idempotent)
+            if (idempotent && seed.UpsertUpdateColumns.Count > 0)
             {
-                var updateColumns = seed.UpsertUpdateColumns.Count > 0 ? seed.UpsertUpdateColumns : ["create_time"];
-                var updateClauses = string.Join(", ", updateColumns.Select(column => $"{column} = values({column})"));
+                // 列名必须按方言转义：workflow_type 的 `describe` 在 MySQL 里是保留字
+                var updateClauses = string.Join(", ", seed.UpsertUpdateColumns.Select(column =>
+                    $"{Quote(column, dialect)} = values({Quote(column, dialect)})"));
                 lines[^1] += $" on duplicate key update {updateClauses}";
             }
 
@@ -681,12 +735,19 @@ internal static class SqlGenerator
 
             foreach (var row in seed.Rows)
             {
-                var guard = string.Join(" and ", seed.GuardColumns.Select(column =>
-                    $"{column} = {Literal(row[columnIndex[column]], dialect)}"));
-                lines.Add($"if not exists (select 1 from {seed.TableName} where {guard})");
-                lines.Add($"    insert into {seed.TableName} ({columns})");
-                lines.Add($"    values ({string.Join(", ", RowValues(row, dialect))});");
-                lines.Add("go");
+                if (idempotent)
+                {
+                    var guard = string.Join(" and ", seed.GuardColumns.Select(column =>
+                        $"{column} = {Literal(row[columnIndex[column]], dialect)}"));
+                    lines.Add($"if not exists (select 1 from {seed.TableName} where {guard})");
+                    lines.Add($"    insert into {seed.TableName} ({columns})");
+                    lines.Add($"    values ({string.Join(", ", RowValues(row, dialect))});");
+                    lines.Add("go");
+                    continue;
+                }
+
+                lines.Add($"insert into {seed.TableName} ({columns})");
+                lines.Add($"values ({string.Join(", ", RowValues(row, dialect))});");
             }
         }
 
@@ -694,18 +755,23 @@ internal static class SqlGenerator
         return lines;
     }
 
+    /// <summary>
+    /// SQL Server 表 / 列注释。必须逐条判重：<c>sp_addextendedproperty</c> 对已存在的属性会直接报错，
+    /// 而本脚本要能重复执行。
+    /// </summary>
     private static List<string> RenderTableComments(IReadOnlyList<TableDef> tables)
     {
         var lines = new List<string>();
-        lines.AddRange(BlankSection("表与列注释（扩展属性 MS_Description）"));
 
         foreach (var table in tables)
         {
             if (table.Comment.Length > 0)
             {
-                lines.Add($"exec sp_addextendedproperty @name = N'MS_Description', @value = N'{table.Comment}',");
-                lines.Add("    @level0type = N'SCHEMA', @level0name = N'dbo',");
-                lines.Add($"    @level1type = N'TABLE', @level1name = N'{table.Name}';");
+                lines.Add($"if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('{table.Name}') and minor_id = 0)");
+                lines.Add($"    exec sp_addextendedproperty @name = N'MS_Description', @value = N'{table.Comment}',");
+                lines.Add("        @level0type = N'SCHEMA', @level0name = N'dbo',");
+                lines.Add($"        @level1type = N'TABLE', @level1name = N'{table.Name}';");
+                lines.Add("go");
                 lines.Add(string.Empty);
             }
 
@@ -716,9 +782,13 @@ internal static class SqlGenerator
                     continue;
                 }
 
-                lines.Add($"exec sp_addextendedproperty @name = N'MS_Description', @value = N'{column.Comment}',");
-                lines.Add($"    @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'{table.Name}',");
-                lines.Add($"    @level2type = N'COLUMN', @level2name = N'{column.Name}';");
+                lines.Add($"if not exists (select 1 from sys.extended_properties ep");
+                lines.Add($"    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id");
+                lines.Add($"    where ep.name = N'MS_Description' and ep.major_id = object_id('{table.Name}') and c.name = N'{column.Name}')");
+                lines.Add($"    exec sp_addextendedproperty @name = N'MS_Description', @value = N'{column.Comment}',");
+                lines.Add("        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'" + table.Name + "',");
+                lines.Add($"        @level2type = N'COLUMN', @level2name = N'{column.Name}';");
+                lines.Add("go");
             }
 
             if (table.Columns.Any(column => column.Comment is not null))
@@ -756,13 +826,17 @@ internal static class SqlGenerator
 
     private static bool IsAscii(string text) => text.All(ch => ch <= 0x7F);
 
+    // ────────────────────────────────────────────────────────────────────────
+    //  头部注释
+    // ────────────────────────────────────────────────────────────────────────
+
     private static List<string> Banner(Dialect dialect)
     {
         var dialectName = dialect == Dialect.MySql ? "MySQL" : "SQL Server";
         return
         [
             "-- ============================================================================",
-            $"--  NetBpm · {dialectName} 数据库脚本（自动生成，请勿手改）",
+            $"--  NetBpm · {dialectName} 数据库初始化脚本（自动生成，请勿手改）",
             "-- ============================================================================",
             "--  本文件由单一数据源生成，两份方言（mysql / sqlserver）结构严格一一对应，",
             "--  差异仅为方言语法（类型名 / 注释写法 / 批分隔 / 幂等守卫）。",
@@ -775,14 +849,37 @@ internal static class SqlGenerator
         ];
     }
 
-    private static List<string> BlankSection(string title) =>
+    private static string[] HeaderInit =>
     [
-        string.Empty,
-        $"-- ─────────────────────────── {title} ───────────────────────────",
+        "--  用途：测试环境 / 生产环境通用的数据库初始化脚本 —— 建库 + 建表 + 索引外键 + 初值数据，",
+        "--        **可重复执行**（每一段都带方言幂等守卫）。新库一次建成；老库重复执行只补缺失部分。",
+        "--",
+        "--  内容：",
+        "--    ⓪ 建库 / 选库（仅手工执行时生效）",
+        "--    ① 引擎基础表 13 张 ACT_*（Activiti 子集）+ 索引 / 唯一约束 / 外键 + ACT_GE_PROPERTY 初值",
+        "--    ② 流程实例业务表（instances / instance_current_task / deal_history）+ 流程类型 + 流程模型",
+        "--    ③ Demo 业务表（leave_bill / order_bill / workflow_parameters）+ 组织架构 + 演示种子数据",
+        "--    ④ 运行期查询索引（性能增强）",
+        "--    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox",
+        "--    ⑥ 老库兼容补齐（大文本扩容、定时作业可靠性列）",
+        "--",
+        "--  执行方式：",
+        "--    · 工具（推荐，一步建库 + 建表 + 校验结构版本）：",
+        "--        dotnet run --project tools/NetBpm.DbInit -- \\",
+        "--          --provider mysql --connection \"Server=127.0.0.1;Port=3306;Database=netbpm;\\",
+        "--             User ID=root;Password=;Allow User Variables=true;\" --create-database",
+        "--    · 手工：MySQL  mysql -u<user> -p < db/mysql/netbpm_init.sql",
+        "--             SQL Server  用 sqlcmd / SSMS 连接 master 执行 db/sqlserver/netbpm_init.sql",
+        "--    · 宿主启动：NetBpm:AutoMigrate=true 时执行本脚本（库需已存在，或先跑一次上面的工具命令）",
+        "--",
+        "--  ⚠️ 初值只在缺失时插入：重复执行不会覆盖已有值（尤其不会重置 next.dbid 造成 id 重用）。",
+        "--  ⚠️ MySQL 连接串需要 Allow User Variables=true（索引 / 约束的幂等守卫用 @ddl 动态执行）。",
+        "--  ⚠️ 表名、列名、索引名、外键名与 Activiti 逐字一致，请勿改名或「顺手优化」列类型。",
+        "-- ============================================================================",
         string.Empty,
     ];
 
-    private static string[] HeaderEngineSchema =>
+    private static string[] EngineSchemaNotes =>
     [
         "--  来源：Activiti 9.0.0",
         "--        activiti-core/activiti-engine/src/main/resources/org/activiti/db/create/",
@@ -800,285 +897,110 @@ internal static class SqlGenerator
         "--                        ACT_RU_EVENT_SUBSCR / ACT_EVT_LOG / ACT_PROCDEF_INFO /",
         "--                        ACT_RU_INTEGRATION / ACT_HI_DETAIL / ACT_HI_COMMENT /",
         "--                        ACT_HI_ATTACHMENT",
+        "--    （其中 ACT_RU_TIMER_JOB、ACT_RU_JOB、ACT_EVT_OUTBOX 以引擎扩展表形式在 ⑤ 补回）",
         "--",
-        "--  ⚠️ 表名、列名、索引名、外键名与 Activiti 逐字一致 —— §7.1 决定两端可读写同一套",
-        "--     表结构，从而支持 §9.2 的「库级 dump 行快照对拍」。请勿改名或「顺手优化」列类型。",
         "--  ⚠️ ACT_IDC_EXEC_ROOT 的 IDC 为上游 Activiti 的原样拼写（非笔误），刻意保留。",
         "--  ⚠️ 裁掉 ACT_HI_DETAIL 的前提是历史级别取 AUDIT（Activiti 默认，只记活动/任务/变量实例）。",
         "--",
-        "--  本脚本合并原 0001（建表）与 0002（初值）：13 张引擎表 + 索引 + 唯一约束 / 外键 +",
-        "--  ACT_GE_PROPERTY 的三条初值。",
-        "--  ⚠️ 初值必须逐字一致（开发计划 §7.3）：",
+        "--  引擎初值必须逐字一致（开发计划 §7.3）：",
         "--     · schema.version  —— 引擎启动时校验（DatabaseSchemaChecker）",
-        "--     · schema.history  —— 记录建库时的版本，供后续迁移判断",
+        "--     · schema.history  —— 记录建库时的版本",
         "--     · next.dbid       —— DbIdGenerator 的区块游标；区块大小默认 2500",
-        "-- ============================================================================",
         string.Empty,
         "-- ─────────────────────────── 运行时表（8 张）───────────────────────────",
         string.Empty,
     ];
 
-    private static string[] HeaderBusinessTables =>
+    private static string[] BusinessNotes =>
     [
         "--  来源：业务系统存量库（原 wf schema，本库统一落 dbo / 无前缀，表名逐字相同）：",
         "--        instances              流程实例表",
         "--        instance_current_task  当前审批任务记录",
         "--        deal_history           审批历史记录",
         "--",
-        "--  与引擎表（ACT_*，见 0001_create_engine_schema.sql）的关系：",
+        "--  与引擎表（ACT_*）的关系：",
         "--    instances.workflow_instance_id  → ACT_RU_EXECUTION.ID_ / ACT_HI_PROCINST.PROC_INST_ID_",
         "--    instance_current_task.task_id   → ACT_RU_TASK.ID_",
         "--    deal_history.task_node          → 用户任务节点名（ACT_RU_TASK.NAME_）",
         "--",
-        "--  类型映射：nvarchar → varchar；datetime / bigint / smallint / tinyint 原样保留。",
-        "--  ⚠️ 主键均为业务侧生成的 BIGINT，不使用自增（与来源一致）。",
-        "--  ⚠️ 业务表用 utf8mb4（deal_comment / describe 含长中文备注，预留 emoji / 扩展汉字空间），",
-        "--     引擎表仍沿用 0001 的 utf8（对拍口径不变）。",
-        "--  ➕ 补充了查询索引（apply_id / task_id / workflow_instance_id / business_id / status_id /",
-        "--     deal_emp_id），不改变列结构与默认值。",
+        "--  业务表用 utf8mb4（deal_comment / describe 含长中文备注，预留 emoji / 扩展汉字空间），",
+        "--  引擎表仍用 utf8（与上游 Activiti 一致，对拍口径不变）。",
         "--",
         "--  流程类型表（workflow_type）：流程信息枚举（ProcessInfoEnum）的数据源，",
-        "--    流程的 Id / Name / Describe / ViewUrl / ApproveUrl 配置在表里，系统启动时加载。",
-        "--    workflow_type.id = instances.workflow_type_id（实例登记的类型 id）。",
-        "--    name 必须与 BPMN process/@id（流程 key）一致；id 建议用设计器 modelId。",
-        "--",
-        "--  流程模型表（bpmn_model）：管理端流程设计器的模型落点（BPMN XML 编辑源），",
+        "--    系统启动时加载；种子数据在本节末尾（不新增 / 不覆盖 create_time）。",
+        "--  流程模型表（bpmn_model）：管理端设计器的模型落点（BPMN XML 编辑源），",
         "--    与部署结果（ACT_RE_PROCDEF）分离 —— 模型可反复编辑，部署才产生新版本。",
         "--",
-        "--  执行顺序：0001_create_engine_schema.sql → 0002_create_business_tables.sql（本文件）",
-        "-- ============================================================================",
-        string.Empty,
-        "-- ─────────────────────────── 流程实例表（3 张）───────────────────────────",
+        "--  ⚠️ 主键均为业务侧生成的 BIGINT，不使用自增（与来源一致）。",
         string.Empty,
     ];
 
-    private static string[] HeaderDemoTables =>
+    private static string[] DemoNotes =>
     [
         "--  来源：**本项目新增** —— 订单审批 + 请假审批两条 Demo 的业务数据表。",
         "--",
-        "--  包含：",
         "--    leave_bill          请假单（days / reason 真列 + ext_params JSON 扩展参数）",
         "--    order_bill          订单单（status 随审批回写：1=审批中，-1=拒绝，100=通过）",
         "--    workflow_parameters 流程参数键值表（「实例 × 参数名」；param_value 用 text / nvarchar(max)）",
-        "--    sys_*               组织架构表（部门 / 员工 / 审批组 / 组成员，幂等，含演示种子数据）",
+        "--    sys_*               组织架构表（部门 / 员工 / 审批组 / 组成员）+ 演示种子数据",
         "--",
-        "--  与流程实例表（0002_create_business_tables.sql）的关系：",
+        "--  与流程实例表的关系：",
         "--    instances.business_id          → leave_bill.business_id / order_bill.business_id",
         "--    instances.workflow_instance_id → workflow_parameters.workflow_instance_id",
         "--    instances.apply_emp_id         → sys_emp.domain_account（申请人在流程里的用户 ID）",
         "--    instances.apply_dept_id        → sys_dept.dept_id",
         "--",
-        "--  幂等性：sys_* 建表与种子可重复执行；其余三张（leave_bill / order_bill /",
-        "--          workflow_parameters）一次性建表。",
-        "--",
-        "--  执行顺序：0001 → 0002 → 0003_create_demo_tables.sql（本文件）",
-        "-- ============================================================================",
-        string.Empty,
-        "-- ─────────────────────────── 业务表单（3 张）───────────────────────────",
+        "--  ⚠️ 这一组是 Demo / 示例业务表：只接引擎、不要业务表的环境可按需忽略本节的表，",
+        "--     但脚本整体执行（含本节的表）对引擎功能无影响。",
         string.Empty,
     ];
 
-    private static string[] HeaderPerfIndexesMySql =>
+    private static string[] PerfIndexesNotes =>
     [
-        "--  运行期查询索引（性能增强，不影响行内容，可与 Activiti 共库）。",
+        "--  背景：上游 Activiti 的索引清单里，运行期（ACT_RU_*）只有少数几个；",
+        "--        本引擎高频执行的查询（执行树按流程实例/父执行、任务按办理人/流程实例、",
+        "--        变量按执行、关系按流程实例）在 MySQL 上会全表扫描。",
         "--",
-        "--  背景：0001 的索引沿用上游 Activiti 清单，其中运行期（ACT_RU_*）只有少数几个。",
-        "--  本引擎实际高频执行的查询（执行树按流程实例/父执行、任务按办理人/流程实例、",
-        "--  变量按执行、关系按流程实例）在 MySQL 上会全表扫描。",
-        "--",
-        "--  幂等：MySQL 不支持 create index if not exists，这里用 information_schema 判重后动态执行。",
-        "--  对已初始化的库请单独执行本脚本：",
-        "--    NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0004_perf_indexes.sql",
-        "--  新库执行 migrate 时会连同本脚本一起执行。",
+        "--  幂等：MySQL 用 information_schema 判重后动态执行，SQL Server 用 sys.indexes 判重。",
         string.Empty,
     ];
 
-    private static string[] HeaderPerfIndexesSqlServer =>
+    private static string[] ExtensionsNotes =>
     [
-        "--  运行期查询索引（性能增强，不影响行内容，可与 Activiti 共库）。",
+        "--  ACT_IDEMPOTENCY      HTTP 幂等键（POST 重试回放，不属于 Activiti 引擎表）",
+        "--  ACT_RU_TIMER_JOB     边界定时器作业（任务创建时写一条，到点触发取消分支）",
+        "--  ACT_HI_MIGRATION     流程实例迁移审计（源/目标定义、活动映射、原因、操作人）",
+        "--  bpmn_model_history   流程模型版本历史（每次保存/回滚一版）",
+        "--  admin_audit_log      管理动作审计（转办 / 跳转 / 变量直写）",
+        "--  admin_history_archive 历史归档快照（归档后原 ACT_HI_* 行删除）",
+        "--  ACT_RU_JOB           asyncBefore / asyncAfter 异步作业（含重试与死信）",
+        "--  ACT_EVT_OUTBOX       事务性事件外发队列（至少一次投递，含发布重试/死信）",
         "--",
-        "--  幂等：sys.indexes 判重，可重复执行。",
-        "--  对已初始化的库请单独执行本脚本：",
-        "--    NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0004_perf_indexes.sql",
+        "--  全部幂等：表已存在时跳过，缺索引/缺列由后续守卫补齐。",
         string.Empty,
     ];
 
-    private static string[] HeaderUpgradeMySql =>
-    [
-        "--  增量升级脚本（0011）：补齐老库缺失的结构。",
-        "--",
-        "--  背景：此前 migrate 判定「库已初始化」后一条脚本都不执行，导致用 0001 建过的库",
-        "--        永远拿不到 0004 索引、0006 定时作业表与后续扩展表。现在由 ACT_GE_SCHEMA_LOG",
-        "--        记录已执行脚本，migrate 会按文件名补跑未执行的脚本。",
-        "--",
-        "--  本脚本幂等：MySQL 用 information_schema 判重后动态执行；",
-        "--  内容：执行日志表、模型大文本列扩容、定时作业重试/死信列、死信查询索引。",
-        string.Empty,
-    ];
+    private static List<string> Footer(Dialect dialect)
+    {
+        var check = dialect == Dialect.MySql
+            ? "select NAME_, VALUE_ from ACT_GE_PROPERTY where NAME_ in ('schema.version', 'next.dbid');"
+            : "select NAME_, VALUE_ from ACT_GE_PROPERTY where NAME_ in ('schema.version', 'next.dbid');";
 
-    private static string[] HeaderUpgradeSqlServer =>
-    [
-        "--  增量升级脚本（0011）：补齐老库缺失的结构。",
-        "--",
-        "--  幂等：object_id / sys.columns / sys.indexes 判重，可重复执行。",
-        "--  内容：执行日志表、定时作业重试/死信列、死信查询索引。",
-        "--        （bpmn_xml / svg 在 SQL Server 已是 nvarchar(max)，无需扩容。）",
-        string.Empty,
-    ];
+        return
+        [
+            string.Empty,
+            "-- ─────────────────────────── 执行结果自检 ───────────────────────────",
+            "--  期望 schema.version = 8.1.4（与 DatabaseSchemaChecker.ExpectedSchemaVersion 一致）；",
+            "--  next.dbid 是 ID 区块游标，重复执行不会重置。",
+            check,
+            string.Empty,
+        ];
+    }
 
-    private static string[] HeaderIdempotencyMySql =>
+    private static List<string> BlankSection(string title) =>
     [
-        "--  HTTP 幂等键（Idempotency-Key）。",
-        "--",
-        "--  背景：POST 启动实例 / 批量操作在客户端超时重试时会被重复执行。",
-        "--  本表缓存「键 → 首次响应」，同键重试直接回放，不进入引擎命令。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0005_create_idempotency.sql",
-        "--   3. STATUS_CODE_ 为空表示「已占位、仍在处理」，并发同键请求会得到 409。",
         string.Empty,
-    ];
-
-    private static string[] HeaderTimerJobMySql =>
-    [
-        "--  定时作业表（边界定时器）。",
-        "--",
-        "--  背景：引擎支持「用户任务 + 定时边界事件」，任务创建时写一条作业，到点由宿主轮询触发：",
-        "--        取消任务 → 沿边界事件出流继续。",
-        "--",
-        "--  注意：",
-        "--   1. 本表是 Activiti ACT_RU_TIMER_JOB 的裁剪版（只保留一次性定时所需列）；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0006_create_timer_job.sql",
-        "--   3. 本脚本幂等，可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderTimerJobSqlServer =>
-    [
-        "--  定时作业表（边界定时器）。",
-        "--",
-        "--  背景：引擎支持「用户任务 + 定时边界事件」，任务创建时写一条作业，到点由宿主轮询触发：",
-        "--        取消任务 → 沿边界事件出流继续。",
-        "--",
-        "--  注意：",
-        "--   1. 本表是 Activiti ACT_RU_TIMER_JOB 的裁剪版（只保留一次性定时所需列）；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0006_create_timer_job.sql",
-        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderMigrationMySql =>
-    [
-        "--  流程实例迁移审计表。",
-        "--",
-        "--  背景：流程定义升级后，运行中的实例可以迁到同 key 的新版本。",
-        "--        历史表（ACT_HI_PROCINST）保持实例启动时的定义不变，",
-        "--        迁移动作用本表记录（源/目标定义、活动映射、原因、操作人）。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0007_create_migration_log.sql",
-        "--   3. 本脚本幂等，可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderMigrationSqlServer =>
-    [
-        "--  流程实例迁移审计表。",
-        "--",
-        "--  背景：流程定义升级后，运行中的实例可以迁到同 key 的新版本。",
-        "--        历史表（ACT_HI_PROCINST）保持实例启动时的定义不变，",
-        "--        迁移动作用本表记录（源/目标定义、活动映射、原因、操作人）。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0007_create_migration_log.sql",
-        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderModelHistoryMySql =>
-    [
-        "--  流程模型版本历史（管理端发布治理）。",
-        "--",
-        "--  背景：设计器保存模型时会覆盖 bpmn_model.bpmn_xml；本表在每次保存/回滚时追加一版快照，",
-        "--        支持查看历史、回滚到任意版本，并记录操作人与动作。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0008_create_model_history.sql",
-        "--   3. 本脚本幂等，可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderModelHistorySqlServer =>
-    [
-        "--  流程模型版本历史（管理端发布治理）。",
-        "--",
-        "--  背景：设计器保存模型时会覆盖 bpmn_model.bpmn_xml；本表在每次保存/回滚时追加一版快照，",
-        "--        支持查看历史、回滚到任意版本，并记录操作人与动作。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0008_create_model_history.sql",
-        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderAdminGovernanceMySql =>
-    [
-        "--  管理治理（审计 + 历史归档）。",
-        "--",
-        "--  admin_audit_log：转办 / 跳转 / 变量直写等高风险管理动作的审计留痕",
-        "--    （操作人、租户、动作、目标、结果、时间；不记录变量值）。",
-        "--  admin_history_archive：已结束实例的 ACT_HI_* 行 JSON 快照；",
-        "--    归档后原历史行在同一事务内删除，使 ACT_HI_* 保持轻量。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider mysql --connection \"...\" --script db/mysql/0009_create_admin_governance.sql",
-        "--   3. 本脚本幂等，可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderAdminGovernanceSqlServer =>
-    [
-        "--  管理治理（审计 + 历史归档）。",
-        "--",
-        "--  admin_audit_log：转办 / 跳转 / 变量直写等高风险管理动作的审计留痕",
-        "--    （操作人、租户、动作、目标、结果、时间；不记录变量值）。",
-        "--  admin_history_archive：已结束实例的 ACT_HI_* 行 JSON 快照；",
-        "--    归档后原历史行在同一事务内删除，使 ACT_HI_* 保持轻量。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0009_create_admin_governance.sql",
-        "--   3. 本脚本幂等（object_id / sys.indexes 判重），可重复执行。",
-        string.Empty,
-    ];
-
-    private static string[] HeaderIdempotencySqlServer =>
-    [
-        "--  HTTP 幂等键（Idempotency-Key）。",
-        "--",
-        "--  背景：POST 启动实例 / 批量操作在客户端超时重试时会被重复执行。",
-        "--  本表缓存「键 → 首次响应」，同键重试直接回放，不进入引擎命令。",
-        "--",
-        "--  注意：",
-        "--   1. 这是应用层表，不属于 Activiti 的 13 张引擎表；",
-        "--   2. 已初始化的库需单独执行：",
-        "--      NetBpm.DbMigrate apply --provider sqlserver --connection \"...\" --script db/sqlserver/0005_create_idempotency.sql",
-        "--   3. STATUS_CODE_ 为空表示「已占位、仍在处理」，并发同键请求会得到 409。",
+        $"-- ─────────────────────────── {title} ───────────────────────────",
         string.Empty,
     ];
 }

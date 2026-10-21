@@ -3,12 +3,15 @@ namespace NetBpm.IntegrationTests;
 /// <summary>定位仓库根目录（测试运行目录在 <c>bin/Debug/net10.0</c> 之下）。</summary>
 internal static class RepositoryLayout
 {
+    /// <summary>初始化脚本文件名：两方言各一份，内容由 <c>tools/NetBpm.DbInit/Schema</c> 生成。</summary>
+    public const string DatabaseScriptFileName = "netbpm_init.sql";
+
     private static readonly Lazy<string> RootPath = new(FindRoot);
 
     public static string Root => RootPath.Value;
 
-    public static string DatabaseScript(string dialect, string fileName) =>
-        Path.Combine(Root, "db", dialect, fileName);
+    public static string DatabaseScript(string dialect) =>
+        Path.Combine(Root, "db", dialect, DatabaseScriptFileName);
 
     public static string CorpusDirectory(string name) => Path.Combine(Root, "tests", "corpus", name);
 
