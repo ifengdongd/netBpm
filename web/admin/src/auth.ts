@@ -174,12 +174,15 @@ export function credentialHeaders(credential: Credential | null): Record<string,
 }
 
 /**
- * 校验凭据是否有效：用 /api/admin/info 做探针。
- * 配置了鉴权时，错误凭据 / 缺失凭据会返回 401；开放模式下恒为 200（凭据直接可用）。
+ * 校验凭据是否有效：用 /api/auth/me 做探针（它就是「我是谁」端点）。
+ * 启用了鉴权时，凭据无效 / 缺失会返回 401；未启用鉴权（开放模式）返回 200 且 authMode=none，
+ * 凭据直接可用。
+ *
+ * 不用 /api/admin/info：它与就绪探针同口径、匿名可达，恒为 200，区分不出凭据好坏。
  */
 export async function verifyCredential(credential: Credential): Promise<boolean> {
   try {
-    const response = await fetch('/api/admin/info', { headers: credentialHeaders(credential) });
+    const response = await fetch('/api/auth/me', { headers: credentialHeaders(credential) });
 
     return response.ok;
   } catch {

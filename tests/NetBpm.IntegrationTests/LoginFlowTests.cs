@@ -82,6 +82,12 @@ public sealed class LoginFlowTests
 
         Assert.True(login.IsSuccessStatusCode, $"匿名调用登录接口失败：{login.StatusCode}");
 
+        // 运维信息与就绪探针同口径：只含版本 / 方言 / 结构版本，启用鉴权后仍匿名可达
+        // （登录页要在登录前读它）。凭据好不好由 /api/auth/me 回答，不靠这个端点。
+        using var info = await client.GetAsync(new Uri("/api/admin/info", UriKind.Relative), Ct);
+
+        Assert.True(info.IsSuccessStatusCode, $"/api/admin/info 应匿名可达：{info.StatusCode}");
+
         using var anonymous = await client.GetAsync(new Uri("/api/auth/me", UriKind.Relative), Ct);
 
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);

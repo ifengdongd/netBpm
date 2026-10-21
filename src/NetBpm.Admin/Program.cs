@@ -1,5 +1,5 @@
-using Microsoft.OpenApi;
 using System.Threading.RateLimiting;
+using Microsoft.OpenApi;
 using NetBpm.Admin.Endpoints;
 using NetBpm.Admin.Storage;
 using NetBpm.Admin.Workflow;
@@ -78,8 +78,9 @@ builder.Services.AddHostedService<AdminArchiveCleanupService>();
 builder.Services.AddNetBpmOpenTelemetry(builder.Configuration);
 
 // 限流（按客户端 IP 分区，匿名与已认证同口径）：
-//   - 凭据校验探针 /api/admin/info（登录页用）每 IP 30 次/分钟，防密钥爆破；
-//   - 其余 /api 每 IP 600 次/分钟，防脚本失控（正常管理操作远达不到）。
+//   - 凭据校验探针 /api/auth/me（登录页用）每 IP 30 次/分钟，防密钥爆破；
+//   - 其余 /api（含匿名可达的 /api/admin/info 运维信息）每 IP 600 次/分钟，防脚本失控
+//     （正常管理操作远达不到）。
 // 静态资源与 /health 不限流；阈值可经 NetBpm:Admin:RateLimit:ApiPerMinute /
 // ProbePerMinute 覆盖，集成测试宿主用 NetBpm:Admin:RateLimit:Enabled=false 关闭。
 var rateLimitEnabled = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:Enabled", true);
@@ -98,7 +99,8 @@ if (rateLimitEnabled)
         {
             var ip = context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
 
-            if (context.Request.Path.StartsWithSegments("/api/admin/info"))
+            // 凭据校验探针：登录页拿它判断手里的密钥 / 令牌是否可用，按 IP 收紧防爆破
+            if (context.Request.Path.StartsWithSegments("/api/auth/me"))
             {
                 return RateLimitPartition.GetFixedWindowLimiter(
                     $"probe:{ip}",

@@ -13,7 +13,9 @@ namespace NetBpm.Rest.Security;
 /// 都未配置时保持开放（开发 / 单机演示），但仍解析 <c>X-User-Id</c> / <c>X-Tenant-Id</c>。
 /// </para>
 /// <para>
-/// <c>POST /api/auth/login</c> 不受本中间件约束（它用来换取令牌）；其余 <c>/api/**</c> 一律校验。
+/// 例外（见 <see cref="AnonymousPaths"/>，与就绪探针同口径）：
+/// <c>POST /api/auth/login</c> 用来换取令牌，<c>GET /api/admin/info</c> 只含版本 / 方言 / 结构版本
+/// 等运维信息；两者匿名可达，其余 <c>/api/**</c> 一律校验。
 /// </para>
 /// <para>
 /// 校验顺序：
@@ -44,6 +46,20 @@ public sealed class AuthenticationMiddleware
 
     /// <summary>租户请求头（JWT 未提供 tenant 时使用）。</summary>
     public const string TenantHeaderName = "X-Tenant-Id";
+
+    /// <summary>
+    /// 即便启用了鉴权也匿名可达的 <c>/api/**</c> 路径（按路径段精确匹配，不匹配前缀相同的其它路径）。
+    /// <list type="bullet">
+    ///   <item><description><c>/api/auth/login</c>：换凭据的入口，要求先带令牌会造成鸡生蛋；</description></item>
+    ///   <item><description><c>/api/admin/info</c>：只含版本 / 方言 / 结构版本等运维信息，与就绪探针同口径
+    ///     （登录页要在登录前读它）。鉴权是否启用由 <c>/api/auth/me</c> 回答，不在这里泄漏。</description></item>
+    /// </list>
+    /// </summary>
+    private static readonly string[] AnonymousPaths =
+    [
+        "/api/auth/login",
+        "/api/admin/info",
+    ];
 
     private readonly RequestDelegate _next;
     private readonly byte[]? _expectedKeyHash;
@@ -125,9 +141,7 @@ public sealed class AuthenticationMiddleware
             return;
         }
 
-        // 登录端点必须匿名可达：它本身就是「换凭据」的地方，
-        // 若要求先带令牌，登录就变成鸡生蛋问题。
-        if (context.Request.Path.StartsWithSegments("/api/auth/login"))
+        if (IsAnonymousPath(context.Request.Path))
         {
             await _next(context).ConfigureAwait(false);
             return;
@@ -191,6 +205,20 @@ public sealed class AuthenticationMiddleware
         ApplyHeaderIdentity(context.Request, requestContext);
 
         await _next(context).ConfigureAwait(false);
+    }
+
+    /// <summary>路径是否在 <see cref="AnonymousPaths"/> 内（按段匹配，<c>/api/admin/info</c> 不会放行 <c>/api/admin/information</c>）。</summary>
+    private static bool IsAnonymousPath(PathString path)
+    {
+        foreach (var candidate in AnonymousPaths)
+        {
+            if (path.StartsWithSegments(candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool TryAuthenticateJwt(string token, RequestContext requestContext)

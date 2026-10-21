@@ -165,15 +165,16 @@ public static class AuthEndpoints
             token.Scopes));
     }
 
+    /// <summary>
+    /// 当前身份（<c>GET /api/auth/me</c>）：凭据探针，前端登录页用它判断手里的凭据是否可用。
+    /// <para>
+    /// 能走到这里说明中间件已经放行，因此 <see cref="RequestAuthMode.None"/> 只有一种含义：
+    /// <b>后端未启用鉴权（开放模式）</b> —— 此时「无凭据」不是错误，回显 <c>authMode=none</c>。
+    /// 启用鉴权后，无凭据 / 无效凭据在中间件就返回了 401，到不了这里。
+    /// </para>
+    /// </summary>
     private static IResult MeAsync(RequestContext requestContext)
     {
-        if (requestContext.AuthMode == RequestAuthMode.None)
-        {
-            return Results.Json(
-                new ErrorResponse("未提供凭据。", Code: "unauthorized"),
-                statusCode: StatusCodes.Status401Unauthorized);
-        }
-
         return Results.Ok(new CurrentIdentity(
             requestContext.UserId,
             requestContext.TenantId,

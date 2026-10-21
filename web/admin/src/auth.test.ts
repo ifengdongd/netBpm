@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ADMIN_SCOPE,
@@ -9,6 +9,7 @@ import {
   isCredentialExpired,
   resolveIdentity,
   setCredential,
+  verifyCredential,
 } from './auth';
 
 /** 构造一个 base64url 的 JWT 形状令牌（签名部分随意，前端不验签）。 */
@@ -142,5 +143,52 @@ describe('resolveIdentity', () => {
   it('非法 JWT 或无凭据时只返回空范围', () => {
     expect(resolveIdentity({ mode: 'bearer', value: 'not-a-jwt' })).toEqual({ scopes: [] });
     expect(resolveIdentity(null)).toEqual({ scopes: [] });
+  });
+});
+
+describe('verifyCredential', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /** 用固定状态码替换 fetch，返回读取「被请求路径」的取数函数。 */
+  function stubFetch(status: number): () => string[] {
+    const requested: string[] = [];
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+
+      return { ok: status >= 200 && status < 300, status } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    return () => requested;
+  }
+
+  it('探针打 /api/auth/me：它受鉴权保护，401 才能代表“凭据无效”', async () => {
+    const requested = stubFetch(200);
+
+    await verifyCredential({ mode: 'bearer', value: 't-1' });
+
+    // 反过来钉死：/api/admin/info 与就绪探针同口径、匿名可达恒为 200，
+    // 拿它当探针会把错误凭据也判为有效。
+    expect(requested()).toEqual(['/api/auth/me']);
+  });
+
+  it('200 判为有效、401 判为无效（开放模式下后端恒回 200，凭据直接可用）', async () => {
+    stubFetch(200);
+    expect(await verifyCredential({ mode: 'bearer', value: 'good' })).toBe(true);
+
+    stubFetch(401);
+    expect(await verifyCredential({ mode: 'bearer', value: 'bad' })).toBe(false);
+  });
+
+  it('后端不可达时判为无效，不向上抛异常', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError('network unreachable');
+    }) as unknown as typeof fetch;
+
+    expect(await verifyCredential({ mode: 'apiKey', value: 'k-1' })).toBe(false);
   });
 });

@@ -595,7 +595,7 @@ API Key 模式代表可信服务，不做任务级校验。令牌支持 `groups`
 | 端点 | 说明 |
 |---|---|
 | `POST /api/auth/login` | 请求 `{ username, password, tenantId? }` → `{ token, expiresAt, user, displayName, tenant, scopes }`；**匿名可达**（它本身就是换凭据的入口） |
-| `GET /api/auth/me` | 回显当前凭据的身份： `{ user, tenant, authMode, scopes, isAdmin }`；无凭据 401 |
+| `GET /api/auth/me` | 回显当前凭据的身份： `{ user, tenant, authMode, scopes, isAdmin }`；**凭据探针** —— 启用鉴权后无凭据 / 无效凭据 401，未启用鉴权（开放模式）返回 `authMode="none"` |
 
 - 账号存在 `admin_user` 表（初始化脚本已含，老库重跑一次幂等脚本即补齐）：
   只存 **PBKDF2-HMACSHA256** 散列（21 万次迭代，格式 `pbkdf2$<迭代>$<salt>$<hash>`），明文口令不落库、不进审计日志。
