@@ -11,7 +11,7 @@ namespace NetBpm.Demo.Storage;
 /// <remarks>
 /// CRUD 全部委托 <see cref="IDataAccessor{TEntity}"/>（<see cref="MySqlDataAccessor{TEntity}"/>：
 /// 反引号引用、limit 行数上限），本类只给出落点展示名。
-/// 表结构见 db/mysql/0003_create_demo_tables.sql。
+/// 表结构见 db/mysql/netbpm_init.sql。
 /// </remarks>
 public sealed class MySqlOrderBillStore : OrderBillStoreBase
 {

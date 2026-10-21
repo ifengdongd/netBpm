@@ -740,7 +740,7 @@ public sealed class AdminGovernanceTests : IClassFixture<AdminEngineFactory>
         Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
         Assert.SkipUnless(
             GovernanceTablesAvailable(),
-            "测试库缺少 0009_create_admin_governance.sql（admin_audit_log / admin_history_archive）。");
+            "测试库缺少 netbpm_init.sql（admin_audit_log / admin_history_archive）。");
     }
 
     private static bool GovernanceTablesAvailable()

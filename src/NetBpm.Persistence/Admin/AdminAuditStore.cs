@@ -283,7 +283,7 @@ public sealed class InMemoryAdminAuditStore : IAdminAuditStore
 }
 
 /// <summary>
-/// 数据库审计存储（多实例 / 需要长期追溯）。表结构见 <c>db/{dialect}/0009_create_admin_governance.sql</c>。
+/// 数据库审计存储（多实例 / 需要长期追溯）。表结构见 <c>db/{dialect}/netbpm_init.sql</c>。
 /// </summary>
 public sealed class DapperAdminAuditStore : IAdminAuditStore
 {

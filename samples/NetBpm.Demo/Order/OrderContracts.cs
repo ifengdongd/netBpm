@@ -7,7 +7,7 @@ namespace NetBpm.Demo.Order;
 // ─────────────────────────── 订单状态 ───────────────────────────
 
 /// <summary>
-/// 订单状态（<c>order_bill.status</c> 列，与 db/*/0003_create_demo_tables.sql 的注释一一对应）。
+/// 订单状态（<c>order_bill.status</c> 列，与 db/*/netbpm_init.sql 的注释一一对应）。
 /// </summary>
 public static class OrderBillStatus
 {

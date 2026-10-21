@@ -126,7 +126,7 @@ public sealed class InMemoryIdempotencyStore : IIdempotencyStore
 }
 
 /// <summary>
-/// 数据库幂等存储（多实例部署）。表结构见 <c>db/{dialect}/0005_create_idempotency.sql</c>。
+/// 数据库幂等存储（多实例部署）。表结构见 <c>db/{dialect}/netbpm_init.sql</c>。
 /// </summary>
 public sealed class DapperIdempotencyStore : IIdempotencyStore
 {

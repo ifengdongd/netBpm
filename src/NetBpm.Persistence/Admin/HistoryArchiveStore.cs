@@ -129,7 +129,7 @@ public sealed class UnsupportedHistoryArchiveStore : IHistoryArchiveStore
 }
 
 /// <summary>
-/// 数据库历史归档实现。表结构见 <c>db/{dialect}/0009_create_admin_governance.sql</c>。
+/// 数据库历史归档实现。表结构见 <c>db/{dialect}/netbpm_init.sql</c>。
 /// </summary>
 /// <remarks>
 /// 分批事务：每 <see cref="ArchiveChunkSize"/> 个实例一个事务，快照写入与删除原行同进同退；
