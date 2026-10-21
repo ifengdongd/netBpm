@@ -167,15 +167,16 @@ internal static class SqlGenerator
             lines.AddRange(RenderTableSection(table, dialect));
         }
 
-        if (dialect == Dialect.SqlServer)
-        {
-            lines.AddRange(BlankSection("⑤-1 表与列注释（扩展属性 MS_Description，已存在则跳过）"));
-            lines.AddRange(RenderTableComments(AllTables));
-        }
-
         // ⑥ 老库兼容补齐
         lines.AddRange(BlankSection("⑥ 老库兼容补齐（幂等；新库执行为空操作）"));
         lines.AddRange(RenderTransitionalUpgrade(dialect));
+
+        // 注释必须排在补列之后：老库缺列时该列还不存在，先加注释会报 15135
+        if (dialect == Dialect.SqlServer)
+        {
+            lines.AddRange(BlankSection("⑦ 表与列注释（扩展属性 MS_Description，已存在则跳过）"));
+            lines.AddRange(RenderTableComments(AllTables));
+        }
 
         lines.AddRange(Footer(dialect));
         return lines;
@@ -756,8 +757,9 @@ internal static class SqlGenerator
     }
 
     /// <summary>
-    /// SQL Server 表 / 列注释。必须逐条判重：<c>sp_addextendedproperty</c> 对已存在的属性会直接报错，
-    /// 而本脚本要能重复执行。
+    /// SQL Server 表 / 列注释。两个前置条件都必须守住：
+    /// ① <c>sp_addextendedproperty</c> 对已存在的属性直接报错 → 判重；
+    /// ② 对象不存在时（老库缺列，要等 ⑥ 段补列） → 判存在，否则报 15135。
     /// </summary>
     private static List<string> RenderTableComments(IReadOnlyList<TableDef> tables)
     {
@@ -767,7 +769,9 @@ internal static class SqlGenerator
         {
             if (table.Comment.Length > 0)
             {
-                lines.Add($"if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('{table.Name}') and minor_id = 0)");
+                lines.Add($"if object_id('{table.Name}', 'U') is not null");
+                lines.Add("    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'");
+                lines.Add($"        and major_id = object_id('{table.Name}') and minor_id = 0)");
                 lines.Add($"    exec sp_addextendedproperty @name = N'MS_Description', @value = N'{table.Comment}',");
                 lines.Add("        @level0type = N'SCHEMA', @level0name = N'dbo',");
                 lines.Add($"        @level1type = N'TABLE', @level1name = N'{table.Name}';");
@@ -782,9 +786,12 @@ internal static class SqlGenerator
                     continue;
                 }
 
-                lines.Add($"if not exists (select 1 from sys.extended_properties ep");
-                lines.Add($"    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id");
-                lines.Add($"    where ep.name = N'MS_Description' and ep.major_id = object_id('{table.Name}') and c.name = N'{column.Name}')");
+                // 列可能要等 ⑥ 段补列才存在（老库 / 被误删），对象不存在时加属性会报 15135
+                lines.Add($"if exists (select 1 from sys.columns");
+                lines.Add($"    where object_id = object_id('{table.Name}') and name = N'{column.Name}')");
+                lines.Add("    and not exists (select 1 from sys.extended_properties ep");
+                lines.Add("        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id");
+                lines.Add($"        where ep.name = N'MS_Description' and ep.major_id = object_id('{table.Name}') and c.name = N'{column.Name}')");
                 lines.Add($"    exec sp_addextendedproperty @name = N'MS_Description', @value = N'{column.Comment}',");
                 lines.Add("        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'" + table.Name + "',");
                 lines.Add($"        @level2type = N'COLUMN', @level2name = N'{column.Name}';");
@@ -862,6 +869,7 @@ internal static class SqlGenerator
         "--    ④ 运行期查询索引（性能增强）",
         "--    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox",
         "--    ⑥ 老库兼容补齐（大文本扩容、定时作业可靠性列）",
+        "--    ⑦ 表与列注释（SQL Server 扩展属性；MySQL 注释内联在建表语句里）",
         "--",
         "--  执行方式：",
         "--    · 工具（推荐，一步建库 + 建表 + 校验结构版本）：",

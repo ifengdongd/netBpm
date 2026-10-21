@@ -20,6 +20,7 @@
 --    ④ 运行期查询索引（性能增强）
 --    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox
 --    ⑥ 老库兼容补齐（大文本扩容、定时作业可靠性列）
+--    ⑦ 表与列注释（SQL Server 扩展属性；MySQL 注释内联在建表语句里）
 --
 --  执行方式：
 --    · 工具（推荐，一步建库 + 建表 + 校验结构版本）：
@@ -1241,1507 +1242,6 @@ if not exists (select 1 from sys.indexes where name = 'ACT_IDX_OUTBOX_PROC_INST'
 create index ACT_IDX_OUTBOX_PROC_INST on ACT_EVT_OUTBOX (PROCESS_INSTANCE_ID_);
 go
 
--- ─────────────────────────── ⑤-1 表与列注释（扩展属性 MS_Description，已存在则跳过） ───────────────────────────
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_GE_PROPERTY') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'通用属性表：存放 schema 版本、schema 历史与 ID 区块游标等全局键值对',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_GE_PROPERTY';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_GE_BYTEARRAY') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'二进制数据表：存放部署的流程定义资源（BPMN XML）等字节内容',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_GE_BYTEARRAY';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RE_DEPLOYMENT') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部署信息表：每次流程部署产生一条记录',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RE_DEPLOYMENT';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RE_PROCDEF') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义表：部署解析后的流程定义（KEY_ + VERSION_ + TENANT_ID_ 唯一）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RE_PROCDEF';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RU_EXECUTION') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时执行实例表：执行树，引擎唯一的运行态（流程实例 / 并发分支 / 作用域）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RU_EXECUTION';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RU_TASK') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时任务表：当前待办的用户任务',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RU_TASK';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RU_IDENTITYLINK') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时身份关联表：任务的用户 / 组关联（办理人、候选人与候选组）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RU_IDENTITYLINK';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RU_VARIABLE') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时变量表：流程实例、执行与任务级变量',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RU_VARIABLE';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_HI_PROCINST') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史流程实例表：记录已启动过的流程实例',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_HI_PROCINST';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_HI_ACTINST') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史活动实例表：流程图着色数据源',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_HI_ACTINST';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_HI_TASKINST') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史任务实例表：记录已产生过的用户任务',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_HI_TASKINST';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_HI_VARINST') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史变量实例表：变量在流程结束时的最终值',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_HI_VARINST';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_HI_IDENTITYLINK') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史身份关联表：历史任务的用户 / 组关联',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_HI_IDENTITYLINK';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('instances') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例表（订单审批/请假审批流程共用；workflow_type_id=流程信息枚举的流程类型id：订单=02830358-46ef-40e5-b3b9-4d5c4eb23f9f，请假=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'instances';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'apply_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'apply_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'workflow_type_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型id（业务侧流程信息枚举 Id：订单=02830358-46ef-40e5-b3b9-4d5c4eb23f9f，请假=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'workflow_type_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'workflow_version')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程版本',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'workflow_version';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'describe')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例描述',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'describe';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_emp_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'apply_emp_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人部门',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'apply_dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'business_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'对应的业务id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'business_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'business_dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务部门id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'business_dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'status_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例状态 审批中、已完成',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'status_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'newest_flag')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'是否是最新流程实例',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'newest_flag';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'workflow_instance_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例id(对应于流程引擎中的id）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'workflow_instance_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'last_audited_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后审批完成时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'last_audited_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'create_emp_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'create_emp_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'current_step')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前步骤名称',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'current_step';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'assign_emp')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前处理人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'assign_emp';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'modify_emp_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'修改人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'modify_emp_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'modify_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'修改时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'modify_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'deleted_flag')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'删除标志',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'deleted_flag';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'original_business_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'原始业务ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'original_business_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'flow_file_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图文件ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
-        @level2type = N'COLUMN', @level2name = N'flow_file_id';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('instance_current_task') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前审批步骤及审批人（订单审批/请假审批流程共用）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'instance_current_task';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'step_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'数据行id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'step_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'apply_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'apply_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'task_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'步骤ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'task_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'task_node')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前步骤名称',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'task_node';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'task_owner')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'待办项归属人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'task_owner';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'assign_emp_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前审批者',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'assign_emp_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'form_key')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程步骤对应的环节配置',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'form_key';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('deal_history') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批历史记录（订单审批/请假审批流程共用）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'deal_history';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_history_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'数据行id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'deal_history_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'business_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'对应业务表单的ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'business_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'apply_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'apply_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'task_node')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'步骤名称',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'task_node';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_emp_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批者员工id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'deal_emp_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'deal_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_result')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批结果',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'deal_result';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_comment')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批说明',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'deal_comment';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'form_key')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程步骤对应的环节配置',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'form_key';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_emp_name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批人姓名',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'deal_emp_name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_domain_account')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批人域帐号',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
-        @level2type = N'COLUMN', @level2name = N'deal_domain_account';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('workflow_type') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型表（流程信息枚举 ProcessInfoEnum 的数据源；系统启动时加载）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'workflow_type';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型id（流程信息枚举 Id，如 02830358-46ef-40e5-b3b9-4d5c4eb23f9f）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程名称（流程 key，= BPMN process/@id，如 order_process）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'describe')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程描述',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'describe';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'view_url')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务单查看页地址（{businessId}/{processInstanceId} 占位符）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'view_url';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'approve_url')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程审批页地址（{taskId}/{processInstanceId} 占位符）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'approve_url';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'sort_order')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'展示顺序（小在前）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'sort_order';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'enabled')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'是否启用（0=停用，加载时跳过）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'enabled';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'modify_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
-        @level2type = N'COLUMN', @level2name = N'modify_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('bpmn_model') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程模型表（管理端流程设计器的模型落点；BPMN XML 的编辑源，部署后产生 ACT_RE_PROCDEF 版本）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'bpmn_model';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'模型 ID（设计器 modelId，GUID 字符串）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程名称（BPMN process/@name）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'process_key')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程 key（= BPMN process/@id，如 order_process）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'process_key';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'description')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程描述',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'description';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'bpmn_xml')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'BPMN 2.0 XML 内容',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'bpmn_xml';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'svg')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图 SVG 预览（前端导出，可选）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'svg';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'modify_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
-        @level2type = N'COLUMN', @level2name = N'modify_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('leave_bill') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'请假单（业务表单；days/reason 对应请假流程参数；流程类型id=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'leave_bill';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'business_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务id（请假单号，由业务侧生成）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'business_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'apply_user')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'apply_user';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'apply_dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请部门',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'apply_dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'business_dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务部门',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'business_dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'days')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'请假天数（对应流程参数 days）；NULL = 还没填',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'days';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'reason')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'请假事由（对应流程参数 reason）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'reason';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'ext_params')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'扩展流程参数（JSON 对象）：除 days / reason 外的键值对',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'ext_params';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'modify_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
-        @level2type = N'COLUMN', @level2name = N'modify_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('order_bill') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订单表（业务表单；状态随订单审批流程回写：1=审批中，-1=审批拒绝，100=审批通过；流程类型id=02830358-46ef-40e5-b3b9-4d5c4eb23f9f）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'order_bill';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'business_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务id（订单单号，由业务侧生成）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'business_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'product_name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订购产品（对应流程参数 product_name）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'product_name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'amount')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订单金额（对应流程参数 amount）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'amount';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'remark')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'备注（对应流程参数 remark）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'remark';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'status')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'状态：1=审批中，-1=审批拒绝，100=审批通过',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'status';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'approve_comment')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最终审批意见（审批结束时随状态一起写回）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'approve_comment';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'apply_user')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'apply_user';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'apply_dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请部门',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'apply_dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'business_dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务部门',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'business_dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'process_instance_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id（提交申请后回填，用于反查审批进度）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'process_instance_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'modify_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'modify_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'deleted_flag')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'伪删除标志（0 正常 / 1 已删除；公共数据操作接口 DeleteAsync 置位，列表与明细自动过滤）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
-        @level2type = N'COLUMN', @level2name = N'deleted_flag';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('workflow_parameters') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程参数表（订单/请假审批流程共用；「实例 × 参数名」键值对）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'workflow_parameters';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'workflow_instance_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例id（对应 instances.workflow_instance_id）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
-        @level2type = N'COLUMN', @level2name = N'workflow_instance_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'param_name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'参数名（如 days / reason / product_name）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
-        @level2type = N'COLUMN', @level2name = N'param_name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'param_value')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'参数值（null = 显式置空）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
-        @level2type = N'COLUMN', @level2name = N'param_value';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'modify_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
-        @level2type = N'COLUMN', @level2name = N'modify_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('sys_dept') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部门信息表',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'sys_dept';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部门ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
-        @level2type = N'COLUMN', @level2name = N'dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'dept_name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部门名称',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
-        @level2type = N'COLUMN', @level2name = N'dept_name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'parent_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'上级部门ID（NULL=顶级）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
-        @level2type = N'COLUMN', @level2name = N'parent_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'sort_order')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'排序号',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
-        @level2type = N'COLUMN', @level2name = N'sort_order';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('sys_emp') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工信息表',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'sys_emp';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'emp_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
-        @level2type = N'COLUMN', @level2name = N'emp_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'emp_name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工姓名',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
-        @level2type = N'COLUMN', @level2name = N'emp_name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'domain_account')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'域账号（审批人/申请人在流程里的用户ID）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
-        @level2type = N'COLUMN', @level2name = N'domain_account';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'dept_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'所属部门ID（sys_dept.dept_id）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
-        @level2type = N'COLUMN', @level2name = N'dept_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('sys_emp_group') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'用户组表（审批组）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'sys_emp_group';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'group_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'组标识（流程定义 candidateGroups 引用的就是它）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
-        @level2type = N'COLUMN', @level2name = N'group_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'group_name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'组名称（如：组长 / 经理）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
-        @level2type = N'COLUMN', @level2name = N'group_name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'sort_order')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'排序号',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
-        @level2type = N'COLUMN', @level2name = N'sort_order';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('sys_emp_group_member') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'用户组成员表',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'sys_emp_group_member';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'member_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'成员行ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
-        @level2type = N'COLUMN', @level2name = N'member_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'group_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'组标识（sys_emp_group.group_id）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
-        @level2type = N'COLUMN', @level2name = N'group_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'emp_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工ID（sys_emp.emp_id）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
-        @level2type = N'COLUMN', @level2name = N'emp_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'create_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
-        @level2type = N'COLUMN', @level2name = N'create_time';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RU_TIMER_JOB') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'定时作业表：边界定时器（一次性）到点后触发',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'RETRIES_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'剩余重试次数；0 表示已进死信',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
-        @level2type = N'COLUMN', @level2name = N'RETRIES_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'DEAD_LETTER_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=已进死信，不再参与到期轮询',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
-        @level2type = N'COLUMN', @level2name = N'DEAD_LETTER_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'EXCEPTION_MSG_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败原因',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
-        @level2type = N'COLUMN', @level2name = N'EXCEPTION_MSG_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'LAST_FAILURE_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
-        @level2type = N'COLUMN', @level2name = N'LAST_FAILURE_';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_HI_MIGRATION') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例迁移审计表：记录源/目标定义、活动映射、原因与操作人',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_HI_MIGRATION';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('bpmn_model_history') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程模型版本历史：每次保存/回滚追加一版，支持回滚与变更追溯',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'bpmn_model_history';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史版本 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'model_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'模型 id（bpmn_model.id）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'model_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'revision')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'版本号（同一模型内递增，从 1 开始）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'revision';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'name')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'保存时的流程名称',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'name';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'process_key')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'保存时的流程 key',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'process_key';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'description')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'保存时的流程描述',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'description';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'bpmn_xml')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'BPMN XML 快照',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'bpmn_xml';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'svg')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图 SVG 快照',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'svg';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'action')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'动作：save / rollback',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'action';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'operator')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'操作人（请求身份）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'operator';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'created_at')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'写入时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
-        @level2type = N'COLUMN', @level2name = N'created_at';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('admin_audit_log') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'管理动作审计：转办 / 跳转 / 变量直写等高风险动作的操作人、目标与结果',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'admin_audit_log';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审计记录 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户（与 ACT_* 的 TENANT_ID_ 同口径）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'actor')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'操作人（JWT sub / X-User-Id）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'actor';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'auth_mode')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'鉴权方式：jwt / api_key / none',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'auth_mode';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'action')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'动作标识，如 task.reassign / instance.jump / variable.write',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'action';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'target_type')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'目标类型：task / process_instance / variable / history',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'target_type';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'target_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'目标 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'target_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'process_instance_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'关联流程实例 id（便于按实例追溯）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'process_instance_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'detail')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'动作明细（JSON；不记录变量值）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'detail';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'success')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=成功，0=失败',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'success';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'error')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'失败原因',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'error';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'created_at')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'写入时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
-        @level2type = N'COLUMN', @level2name = N'created_at';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('admin_history_archive') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史归档：已结束实例的 ACT_HI_* 行快照（JSON），原历史行在归档后删除',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'admin_history_archive';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'归档行 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'process_instance_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'process_instance_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'tenant_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'tenant_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'process_definition_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义 id（启动时版本）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'process_definition_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'business_key')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务主键',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'business_key';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'start_user_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'发起人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'start_user_id';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'start_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'实例开始时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'start_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'end_time')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'实例结束时间',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'end_time';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'archived_at')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'归档时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'archived_at';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'archived_by')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'归档操作人',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'archived_by';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'payload')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史行快照（processInstance / activities / tasks / variables / identityLinks）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
-        @level2type = N'COLUMN', @level2name = N'payload';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_RU_JOB') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'异步作业表：asyncBefore / asyncAfter 作业（独占，一个作业 = 一个命令）',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_RU_JOB';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'作业 id（IIdGenerator 分配）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'REV_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'乐观锁版本',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'REV_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'EXECUTION_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'执行 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'EXECUTION_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'PROCESS_INSTANCE_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'PROCESS_INSTANCE_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'PROC_DEF_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'PROC_DEF_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'ACTIVITY_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'活动 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'ACTIVITY_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'PHASE_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'before / after',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'PHASE_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'DUEDATE_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'到期时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'DUEDATE_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'TENANT_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'TENANT_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'CREATE_TIME_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'CREATE_TIME_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'RETRIES_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'剩余重试次数',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'RETRIES_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'DEAD_LETTER_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=已进死信',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'DEAD_LETTER_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'EXCEPTION_MSG_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败原因',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'EXCEPTION_MSG_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'LAST_FAILURE_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
-        @level2type = N'COLUMN', @level2name = N'LAST_FAILURE_';
-go
-
-if not exists (select 1 from sys.extended_properties where name = N'MS_Description' and major_id = object_id('ACT_EVT_OUTBOX') and minor_id = 0)
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事务性事件 outbox：引擎事件与业务写入同事务落库，由发布器至少一次投递',
-        @level0type = N'SCHEMA', @level0name = N'dbo',
-        @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX';
-go
-
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件 id（订阅方幂等键）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'EVENT_TYPE_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件类型（PROCESS_COMPLETED / TASK_CREATED ...）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'EVENT_TYPE_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'ENTITY_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'实体 id（任务 / 活动 / 实例）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'ENTITY_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PROCESS_INSTANCE_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'PROCESS_INSTANCE_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PROC_DEF_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'PROC_DEF_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'EXECUTION_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'执行 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'EXECUTION_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'ACTIVITY_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'活动 id',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'ACTIVITY_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'TENANT_ID_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'TENANT_ID_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PAYLOAD_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件载荷（JSON）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'PAYLOAD_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'CREATE_TIME_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'CREATE_TIME_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PUBLISHED_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=已发布',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'PUBLISHED_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PUBLISH_ATTEMPTS_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'发布尝试次数',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'PUBLISH_ATTEMPTS_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'DEAD_LETTER_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=投递失败进死信',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'DEAD_LETTER_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'LAST_ERROR_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次发布失败原因',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'LAST_ERROR_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'NEXT_ATTEMPT_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'下次可发布时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'NEXT_ATTEMPT_';
-go
-if not exists (select 1 from sys.extended_properties ep
-    join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
-    where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PUBLISHED_TIME_')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'发布时间（UTC）',
-        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
-        @level2type = N'COLUMN', @level2name = N'PUBLISHED_TIME_';
-go
-
-
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
 
 --  这一节只为「用旧版脚本建过库」的环境准备：
@@ -2765,6 +1265,1939 @@ go
 
 if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_TIMER_JOB') and name = 'LAST_FAILURE_')
     alter table ACT_RU_TIMER_JOB add LAST_FAILURE_ datetime;
+go
+
+
+-- ─────────────────────────── ⑦ 表与列注释（扩展属性 MS_Description，已存在则跳过） ───────────────────────────
+
+if object_id('ACT_GE_PROPERTY', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_GE_PROPERTY') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'通用属性表：存放 schema 版本、schema 历史与 ID 区块游标等全局键值对',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_GE_PROPERTY';
+go
+
+if object_id('ACT_GE_BYTEARRAY', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_GE_BYTEARRAY') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'二进制数据表：存放部署的流程定义资源（BPMN XML）等字节内容',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_GE_BYTEARRAY';
+go
+
+if object_id('ACT_RE_DEPLOYMENT', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RE_DEPLOYMENT') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部署信息表：每次流程部署产生一条记录',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RE_DEPLOYMENT';
+go
+
+if object_id('ACT_RE_PROCDEF', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RE_PROCDEF') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义表：部署解析后的流程定义（KEY_ + VERSION_ + TENANT_ID_ 唯一）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RE_PROCDEF';
+go
+
+if object_id('ACT_RU_EXECUTION', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RU_EXECUTION') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时执行实例表：执行树，引擎唯一的运行态（流程实例 / 并发分支 / 作用域）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RU_EXECUTION';
+go
+
+if object_id('ACT_RU_TASK', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RU_TASK') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时任务表：当前待办的用户任务',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RU_TASK';
+go
+
+if object_id('ACT_RU_IDENTITYLINK', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RU_IDENTITYLINK') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时身份关联表：任务的用户 / 组关联（办理人、候选人与候选组）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RU_IDENTITYLINK';
+go
+
+if object_id('ACT_RU_VARIABLE', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RU_VARIABLE') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'运行时变量表：流程实例、执行与任务级变量',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RU_VARIABLE';
+go
+
+if object_id('ACT_HI_PROCINST', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_HI_PROCINST') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史流程实例表：记录已启动过的流程实例',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_HI_PROCINST';
+go
+
+if object_id('ACT_HI_ACTINST', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_HI_ACTINST') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史活动实例表：流程图着色数据源',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_HI_ACTINST';
+go
+
+if object_id('ACT_HI_TASKINST', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_HI_TASKINST') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史任务实例表：记录已产生过的用户任务',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_HI_TASKINST';
+go
+
+if object_id('ACT_HI_VARINST', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_HI_VARINST') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史变量实例表：变量在流程结束时的最终值',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_HI_VARINST';
+go
+
+if object_id('ACT_HI_IDENTITYLINK', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_HI_IDENTITYLINK') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史身份关联表：历史任务的用户 / 组关联',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_HI_IDENTITYLINK';
+go
+
+if object_id('instances', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('instances') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例表（订单审批/请假审批流程共用；workflow_type_id=流程信息枚举的流程类型id：订单=02830358-46ef-40e5-b3b9-4d5c4eb23f9f，请假=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'instances';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'apply_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'apply_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'apply_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'apply_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'workflow_type_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'workflow_type_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型id（业务侧流程信息枚举 Id：订单=02830358-46ef-40e5-b3b9-4d5c4eb23f9f，请假=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'workflow_type_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'workflow_version')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'workflow_version')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程版本',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'workflow_version';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'describe')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'describe')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例描述',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'describe';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'apply_emp_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_emp_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'apply_emp_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'apply_dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'apply_dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人部门',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'apply_dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'business_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'business_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'对应的业务id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'business_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'business_dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'business_dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务部门id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'business_dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'status_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'status_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例状态 审批中、已完成',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'status_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'newest_flag')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'newest_flag')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'是否是最新流程实例',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'newest_flag';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'workflow_instance_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'workflow_instance_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例id(对应于流程引擎中的id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'workflow_instance_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'last_audited_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'last_audited_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后审批完成时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'last_audited_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'create_emp_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'create_emp_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'create_emp_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'current_step')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'current_step')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前步骤名称',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'current_step';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'assign_emp')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'assign_emp')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前处理人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'assign_emp';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'modify_emp_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'modify_emp_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'修改人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'modify_emp_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'modify_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'modify_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'修改时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'modify_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'deleted_flag')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'deleted_flag')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'删除标志',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'deleted_flag';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'original_business_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'original_business_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'原始业务ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'original_business_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instances') and name = N'flow_file_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instances') and c.name = N'flow_file_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图文件ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instances',
+        @level2type = N'COLUMN', @level2name = N'flow_file_id';
+go
+
+if object_id('instance_current_task', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('instance_current_task') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前审批步骤及审批人（订单审批/请假审批流程共用）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'instance_current_task';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'step_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'step_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'数据行id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'step_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'apply_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'apply_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'apply_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'task_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'task_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'步骤ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'task_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'task_node')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'task_node')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前步骤名称',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'task_node';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'task_owner')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'task_owner')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'待办项归属人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'task_owner';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'assign_emp_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'assign_emp_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'当前审批者',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'assign_emp_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'form_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'form_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程步骤对应的环节配置',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'form_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('instance_current_task') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('instance_current_task') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'instance_current_task',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+
+if object_id('deal_history', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('deal_history') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批历史记录（订单审批/请假审批流程共用）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'deal_history';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'deal_history_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_history_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'数据行id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'deal_history_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'business_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'business_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'对应业务表单的ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'business_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'apply_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'apply_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'apply_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'task_node')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'task_node')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'步骤名称',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'task_node';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'deal_emp_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_emp_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批者员工id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'deal_emp_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'deal_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'deal_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'deal_result')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_result')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批结果',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'deal_result';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'deal_comment')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_comment')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批说明',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'deal_comment';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'form_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'form_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程步骤对应的环节配置',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'form_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'deal_emp_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_emp_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批人姓名',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'deal_emp_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('deal_history') and name = N'deal_domain_account')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('deal_history') and c.name = N'deal_domain_account')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审批人域帐号',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'deal_history',
+        @level2type = N'COLUMN', @level2name = N'deal_domain_account';
+go
+
+if object_id('workflow_type', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('workflow_type') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型表（流程信息枚举 ProcessInfoEnum 的数据源；系统启动时加载）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'workflow_type';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程类型id（流程信息枚举 Id，如 02830358-46ef-40e5-b3b9-4d5c4eb23f9f）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程名称（流程 key，= BPMN process/@id，如 order_process）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'describe')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'describe')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程描述',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'describe';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'view_url')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'view_url')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务单查看页地址（{businessId}/{processInstanceId} 占位符）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'view_url';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'approve_url')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'approve_url')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程审批页地址（{taskId}/{processInstanceId} 占位符）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'approve_url';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'sort_order')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'sort_order')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'展示顺序（小在前）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'sort_order';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'enabled')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'enabled')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'是否启用（0=停用，加载时跳过）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'enabled';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_type') and name = N'modify_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_type') and c.name = N'modify_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_type',
+        @level2type = N'COLUMN', @level2name = N'modify_time';
+go
+
+if object_id('bpmn_model', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('bpmn_model') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程模型表（管理端流程设计器的模型落点；BPMN XML 的编辑源，部署后产生 ACT_RE_PROCDEF 版本）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'bpmn_model';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'模型 ID（设计器 modelId，GUID 字符串）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程名称（BPMN process/@name）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'process_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'process_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程 key（= BPMN process/@id，如 order_process）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'process_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'description')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'description')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程描述',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'description';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'bpmn_xml')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'bpmn_xml')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'BPMN 2.0 XML 内容',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'bpmn_xml';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'svg')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'svg')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图 SVG 预览（前端导出，可选）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'svg';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model') and name = N'modify_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model') and c.name = N'modify_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model',
+        @level2type = N'COLUMN', @level2name = N'modify_time';
+go
+
+if object_id('leave_bill', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('leave_bill') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'请假单（业务表单；days/reason 对应请假流程参数；流程类型id=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'leave_bill';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'business_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'business_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务id（请假单号，由业务侧生成）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'business_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'apply_user')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'apply_user')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'apply_user';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'apply_dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'apply_dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请部门',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'apply_dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'business_dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'business_dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务部门',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'business_dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'days')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'days')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'请假天数（对应流程参数 days）；NULL = 还没填',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'days';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'reason')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'reason')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'请假事由（对应流程参数 reason）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'reason';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'ext_params')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'ext_params')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'扩展流程参数（JSON 对象）：除 days / reason 外的键值对',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'ext_params';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('leave_bill') and name = N'modify_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('leave_bill') and c.name = N'modify_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'leave_bill',
+        @level2type = N'COLUMN', @level2name = N'modify_time';
+go
+
+if object_id('order_bill', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('order_bill') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订单表（业务表单；状态随订单审批流程回写：1=审批中，-1=审批拒绝，100=审批通过；流程类型id=02830358-46ef-40e5-b3b9-4d5c4eb23f9f）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'order_bill';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'business_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'business_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务id（订单单号，由业务侧生成）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'business_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'product_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'product_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订购产品（对应流程参数 product_name）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'product_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'amount')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'amount')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订单金额（对应流程参数 amount）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'amount';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'remark')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'remark')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'备注（对应流程参数 remark）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'remark';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'status')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'status')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'状态：1=审批中，-1=审批拒绝，100=审批通过',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'status';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'approve_comment')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'approve_comment')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最终审批意见（审批结束时随状态一起写回）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'approve_comment';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'apply_user')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'apply_user')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'apply_user';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'apply_dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'apply_dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'申请部门',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'apply_dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'business_dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'business_dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务部门',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'business_dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'process_instance_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'process_instance_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id（提交申请后回填，用于反查审批进度）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'process_instance_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'modify_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'modify_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'modify_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('order_bill') and name = N'deleted_flag')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('order_bill') and c.name = N'deleted_flag')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'伪删除标志（0 正常 / 1 已删除；公共数据操作接口 DeleteAsync 置位，列表与明细自动过滤）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'order_bill',
+        @level2type = N'COLUMN', @level2name = N'deleted_flag';
+go
+
+if object_id('workflow_parameters', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('workflow_parameters') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程参数表（订单/请假审批流程共用；「实例 × 参数名」键值对）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'workflow_parameters';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_parameters') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_parameters') and name = N'workflow_instance_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'workflow_instance_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例id（对应 instances.workflow_instance_id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
+        @level2type = N'COLUMN', @level2name = N'workflow_instance_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_parameters') and name = N'param_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'param_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'参数名（如 days / reason / product_name）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
+        @level2type = N'COLUMN', @level2name = N'param_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_parameters') and name = N'param_value')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'param_value')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'参数值（null = 显式置空）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
+        @level2type = N'COLUMN', @level2name = N'param_value';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_parameters') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('workflow_parameters') and name = N'modify_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('workflow_parameters') and c.name = N'modify_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后修改时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'workflow_parameters',
+        @level2type = N'COLUMN', @level2name = N'modify_time';
+go
+
+if object_id('sys_dept', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('sys_dept') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部门信息表',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'sys_dept';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_dept') and name = N'dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部门ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
+        @level2type = N'COLUMN', @level2name = N'dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_dept') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_dept') and name = N'dept_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'dept_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'部门名称',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
+        @level2type = N'COLUMN', @level2name = N'dept_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_dept') and name = N'parent_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'parent_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'上级部门ID（NULL=顶级）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
+        @level2type = N'COLUMN', @level2name = N'parent_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_dept') and name = N'sort_order')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'sort_order')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'排序号',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
+        @level2type = N'COLUMN', @level2name = N'sort_order';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_dept') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_dept') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_dept',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+
+if object_id('sys_emp', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('sys_emp') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工信息表',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'sys_emp';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp') and name = N'emp_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'emp_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
+        @level2type = N'COLUMN', @level2name = N'emp_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp') and name = N'emp_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'emp_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工姓名',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
+        @level2type = N'COLUMN', @level2name = N'emp_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp') and name = N'domain_account')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'domain_account')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'域账号（审批人/申请人在流程里的用户ID）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
+        @level2type = N'COLUMN', @level2name = N'domain_account';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp') and name = N'dept_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'dept_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'所属部门ID（sys_dept.dept_id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
+        @level2type = N'COLUMN', @level2name = N'dept_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+
+if object_id('sys_emp_group', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('sys_emp_group') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'用户组表（审批组）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'sys_emp_group';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group') and name = N'group_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'group_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'组标识（流程定义 candidateGroups 引用的就是它）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
+        @level2type = N'COLUMN', @level2name = N'group_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group') and name = N'group_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'group_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'组名称（如：组长 / 经理）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
+        @level2type = N'COLUMN', @level2name = N'group_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group') and name = N'sort_order')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'sort_order')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'排序号',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
+        @level2type = N'COLUMN', @level2name = N'sort_order';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+
+if object_id('sys_emp_group_member', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('sys_emp_group_member') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'用户组成员表',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'sys_emp_group_member';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group_member') and name = N'member_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'member_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'成员行ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
+        @level2type = N'COLUMN', @level2name = N'member_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group_member') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户ID',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group_member') and name = N'group_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'group_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'组标识（sys_emp_group.group_id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
+        @level2type = N'COLUMN', @level2name = N'group_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group_member') and name = N'emp_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'emp_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'员工ID（sys_emp.emp_id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
+        @level2type = N'COLUMN', @level2name = N'emp_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('sys_emp_group_member') and name = N'create_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('sys_emp_group_member') and c.name = N'create_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'sys_emp_group_member',
+        @level2type = N'COLUMN', @level2name = N'create_time';
+go
+
+if object_id('ACT_RU_TIMER_JOB', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RU_TIMER_JOB') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'定时作业表：边界定时器（一次性）到点后触发',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_TIMER_JOB') and name = N'RETRIES_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'RETRIES_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'剩余重试次数；0 表示已进死信',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+        @level2type = N'COLUMN', @level2name = N'RETRIES_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_TIMER_JOB') and name = N'DEAD_LETTER_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'DEAD_LETTER_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=已进死信，不再参与到期轮询',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+        @level2type = N'COLUMN', @level2name = N'DEAD_LETTER_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_TIMER_JOB') and name = N'EXCEPTION_MSG_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'EXCEPTION_MSG_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败原因',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+        @level2type = N'COLUMN', @level2name = N'EXCEPTION_MSG_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_TIMER_JOB') and name = N'LAST_FAILURE_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'LAST_FAILURE_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+        @level2type = N'COLUMN', @level2name = N'LAST_FAILURE_';
+go
+
+if object_id('ACT_HI_MIGRATION', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_HI_MIGRATION') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例迁移审计表：记录源/目标定义、活动映射、原因与操作人',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_HI_MIGRATION';
+go
+
+if object_id('bpmn_model_history', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('bpmn_model_history') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程模型版本历史：每次保存/回滚追加一版，支持回滚与变更追溯',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'bpmn_model_history';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史版本 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'多租户 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'model_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'model_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'模型 id（bpmn_model.id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'model_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'revision')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'revision')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'版本号（同一模型内递增，从 1 开始）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'revision';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'保存时的流程名称',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'process_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'process_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'保存时的流程 key',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'process_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'description')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'description')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'保存时的流程描述',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'description';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'bpmn_xml')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'bpmn_xml')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'BPMN XML 快照',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'bpmn_xml';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'svg')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'svg')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程图 SVG 快照',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'svg';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'action')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'action')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'动作：save / rollback',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'action';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'operator')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'operator')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'操作人（请求身份）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'operator';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('bpmn_model_history') and name = N'created_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('bpmn_model_history') and c.name = N'created_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'写入时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'bpmn_model_history',
+        @level2type = N'COLUMN', @level2name = N'created_at';
+go
+
+if object_id('admin_audit_log', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('admin_audit_log') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'管理动作审计：转办 / 跳转 / 变量直写等高风险动作的操作人、目标与结果',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'admin_audit_log';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'审计记录 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户（与 ACT_* 的 TENANT_ID_ 同口径）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'actor')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'actor')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'操作人（JWT sub / X-User-Id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'actor';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'auth_mode')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'auth_mode')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'鉴权方式：jwt / api_key / none',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'auth_mode';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'action')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'action')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'动作标识，如 task.reassign / instance.jump / variable.write',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'action';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'target_type')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'target_type')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'目标类型：task / process_instance / variable / history',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'target_type';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'target_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'target_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'目标 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'target_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'process_instance_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'process_instance_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'关联流程实例 id（便于按实例追溯）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'process_instance_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'detail')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'detail')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'动作明细（JSON；不记录变量值）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'detail';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'success')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'success')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=成功，0=失败',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'success';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'error')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'error')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'失败原因',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'error';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_audit_log') and name = N'created_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_audit_log') and c.name = N'created_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'写入时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
+        @level2type = N'COLUMN', @level2name = N'created_at';
+go
+
+if object_id('admin_history_archive', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('admin_history_archive') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史归档：已结束实例的 ACT_HI_* 行快照（JSON），原历史行在归档后删除',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'admin_history_archive';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'归档行 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'process_instance_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'process_instance_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'process_instance_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'process_definition_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'process_definition_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义 id（启动时版本）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'process_definition_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'business_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'business_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务主键',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'business_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'start_user_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'start_user_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'发起人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'start_user_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'start_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'start_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'实例开始时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'start_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'end_time')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'end_time')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'实例结束时间',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'end_time';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'archived_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'archived_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'归档时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'archived_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'archived_by')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'archived_by')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'归档操作人',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'archived_by';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_history_archive') and name = N'payload')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_history_archive') and c.name = N'payload')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'历史行快照（processInstance / activities / tasks / variables / identityLinks）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_history_archive',
+        @level2type = N'COLUMN', @level2name = N'payload';
+go
+
+if object_id('ACT_RU_JOB', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_RU_JOB') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'异步作业表：asyncBefore / asyncAfter 作业（独占，一个作业 = 一个命令）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_RU_JOB';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'作业 id（IIdGenerator 分配）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'REV_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'REV_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'乐观锁版本',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'REV_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'EXECUTION_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'EXECUTION_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'执行 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'EXECUTION_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'PROCESS_INSTANCE_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'PROCESS_INSTANCE_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'PROCESS_INSTANCE_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'PROC_DEF_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'PROC_DEF_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'PROC_DEF_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'ACTIVITY_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'ACTIVITY_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'活动 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'ACTIVITY_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'PHASE_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'PHASE_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'before / after',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'PHASE_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'DUEDATE_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'DUEDATE_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'到期时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'DUEDATE_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'TENANT_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'TENANT_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'TENANT_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'CREATE_TIME_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'CREATE_TIME_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'CREATE_TIME_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'RETRIES_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'RETRIES_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'剩余重试次数',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'RETRIES_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'DEAD_LETTER_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'DEAD_LETTER_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=已进死信',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'DEAD_LETTER_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'EXCEPTION_MSG_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'EXCEPTION_MSG_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败原因',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'EXCEPTION_MSG_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'LAST_FAILURE_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'LAST_FAILURE_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次失败时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'LAST_FAILURE_';
+go
+
+if object_id('ACT_EVT_OUTBOX', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_EVT_OUTBOX') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事务性事件 outbox：引擎事件与业务写入同事务落库，由发布器至少一次投递',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件 id（订阅方幂等键）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'EVENT_TYPE_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'EVENT_TYPE_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件类型（PROCESS_COMPLETED / TASK_CREATED ...）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'EVENT_TYPE_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'ENTITY_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'ENTITY_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'实体 id（任务 / 活动 / 实例）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'ENTITY_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'PROCESS_INSTANCE_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PROCESS_INSTANCE_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'PROCESS_INSTANCE_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'PROC_DEF_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PROC_DEF_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'PROC_DEF_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'EXECUTION_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'EXECUTION_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'执行 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'EXECUTION_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'ACTIVITY_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'ACTIVITY_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'活动 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'ACTIVITY_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'TENANT_ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'TENANT_ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'TENANT_ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'PAYLOAD_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PAYLOAD_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件载荷（JSON）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'PAYLOAD_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'CREATE_TIME_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'CREATE_TIME_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'CREATE_TIME_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'PUBLISHED_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PUBLISHED_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=已发布',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'PUBLISHED_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'PUBLISH_ATTEMPTS_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PUBLISH_ATTEMPTS_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'发布尝试次数',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'PUBLISH_ATTEMPTS_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'DEAD_LETTER_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'DEAD_LETTER_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=投递失败进死信',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'DEAD_LETTER_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'LAST_ERROR_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'LAST_ERROR_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最后一次发布失败原因',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'LAST_ERROR_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'NEXT_ATTEMPT_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'NEXT_ATTEMPT_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'下次可发布时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'NEXT_ATTEMPT_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_EVT_OUTBOX') and name = N'PUBLISHED_TIME_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_EVT_OUTBOX') and c.name = N'PUBLISHED_TIME_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'发布时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
+        @level2type = N'COLUMN', @level2name = N'PUBLISHED_TIME_';
 go
 
 

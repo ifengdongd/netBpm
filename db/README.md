@@ -65,6 +65,7 @@ dotnet run --project tools/NetBpm.DbInit -- \
 | ④ | **性能增强** | 运行期查询索引（执行树 / 任务 / 变量 / 关系 / 历史），幂等 |
 | ⑤ | **应用层扩展表** | `ACT_IDEMPOTENCY`（HTTP 幂等键）、`ACT_RU_TIMER_JOB`（边界定时作业）、`ACT_HI_MIGRATION`（实例迁移审计）、`bpmn_model_history`（模型版本历史）、`admin_audit_log` + `admin_history_archive`（管理审计与历史归档）、`ACT_RU_JOB`（异步作业）、`ACT_EVT_OUTBOX`（事务性事件外发队列） |
 | ⑥ | **老库兼容补齐** | 模型大文本列扩容（MySQL `text` 64KB → `mediumtext`）、定时作业重试 / 死信列；新库执行为空操作 |
+| ⑦ | **表与列注释**（SQL Server） | `MS_Description` 扩展属性，判重 + 判存在；MySQL 为建表语句内联 `comment` |
 
 > **其它 .NET 项目接入引擎**：整份脚本执行一次即可；只接引擎、不要业务表的项目，
 > 忽略 ② ③ 建出来的表就行（对引擎功能无影响）。
