@@ -42,6 +42,9 @@ builder.Services.AddHostedService<IdempotencyCleanupService>();
 // 管理动作审计（转办 / 跳转 / 变量直写）：写审计存储，失败不影响业务
 builder.Services.AddNetBpmAuditing();
 
+// 账号密码登录：账号存储（admin_user）+ 令牌签发（复用 NetBpm:Security:Jwt 的密钥）
+builder.Services.AddNetBpmAuth(builder.Configuration);
+
 // 审计保留策略（NetBpm:Admin:AuditRetentionDays，默认 0 = 永久保留）
 builder.Services.AddHostedService<AdminAuditCleanupService>();
 builder.Services.AddHostedService<AdminArchiveCleanupService>();
@@ -125,6 +128,7 @@ app.MapGet("/api/admin/info", (IServiceProvider services) =>
 app.MapDesignerEndpoints();
 app.MapRuntimeEndpoints();
 app.MapIdentityEndpoints();
+app.MapAuthEndpoints();
 
 // 数据库模式：执行幂等初始化脚本（库里缺什么补什么），再校验 ACT_GE_PROPERTY.schema.version（P5 验收标准之一）
 var netBpmOptions = app.Services.GetRequiredService<NetBpmOptions>();

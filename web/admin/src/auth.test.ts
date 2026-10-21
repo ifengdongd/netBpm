@@ -4,7 +4,9 @@ import {
   ADMIN_SCOPE,
   clearCredential,
   credentialHeaders,
+  credentialPersistence,
   getCredential,
+  isCredentialExpired,
   resolveIdentity,
   setCredential,
 } from './auth';
@@ -20,6 +22,46 @@ function fakeJwt(payload: object): string {
 describe('凭据存取', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('默认写入 localStorage：跨标签页共享，与设计器共用一个键', () => {
+    setCredential({ mode: 'bearer', value: 't-1' });
+
+    expect(localStorage.getItem('netbpm.admin.credential.v1')).toContain('t-1');
+    expect(sessionStorage.getItem('netbpm.admin.credential.v1')).toBeNull();
+    expect(credentialPersistence()).toBe('shared');
+    expect(getCredential()).toEqual({ mode: 'bearer', value: 't-1' });
+  });
+
+  it('session 模式只写 sessionStorage：本标签页优先，关闭即失效', () => {
+    localStorage.setItem('netbpm.admin.credential.v1', JSON.stringify({ mode: 'bearer', value: 'shared' }));
+    setCredential({ mode: 'bearer', value: 'temporary' }, 'session');
+
+    expect(credentialPersistence()).toBe('session');
+    // 读取顺序：临时登录覆盖共享凭据，但共享凭据不被破坏（其它标签页仍可用）
+    expect(getCredential()?.value).toBe('temporary');
+    expect(localStorage.getItem('netbpm.admin.credential.v1')).toContain('shared');
+  });
+
+  it('退出登录：两种存储一起清（一处退出，处处退出）', () => {
+    localStorage.setItem('netbpm.admin.credential.v1', JSON.stringify({ mode: 'bearer', value: 'shared' }));
+    setCredential({ mode: 'bearer', value: 'temporary' }, 'session');
+
+    clearCredential();
+
+    expect(getCredential()).toBeNull();
+    expect(credentialPersistence()).toBeNull();
+  });
+
+  it('令牌过期判定：过期视为失效，无过期时间的凭据长期有效', () => {
+    const now = Date.parse('2026-10-21T10:00:00Z');
+
+    expect(isCredentialExpired({ mode: 'bearer', value: 't', expiresAt: '2026-10-21T09:59:59Z' }, now)).toBe(true);
+    expect(isCredentialExpired({ mode: 'bearer', value: 't', expiresAt: '2026-10-21T10:00:01Z' }, now)).toBe(false);
+    expect(isCredentialExpired({ mode: 'bearer', value: 't' }, now)).toBe(false);
+    expect(isCredentialExpired({ mode: 'apiKey', value: 'k' }, now)).toBe(false);
+    expect(isCredentialExpired(null, now)).toBe(false);
   });
 
   it('保存 / 读取 / 清除凭据', () => {

@@ -13,6 +13,9 @@ namespace NetBpm.Rest.Security;
 /// 都未配置时保持开放（开发 / 单机演示），但仍解析 <c>X-User-Id</c> / <c>X-Tenant-Id</c>。
 /// </para>
 /// <para>
+/// <c>POST /api/auth/login</c> 不受本中间件约束（它用来换取令牌）；其余 <c>/api/**</c> 一律校验。
+/// </para>
+/// <para>
 /// 校验顺序：
 /// <list type="number">
 ///   <item><description>带 <c>Authorization: Bearer</c> → 按 JWT 校验（签名 / iss / aud / 过期）；</description></item>
@@ -117,6 +120,14 @@ public sealed class AuthenticationMiddleware
         ArgumentNullException.ThrowIfNull(requestContext);
 
         if (!context.Request.Path.StartsWithSegments("/api"))
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
+        // 登录端点必须匿名可达：它本身就是「换凭据」的地方，
+        // 若要求先带令牌，登录就变成鸡生蛋问题。
+        if (context.Request.Path.StartsWithSegments("/api/auth/login"))
         {
             await _next(context).ConfigureAwait(false);
             return;

@@ -1023,6 +1023,7 @@ go
 --  ACT_HI_MIGRATION     流程实例迁移审计（源/目标定义、活动映射、原因、操作人）
 --  bpmn_model_history   流程模型版本历史（每次保存/回滚一版）
 --  admin_audit_log      管理动作审计（转办 / 跳转 / 变量直写）
+--  admin_user           控制台账号（账号密码登录；只存 PBKDF2 口令散列）
 --  admin_history_archive 历史归档快照（归档后原 ACT_HI_* 行删除）
 --  ACT_RU_JOB           asyncBefore / asyncAfter 异步作业（含重试与死信）
 --  ACT_EVT_OUTBOX       事务性事件外发队列（至少一次投递，含发布重试/死信）
@@ -1154,6 +1155,30 @@ create index ix_admin_audit_target on admin_audit_log (target_type, target_id);
 go
 if not exists (select 1 from sys.indexes where name = 'ix_admin_audit_instance' and object_id = object_id('admin_audit_log'))
 create index ix_admin_audit_instance on admin_audit_log (process_instance_id);
+go
+if object_id(N'admin_user', N'U') is null
+    create table admin_user (
+    id nvarchar(64) not null,
+    username nvarchar(64) not null,
+    display_name nvarchar(128),
+    password_hash nvarchar(255) not null,
+    scopes nvarchar(1000) not null constraint df_admin_user_scopes default (''),
+    tenant_id nvarchar(255),
+    enabled int not null constraint df_admin_user_enabled default (1),
+    failed_attempts int not null constraint df_admin_user_failed_attempts default (0),
+    locked_until datetime,
+    last_login_at datetime,
+    created_at datetime not null,
+    updated_at datetime not null,
+    constraint pk_admin_user primary key clustered (id)
+    );
+go
+
+if not exists (select 1 from sys.indexes where name = 'ux_admin_user_username' and object_id = object_id('admin_user'))
+create unique index ux_admin_user_username on admin_user (username);
+go
+if not exists (select 1 from sys.indexes where name = 'ix_admin_user_tenant' and object_id = object_id('admin_user'))
+create index ix_admin_user_tenant on admin_user (tenant_id);
 go
 if object_id(N'admin_history_archive', N'U') is null
     create table admin_history_archive (
@@ -2802,6 +2827,123 @@ if exists (select 1 from sys.columns
     exec sp_addextendedproperty @name = N'MS_Description', @value = N'写入时间（UTC）',
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_audit_log',
         @level2type = N'COLUMN', @level2name = N'created_at';
+go
+
+if object_id('admin_user', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('admin_user') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'控制台账号：账号密码登录的用户表（只存 PBKDF2 口令散列，不存明文）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'admin_user';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'账号 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'username')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'username')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'登录名（全局唯一）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'username';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'display_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'display_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'显示名',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'display_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'password_hash')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'password_hash')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'PBKDF2 散列：pbkdf2$迭代次数$salt(base64)$hash(base64)',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'password_hash';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'scopes')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'scopes')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'授权范围（空格分隔，如 netbpm.admin）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'scopes';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'所属租户（为空表示不限租户）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'enabled')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'enabled')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'1=启用，0=停用',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'enabled';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'failed_attempts')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'failed_attempts')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'连续失败次数（成功后清零）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'failed_attempts';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'locked_until')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'locked_until')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'锁定到期时间（UTC；暴力破解保护）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'locked_until';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'last_login_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'last_login_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'上次登录时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'last_login_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'created_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'created_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'created_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('admin_user') and name = N'updated_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('admin_user') and c.name = N'updated_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'更新时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'admin_user',
+        @level2type = N'COLUMN', @level2name = N'updated_at';
 go
 
 if object_id('admin_history_archive', 'U') is not null

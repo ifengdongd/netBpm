@@ -63,12 +63,33 @@ dotnet run --project tools/NetBpm.DbInit -- \
 | ② | **流程实例业务表** | `instances` / `instance_current_task` / `deal_history` + `workflow_type` 流程类型表（`ProcessInfoEnum` 数据源，含种子）+ `bpmn_model` 流程模型表 |
 | ③ | **Demo 业务表** | 请假单（`leave_bill`）、订单单（`order_bill`）、流程参数键值表（`workflow_parameters`）、组织架构（`sys_*` 四张，含演示种子数据） |
 | ④ | **性能增强** | 运行期查询索引（执行树 / 任务 / 变量 / 关系 / 历史），幂等 |
-| ⑤ | **应用层扩展表** | `ACT_IDEMPOTENCY`（HTTP 幂等键）、`ACT_RU_TIMER_JOB`（边界定时作业）、`ACT_HI_MIGRATION`（实例迁移审计）、`bpmn_model_history`（模型版本历史）、`admin_audit_log` + `admin_history_archive`（管理审计与历史归档）、`ACT_RU_JOB`（异步作业）、`ACT_EVT_OUTBOX`（事务性事件外发队列） |
+| ⑤ | **应用层扩展表** | `ACT_IDEMPOTENCY`（HTTP 幂等键）、`ACT_RU_TIMER_JOB`（边界定时作业）、`ACT_HI_MIGRATION`（实例迁移审计）、`bpmn_model_history`（模型版本历史）、`admin_audit_log` + `admin_history_archive`（管理审计与历史归档）、`ACT_RU_JOB`（异步作业）、`ACT_EVT_OUTBOX`（事务性事件外发队列）、`admin_user`（控制台账号密码登录，只存 PBKDF2 口令散列） |
 | ⑥ | **老库兼容补齐** | 模型大文本列扩容（MySQL `text` 64KB → `mediumtext`）、定时作业重试 / 死信列；新库执行为空操作 |
 | ⑦ | **表与列注释**（SQL Server） | `MS_Description` 扩展属性，判重 + 判存在；MySQL 为建表语句内联 `comment` |
 
 > **其它 .NET 项目接入引擎**：整份脚本执行一次即可；只接引擎、不要业务表的项目，
 > 忽略 ② ③ 建出来的表就行（对引擎功能无影响）。
+
+## 控制台账号表（admin_user）
+
+账号密码登录（`POST /api/auth/login`）的账号落在这张表；**只存 PBKDF2 口令散列，不存明文**。
+
+| 列 | 说明 |
+|---|---|
+| `id` / `username` | 账号 id / 登录名（`username` 唯一） |
+| `display_name` | 显示名（顶栏展示） |
+| `password_hash` | `pbkdf2$<迭代次数>$<salt(base64)>$<hash(base64)>` |
+| `scopes` | 授权范围（空格分隔，如 `netbpm.admin`） |
+| `tenant_id` | 所属租户（为空表示不限租户） |
+| `enabled` | 1 = 启用，0 = 停用 |
+| `failed_attempts` / `locked_until` | 连续失败次数与锁定到期时间（UTC），成功后清零 |
+| `last_login_at` | 上次登录时间（UTC） |
+
+- 新库由脚本直接建出；**老库重跑一次本脚本即补齐**（脚本幂等，`admin_user` 与其它 ⑤ 段表同一段）。
+- 账号由运维工具维护（口令至少 8 位，不传 `--password` 会交互式读取且不回显）：
+  `users add | list | reset-password | enable | disable`。
+- 无库（内存）模式没有这张表，改用配置 `NetBpm:Security:DevUsers`（仅限本地开发）。
+- 该表只服务控制台登录：引擎与业务表的租户 / 身份口径不变。
 
 ## 执行方式
 
@@ -80,6 +101,10 @@ dotnet run --project tools/NetBpm.DbMigrate -- migrate --create-database \
 
 # 2. 只校验结构版本
 dotnet run --project tools/NetBpm.DbMigrate -- check --provider mysql --connection "<连接串>"
+
+# 3. 控制台账号（admin_user）：建号 / 列表 / 改口令 / 启停
+dotnet run --project tools/NetBpm.DbMigrate -- users add --username admin --scopes netbpm.admin \
+  --provider mysql --connection "<连接串>"
 
 # 3. 宿主启动：NetBpm:AutoMigrate=true 时执行本脚本（库需已存在，或先跑一次 1）
 #    NetBpm:ValidateSchemaOnStartup=true 时校验 schema.version

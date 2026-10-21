@@ -560,6 +560,8 @@ SQL Server 由 SqlClient 负责（4.0 起已移除 TLS 1.0/1.1 支持），请�
 - 用户级：`NetBpm:Security:Jwt:SigningKey`（HS256，至少 32 字节），请求带 `Authorization: Bearer <jwt>`。
   操作人取 `sub`，租户取 `tenant` / `tenant_id`；配置了 `Issuer` / `Audience` 时一并校验，过期令牌一律 401。
   JWT 模式下忽略 `X-User-Id` / `X-Tenant-Id`，身份只来自签名令牌。
+- 账号密码（控制台登录）：`POST /api/auth/login` 用 `admin_user` 表里的账号换一个 JWT，
+  见下面「控制台账号密码登录」。它是**新增的第三种凭据来源**，上面两种方式照旧可用。
 
 **JWT 下的租户与身份边界**：请求体 / 查询参数里的 `startUserId`、`tenantId` 与令牌不一致一律 **403**
 （不允许用请求参数冒充他人或跨租户读写）；按 id 访问实例、任务、历史、部署时按令牌租户校验，
@@ -587,6 +589,55 @@ API Key 模式代表可信服务，不做任务级校验。令牌支持 `groups`
 越权**读**需要 `netbpm.admin`；API Key 模式不做参与人校验。
 
 两者都留空则保持开放（仅限开发环境，此时请求头声明的身份被直接信任）。
+
+**控制台账号密码登录**（`/api/auth/**`，管理宿主与 REST 宿主都注册）：
+
+| 端点 | 说明 |
+|---|---|
+| `POST /api/auth/login` | 请求 `{ username, password, tenantId? }` → `{ token, expiresAt, user, displayName, tenant, scopes }`；**匿名可达**（它本身就是换凭据的入口） |
+| `GET /api/auth/me` | 回显当前凭据的身份： `{ user, tenant, authMode, scopes, isAdmin }`；无凭据 401 |
+
+- 账号存在 `admin_user` 表（初始化脚本已含，老库重跑一次幂等脚本即补齐）：
+  只存 **PBKDF2-HMACSHA256** 散列（21 万次迭代，格式 `pbkdf2$<迭代>$<salt>$<hash>`），明文口令不落库、不进审计日志。
+- 签发的令牌复用 `NetBpm:Security:Jwt:*` 同一套密钥，因此能直接被鉴权中间件接受：
+  身份取 `sub`，范围取 `scope`，租户取 `tenant`。**未配置 `SigningKey` 时登录返回 503 `jwt_not_configured`** ——
+  宁可明确失败，也不让登录「看起来成功」却拿到一个谁都不认的令牌。
+- 失败语义（前端按 `code` 分支，文案统一为「登录名或口令错误」以免探测账号是否存在）：
+
+| code | 状态 | 含义 |
+|---|---|---|
+| `invalid_credentials` | 401 | 登录名或口令错误（账号不存在同样返回它，并做一次同等强度的散列计算抹平耗时差） |
+| `account_locked` | 429 | 连续失败达阈值被临时锁定（锁定先于口令校验：口令再对也不放行） |
+| `account_disabled` | 403 | 账号已停用 |
+| `tenant_mismatch` | 403 | 请求里的租户与账号绑定的租户不一致 |
+| `jwt_not_configured` | 503 | 未配置签名密钥 |
+
+- 可调参数（`NetBpm:Security:Login`）：`AccessTokenMinutes`（默认 120）、
+  `MaxFailedAttempts`（默认 5，0 = 不锁定）、`LockoutMinutes`（默认 10）。
+  管理宿主另对 `/api/auth/login` 单独限流：`NetBpm:Admin:RateLimit:LoginPerMinute`（默认 10，防口令爆破）。
+- **建账号**用运维工具（口令至少 8 位；不传 `--password` 会交互式读取且不回显）：
+
+```bash
+dotnet run --project tools/NetBpm.DbMigrate -- users add \
+  --username admin --display-name 管理员 --scopes netbpm.admin \
+  --provider sqlserver --connection "Server=localhost;Database=netbpm;User ID=sa;Password=***;TrustServerCertificate=True"
+
+dotnet run --project tools/NetBpm.DbMigrate -- users list        --provider ... --connection "..."
+dotnet run --project tools/NetBpm.DbMigrate -- users reset-password --username admin --provider ... --connection "..."
+dotnet run --project tools/NetBpm.DbMigrate -- users disable     --username admin --provider ... --connection "..."
+```
+
+- **无库（内存）模式**没有 `admin_user` 表，可用 `NetBpm:Security:DevUsers` 配置开发账号
+  （口令写在配置里，仅本地开发；生产请用 `admin_user`）：
+
+```json
+"NetBpm": { "Security": { "DevUsers": [ { "Username": "admin", "Password": "NetBpm@2026", "Scopes": "netbpm.admin" } ] } }
+```
+
+- 控制台前端：登录页默认把令牌写到 `localStorage['netbpm.admin.credential.v1']`
+  （**跨标签页共享**，设计器 `web/designer` 读同一个键，因此新开标签页免登录）；
+  取消「保持登录」只写 `sessionStorage`（仅本标签页，关闭即失效，顶栏会标「仅本标签页」）。
+  令牌过期时本地先判一次并回登录页，服务端 401 同样会跳登录页。
 
 **错误码约定**：`400` 参数 / 业务规则拒绝、`403` 身份或租户与令牌不一致、`404` 对象不存在（含跨租户）、
 `409` 状态冲突（已认领 / 仍有运行实例 / 乐观锁失败）、`501` 明确未实现、`500` 只返回 traceId，

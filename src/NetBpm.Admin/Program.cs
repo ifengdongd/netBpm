@@ -67,6 +67,9 @@ builder.Services.AddHostedService<IdempotencyCleanupService>();
 // 管理动作审计（转办 / 跳转 / 变量直写）
 builder.Services.AddNetBpmAuditing();
 
+// 账号密码登录：账号存储（admin_user）+ 令牌签发（复用 NetBpm:Security:Jwt 的密钥）
+builder.Services.AddNetBpmAuth(builder.Configuration);
+
 // 审计保留策略（NetBpm:Admin:AuditRetentionDays，默认 0 = 永久保留）
 builder.Services.AddHostedService<AdminAuditCleanupService>();
 builder.Services.AddHostedService<AdminArchiveCleanupService>();
@@ -85,6 +88,7 @@ if (rateLimitEnabled)
 {
     var apiPerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:ApiPerMinute", 600);
     var probePerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:ProbePerMinute", 30);
+    var loginPerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:LoginPerMinute", 10);
 
     builder.Services.AddRateLimiter(limiter =>
     {
@@ -99,6 +103,14 @@ if (rateLimitEnabled)
                 return RateLimitPartition.GetFixedWindowLimiter(
                     $"probe:{ip}",
                     _ => new FixedWindowRateLimiterOptions { PermitLimit = probePerMinute, Window = TimeSpan.FromMinutes(1) });
+            }
+
+            // 登录接口：比探针更紧（口令爆破），阈值 NetBpm:Admin:RateLimit:LoginPerMinute
+            if (context.Request.Path.StartsWithSegments("/api/auth/login"))
+            {
+                return RateLimitPartition.GetFixedWindowLimiter(
+                    $"login:{ip}",
+                    _ => new FixedWindowRateLimiterOptions { PermitLimit = loginPerMinute, Window = TimeSpan.FromMinutes(1) });
             }
 
             if (context.Request.Path.StartsWithSegments("/api"))
@@ -204,6 +216,8 @@ app.MapDesignerEndpoints();
 app.MapRuntimeEndpoints();
 app.MapIdentityEndpoints();
 app.MapAdminEndpoints();
+// 账号密码登录（/api/auth/login、/api/auth/me）：登录接口匿名可达，内部自带限流分区。
+app.MapAuthEndpoints();
 
 // React 管理前端：静态文件 + SPA history 路由回退。
 // hash 文件名的资源（/assets、/designer/assets）长缓存 immutable；

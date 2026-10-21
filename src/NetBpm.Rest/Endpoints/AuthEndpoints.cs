@@ -1,0 +1,309 @@
+using NetBpm.Persistence;
+using NetBpm.Persistence.Admin;
+using NetBpm.Rest.Security;
+using NetBpm.Runtime;
+
+namespace NetBpm.Rest.Endpoints;
+
+/// <summary>账号密码登录请求。</summary>
+/// <param name="Username">登录名。</param>
+/// <param name="Password">口令（明文，仅在本请求内用于校验，不落库不记审计）。</param>
+/// <param name="TenantId">期望登录到的租户（账号绑定了租户时必须一致）。</param>
+public sealed record LoginRequest(string Username, string Password, string? TenantId = null);
+
+/// <summary>登录成功响应。</summary>
+/// <param name="Token">访问令牌（<c>Authorization: Bearer &lt;token&gt;</c>）。</param>
+/// <param name="ExpiresAt">过期时间（UTC）。</param>
+/// <param name="User">操作人（令牌 <c>sub</c>）。</param>
+/// <param name="DisplayName">显示名。</param>
+/// <param name="Tenant">租户（可为空）。</param>
+/// <param name="Scopes">令牌携带的授权范围。</param>
+public sealed record LoginResponse(
+    string Token,
+    DateTime ExpiresAt,
+    string User,
+    string? DisplayName,
+    string? Tenant,
+    IReadOnlyList<string> Scopes);
+
+/// <summary>当前身份（<c>GET /api/auth/me</c>）。</summary>
+public sealed record CurrentIdentity(
+    string? User,
+    string? Tenant,
+    string AuthMode,
+    IReadOnlyList<string> Scopes,
+    bool IsAdmin);
+
+/// <summary>
+/// 账号密码登录端点：<c>POST /api/auth/login</c> 校验 <c>admin_user</c> 里的账号，
+/// 成功后用与鉴权中间件同一套密钥签发 JWT（<c>GET /api/auth/me</c> 回显当前身份）。
+/// <para>
+/// 与既有鉴权方式的关系：本端点<b>只新增「用户令牌」这一种来源</b>，
+/// <c>NetBpm:Security:ApiKey</c> 与外部签发的 JWT 仍然照旧可用；
+/// 未配置 <c>NetBpm:Security:Jwt:SigningKey</c> 时签不出令牌，端点返回 503 说明原因。
+/// </para>
+/// </summary>
+public static class AuthEndpoints
+{
+    // 用于「账号不存在」时也走一次 PBKDF2，抹平与「口令错误」的耗时差，避免用响应时间探测账号是否存在
+    private static readonly string DummyPasswordHash = NetBpm.Persistence.Admin.PasswordHasher.Hash(
+        Guid.NewGuid().ToString("N"));
+
+    /// <summary>注册鉴权相关端点。</summary>
+    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        var group = endpoints.MapGroup("/api/auth").WithTags("auth");
+
+        group.MapPost("/login", LoginAsync)
+            .Accepts<LoginRequest>("application/json")
+            .Produces<LoginResponse>()
+            .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized)
+            .Produces<ErrorResponse>(StatusCodes.Status429TooManyRequests)
+            .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/me", MeAsync).Produces<CurrentIdentity>()
+            .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized);
+
+        return endpoints;
+    }
+
+    private static async Task<IResult> LoginAsync(
+        LoginRequest? request,
+        AuthTokenIssuer issuer,
+        IAdminUserStore users,
+        AuthTokenOptions options,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrEmpty(request.Password))
+        {
+            return Results.BadRequest(new ErrorResponse("请提供登录名与口令。"));
+        }
+
+        if (!issuer.CanIssue)
+        {
+            // 签不出令牌就不要让登录「看起来成功」
+            return Results.Json(
+                new ErrorResponse(
+                    "未启用令牌签发：请先配置 NetBpm:Security:Jwt:SigningKey（HS256，至少 32 字节）。",
+                    Code: "jwt_not_configured"),
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var username = request.Username.Trim();
+        var user = await users.FindByUsernameAsync(username, ct).ConfigureAwait(false);
+
+        // 锁定先于口令校验：口令再对也不放行，否则「试到正确口令」就能绕过锁定
+        if (user is not null
+            && user.LockedUntil is { } lockedUntil
+            && lockedUntil > DateTime.UtcNow)
+        {
+            return Results.Json(
+                new ErrorResponse(
+                    $"账号已锁定（连续失败 {options.MaxFailedAttempts} 次），请在 {lockedUntil:u} 之后重试。",
+                    Code: "account_locked"),
+                statusCode: StatusCodes.Status429TooManyRequests);
+        }
+
+        // 账号不存在也做一次同强度校验：既防计时探测，也让失败路径的耗时一致
+        var passwordOk = NetBpm.Persistence.Admin.PasswordHasher.Verify(
+            request.Password,
+            user?.PasswordHash ?? DummyPasswordHash);
+
+        if (user is null || !passwordOk)
+        {
+            if (user is not null)
+            {
+                await users.MarkLoginFailureAsync(
+                    user.Id,
+                    options.MaxFailedAttempts,
+                    options.MaxFailedAttempts > 0
+                        ? DateTime.UtcNow.AddMinutes(Math.Max(1, options.LockoutMinutes))
+                        : null,
+                    ct).ConfigureAwait(false);
+            }
+
+            loggerFactory.CreateLogger("NetBpm.Auth")
+                .LogWarning("登录失败：{Username}（口令错误或账号不存在）", username);
+
+            // 统一文案：不透露账号是否存在
+            return Results.Json(
+                new ErrorResponse("登录名或口令错误。", Code: "invalid_credentials"),
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        if (!user.Enabled)
+        {
+            return Results.Json(
+                new ErrorResponse("账号已停用。", Code: "account_disabled"),
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var tenant = string.IsNullOrWhiteSpace(user.TenantId) ? null : user.TenantId;
+
+        if (tenant is not null
+            && !string.IsNullOrWhiteSpace(request.TenantId)
+            && !string.Equals(request.TenantId.Trim(), tenant, StringComparison.Ordinal))
+        {
+            return Results.Json(
+                new ErrorResponse($"账号 '{username}' 不属于租户 '{request.TenantId}'。", Code: "tenant_mismatch"),
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var token = issuer.Issue(user.Username, user.Scopes, user.DisplayName, tenant);
+
+        await users.MarkLoginSuccessAsync(user.Id, DateTime.UtcNow, ct).ConfigureAwait(false);
+
+        return Results.Ok(new LoginResponse(
+            token.Token,
+            token.ExpiresAt,
+            token.UserId,
+            user.DisplayName,
+            token.TenantId,
+            token.Scopes));
+    }
+
+    private static IResult MeAsync(RequestContext requestContext)
+    {
+        if (requestContext.AuthMode == RequestAuthMode.None)
+        {
+            return Results.Json(
+                new ErrorResponse("未提供凭据。", Code: "unauthorized"),
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        return Results.Ok(new CurrentIdentity(
+            requestContext.UserId,
+            requestContext.TenantId,
+            requestContext.AuthMode.ToString().ToLowerInvariant(),
+            [.. requestContext.Scopes],
+            requestContext.IsAdmin));
+    }
+}
+
+/// <summary>鉴权相关服务的注册。</summary>
+public static class AuthServiceCollectionExtensions
+{
+    /// <summary>
+    /// 注册令牌签发器与账号存储：有库走 <c>admin_user</c> 表，无库（in-memory / 开发）
+    /// 走内存实现（由 <c>NetBpm:Security:DevUsers</c> 播种，不配置就是空表）。
+    /// </summary>
+    public static IServiceCollection AddNetBpmAuth(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var options = new AuthTokenOptions
+        {
+            SigningKey = configuration["NetBpm:Security:Jwt:SigningKey"],
+            Issuer = configuration["NetBpm:Security:Jwt:Issuer"],
+            Audience = configuration["NetBpm:Security:Jwt:Audience"],
+        };
+
+        var section = configuration.GetSection("NetBpm:Security:Login");
+
+        if (int.TryParse(section["AccessTokenMinutes"], out var minutes) && minutes > 0)
+        {
+            options.AccessTokenMinutes = minutes;
+        }
+
+        if (int.TryParse(section["MaxFailedAttempts"], out var maxFailures) && maxFailures >= 0)
+        {
+            options.MaxFailedAttempts = maxFailures;
+        }
+
+        if (int.TryParse(section["LockoutMinutes"], out var lockout) && lockout > 0)
+        {
+            options.LockoutMinutes = lockout;
+        }
+
+        services.AddSingleton(options);
+        services.AddSingleton<AuthTokenIssuer>();
+        services.AddSingleton<IAdminUserStore>(provider =>
+        {
+            var netBpmOptions = provider.GetRequiredService<NetBpmOptions>();
+
+            if (!netBpmOptions.UsesDatabase)
+            {
+                return new InMemoryAdminUserStore(ReadDevUsers(configuration, provider));
+            }
+
+            return new DapperAdminUserStore(provider.GetRequiredService<IDbConnectionFactory>());
+        });
+
+        return services;
+    }
+
+    /// <summary>
+    /// 开发账号（<c>NetBpm:Security:DevUsers</c>）：只在无库模式下生效，
+    /// 明文口令只存在于配置里，启动时转成散列。
+    /// </summary>
+    private static List<AdminUser> ReadDevUsers(IConfiguration configuration, IServiceProvider provider)
+    {
+        var section = configuration.GetSection("NetBpm:Security:DevUsers");
+
+        if (!section.Exists())
+        {
+            return [];
+        }
+
+        var configured = section.Get<DevUserOption[]>() ?? [];
+        var users = new List<AdminUser>();
+
+        foreach (var item in configured)
+        {
+            if (string.IsNullOrWhiteSpace(item.Username) || string.IsNullOrWhiteSpace(item.Password))
+            {
+                continue;
+            }
+
+            var scopes = string.IsNullOrWhiteSpace(item.Scopes)
+                ? Array.Empty<string>()
+                : item.Scopes.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var now = DateTime.UtcNow;
+
+            users.Add(new AdminUser(
+                Guid.NewGuid().ToString("N"),
+                item.Username.Trim(),
+                NetBpm.Persistence.Admin.PasswordHasher.Hash(item.Password),
+                scopes,
+                item.DisplayName,
+                string.IsNullOrWhiteSpace(item.TenantId) ? null : item.TenantId.Trim(),
+                true,
+                0,
+                null,
+                null,
+                now,
+                now));
+        }
+
+        if (users.Count > 0)
+        {
+            provider.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("NetBpm.Auth")
+                .LogWarning(
+                    "启用了 {Count} 个开发账号（NetBpm:Security:DevUsers，口令写在配置里）：仅限无库 / 本地开发，生产请改用 admin_user 表。",
+                    users.Count);
+        }
+
+        return users;
+    }
+
+    private sealed class DevUserOption
+    {
+        public string? Username { get; set; }
+
+        public string? Password { get; set; }
+
+        public string? DisplayName { get; set; }
+
+        public string? Scopes { get; set; }
+
+        public string? TenantId { get; set; }
+    }
+}

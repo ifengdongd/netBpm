@@ -14,7 +14,16 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { AUTH_EXPIRED_EVENT } from '../api/client';
 import { STALE_ADMIN_HINT, useAdminHostCheck, WRONG_HOST_HINT } from '../api/hostCheck';
-import { ADMIN_SCOPE, clearCredential, credentialLabel, getCredential, resolveIdentity } from '../auth';
+import {
+  ADMIN_SCOPE,
+  clearCredential,
+  credentialLabel,
+  credentialPersistence,
+  getCredential,
+  isCredentialExpired,
+  resolveIdentity,
+  subscribeCredential,
+} from '../auth';
 
 const { Sider, Header, Content } = Layout;
 
@@ -31,8 +40,14 @@ export default function AppLayout() {
   const { message } = App.useApp();
   const navigate = useNavigate();
   const location = useLocation();
-  const [credential, setCredentialState] = useState(getCredential());
+  // 初始读取时就把过期令牌当作未登录（避免顶栏闪一下「已登录」再跳走）
+  const [credential, setCredentialState] = useState(() => {
+    const current = getCredential();
+
+    return isCredentialExpired(current) ? null : current;
+  });
   const identity = resolveIdentity(credential);
+  const persistence = credentialPersistence();
 
   // 宿主自检：指到 NetBpm.Rest（5080）时管理端点全是 404，各页面只会报 Not Found，
   // 这里统一置顶说明，不用再逐页猜。
@@ -40,6 +55,24 @@ export default function AppLayout() {
 
   // 取第一段作为高亮 key（/models、/process-types、/deployments、/monitoring）
   const selectedKey = `/${location.pathname.split('/')[1] ?? 'models'}`;
+
+  // 跨标签页同步：别处登录 / 退出后，本页顶栏跟着变（新标签页也因此免登录）
+  useEffect(() => subscribeCredential(() => setCredentialState(getCredential())), []);
+
+  // 令牌过期：本地先判一次，不等服务端 401（刷新页面时能立刻回到登录页）
+  useEffect(() => {
+    const current = getCredential();
+
+    if (current === null || !isCredentialExpired(current)) {
+      return;
+    }
+
+    clearCredential();
+    message.warning('登录已过期，请重新登录');
+
+    const redirect = `${window.location.pathname}${window.location.search}`;
+    navigate(`/login?redirect=${encodeURIComponent(redirect)}`, { replace: true });
+  }, [message, navigate]);
 
   // 401（凭据失效）软跳转：router 跳登录页而不是整页刷新，保留 SPA 状态
   useEffect(() => {
@@ -96,7 +129,9 @@ export default function AppLayout() {
                 <Tag icon={<UserOutlined />} color="blue">
                   {credentialLabel(credential)}
                 </Tag>
+                {credential.displayName !== undefined && <Tag>{credential.displayName}</Tag>}
                 {identity.user !== undefined && <Tag>{identity.user}</Tag>}
+                {persistence === 'session' && <Tag color="orange">仅本标签页</Tag>}
                 {identity.tenant !== undefined && <Tag color="geekblue">租户：{identity.tenant}</Tag>}
                 {identity.scopes.includes(ADMIN_SCOPE) && <Tag color="gold">admin</Tag>}
                 <Button size="small" icon={<LogoutOutlined />} onClick={handleLogout}>

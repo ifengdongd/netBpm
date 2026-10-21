@@ -767,6 +767,35 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: false);
 
+    /// <summary>
+    /// 控制台账号（账号密码登录的落点）。注意：这里只存<b>口令散列</b>，
+    /// 明文口令不会落库也不会进审计；散列格式见 <c>PasswordHasher</c>。
+    /// </summary>
+    internal static readonly TableDef AdminUserTable = new(
+        "admin_user",
+        "控制台账号：账号密码登录的用户表（只存 PBKDF2 口令散列，不存明文）",
+        [
+            C("id", ColType.Varchar, 64, false, comment: "账号 id"),
+            C("username", ColType.Varchar, 64, nullable: false, comment: "登录名（全局唯一）"),
+            C("display_name", ColType.Varchar, 128, comment: "显示名"),
+            C("password_hash", ColType.Varchar, 255, nullable: false,
+                comment: "PBKDF2 散列：pbkdf2$迭代次数$salt(base64)$hash(base64)"),
+            C("scopes", ColType.Varchar, 1000, nullable: false, def: "''",
+                comment: "授权范围（空格分隔，如 netbpm.admin）"),
+            C("tenant_id", ColType.Varchar, 255, comment: "所属租户（为空表示不限租户）"),
+            C("enabled", ColType.Int, nullable: false, def: "1", comment: "1=启用，0=停用"),
+            C("failed_attempts", ColType.Int, nullable: false, def: "0", comment: "连续失败次数（成功后清零）"),
+            C("locked_until", ColType.DateTime3, comment: "锁定到期时间（UTC；暴力破解保护）"),
+            C("last_login_at", ColType.DateTime3, comment: "上次登录时间（UTC）"),
+            C("created_at", ColType.DateTime3, nullable: false, comment: "创建时间（UTC）"),
+            C("updated_at", ColType.DateTime3, nullable: false, comment: "更新时间（UTC）"),
+        ],
+        ["id"],
+        [new IndexDef("ix_admin_user_tenant", ["tenant_id"])],
+        [new IndexDef("ux_admin_user_username", ["username"])],
+        [],
+        EngineCharset: false);
+
     // 0009 历史归档（把已结束实例的 ACT_HI_* 行搬进 JSON 快照后删除原行）
     internal static readonly TableDef HistoryArchiveTable = new(
         "admin_history_archive",

@@ -1295,6 +1295,7 @@ deallocate prepare stmt;
 --  ACT_HI_MIGRATION     流程实例迁移审计（源/目标定义、活动映射、原因、操作人）
 --  bpmn_model_history   流程模型版本历史（每次保存/回滚一版）
 --  admin_audit_log      管理动作审计（转办 / 跳转 / 变量直写）
+--  admin_user           控制台账号（账号密码登录；只存 PBKDF2 口令散列）
 --  admin_history_archive 历史归档快照（归档后原 ACT_HI_* 行删除）
 --  ACT_RU_JOB           asyncBefore / asyncAfter 异步作业（含重试与死信）
 --  ACT_EVT_OUTBOX       事务性事件外发队列（至少一次投递，含发布重试/死信）
@@ -1497,6 +1498,40 @@ set @ddl = (select if(count(*) = 0,
         'create index ix_admin_audit_instance on admin_audit_log (process_instance_id)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'admin_audit_log' and index_name = 'ix_admin_audit_instance');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists admin_user (
+    id varchar(64) not null comment '账号 id',
+    username varchar(64) not null comment '登录名（全局唯一）',
+    display_name varchar(128) comment '显示名',
+    password_hash varchar(255) not null comment 'PBKDF2 散列：pbkdf2$迭代次数$salt(base64)$hash(base64)',
+    scopes varchar(1000) not null default '' comment '授权范围（空格分隔，如 netbpm.admin）',
+    tenant_id varchar(255) comment '所属租户（为空表示不限租户）',
+    enabled int not null default 1 comment '1=启用，0=停用',
+    failed_attempts int not null default 0 comment '连续失败次数（成功后清零）',
+    locked_until datetime(3) comment '锁定到期时间（UTC；暴力破解保护）',
+    last_login_at datetime(3) comment '上次登录时间（UTC）',
+    created_at datetime(3) not null comment '创建时间（UTC）',
+    updated_at datetime(3) not null comment '更新时间（UTC）',
+    primary key (id),
+    unique key ux_admin_user_username (username),
+    index ix_admin_user_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='控制台账号：账号密码登录的用户表（只存 PBKDF2 口令散列，不存明文）';
+
+set @ddl = (select if(count(*) = 0,
+        'create unique index ux_admin_user_username on admin_user (username)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'admin_user' and index_name = 'ux_admin_user_username');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_admin_user_tenant on admin_user (tenant_id)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'admin_user' and index_name = 'ix_admin_user_tenant');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
