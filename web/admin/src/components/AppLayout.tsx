@@ -6,9 +6,10 @@ import {
   DashboardOutlined,
   EyeOutlined,
   LogoutOutlined,
+  SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Alert, App, Button, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { Alert, App, Button, Layout, Menu, Space, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
@@ -48,6 +49,26 @@ export default function AppLayout() {
   });
   const identity = resolveIdentity(credential);
   const persistence = credentialPersistence();
+
+  // 顶栏只留一个身份标签：优先显示名 → 登录名 → 鉴权方式（API Key / Bearer Token），
+  // 用户名、租户、范围、有效期都收进悬浮提示，避免同一份信息摊成四五个 Tag。
+  const isAdmin = identity.scopes.includes(ADMIN_SCOPE);
+  const identityName = credential === null
+    ? null
+    : credential.displayName ?? identity.user ?? credentialLabel(credential);
+
+  const identityHint = [
+    `鉴权方式：${credential === null ? '-' : credentialLabel(credential)}`,
+    `登录名：${identity.user ?? '-'}`,
+    `租户：${identity.tenant ?? '不限'}`,
+    `授权范围：${identity.scopes.length > 0 ? identity.scopes.join(' ') : '-'}`,
+    credential?.expiresAt !== undefined
+      ? `有效期至：${new Date(credential.expiresAt).toLocaleString()}`
+      : null,
+    persistence === 'session' ? '存储：仅本标签页（关闭即失效）' : '存储：本机共享（跨标签页）',
+  ]
+    .filter((line) => line !== null)
+    .join('\n');
 
   // 宿主自检：指到 NetBpm.Rest（5080）时管理端点全是 404，各页面只会报 Not Found，
   // 这里统一置顶说明，不用再逐页猜。
@@ -123,17 +144,36 @@ export default function AppLayout() {
           <Typography.Title level={4} style={{ margin: 0, lineHeight: '56px' }}>
             {menuItems.find((item) => item.key === selectedKey)?.label ?? '管理控制台'}
           </Typography.Title>
-          <Space>
+          <Space size={8}>
             {credential !== null ? (
               <>
-                <Tag icon={<UserOutlined />} color="blue">
-                  {credentialLabel(credential)}
-                </Tag>
-                {credential.displayName !== undefined && <Tag>{credential.displayName}</Tag>}
-                {identity.user !== undefined && <Tag>{identity.user}</Tag>}
-                {persistence === 'session' && <Tag color="orange">仅本标签页</Tag>}
-                {identity.tenant !== undefined && <Tag color="geekblue">租户：{identity.tenant}</Tag>}
-                {identity.scopes.includes(ADMIN_SCOPE) && <Tag color="gold">admin</Tag>}
+                <Tooltip
+                  title={<span style={{ whiteSpace: 'pre-line' }}>{identityHint}</span>}
+                  placement="bottomRight"
+                >
+                  <Tag
+                    icon={isAdmin ? <SafetyCertificateOutlined /> : <UserOutlined />}
+                    color={isAdmin ? 'gold' : 'blue'}
+                    style={{ marginInlineEnd: 0, cursor: 'default' }}
+                  >
+                    {identityName}
+                    {identity.user !== undefined && identity.user !== identityName && (
+                      <span style={{ opacity: 0.55, marginLeft: 6, fontSize: 12 }}>{identity.user}</span>
+                    )}
+                  </Tag>
+                </Tooltip>
+                {identity.tenant !== undefined && (
+                  <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>
+                    {identity.tenant}
+                  </Tag>
+                )}
+                {persistence === 'session' && (
+                  <Tooltip title="未勾选「保持登录」：凭据只存在本标签页，关闭即失效">
+                    <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                      仅本标签页
+                    </Tag>
+                  </Tooltip>
+                )}
                 <Button size="small" icon={<LogoutOutlined />} onClick={handleLogout}>
                   退出
                 </Button>
