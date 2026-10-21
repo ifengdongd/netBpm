@@ -8,11 +8,12 @@ import {
   LogoutOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { App, Button, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { Alert, App, Button, Layout, Menu, Space, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { AUTH_EXPIRED_EVENT } from '../api/client';
+import { STALE_ADMIN_HINT, useAdminHostCheck, WRONG_HOST_HINT } from '../api/hostCheck';
 import { ADMIN_SCOPE, clearCredential, credentialLabel, getCredential, resolveIdentity } from '../auth';
 
 const { Sider, Header, Content } = Layout;
@@ -32,6 +33,10 @@ export default function AppLayout() {
   const location = useLocation();
   const [credential, setCredentialState] = useState(getCredential());
   const identity = resolveIdentity(credential);
+
+  // 宿主自检：指到 NetBpm.Rest（5080）时管理端点全是 404，各页面只会报 Not Found，
+  // 这里统一置顶说明，不用再逐页猜。
+  const hostCheck = useAdminHostCheck();
 
   // 取第一段作为高亮 key（/models、/process-types、/deployments、/monitoring）
   const selectedKey = `/${location.pathname.split('/')[1] ?? 'models'}`;
@@ -106,6 +111,26 @@ export default function AppLayout() {
           </Space>
         </Header>
         <Content style={{ margin: 24 }}>
+          {hostCheck === 'missingAdmin' && (
+            <Alert
+              banner
+              type="error"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={WRONG_HOST_HINT}
+              description="管理端点（/api/admin/**）只在 NetBpm.Admin 提供；Rest 宿主（默认 5080）只有 designer / runtime / identity。开发期请用 NETBPM_API_TARGET=http://localhost:5081 npm run dev 并重启 Vite；生产部署请把控制台指向 Admin 宿主。"
+            />
+          )}
+          {hostCheck === 'staleAdmin' && (
+            <Alert
+              banner
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={STALE_ADMIN_HINT}
+              description="常见于：前端已重新构建，但后端仍是旧进程（dotnet run --no-build / 发布目录未更新）。停掉当前 Admin 进程后重新启动（dotnet run --project src/NetBpm.Admin）即可。"
+            />
+          )}
           <Outlet />
         </Content>
       </Layout>

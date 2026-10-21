@@ -27,7 +27,8 @@ import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { jobsApi, runtimeApi } from '../api';
-import { ApiError, newIdempotencyKey } from '../api/client';
+import { newIdempotencyKey } from '../api/client';
+import { ADMIN_404_HINT, isNotFound } from '../api/hostCheck';
 import type {
   HistoricProcessInstance,
   ProcessInstanceResponse,
@@ -40,18 +41,6 @@ import TaskDetailDrawer from '../components/TaskDetailDrawer';
 import { usePagedList } from '../hooks/usePagedList';
 import { formatTime } from '../utils';
 import { buildHistoricColumns, buildInstanceColumns, buildTaskColumns } from './monitoring/columns';
-
-/**
- * 管理端点只在 Admin 宿主提供（/api/admin/**）。
- * Rest 宿主（默认 5080）只有 designer / runtime / identity，打到它会得到 404。
- */
-const WRONG_HOST_HINT =
-  '当前后端不是 Admin 宿主（缺少 /api/admin 端点），请把控制台指向 NetBpm.Admin（默认 5081）';
-
-/** 404 = 端点不存在。用于识别「控制台代理指错宿主」，而不是「确实没有数据」。 */
-function isNotFound(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 404;
-}
 
 interface TaskActionState {
   mode: 'assignee' | 'complete';
@@ -924,10 +913,10 @@ export default function MonitoringPage() {
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
           {jobHostMismatch && (
             <Alert
-              type="error"
+              type="warning"
               showIcon
-              message={WRONG_HOST_HINT}
-              description="定时作业属于管理端点（/api/admin/jobs）。Rest 宿主（默认 5080）只有 designer / runtime / identity，请改用 NETBPM_API_TARGET=http://localhost:5081 指向 NetBpm.Admin 后重启控制台（或刷新页面）。"
+              message={ADMIN_404_HINT}
+              description="定时作业属于管理端点（/api/admin/jobs）。若控制台指向 Rest 宿主（默认 5080），请改用 NETBPM_API_TARGET=http://localhost:5081；若已指向 Admin 宿主，说明后端进程还是旧构建，重新编译并重启即可。"
             />
           )}
           <FilterBar active={hasJobFilter} onSearch={applyJobFilter} onReset={resetJobFilter}>
