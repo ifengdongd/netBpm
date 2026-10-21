@@ -27,6 +27,29 @@ public class RuntimeManagementTests
         </definitions>
         """;
 
+    /// <summary>并行网关：fork → A/B 两个用户任务 → join → 结束（取消单分支用）。</summary>
+    private const string ParallelProcess = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="parallel-modify" name="并行取消" isExecutable="true">
+            <startEvent id="start" />
+            <parallelGateway id="fork" />
+            <userTask id="review_a" name="A 审批" activiti:candidateGroups="group-a" />
+            <userTask id="review_b" name="B 审批" activiti:candidateGroups="group-b" />
+            <parallelGateway id="join" />
+            <endEvent id="end" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="fork" />
+            <sequenceFlow id="f2" sourceRef="fork" targetRef="review_a" />
+            <sequenceFlow id="f3" sourceRef="fork" targetRef="review_b" />
+            <sequenceFlow id="f4" sourceRef="review_a" targetRef="join" />
+            <sequenceFlow id="f5" sourceRef="review_b" targetRef="join" />
+            <sequenceFlow id="f6" sourceRef="join" targetRef="end" />
+          </process>
+        </definitions>
+        """;
+
     private static string FirstAssignee(TestEngine engine) =>
         engine.TaskManager.Tasks.Single().Assignee ?? string.Empty;
 
@@ -161,6 +184,98 @@ public class RuntimeManagementTests
             () => engine.MoveActivityToAsync(instanceId, "leader_approve").AsTask());
 
         Assert.Contains("不存在或已结束", exception.Message, StringComparison.Ordinal);
+    }
+
+    // ─────────────────────────── modify：取消活动 / 活动前启动 ───────────────────────────
+
+    [Fact]
+    public async Task CancelActivity_ShouldCloseTaskAndEndInstance()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        Assert.Single(engine.TaskManager.Tasks);
+
+        // 唯一分支被取消 → 实例也随之结束（与正常走完同口径）
+        await engine.CancelActivityAsync(instanceId, "leader_approve", "运维取消");
+
+        Assert.Empty(engine.TaskManager.Tasks);
+        Assert.Equal(0, engine.ExecutionManager.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task CancelActivity_ShouldOnlyRemoveTargetBranch_AndKeepOthers()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(ParallelProcess);
+
+        // 并行网关后两个用户任务各一个待办
+        Assert.Equal(2, engine.TaskManager.Tasks.Count);
+
+        await engine.CancelActivityAsync(instanceId, "review_a", "取消 A 分支");
+
+        // A 分支的待办消失，B 分支还在；实例没有结束
+        var remaining = Assert.Single(engine.TaskManager.Tasks);
+        Assert.Equal("review_b", remaining.TaskDefinitionKey);
+
+        var instance = await engine.ExecutionManager.FindByIdAsync(instanceId);
+        Assert.NotNull(instance);
+    }
+
+    [Fact]
+    public async Task CancelActivity_AlreadyFinished_ShouldThrow()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        await engine.CancelActivityAsync(instanceId, "leader_approve");
+
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => engine.CancelActivityAsync(instanceId, "leader_approve").AsTask());
+
+        Assert.Contains("不存在或已结束", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CancelActivity_UnknownActivity_ShouldThrow()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => engine.CancelActivityAsync(instanceId, "no_such_node").AsTask());
+
+        Assert.Contains("不在流程定义", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartBeforeActivity_ShouldAddBranchWithoutTouchingCurrentTask()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        var leaderTask = Assert.Single(engine.TaskManager.Tasks);
+        Assert.Equal("leader_approve", leaderTask.TaskDefinitionKey);
+
+        // 在经理审批之前再起一条令牌：原有组长待办保留，额外出现经理待办
+        await engine.StartBeforeActivityAsync(instanceId, "manager_approve");
+
+        Assert.Equal(2, engine.TaskManager.Tasks.Count);
+        Assert.Contains(engine.TaskManager.Tasks, task => task.TaskDefinitionKey == "leader_approve");
+        Assert.Contains(engine.TaskManager.Tasks, task => task.TaskDefinitionKey == "manager_approve");
+    }
+
+    [Fact]
+    public async Task StartBeforeActivity_NonFlowNode_ShouldThrow()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        // f1 是顺序流：没有行为，挂上去的执行永远推进不了
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => engine.StartBeforeActivityAsync(instanceId, "f1").AsTask());
+
+        Assert.Contains("不是可执行的流节点", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

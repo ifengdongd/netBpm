@@ -11,12 +11,24 @@
 
 // ─────────────────────────── 管理端 · 流程模型 ───────────────────────────
 
+/** 发布状态：由同 key 的最新定义与版本历史推导（服务端只读）。 */
+export interface BpmnModelPublishState {
+  currentRevision?: number | null;
+  publishedRevision?: number | null;
+  latestPublishedVersion?: number | null;
+  latestPublishedAt?: string | null;
+  latestProcessDefinitionId?: string | null;
+  /** 最后一次发布之后又保存过。 */
+  hasUnpublishedChanges: boolean;
+}
+
 export interface BpmnModelSummary {
   id: string;
   name: string;
   processKey: string;
   description?: string | null;
   modifyTime: string;
+  publish: BpmnModelPublishState;
 }
 
 export interface BpmnModelDetail {
@@ -28,6 +40,7 @@ export interface BpmnModelDetail {
   svg?: string | null;
   createTime: string;
   modifyTime?: string | null;
+  publish: BpmnModelPublishState;
 }
 
 export interface SaveBpmnModelRequest {
@@ -36,6 +49,48 @@ export interface SaveBpmnModelRequest {
   description?: string | null;
   bpmnXml: string;
   svg?: string | null;
+}
+
+/** 局部更新模型：只提交要改的字段（设计器保存用，避免 PUT 清空描述 / SVG）。 */
+export interface PatchBpmnModelRequest {
+  name?: string;
+  processKey?: string;
+  description?: string;
+  bpmnXml?: string;
+  svg?: string;
+}
+
+/** 校验问题（部署期 / 保存期同一口径）。 */
+export interface ValidationIssue {
+  rule: string;
+  elementId?: string | null;
+  elementType?: string | null;
+  message: string;
+}
+
+/** 发布前预检结果（`POST /api/admin/models/{id}/validate`）。 */
+export interface ModelValidationResponse {
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+}
+
+/** 保存模型结果（含新版本号与校验明细）。 */
+export interface SaveBpmnModelResponse {
+  id: string;
+  revision: number;
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+}
+
+/** 一次模型发布记录。 */
+export interface ModelPublication {
+  revision: number;
+  createdAt: string;
+  operator?: string | null;
+  processDefinitionId?: string | null;
+  version?: number | null;
+  /** 是否与线上定义唯一匹配（无法唯一匹配时 version 为 null）。 */
+  linked: boolean;
 }
 
 /** 模型版本摘要（不含 XML 正文）。 */
@@ -75,6 +130,8 @@ export interface DeployResponse {
   deploymentName?: string | null;
   /** 提示级问题（部署成功，但建议检查）；null 表示没有任何提示。 */
   warnings?: { rule: string; message: string }[] | null;
+  /** true 表示内容与最后一次发布一致，本次跳过部署（回放线上版本）。 */
+  skipped?: boolean;
 }
 
 // ─────────────────────────── 管理端 · 流程类型 ───────────────────────────
@@ -134,6 +191,47 @@ export interface DeploymentSummaryResponse {
   deployTime?: string | null;
   tenantId?: string | null;
   definitions: DeploymentDefinitionResponse[];
+  /** 该部署包含的流程定义数量。 */
+  definitionCount?: number;
+  /** 该部署内最高的定义版本号。 */
+  latestVersion?: number | null;
+  /** 该部署内已挂起的定义数量。 */
+  suspendedCount?: number;
+}
+
+// ─────────────────────────── 运行时 · 任务表单 / 身份 ───────────────────────────
+
+export interface FormPropertyValue {
+  id?: string | null;
+  name?: string | null;
+}
+
+/** `activiti:formProperty` 的只读元数据（引擎只回传声明，不渲染表单）。 */
+export interface FormProperty {
+  id?: string | null;
+  name?: string | null;
+  type?: string | null;
+  variable?: string | null;
+  expression?: string | null;
+  default?: string | null;
+  datePattern?: string | null;
+  required?: boolean | null;
+  readable?: boolean | null;
+  writable?: boolean | null;
+  values: FormPropertyValue[];
+}
+
+export interface FormMetadata {
+  formKey?: string | null;
+  activityId?: string | null;
+  activityName?: string | null;
+  formProperties: FormProperty[];
+}
+
+export interface UserGroup {
+  id: string;
+  name?: string | null;
+  type?: string | null;
 }
 
 // ─────────────────────────── 运行时 · 实例 / 任务 ───────────────────────────
@@ -290,6 +388,21 @@ export interface TaskDetail {
   identityLinks: IdentityLink[];
 }
 
+/** 局部更新任务（`PATCH /api/runtime/tasks/{taskId}`）：只提交要改的字段。 */
+export interface UpdateTaskRequest {
+  name?: string;
+  description?: string;
+  priority?: number;
+  /** ISO 8601 时间；清空到期时间用 `clearDueDate`。 */
+  dueDate?: string;
+  category?: string;
+  owner?: string;
+  clearDueDate?: boolean;
+  clearDescription?: boolean;
+  /** 乐观并发：与任务当前 revision 不一致时 409。 */
+  expectedRevision?: number;
+}
+
 /** 运行态变量：键值对（值由服务端按变量类型解码）。 */
 export type Variables = Record<string, unknown>;
 
@@ -330,6 +443,33 @@ export interface PagedResponse<T> {
 // ─────────────────────────── 管理治理 · 审计 ───────────────────────────
 
 /** 一条管理动作审计（`GET /api/admin/audit`）。 */
+/** 定时作业（边界定时器）。 */
+export interface TimerJobSummary {
+  id: string;
+  processInstanceId: string;
+  processDefinitionId?: string | null;
+  activityId: string;
+  boundaryEventId: string;
+  dueDate: string;
+  tenantId?: string | null;
+  createTime: string;
+}
+
+/** 定时作业统计。 */
+export interface TimerJobStats {
+  total: number;
+  overdue: number;
+  dueWithinHour: number;
+  nextDueAt?: string | null;
+}
+
+/** 审计筛选项（出现过的动作 / 目标类型 / 操作人）。 */
+export interface AdminAuditOptions {
+  actions: string[];
+  targetTypes: string[];
+  actors: string[];
+}
+
 export interface AdminAuditItem {
   id: string;
   tenantId?: string | null;

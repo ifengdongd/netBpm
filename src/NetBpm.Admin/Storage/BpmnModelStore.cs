@@ -36,7 +36,10 @@ public sealed class BpmnModelStore
         name        as Name,
         process_key as ProcessKey,
         description as Description,
-        modify_time as ModifyTime
+        modify_time as ModifyTime,
+        (select max(h.revision)
+           from bpmn_model_history h
+          where h.model_id = bpmn_model.id and h.tenant_id = bpmn_model.tenant_id) as Revision
         """;
 
     private const string RevisionDetailColumns = """
@@ -128,9 +131,29 @@ public sealed class BpmnModelStore
                    bpmn_xml    as BpmnXml,
                    svg         as Svg,
                    create_time as CreateTime,
-                   modify_time as ModifyTime
+                   modify_time as ModifyTime,
+                   (select max(h.revision)
+                      from bpmn_model_history h
+                     where h.model_id = bpmn_model.id and h.tenant_id = bpmn_model.tenant_id) as Revision
               from bpmn_model
              where id = @Id and tenant_id = @TenantId
+            """,
+            new { Id = id, TenantId = _tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <summary>模型的最新版本号；模型不存在或没有历史时返回 <see langword="null"/>。</summary>
+    public async Task<int?> GetLatestRevisionAsync(string id, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        await using var connection = _connections.CreateConnection();
+
+        return await connection.ExecuteScalarAsync<int?>(new CommandDefinition(
+            """
+            select max(revision)
+              from bpmn_model_history
+             where model_id = @Id and tenant_id = @TenantId
             """,
             new { Id = id, TenantId = _tenantId },
             cancellationToken: ct)).ConfigureAwait(false);
@@ -175,6 +198,22 @@ public sealed class BpmnModelStore
         }
     }
 
+    /// <summary>新建模型（id 由后端生成），初始版本 1；返回创建后的详情。</summary>
+    public async Task<BpmnModelDetail> CreateAsync(
+        SaveBpmnModelRequest model,
+        string? operatorId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        var id = Guid.NewGuid().ToString("N");
+
+        await SaveAsync(id, model, operatorId, "save", ct).ConfigureAwait(false);
+
+        return await GetAsync(id, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"模型 '{id}' 创建后读取失败。");
+    }
+
     /// <summary>单次保存尝试（含事务；失败时事务随 dispose 回滚）。</summary>
     private async Task<int> SaveOnceAsync(
         string id,
@@ -214,6 +253,128 @@ public sealed class BpmnModelStore
             cancellationToken: ct)).ConfigureAwait(false);
 
         return rows.ToArray();
+    }
+
+    /// <summary>
+    /// 分页版本历史（不含 XML/SVG 正文，按版本号倒序）。
+    /// <para>
+    /// 版本多的老模型历史可能上百条，列表页只需要第一页；<c>Total</c> 用于分页器。
+    /// </para>
+    /// </summary>
+    public async Task<BpmnModelHistoryPage> PageHistoryAsync(
+        string id,
+        int firstResult,
+        int maxResults,
+        CancellationToken ct = default)
+    {
+        await using var connection = _connections.CreateConnection();
+
+        var total = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+            "select count(*) from bpmn_model_history where model_id = @Id and tenant_id = @TenantId",
+            new { Id = id, TenantId = _tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (total == 0)
+        {
+            return new BpmnModelHistoryPage([], 0);
+        }
+
+        var pageSql = _connections.DatabaseType == DatabaseType.SqlServer
+            ? $"""
+               select {RevisionSummaryColumns}
+                 from bpmn_model_history
+                where model_id = @Id and tenant_id = @TenantId
+                order by revision desc
+               offset @Skip rows fetch next @Take rows only
+               """
+            : $"""
+               select {RevisionSummaryColumns}
+                 from bpmn_model_history
+                where model_id = @Id and tenant_id = @TenantId
+                order by revision desc
+                limit @Take offset @Skip
+               """;
+
+        var rows = await connection.QueryAsync<BpmnModelRevisionSummary>(new CommandDefinition(
+            pageSql,
+            new
+            {
+                Id = id,
+                TenantId = _tenantId,
+                Skip = Math.Max(0, firstResult),
+                Take = Math.Max(1, maxResults),
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return new BpmnModelHistoryPage(rows.ToArray(), total);
+    }
+
+    /// <summary>
+    /// 同租户下是否已有别的模型占用该 <c>process_key</c>；占用时返回其 id。
+    /// <para>
+    /// 唯一索引是兜底，这里提前给出可读冲突：同一 key 下混入两个模型来源，
+    /// 发布后会在同一 key 下产生来源不明的版本，回滚 / 发布历史也对不上。
+    /// </para>
+    /// </summary>
+    public async Task<string?> FindIdByProcessKeyAsync(
+        string processKey,
+        string? excludeId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+
+        await using var connection = _connections.CreateConnection();
+
+        var where = """
+            where tenant_id = @TenantId
+              and process_key = @ProcessKey
+              and (@ExcludeId is null or id <> @ExcludeId)
+            """;
+
+        var sql = _connections.DatabaseType == DatabaseType.SqlServer
+            ? $"select top 1 id from bpmn_model {where}"
+            : $"select id from bpmn_model {where} limit 1";
+
+        return await connection.ExecuteScalarAsync<string?>(new CommandDefinition(
+            sql,
+            new { TenantId = _tenantId, ProcessKey = processKey.Trim(), ExcludeId = excludeId },
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 批量读取模型的版本水位：最新版本号 + 最近一次 <c>publish</c> 快照版本号。
+    /// <para>
+    /// 用于列表/详情的「线上版本 / 是否有未发布修改」，一次查询覆盖整页模型，
+    /// 不给每个模型单独发一次 count。
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, BpmnModelRevisionStamp>> GetRevisionStampsAsync(
+        IReadOnlyCollection<string> modelIds,
+        CancellationToken ct = default)
+    {
+        if (modelIds.Count == 0)
+        {
+            return new Dictionary<string, BpmnModelRevisionStamp>(StringComparer.Ordinal);
+        }
+
+        await using var connection = _connections.CreateConnection();
+
+        var rows = await connection.QueryAsync<RevisionStampRow>(new CommandDefinition(
+            """
+            select model_id as ModelId,
+                   max(revision) as LatestRevision,
+                   max(case when action = 'publish' then revision end) as PublishedRevision
+              from bpmn_model_history
+             where tenant_id = @TenantId and model_id in @ModelIds
+             group by model_id
+            """,
+            new { TenantId = _tenantId, ModelIds = modelIds },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows.ToDictionary(
+            row => row.ModelId,
+            row => new BpmnModelRevisionStamp(row.LatestRevision, row.PublishedRevision),
+            StringComparer.Ordinal);
     }
 
     /// <summary>单个版本快照（含 XML/SVG）；不存在返回 null。</summary>
@@ -462,4 +623,21 @@ public sealed class BpmnModelStore
             values
                 (@Id, @TenantId, @Name, @ProcessKey, @Description, @BpmnXml, @Svg, @Now, @Now);
         """;
+
+    /// <summary>版本水位：最新版本号与最近一次发布快照版本号。</summary>
+    /// <param name="LatestRevision">模型的最新版本号。</param>
+    /// <param name="PublishedRevision">最近一次 publish 快照的版本号；从未发布为 null。</param>
+    public sealed record BpmnModelRevisionStamp(int LatestRevision, int? PublishedRevision);
+
+    /// <summary>分页的版本历史（当前页 + 总数）。</summary>
+    public sealed record BpmnModelHistoryPage(IReadOnlyList<BpmnModelRevisionSummary> Items, int Total);
+
+    private sealed class RevisionStampRow
+    {
+        public string ModelId { get; set; } = string.Empty;
+
+        public int LatestRevision { get; set; }
+
+        public int? PublishedRevision { get; set; }
+    }
 }

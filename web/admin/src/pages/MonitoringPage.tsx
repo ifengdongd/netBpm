@@ -3,9 +3,11 @@ import {
   App,
   Button,
   Card,
+  Checkbox,
   Col,
   Form,
   Input,
+  InputNumber,
   Modal,
   Row,
   Select,
@@ -17,21 +19,25 @@ import {
   Tag,
   Typography,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { runtimeApi } from '../api';
+import { jobsApi, runtimeApi } from '../api';
+import { newIdempotencyKey } from '../api/client';
 import type {
   HistoricProcessInstance,
   ProcessInstanceResponse,
   TaskResponse,
+  TimerJobSummary,
   Variables,
 } from '../api/types';
 import InstanceDetailDrawer from '../components/InstanceDetailDrawer';
 import TaskDetailDrawer from '../components/TaskDetailDrawer';
 import { usePagedList } from '../hooks/usePagedList';
+import { formatTime } from '../utils';
 import { buildHistoricColumns, buildInstanceColumns, buildTaskColumns } from './monitoring/columns';
 
 interface TaskActionState {
@@ -64,6 +70,13 @@ interface HistoricFilter {
   state?: HistoricState;
 }
 
+/** 定时作业筛选（dueBefore 为 ISO 时间字符串）。 */
+interface JobFilter {
+  processInstanceId?: string;
+  processDefinitionId?: string;
+  dueBefore?: string;
+}
+
 export default function MonitoringPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -81,6 +94,8 @@ export default function MonitoringPage() {
   const [taskFilter, setTaskFilter] = useState<TaskFilter>({});
   const [historicDraft, setHistoricDraft] = useState<HistoricFilter>({});
   const [historicFilter, setHistoricFilter] = useState<HistoricFilter>({});
+  const [jobDraft, setJobDraft] = useState<JobFilter>({});
+  const [jobFilter, setJobFilter] = useState<JobFilter>({});
 
   // 统计
   const statsQuery = useQuery({
@@ -149,6 +164,32 @@ export default function MonitoringPage() {
     { refetchInterval },
   );
 
+  // 定时作业（边界定时器）：到期时间升序，运维用来判断「谁在等超时」
+  const jobList = usePagedList<TimerJobSummary>(
+    ['admin', 'jobs', jobFilter],
+    (page, signal) =>
+      jobsApi.list(
+        {
+          ...jobFilter,
+          firstResult: (page.current - 1) * page.pageSize,
+          maxResults: page.pageSize,
+        },
+        signal,
+      ),
+    (error) => message.error(`加载定时作业失败：${error.message}`),
+    { refetchInterval },
+  );
+
+  const jobStats = useQuery({
+    queryKey: ['admin', 'jobs-stats', jobFilter],
+    queryFn: () =>
+      jobsApi.stats({
+        processInstanceId: jobFilter.processInstanceId,
+        processDefinitionId: jobFilter.processDefinitionId,
+      }),
+    refetchInterval,
+  });
+
   // 抽屉 / 弹窗
   const [searchParams, setSearchParams] = useSearchParams();
   // 支持 ?instanceId=xxx 深链：从「部署管理 → 发起实例」的成功提示跳过来时直接打开详情。
@@ -161,6 +202,22 @@ export default function MonitoringPage() {
   const [taskAction, setTaskAction] = useState<TaskActionState | null>(null);
   const [actionSubmitting, setActionSubmitting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // 任务改期 / 改优先级（PATCH /tasks/{id}）
+  const [editTask, setEditTask] = useState<TaskResponse | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editForm] = Form.useForm<{ dueDate?: string; priority?: number }>();
+
+  // 定时作业改期
+  const [jobReschedule, setJobReschedule] = useState<TimerJobSummary | null>(null);
+  const [jobSubmitting, setJobSubmitting] = useState(false);
+  const [jobForm] = Form.useForm<{ dueDate?: string }>();
+
+  // 批量改任务到期时间
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [batchDueOpen, setBatchDueOpen] = useState(false);
+  const [batchDueSubmitting, setBatchDueSubmitting] = useState(false);
+  const [batchDueForm] = Form.useForm<{ dueDate?: string; clearDueDate?: boolean }>();
 
   /** 关闭实例详情：同时清掉地址栏的 instanceId，避免刷新后又弹出来。 */
   const closeInstanceDetail = () => {
@@ -184,6 +241,7 @@ export default function MonitoringPage() {
   const hasInstanceFilter = hasTextFilter(instanceFilter);
   const hasTaskFilter = hasTextFilter(taskFilter);
   const hasHistoricFilter = hasTextFilter(historicFilter) || historicFilter.state !== undefined;
+  const hasJobFilter = hasTextFilter(jobFilter);
 
   /** 应用筛选：条件生效 + 回到第一页（否则可能停在已不存在的页上）+ 清空跨页勾选。 */
   const applyInstanceFilter = () => {
@@ -261,6 +319,128 @@ export default function MonitoringPage() {
     }
   };
 
+  const applyJobFilter = () => {
+    // datetime-local 是本地时间；提交前转成带时区的 ISO，避免服务端按 UTC 解读
+    const dueBefore = toIsoOrUndefined(jobDraft.dueBefore);
+    const next = normalizeFilters({ ...jobDraft, dueBefore });
+
+    if (isSameFilter(next, jobFilter)) {
+      jobList.reload();
+      return;
+    }
+
+    setJobFilter(next);
+
+    if (jobList.page.current !== 1) {
+      jobList.setPage({ ...jobList.page, current: 1 });
+    }
+  };
+
+  const resetJobFilter = () => {
+    setJobDraft({});
+    setJobFilter({});
+
+    if (jobList.page.current !== 1) {
+      jobList.setPage({ ...jobList.page, current: 1 });
+    }
+  };
+
+  const openJobReschedule = (job: TimerJobSummary) => {
+    jobForm.setFieldsValue({ dueDate: toLocalDateTime(job.dueDate) });
+    setJobReschedule(job);
+  };
+
+  const submitJobReschedule = async () => {
+    if (jobReschedule === null) {
+      return;
+    }
+
+    let values: { dueDate?: string };
+
+    try {
+      values = await jobForm.validateFields();
+    } catch {
+      return;
+    }
+
+    const dueDate = toIsoOrUndefined(values.dueDate);
+
+    if (dueDate === undefined) {
+      message.error('请填写新的到期时间');
+      return;
+    }
+
+    setJobSubmitting(true);
+
+    try {
+      await jobsApi.reschedule(jobReschedule.id, dueDate);
+      message.success('作业已改期');
+      setJobReschedule(null);
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'jobs'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'jobs-stats'] });
+    } catch (error) {
+      message.error(`改期失败：${(error as Error).message}`);
+    } finally {
+      setJobSubmitting(false);
+    }
+  };
+
+  /** 批量改到期时间：逐项执行，成功/失败条数如实反馈（单项失败不影响其它项）。 */
+  const submitBatchDueDate = async () => {
+    let values: { dueDate?: string; clearDueDate?: boolean };
+
+    try {
+      values = await batchDueForm.validateFields();
+    } catch {
+      return;
+    }
+
+    const dueDate = toIsoOrUndefined(values.dueDate);
+
+    if (dueDate === undefined && values.clearDueDate !== true) {
+      message.error('请填写新的到期时间，或勾选「清空到期时间」');
+      return;
+    }
+
+    setBatchDueSubmitting(true);
+
+    try {
+      const result = await runtimeApi.batchSetTaskDueDate(
+        selectedTaskIds,
+        dueDate,
+        values.clearDueDate === true,
+      );
+
+      if (result.failed > 0) {
+        message.warning(`批量改期完成：成功 ${result.succeeded} 条，失败 ${result.failed} 条`);
+      } else {
+        message.success(`批量改期完成：${result.succeeded} 条`);
+      }
+
+      setBatchDueOpen(false);
+      setSelectedTaskIds([]);
+      batchDueForm.resetFields();
+      void queryClient.invalidateQueries({ queryKey: ['runtime'] });
+    } catch (error) {
+      message.error(`批量改期失败：${(error as Error).message}`);
+    } finally {
+      setBatchDueSubmitting(false);
+    }
+  };
+
+  /** 立即触发定时作业：不等到期，走与轮询相同的抢占语义（重复点击只有一个生效）。 */
+  const executeJob = async (job: TimerJobSummary) => {
+    try {
+      await jobsApi.execute(job.id);
+      message.success('已触发定时作业');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'jobs'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'jobs-stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['runtime'] });
+    } catch (error) {
+      message.error(`触发失败：${(error as Error).message}`);
+    }
+  };
+
   // ─────────────────────────── 实例操作 ───────────────────────────
 
   const toggleInstanceSuspension = async (instance: ProcessInstanceResponse) => {
@@ -304,6 +484,27 @@ export default function MonitoringPage() {
     }
   };
 
+  /** 批量挂起 / 激活（逐项执行；失败项在提示里给条数，详情看审计）。 */
+  const batchSetSuspension = async (suspend: boolean) => {
+    if (selectedIds.length === 0) {
+      message.warning(`请先勾选要${suspend ? '挂起' : '激活'}的实例`);
+      return;
+    }
+
+    try {
+      const result = suspend
+        ? await runtimeApi.batchSuspendInstances(selectedIds)
+        : await runtimeApi.batchActivateInstances(selectedIds);
+
+      message.success(
+        `批量${suspend ? '挂起' : '激活'}完成：成功 ${result.succeeded} 条，失败 ${result.failed} 条`,
+      );
+      refreshAll();
+    } catch (error) {
+      message.error(`批量${suspend ? '挂起' : '激活'}失败：${(error as Error).message}`);
+    }
+  };
+
   // ─────────────────────────── 任务操作 ───────────────────────────
 
   const claimTask = async (task: TaskResponse) => {
@@ -313,6 +514,62 @@ export default function MonitoringPage() {
       refreshAll();
     } catch (error) {
       message.error(`认领失败：${(error as Error).message}`);
+    }
+  };
+
+  const unclaimTask = async (task: TaskResponse) => {
+    try {
+      await runtimeApi.unclaimTask(task.id);
+      message.success('已取消认领');
+      refreshAll();
+    } catch (error) {
+      message.error(`取消认领失败：${(error as Error).message}`);
+    }
+  };
+
+  const openTaskEdit = (task: TaskResponse) => {
+    editForm.setFieldsValue({
+      dueDate: toLocalDateTime(task.dueDate),
+      priority: task.priority,
+    });
+    setEditTask(task);
+  };
+
+  const submitTaskEdit = async () => {
+    if (editTask === null) {
+      return;
+    }
+
+    let values: { dueDate?: string; priority?: number };
+
+    try {
+      values = await editForm.validateFields();
+    } catch {
+      return;
+    }
+
+    const dueDate = values.dueDate ? new Date(values.dueDate) : null;
+
+    if (dueDate !== null && Number.isNaN(dueDate.getTime())) {
+      message.error('到期时间格式不正确');
+      return;
+    }
+
+    setEditSubmitting(true);
+
+    try {
+      await runtimeApi.updateTask(editTask.id, {
+        dueDate: dueDate?.toISOString(),
+        clearDueDate: dueDate === null,
+        priority: values.priority,
+      });
+      message.success('任务已更新');
+      setEditTask(null);
+      refreshAll();
+    } catch (error) {
+      message.error(`更新任务失败：${(error as Error).message}`);
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -342,7 +599,11 @@ export default function MonitoringPage() {
         await runtimeApi.setTaskAssignee(taskAction.task.id, values.assignee?.trim() ?? '');
         message.success('已转办');
       } else {
-        await runtimeApi.completeTask(taskAction.task.id, parseVariables(values.variables));
+        await runtimeApi.completeTask(
+          taskAction.task.id,
+          parseVariables(values.variables),
+          newIdempotencyKey(),
+        );
         message.success('已完成任务');
       }
 
@@ -366,12 +627,37 @@ export default function MonitoringPage() {
   const taskColumns = buildTaskColumns({
     onDetail: setDetailTaskId,
     onClaim: (task) => void claimTask(task),
+    onUnclaim: (task) => void unclaimTask(task),
+    onEdit: openTaskEdit,
     onOpenAction: (mode, task) => openTaskAction(mode, task),
   });
 
   const historicColumns = buildHistoricColumns({
     onDetail: setManualInstanceId,
   });
+
+  const jobColumns: ColumnsType<TimerJobSummary> = [
+    { title: '到期时间', dataIndex: 'dueDate', key: 'dueDate', width: 190, render: (v: string) => formatTime(v) },
+    { title: '流程实例', dataIndex: 'processInstanceId', key: 'processInstanceId', ellipsis: true },
+    { title: '节点', dataIndex: 'activityId', key: 'activityId', width: 160 },
+    { title: '边界事件', dataIndex: 'boundaryEventId', key: 'boundaryEventId', width: 160 },
+    { title: '创建时间', dataIndex: 'createTime', key: 'createTime', width: 190, render: (v: string) => formatTime(v) },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 160,
+      render: (_, record) => (
+        <Space size={4}>
+          <Button size="small" onClick={() => openJobReschedule(record)}>
+            改期
+          </Button>
+          <Button size="small" onClick={() => void executeJob(record)}>
+            立即触发
+          </Button>
+        </Space>
+      ),
+    },
+  ];
 
   const tabItems = [
     {
@@ -409,9 +695,17 @@ export default function MonitoringPage() {
               onPressEnter={applyInstanceFilter}
             />
           </FilterBar>
-          <Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0} onClick={() => void batchDelete()}>
-            批量删除选中（{selectedIds.length}）
-          </Button>
+          <Space wrap>
+            <Button disabled={selectedIds.length === 0} onClick={() => void batchSetSuspension(true)}>
+              批量挂起（{selectedIds.length}）
+            </Button>
+            <Button disabled={selectedIds.length === 0} onClick={() => void batchSetSuspension(false)}>
+              批量激活
+            </Button>
+            <Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0} onClick={() => void batchDelete()}>
+              批量删除选中（{selectedIds.length}）
+            </Button>
+          </Space>
           <Table<ProcessInstanceResponse>
             rowKey="id"
             columns={instanceColumns}
@@ -463,11 +757,20 @@ export default function MonitoringPage() {
               onPressEnter={applyTaskFilter}
             />
           </FilterBar>
+          <Space wrap>
+            <Button disabled={selectedTaskIds.length === 0} onClick={() => setBatchDueOpen(true)}>
+              批量改到期时间（{selectedTaskIds.length}）
+            </Button>
+          </Space>
           <Table<TaskResponse>
             rowKey="id"
             columns={taskColumns}
             dataSource={taskList.items}
             loading={taskList.loading}
+            rowSelection={{
+              selectedRowKeys: selectedTaskIds,
+              onChange: (keys) => setSelectedTaskIds(keys as string[]),
+            }}
             pagination={taskList.pagination}
           />
         </Space>
@@ -526,6 +829,51 @@ export default function MonitoringPage() {
             dataSource={historicList.items}
             loading={historicList.loading}
             pagination={historicList.pagination}
+          />
+        </Space>
+      ),
+    },
+    {
+      key: 'jobs',
+      label: `定时作业（${jobStats.data?.total ?? jobList.total}）`,
+      children: (
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <FilterBar active={hasJobFilter} onSearch={applyJobFilter} onReset={resetJobFilter}>
+            <Input
+              allowClear
+              placeholder="流程实例 ID"
+              style={{ width: 260 }}
+              value={jobDraft.processInstanceId ?? ''}
+              onChange={(event) => setJobDraft({ ...jobDraft, processInstanceId: event.target.value })}
+              onPressEnter={applyJobFilter}
+            />
+            <Input
+              allowClear
+              placeholder="流程定义 ID"
+              style={{ width: 260 }}
+              value={jobDraft.processDefinitionId ?? ''}
+              onChange={(event) => setJobDraft({ ...jobDraft, processDefinitionId: event.target.value })}
+              onPressEnter={applyJobFilter}
+            />
+            <Input
+              allowClear
+              type="datetime-local"
+              title="只看该时刻之前到期的作业"
+              style={{ width: 210 }}
+              value={jobDraft.dueBefore ?? ''}
+              onChange={(event) => setJobDraft({ ...jobDraft, dueBefore: event.target.value })}
+            />
+          </FilterBar>
+          <Typography.Text type="secondary">
+            共 {jobStats.data?.total ?? 0} 条 · 已到期 {jobStats.data?.overdue ?? 0} 条 · 1 小时内{' '}
+            {jobStats.data?.dueWithinHour ?? 0} 条 · 最近到期 {formatTime(jobStats.data?.nextDueAt)}
+          </Typography.Text>
+          <Table<TimerJobSummary>
+            rowKey="id"
+            columns={jobColumns}
+            dataSource={jobList.items}
+            loading={jobList.loading}
+            pagination={jobList.pagination}
           />
         </Space>
       ),
@@ -635,6 +983,80 @@ export default function MonitoringPage() {
           )}
         </Form>
       </Modal>
+
+      <Modal
+        title={editTask ? `修改任务「${editTask.name ?? editTask.id}」` : ''}
+        open={editTask !== null}
+        confirmLoading={editSubmitting}
+        okText="保存"
+        cancelText="取消"
+        onOk={() => void submitTaskEdit()}
+        onCancel={() => setEditTask(null)}
+        destroyOnClose
+      >
+        <Form form={editForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="dueDate"
+            label="到期时间"
+            extra="按本地时区填写；留空表示清除到期时间。"
+          >
+            <Input type="datetime-local" />
+          </Form.Item>
+          <Form.Item name="priority" label="优先级（0-100）">
+            <InputNumber min={0} max={100} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={
+          jobReschedule
+            ? `作业改期（${jobReschedule.processInstanceId} / ${jobReschedule.boundaryEventId}）`
+            : ''
+        }
+        open={jobReschedule !== null}
+        confirmLoading={jobSubmitting}
+        okText="保存"
+        cancelText="取消"
+        onOk={() => void submitJobReschedule()}
+        onCancel={() => setJobReschedule(null)}
+        destroyOnClose
+      >
+        <Form form={jobForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="dueDate"
+            label="新的到期时间"
+            extra="按本地时区填写；到点后由宿主的定时轮询触发边界事件。"
+            rules={[{ required: true, message: '请选择到期时间' }]}
+          >
+            <Input type="datetime-local" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`批量改到期时间（${selectedTaskIds.length} 条）`}
+        open={batchDueOpen}
+        confirmLoading={batchDueSubmitting}
+        okText="保存"
+        cancelText="取消"
+        onOk={() => void submitBatchDueDate()}
+        onCancel={() => setBatchDueOpen(false)}
+        destroyOnClose
+      >
+        <Form form={batchDueForm} layout="vertical" preserve={false}>
+          <Form.Item name="clearDueDate" valuePropName="checked">
+            <Checkbox>清空到期时间（忽略下面的时间）</Checkbox>
+          </Form.Item>
+          <Form.Item
+            name="dueDate"
+            label="新的到期时间"
+            extra="按本地时区填写；逐项执行，单条失败不影响其它条。"
+          >
+            <Input type="datetime-local" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   );
 }
@@ -662,6 +1084,34 @@ function validateVariables(_: unknown, value?: string): Promise<void> {
   } catch (error) {
     return Promise.reject(error instanceof Error ? error : new Error('变量必须是 JSON 对象'));
   }
+}
+
+/** ISO / UTC 时间 → `<input type="datetime-local">` 需要的本地时间字符串。 */
+function toLocalDateTime(iso?: string | null): string | undefined {
+  if (!iso) {
+    return undefined;
+  }
+
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** 本地时间字符串 → ISO（带时区）；空 / 非法返回 undefined。 */
+function toIsoOrUndefined(local?: string): string | undefined {
+  if (!local) {
+    return undefined;
+  }
+
+  const date = new Date(local);
+
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 /** 去掉筛选值的首尾空白，空串直接丢弃（查询串与缓存键都不该带空条件）。 */

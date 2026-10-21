@@ -226,19 +226,32 @@ public static class DesignerEndpoints
         var first = firstResult ?? 0;
         var size = Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize);
 
-        var query = new ProcessDefinitionQuery(processDefinitionKey, tenant, first, size);
+        // 版本列表按 version 排序 —— 必须「先排序再分页」。
+        // 引擎的通用分页按 DeployTime 排序，回填 / 迁移数据时部署时间与版本号可能不一致，
+        // 先分页再在页内排序会取错页；同 key 的定义数量很小，可以整体取出后切片。
+        var definitions = await engine
+            .FindProcessDefinitionsAsync(new ProcessDefinitionQuery(processDefinitionKey, tenant), ct)
+            .ConfigureAwait(false);
 
-        var definitions = await engine.FindProcessDefinitionsAsync(query, ct).ConfigureAwait(false);
-        var total = await engine.CountProcessDefinitionsAsync(query, ct).ConfigureAwait(false);
+        var ordered = definitions.OrderByDescending(definition => definition.Version).ToArray();
 
         return PagedResults.Create(
-            definitions.OrderByDescending(definition => definition.Version).Select(ToResponse).ToArray(),
-            total,
+            ordered.Skip(first).Take(size).Select(ToResponse).ToArray(),
+            ordered.Length,
             first,
             size,
             response,
             envelope ?? false);
     }
+
+    /// <summary>部署关键字匹配：部署 id / 部署名 / 租户，或该部署下任一流程定义的 key / 名称。</summary>
+    private static bool MatchesDeploymentKeyword(DeploymentSummaryResponse deployment, string keyword) =>
+        deployment.DeploymentId.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+        || (deployment.Name?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+        || (deployment.TenantId?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+        || deployment.Definitions.Any(definition =>
+            definition.Key.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+            || (definition.Name?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false));
 
     private static ProcessDefinitionResponse ToResponse(DeployedProcessDefinition definition) =>
         new(
@@ -350,8 +363,13 @@ public static class DesignerEndpoints
     /// 因此这里从定义列表聚合，不额外查 <c>ACT_RE_DEPLOYMENT</c>，避免两套分页口径。
     /// 分页在聚合后按部署切片，总数放 <c>X-Total-Count</c>。
     /// </para>
+    /// <para>
+    /// <paramref name="keyword"/> 由服务端过滤（部署 id / 部署名 / 租户 / 定义 key / 定义名）——
+    /// 控制台不再只拉前 200 条后在前端过滤，部署多了也不会「搜不到」。
+    /// </para>
     /// </summary>
     private static async Task<IResult> FindDeploymentsAsync(
+        string? keyword,
         string? tenantId,
         int? firstResult,
         int? maxResults,
@@ -370,27 +388,35 @@ public static class DesignerEndpoints
             .FindProcessDefinitionsAsync(new ProcessDefinitionQuery(TenantId: tenant), ct)
             .ConfigureAwait(false);
 
+        var trimmedKeyword = string.IsNullOrWhiteSpace(keyword) ? null : keyword.Trim();
+
         var deployments = definitions
             .GroupBy(definition => definition.DeploymentId, StringComparer.Ordinal)
             .Select(group =>
             {
                 var latest = group.MaxBy(definition => definition.Version)!;
 
+                var definitionsInGroup = group
+                    .OrderByDescending(definition => definition.Version)
+                    .ToArray();
+
                 return new DeploymentSummaryResponse(
                     group.Key,
                     latest.DeploymentName,
                     latest.DeployTime,
                     latest.TenantId,
-                    [.. group
-                        .OrderByDescending(definition => definition.Version)
-                        .Select(definition => new DeploymentDefinitionResponse(
-                            definition.Id,
-                            definition.Key,
-                            definition.Name,
-                            definition.Version,
-                            definition.ResourceName,
-                            definition.IsSuspended))]);
+                    [.. definitionsInGroup.Select(definition => new DeploymentDefinitionResponse(
+                        definition.Id,
+                        definition.Key,
+                        definition.Name,
+                        definition.Version,
+                        definition.ResourceName,
+                        definition.IsSuspended))],
+                    DefinitionCount: definitionsInGroup.Length,
+                    LatestVersion: definitionsInGroup.Length == 0 ? null : definitionsInGroup[0].Version,
+                    SuspendedCount: definitionsInGroup.Count(definition => definition.IsSuspended));
             })
+            .Where(deployment => trimmedKeyword is null || MatchesDeploymentKeyword(deployment, trimmedKeyword))
             .OrderByDescending(deployment => deployment.DeployTime ?? DateTime.MinValue)
             .ToArray();
 

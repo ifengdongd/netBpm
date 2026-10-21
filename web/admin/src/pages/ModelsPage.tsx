@@ -1,19 +1,22 @@
 import {
   CloudUploadOutlined,
+  CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
   HistoryOutlined,
+  ImportOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { App, Button, Input, Popconfirm, Space, Table, Tag, Typography } from 'antd';
+import { App, Button, Input, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { modelsApi } from '../api';
-import type { BpmnModelSummary } from '../api/types';
+import { newIdempotencyKey } from '../api/client';
+import type { BpmnModelPublishState, BpmnModelSummary, ValidationIssue } from '../api/types';
 import ModelHistoryDrawer from '../components/ModelHistoryDrawer';
 import { usePagedList } from '../hooks/usePagedList';
 import { formatTime } from '../utils';
@@ -29,6 +32,8 @@ export default function ModelsPage() {
   const [historyModel, setHistoryModel] = useState<BpmnModelSummary | null>(null);
   // 部署进行中的模型 id（行级 loading）
   const [deploying, setDeploying] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 服务端分页 + 关键字过滤（queryKey 含关键字，变更自动重查）
   const modelList = usePagedList<BpmnModelSummary>(
@@ -77,6 +82,41 @@ export default function ModelsPage() {
     [modelList, message],
   );
 
+  /** 复制模型：副本从版本 1 开始，名称默认「原名（副本）」。 */
+  const handleDuplicate = useCallback(
+    async (record: BpmnModelSummary) => {
+      try {
+        await modelsApi.duplicate(record.id);
+        message.success(`已复制：${record.name}`);
+        modelList.reload();
+      } catch (error) {
+        message.error(`复制失败：${(error as Error).message}`);
+      }
+    },
+    [message, modelList],
+  );
+
+  /** 导入 BPMN XML：process key / 名称由后端从 XML 推导，成功后进入列表。 */
+  const handleImportFile = useCallback(
+    async (file: File) => {
+      setImporting(true);
+
+      try {
+        const xml = await file.text();
+        const name = file.name.replace(/\.(bpmn20\.xml|bpmn|xml)$/i, '');
+        const created = await modelsApi.importXml(xml, name || undefined);
+
+        message.success(`已导入模型：${name || created.id}`);
+        modelList.reload();
+      } catch (error) {
+        message.error(`导入失败：${(error as Error).message}`);
+      } finally {
+        setImporting(false);
+      }
+    },
+    [message, modelList],
+  );
+
   /** 导出：拉取模型详情，把 BPMN XML 下载为 .bpmn20.xml 文件。 */
   const handleExport = useCallback(
     async (record: BpmnModelSummary) => {
@@ -107,9 +147,31 @@ export default function ModelsPage() {
       setDeploying(record.id);
 
       try {
+        // 预检：与发布同口径，阻断级问题直接在弹窗里列出，不必渲染 / 部署一轮才发现
+        const precheck = await modelsApi.validate(record.id);
+
+        if (precheck.errors.length > 0) {
+          modal.error({
+            title: `发布被拦截：${precheck.errors.length} 处阻断问题`,
+            width: 640,
+            content: issueList(precheck.errors, 'error'),
+          });
+          return;
+        }
+
         const detail = await modelsApi.get(record.id);
         const svg = await renderDiagramSvg(detail.bpmnXml);
-        const deployed = await modelsApi.publish(record.id, svg ?? undefined);
+        const deployed = await modelsApi.publish(record.id, svg ?? undefined, newIdempotencyKey());
+
+        // 没有未发布的修改：后端跳过部署、回放线上版本，不再多造一个定义版本
+        if (deployed.skipped) {
+          message.info(
+            `内容未变化，已跳过部署：${deployed.processDefinitionKey} v${deployed.version}`,
+          );
+          modelList.reload();
+          return;
+        }
+
         const warnings = deployed.warnings ?? [];
 
         if (warnings.length === 0) {
@@ -160,6 +222,12 @@ export default function ModelsPage() {
       render: (key: string) => <Tag>{key}</Tag>,
     },
     {
+      title: '发布状态',
+      key: 'publish',
+      width: 190,
+      render: (_, record) => <PublishBadge publish={record.publish} />,
+    },
+    {
       title: '最近修改',
       dataIndex: 'modifyTime',
       key: 'modifyTime',
@@ -204,6 +272,12 @@ export default function ModelsPage() {
           </Button>
           <Button
             size="small"
+            icon={<CopyOutlined />}
+            title="复制模型（副本从版本 1 开始）"
+            onClick={() => void handleDuplicate(record)}
+          />
+          <Button
+            size="small"
             icon={<HistoryOutlined />}
             onClick={() => setHistoryModel(record)}
           >
@@ -244,9 +318,32 @@ export default function ModelsPage() {
           <Button icon={<ReloadOutlined />} onClick={modelList.reload}>
             刷新
           </Button>
+          <Button
+            icon={<ImportOutlined />}
+            loading={importing}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            导入模型
+          </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/models/editor?action=new')}>
             新建模型
           </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".bpmn,.xml"
+            style={{ display: 'none' }}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+
+              if (file) {
+                void handleImportFile(file);
+              }
+
+              // 允许连续导入同一个文件
+              event.target.value = '';
+            }}
+          />
         </Space>
       </Space>
       <Table<BpmnModelSummary>
@@ -263,6 +360,40 @@ export default function ModelsPage() {
         open={historyModel !== null}
         onClose={() => setHistoryModel(null)}
       />
+    </Space>
+  );
+}
+
+/** 发布状态：线上版本 + 是否有未发布的修改。 */
+function PublishBadge({ publish }: { publish: BpmnModelPublishState }) {
+  if (!publish?.latestPublishedVersion) {
+    return <Tag>未发布</Tag>;
+  }
+
+  return (
+    <Space size={4} wrap>
+      <Tooltip title={publish.latestPublishedAt ? `部署于 ${formatTime(publish.latestPublishedAt)}` : undefined}>
+        <Tag color="green">线上 v{publish.latestPublishedVersion}</Tag>
+      </Tooltip>
+      {publish.hasUnpublishedChanges ? (
+        <Tag color="orange">未发布修改</Tag>
+      ) : (
+        <Tag color="blue">已同步</Tag>
+      )}
+    </Space>
+  );
+}
+
+/** 校验问题列表：规则名 + 说明，供预检拦截 / 部署提示共用。 */
+function issueList(issues: ValidationIssue[], color: string) {
+  return (
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      {issues.map((issue, index) => (
+        <Space key={`${issue.rule}-${index}`} align="start">
+          <Tag color={color}>{issue.rule}</Tag>
+          <Typography.Text>{issue.message}</Typography.Text>
+        </Space>
+      ))}
     </Space>
   );
 }

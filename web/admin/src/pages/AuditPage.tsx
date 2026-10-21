@@ -1,4 +1,4 @@
-import { DeleteOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import {
   App,
   AutoComplete,
@@ -16,11 +16,13 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { useQuery } from '@tanstack/react-query';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { auditApi } from '../api';
 import type { AuditQuery } from '../api';
+import { fetchBlob, toQueryString } from '../api/client';
 import type { AdminAuditItem } from '../api/types';
 import { usePagedList, type PageState } from '../hooks/usePagedList';
 import { auditActionColor, formatTime } from '../utils';
@@ -73,6 +75,27 @@ export default function AuditPage() {
   const { message } = App.useApp();
   const [form] = Form.useForm<FilterValues>();
 
+  // 筛选项来自后端（出现过的动作 / 操作人）；本地静态清单只作为兜底与常用项
+  const optionsQuery = useQuery({
+    queryKey: ['admin', 'audit-options'],
+    queryFn: () => auditApi.options(),
+    staleTime: 60_000,
+  });
+
+  const actionOptions = useMemo(() => {
+    const actions = new Set([
+      ...ACTION_OPTIONS.map((option) => option.value),
+      ...(optionsQuery.data?.actions ?? []),
+    ]);
+
+    return [...actions].sort().map((value) => ({ value }));
+  }, [optionsQuery.data]);
+
+  const actorOptions = useMemo(
+    () => (optionsQuery.data?.actors ?? []).map((value) => ({ value })),
+    [optionsQuery.data],
+  );
+
   const buildQuery = useCallback(
     (target: PageState): AuditQuery => {
       const values = form.getFieldsValue();
@@ -120,6 +143,36 @@ export default function AuditPage() {
   const onReset = () => {
     form.resetFields();
     resetToFirstPage();
+  };
+
+  /** 导出当前筛选条件下的 CSV（带鉴权头，服务端流式输出）。 */
+  const onExport = async () => {
+    const values = form.getFieldsValue();
+
+    const path = `/api/admin/audit/export${toQueryString({
+      actor: values.actor?.trim() || undefined,
+      action: values.action?.trim() || undefined,
+      processInstanceId: values.processInstanceId?.trim() || undefined,
+      success:
+        values.success === 'all' || values.success === undefined ? undefined : values.success,
+      since: values.range?.[0]?.toISOString(),
+      until: values.range?.[1]?.toISOString(),
+    })}`;
+
+    try {
+      const blob = await fetchBlob(path);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = `audit-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      message.success('已导出当前筛选条件下的审计记录');
+    } catch (error) {
+      message.error(`导出失败：${(error as Error).message}`);
+    }
   };
 
   const onPurge = async () => {
@@ -195,6 +248,9 @@ export default function AuditPage() {
           <Button icon={<ReloadOutlined />} onClick={reload}>
             刷新
           </Button>
+          <Button icon={<DownloadOutlined />} onClick={() => void onExport()}>
+            导出 CSV
+          </Button>
           <Button danger icon={<DeleteOutlined />} onClick={() => setPurgeOpen(true)}>
             清理历史
           </Button>
@@ -203,13 +259,19 @@ export default function AuditPage() {
     >
       <Form form={form} layout="inline" initialValues={{ success: 'all' }} style={{ marginBottom: 16, rowGap: 8 }}>
         <Form.Item name="actor" label="操作人">
-          <Input allowClear placeholder="如 alice" style={{ width: 160 }} />
+          <AutoComplete
+            allowClear
+            options={actorOptions}
+            placeholder="如 alice"
+            style={{ width: 160 }}
+            filterOption={(input, option) => (option?.value ?? '').includes(input)}
+          />
         </Form.Item>
 
         <Form.Item name="action" label="动作">
           <AutoComplete
             allowClear
-            options={ACTION_OPTIONS}
+            options={actionOptions}
             placeholder="如 task.reassign"
             style={{ width: 200 }}
             filterOption={(input, option) => (option?.value ?? '').includes(input)}

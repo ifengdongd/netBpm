@@ -23,7 +23,7 @@ import {
 } from '../src/auth';
 import { computeTypeChange, resolveDisplayKey } from '../src/designer/listEditors';
 import NetBpmPropertiesProvider from '../src/designer/propertiesProvider';
-import { parseProcessMeta, upsertDiagram, type DiagramRecord } from '../src/storage';
+import { parseProcessMeta, saveDiagramXml, upsertDiagram, type DiagramRecord } from '../src/storage';
 import { hasBlockingError, summarize, validateDiagram } from '../src/validation';
 import type { StubEntry, StubGroup } from './propertiesPanelStub';
 
@@ -801,6 +801,59 @@ test('存储：按 processId 覆盖更新，新记录排在最前，且不改变
 
   // 原数组未被改动
   assert.equal(JSON.stringify(existing), snapshot);
+});
+
+test('存储：保存已有模型带 If-Match 版本号并回写新版本，冲突时给出可读错误', async () => {
+  // 并发控制的口径在后端（If-Match → 409 RevisionConflictResponse），前端只需把版本号带上、
+  // 把 409 变成人话。这条测试盯的正是「前端忘了发 If-Match，后端校验形同虚设」这类回归。
+  const xml = '<bpmn:process id="p1" name="流程" />';
+  const sent: { method: string; ifMatch: string | null }[] = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+
+    // resolveMode() 的探测请求
+    if (url.endsWith('/api/admin/models')) {
+      return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const headers = new Headers(init?.headers);
+    const ifMatch = headers.get('If-Match');
+
+    sent.push({ method, ifMatch });
+
+    if (ifMatch === '"1"') {
+      return new Response(
+        JSON.stringify({
+          message: '模型已被其他人修改（服务端版本 2，本次提交基于版本 1），请刷新后重试。',
+          currentRevision: 2,
+        }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    return new Response(JSON.stringify({ id: 'm-1', revision: 2, errors: [], warnings: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const saved = await saveDiagramXml(xml, 'm-1', 3);
+
+    assert.equal(sent[0].method, 'PATCH');
+    assert.equal(sent[0].ifMatch, '"3"');
+    assert.equal(saved.revision, 2);
+
+    await assert.rejects(
+      () => saveDiagramXml(xml, 'm-1', 1),
+      /保存冲突：模型已被其他人修改/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 // ─────────────────────────── 边界定时器 / 终止结束事件 ───────────────────────────

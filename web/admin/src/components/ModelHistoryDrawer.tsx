@@ -49,7 +49,17 @@ export default function ModelHistoryDrawer({ modelId, modelName, open, onClose }
     enabled: viewing !== null && modelId !== null,
   });
 
-  const revisions = historyQuery.data ?? [];
+  /** 发布记录：版本历史里的 publish 快照 + 就近匹配到的线上定义版本。 */
+  const publicationsQuery = useQuery({
+    queryKey: ['admin', 'model-publications', modelId],
+    queryFn: () => modelsApi.publications(modelId as string),
+    enabled: open && modelId !== null,
+  });
+
+  const revisions = historyQuery.data?.items ?? [];
+  const publishedVersions = new Map(
+    (publicationsQuery.data ?? []).map((publication) => [publication.revision, publication]),
+  );
 
   /** 失效模型列表与历史缓存（回滚 / 清理后自动刷新本抽屉与列表页）。 */
   const invalidate = () => {
@@ -109,9 +119,27 @@ export default function ModelHistoryDrawer({ modelId, modelName, open, onClose }
       title: '动作',
       dataIndex: 'action',
       key: 'action',
-      width: 100,
-      render: (action: string) =>
-        action === 'rollback' ? <Tag color="orange">回滚</Tag> : action === 'publish' ? <Tag color="green">部署</Tag> : <Tag>保存</Tag>,
+      width: 150,
+      render: (action: string, record) => {
+        if (action === 'rollback') {
+          return <Tag color="orange">回滚</Tag>;
+        }
+
+        if (action === 'publish') {
+          const publication = publishedVersions.get(record.revision);
+
+          return (
+            <Space size={4}>
+              <Tag color="green">部署</Tag>
+              {publication?.linked && publication.version ? (
+                <Tag color="cyan">线上 v{publication.version}</Tag>
+              ) : null}
+            </Space>
+          );
+        }
+
+        return <Tag>保存</Tag>;
+      },
     },
     { title: '流程名称', dataIndex: 'name', key: 'name', ellipsis: true },
     { title: '操作人', dataIndex: 'operator', key: 'operator', width: 130, render: (v?: string | null) => v ?? '—' },

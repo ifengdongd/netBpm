@@ -83,6 +83,11 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
   const [jumping, setJumping] = useState(false);
   const [jumpForm] = Form.useForm<{ targetActivityId: string; reason?: string }>();
 
+  // 变量直写（管理端高危动作：与运行时 PUT /variables 同口径，后端会写审计）
+  const [varsOpen, setVarsOpen] = useState(false);
+  const [varsSubmitting, setVarsSubmitting] = useState(false);
+  const [varsForm] = Form.useForm<{ variables: string }>();
+
   const loading = open && detailQuery.isPending;
   const loaded = detailQuery.isSuccess || detailQuery.isError;
 
@@ -132,6 +137,55 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
       message.error(`跳转失败：${(error as Error).message}`);
     } finally {
       setJumping(false);
+    }
+  };
+
+  /** 变量直写：合并写入（不是整体替换），值为 JSON 原生类型。 */
+  const handleWriteVariables = async () => {
+    if (instance === null) {
+      return;
+    }
+
+    let values: { variables: string };
+
+    try {
+      values = await varsForm.validateFields();
+    } catch {
+      return;
+    }
+
+    let payload: Variables;
+
+    try {
+      const parsed = JSON.parse(values.variables) as unknown;
+
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('变量必须是 JSON 对象');
+      }
+
+      payload = parsed as Variables;
+    } catch (error) {
+      message.error(`变量格式错误：${(error as Error).message}`);
+      return;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      message.error('至少提供一个变量');
+      return;
+    }
+
+    setVarsSubmitting(true);
+
+    try {
+      await runtimeApi.setInstanceVariables(instance.id, payload);
+      message.success(`已写入 ${Object.keys(payload).length} 个变量`);
+      setVarsOpen(false);
+      varsForm.resetFields();
+      onChanged();
+    } catch (error) {
+      message.error(`写入失败：${(error as Error).message}`);
+    } finally {
+      setVarsSubmitting(false);
     }
   };
 
@@ -339,6 +393,14 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
               <Button icon={<SwapOutlined />} onClick={() => setJumpOpen(true)}>
                 跳转节点
               </Button>
+              <Button
+                onClick={() => {
+                  varsForm.setFieldsValue({ variables: JSON.stringify(variables, null, 2) });
+                  setVarsOpen(true);
+                }}
+              >
+                变量直写
+              </Button>
               <Popconfirm
                 title="删除该实例？"
                 description="待办 / 变量将被清理，历史保留。"
@@ -378,6 +440,34 @@ export default function InstanceDetailDrawer({ instanceId, open, onClose, onChan
           </Form.Item>
           <Form.Item name="reason" label="跳转原因（可选）">
             <Input placeholder="写入被删任务与活动历史" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="变量直写"
+        open={varsOpen}
+        confirmLoading={varsSubmitting}
+        onOk={() => void handleWriteVariables()}
+        onCancel={() => setVarsOpen(false)}
+        okText="写入"
+        cancelText="取消"
+        width={640}
+        destroyOnClose
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="合并写入当前运行实例的流程变量，属于管理端高危操作（会写审计）。"
+        />
+        <Form form={varsForm} layout="vertical">
+          <Form.Item
+            name="variables"
+            label="变量（JSON 对象）"
+            rules={[{ required: true, whitespace: true, message: '请输入 JSON 对象' }]}
+          >
+            <Input.TextArea rows={12} placeholder={'{\n  "approved": true\n}'} />
           </Form.Item>
         </Form>
       </Modal>

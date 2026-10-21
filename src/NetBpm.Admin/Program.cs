@@ -110,6 +110,12 @@ if (rateLimitEnabled)
 var app = builder.Build();
 var startedAt = DateTime.UtcNow;
 
+// OpenAPI 文档默认只在开发环境暴露（契约生成 / 联调用）；
+// 生产环境需要时显式打开 NetBpm:Admin:OpenApi:Enabled=true。
+var openApiEnabled = builder.Configuration.GetValue(
+    "NetBpm:Admin:OpenApi:Enabled",
+    builder.Environment.IsDevelopment());
+
 app.UseExceptionHandler();
 
 if (rateLimitEnabled)
@@ -121,7 +127,10 @@ if (rateLimitEnabled)
 app.UseMiddleware<AuthenticationMiddleware>();
 app.UseMiddleware<IdempotencyMiddleware>();
 
-app.MapOpenApi();
+if (openApiEnabled)
+{
+    app.MapOpenApi();
+}
 
 app.MapGet("/health", () => Results.Ok(new
 {

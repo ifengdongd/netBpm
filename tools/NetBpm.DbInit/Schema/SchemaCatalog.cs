@@ -694,11 +694,10 @@ internal static class SchemaCatalog
             C("modify_time", ColType.DateTime, comment: "最后修改时间"),
         ],
         ["id"],
-        [
-            new IndexDef("ix_bpmn_model_key", ["tenant_id", "process_key"]),
-            new IndexDef("ix_bpmn_model_modify", ["tenant_id", "modify_time"]),
-        ],
-        [], [],
+        [new IndexDef("ix_bpmn_model_modify", ["tenant_id", "modify_time"])],
+        // 同一租户下一个 key 只能对应一个模型：否则发布后同一 key 下会混入多来源版本
+        [new IndexDef("ux_bpmn_model_key", ["tenant_id", "process_key"], Unique: true)],
+        [],
         EngineCharset: false);
 
     // 0008 流程模型版本历史（管理端发布治理）

@@ -1,4 +1,5 @@
 import {
+  CopyOutlined,
   DeleteOutlined,
   DownloadOutlined,
   FileTextOutlined,
@@ -14,7 +15,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { deploymentsApi, runtimeApi } from '../api';
+import { deploymentsApi, modelsApi, runtimeApi } from '../api';
+import { newIdempotencyKey } from '../api/client';
 import type {
   DeploymentDefinitionResponse,
   DeploymentResource,
@@ -28,17 +30,25 @@ export default function DeploymentsPage() {
   const { message, modal } = App.useApp();
   const navigate = useNavigate();
 
+  // 搜索框输入值 / 已提交关键字：过滤走服务端，部署多了也不会「只搜前 200 条」
+  const [keywordInput, setKeywordInput] = useState('');
   const [keyword, setKeyword] = useState('');
 
   const deploymentsQuery = useQuery({
-    queryKey: ['designer', 'deployments'],
-    queryFn: () => deploymentsApi.list({ firstResult: 0, maxResults: 200 }),
+    queryKey: ['designer', 'deployments', keyword],
+    queryFn: () =>
+      deploymentsApi.list({
+        keyword: keyword || undefined,
+        firstResult: 0,
+        maxResults: 200,
+      }),
     // 部署列表低频变化（写操作后有 refetch），放宽新鲜度
     staleTime: 60_000,
   });
 
   // useMemo 稳定空数组引用，避免下游 useMemo 依赖每次渲染变化
   const deployments = useMemo(() => deploymentsQuery.data?.items ?? [], [deploymentsQuery.data]);
+  const totalDeployments = deploymentsQuery.data?.total ?? deployments.length;
   const loading = deploymentsQuery.isFetching;
 
   useEffect(() => {
@@ -47,25 +57,13 @@ export default function DeploymentsPage() {
     }
   }, [deploymentsQuery.isError, deploymentsQuery.error, message]);
 
-  const filteredDeployments = useMemo(() => {
-    const query = keyword.trim().toLowerCase();
+  const applyKeyword = (value: string) => {
+    const trimmed = value.trim();
+    setKeywordInput(trimmed);
+    setKeyword(trimmed);
+  };
 
-    if (query.length === 0) {
-      return deployments;
-    }
-
-    // 命中部署名 / 部署 id / 租户，或该部署下任一流程定义的 key、名称
-    return deployments.filter((deployment) => {
-      const haystacks = [
-        deployment.name ?? '',
-        deployment.deploymentId,
-        deployment.tenantId ?? '',
-        ...deployment.definitions.flatMap((definition) => [definition.key, definition.name ?? '']),
-      ];
-
-      return haystacks.some((field) => field.toLowerCase().includes(query));
-    });
-  }, [deployments, keyword]);
+  const filteredDeployments = deployments;
 
   // 三个弹窗的数据源：target 为 null 时 enabled=false 不发请求；由 query 统一缓存 / 错误处理
   const [xmlTarget, setXmlTarget] = useState<DeploymentDefinitionResponse | null>(null);
@@ -129,6 +127,21 @@ export default function DeploymentsPage() {
     }
   };
 
+  /** 把已部署定义另存为设计器模型（拉回线上版本继续修改）。 */
+  const saveAsModel = async (definition: DeploymentDefinitionResponse) => {
+    try {
+      const created = await modelsApi.fromDefinition(
+        definition.processDefinitionId,
+        `${definition.name ?? definition.key} v${definition.version}`,
+      );
+
+      message.success('已从定义创建模型，正在打开设计器');
+      navigate(`/models/editor?modelId=${encodeURIComponent(created.id)}`);
+    } catch (error) {
+      message.error(`创建模型失败：${(error as Error).message}`);
+    }
+  };
+
   /** 打开发起实例表单（清掉上一次输入，避免带到另一个定义）。 */
   const openStart = (definition: DeploymentDefinitionResponse) => {
     startForm.resetFields();
@@ -153,12 +166,15 @@ export default function DeploymentsPage() {
     setStartSubmitting(true);
 
     try {
-      const started = await runtimeApi.startInstance({
-        processDefinitionId: startTarget.processDefinitionId,
-        businessKey: values.businessKey?.trim() || undefined,
-        startUserId: values.startUserId?.trim() || undefined,
-        variables: parseVariables(values.variables),
-      });
+      const started = await runtimeApi.startInstance(
+        {
+          processDefinitionId: startTarget.processDefinitionId,
+          businessKey: values.businessKey?.trim() || undefined,
+          startUserId: values.startUserId?.trim() || undefined,
+          variables: parseVariables(values.variables),
+        },
+        newIdempotencyKey(),
+      );
 
       setStartTarget(null);
 
@@ -224,7 +240,7 @@ export default function DeploymentsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 430,
+      width: 470,
       render: (_, record) => (
         <Space>
           <Button
@@ -238,6 +254,12 @@ export default function DeploymentsPage() {
           >
             发起
           </Button>
+          <Button
+            size="small"
+            icon={<CopyOutlined />}
+            title="把该定义另存为设计器模型"
+            onClick={() => void saveAsModel(record)}
+          />
           <Button
             size="small"
             icon={record.isSuspended ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
@@ -266,6 +288,24 @@ export default function DeploymentsPage() {
       render: (_, record) => <Typography.Text strong>{record.name || '（未命名部署）'}</Typography.Text>,
     },
     { title: '部署时间', dataIndex: 'deployTime', key: 'deployTime', width: 200, render: (v?: string | null) => formatTime(v) },
+    {
+      title: '定义',
+      key: 'definitionCount',
+      width: 110,
+      render: (_, record) => {
+        const count = record.definitionCount ?? record.definitions.length;
+        const latest = record.latestVersion ?? Math.max(0, ...record.definitions.map((d) => d.version));
+        const suspended = record.suspendedCount ?? 0;
+
+        return (
+          <Space size={4} wrap>
+            <Tag>{count} 个</Tag>
+            {latest > 0 ? <Tag color="blue">v{latest}</Tag> : null}
+            {suspended > 0 ? <Tag color="orange">挂起 {suspended}</Tag> : null}
+          </Space>
+        );
+      },
+    },
     { title: '租户', dataIndex: 'tenantId', key: 'tenantId', width: 120, render: (v?: string | null) => v || '—' },
     {
       title: '操作',
@@ -299,13 +339,19 @@ export default function DeploymentsPage() {
             allowClear
             placeholder="搜索部署名 / 部署 ID / 流程 Key"
             style={{ width: 300 }}
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
+            value={keywordInput}
+            onChange={(event) => {
+              setKeywordInput(event.target.value);
+
+              // 清空输入即撤销过滤（allowClear 不保证触发 onSearch）
+              if (event.target.value === '' && keyword !== '') {
+                setKeyword('');
+              }
+            }}
+            onSearch={applyKeyword}
           />
           <Typography.Text type="secondary">
-            {keyword.trim().length > 0
-              ? `匹配 ${filteredDeployments.length} / ${deployments.length} 次部署`
-              : `共 ${deployments.length} 次部署`}
+            {keyword ? `匹配 ${deployments.length} 次部署（共 ${totalDeployments} 次）` : `共 ${totalDeployments} 次部署`}
           </Typography.Text>
         </Space>
         <Button icon={<ReloadOutlined />} onClick={() => void deploymentsQuery.refetch()}>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using NetBpm.Engine;
+using NetBpm.Engine.Command;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
@@ -43,6 +44,12 @@ public static class RuntimeEndpoints
         group.MapPost("/process-instances/{processInstanceId}/suspend", SuspendProcessInstanceAsync);
         group.MapPost("/process-instances/{processInstanceId}/activate", ActivateProcessInstanceAsync);
         group.MapPost("/process-instances/{processInstanceId}/jump", JumpProcessInstanceAsync);
+        group.MapPost("/process-instances/{processInstanceId}/activities/{activityId}/cancel", CancelActivityAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status409Conflict);
+        group.MapPost("/process-instances/{processInstanceId}/activities/{activityId}/start-before", StartBeforeActivityAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status409Conflict);
         group.MapPost("/process-instances/{processInstanceId}/migrate", MigrateProcessInstanceAsync)
             .Produces<MigrationPlanResponse>();
         group.MapGet("/process-instances/{processInstanceId}/migrations", FindMigrationsAsync)
@@ -69,7 +76,14 @@ public static class RuntimeEndpoints
         // 统计与批量（管理端）
         group.MapGet("/tasks/stats", GetTaskStatsAsync).Produces<TaskStatsResponse>();
         group.MapPost("/tasks/batch/assignee", BatchSetAssigneeAsync).Produces<BatchResultResponse>();
+        group.MapPost("/tasks/batch/due-date", BatchSetTaskDueDateAsync).Produces<BatchResultResponse>();
         group.MapPost("/process-instances/batch/delete", BatchDeleteProcessInstancesAsync)
+            .Produces<BatchResultResponse>();
+        group.MapPost("/process-instances/batch/suspend", BatchSuspendProcessInstancesAsync)
+            .Produces<BatchResultResponse>();
+        group.MapPost("/process-instances/batch/activate", BatchActivateProcessInstancesAsync)
+            .Produces<BatchResultResponse>();
+        group.MapPost("/process-instances/batch/migrate", BatchMigrateProcessInstancesAsync)
             .Produces<BatchResultResponse>();
 
         // 变量（P5 后半段 + B2.4 删除 + 运行期写入）
@@ -376,6 +390,133 @@ public static class RuntimeEndpoints
                 return Results.NoContent();
             },
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 取消指定活动上的活动实例（Camunda <c>cancelActivityInstance</c> 的裁剪版）。
+    /// <para>
+    /// 与跳转不同：不搬令牌，只让这一处令牌消失，其它并行分支不受影响；
+    /// 取消后若实例已无活动分支，实例随之正常结束。任务 / 定时作业 / 历史一并收口。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> CancelActivityAsync(
+        string processInstanceId,
+        string activityId,
+        CancelActivityRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
+            .ConfigureAwait(false);
+
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceJump, "取消活动实例");
+
+        var reason = string.IsNullOrWhiteSpace(request?.Reason) ? "控制台取消活动" : request.Reason.Trim();
+
+        try
+        {
+            await engine
+                .ExecuteAsync(new CancelActivityCommand(processInstanceId, activityId, reason), ct)
+                .ConfigureAwait(false);
+        }
+        catch (EngineObjectNotFoundException exception)
+        {
+            return Results.NotFound(new ErrorResponse(exception.Message));
+        }
+        catch (EngineException exception)
+        {
+            // 活动已结束 / 令牌不在该节点 / 被并发取消：409，调用方据此刷新而不是盲目重试
+            await auditor.RecordAsync(
+                requestContext,
+                AdminAuditActions.InstanceActivityCancel,
+                AdminAuditTargets.ProcessInstance,
+                processInstanceId,
+                processInstanceId,
+                new { activityId, reason },
+                success: false,
+                error: exception.Message,
+                ct: ct).ConfigureAwait(false);
+
+            return Results.Conflict(new ErrorResponse(exception.Message));
+        }
+
+        await auditor.RecordAsync(
+            requestContext,
+            AdminAuditActions.InstanceActivityCancel,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            new { activityId, reason },
+            success: true,
+            ct: ct).ConfigureAwait(false);
+
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// 在指定活动之前启动一个新令牌（Camunda <c>startBeforeActivity</c> 的裁剪版）。
+    /// <para>
+    /// 现有执行不动，额外挂一个并发子执行从目标活动继续推进 —— 目标活动会真的开始执行
+    /// （用户任务建待办、服务任务执行、出流照常），相当于临时多开一条分支。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> StartBeforeActivityAsync(
+        string processInstanceId,
+        string activityId,
+        StartBeforeActivityRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        await EnsureInstanceAccessAsync(processInstanceId, requestContext, executionManager, ct)
+            .ConfigureAwait(false);
+
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceJump, "在活动之前启动");
+
+        var detail = new { activityId, reason = request?.Reason };
+
+        try
+        {
+            await engine
+                .ExecuteAsync(new StartBeforeActivityCommand(processInstanceId, activityId), ct)
+                .ConfigureAwait(false);
+        }
+        catch (EngineObjectNotFoundException exception)
+        {
+            return Results.NotFound(new ErrorResponse(exception.Message));
+        }
+        catch (EngineException exception)
+        {
+            await auditor.RecordAsync(
+                requestContext,
+                AdminAuditActions.InstanceActivityStart,
+                AdminAuditTargets.ProcessInstance,
+                processInstanceId,
+                processInstanceId,
+                detail,
+                success: false,
+                error: exception.Message,
+                ct: ct).ConfigureAwait(false);
+
+            return Results.Conflict(new ErrorResponse(exception.Message));
+        }
+
+        await auditor.RecordAsync(
+            requestContext,
+            AdminAuditActions.InstanceActivityStart,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            detail,
+            success: true,
+            ct: ct).ConfigureAwait(false);
+
+        return Results.NoContent();
     }
 
     /// <summary>
@@ -1125,6 +1266,184 @@ public static class RuntimeEndpoints
         return Results.Ok(ToBatchResult(items));
     }
 
+    /// <summary>
+    /// 批量改任务到期时间（逐项执行，不是原子操作）。
+    /// <para>
+    /// 常用场景：批量把积压任务的到期时间统一推到某个时间点，或批量清空到期时间。
+    /// 单条失败（任务已被办 / 无权限）不影响其它条，逐项结果 + 逐项审计。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> BatchSetTaskDueDateAsync(
+        BatchTaskDueDateRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        if (request?.TaskIds is not { Count: > 0 } taskIds)
+        {
+            return Results.BadRequest(new ErrorResponse("taskIds 不能为空。"));
+        }
+
+        if (taskIds.Count > MaxBatchSize)
+        {
+            return Results.BadRequest(new ErrorResponse($"单次批量操作最多 {MaxBatchSize} 条。"));
+        }
+
+        if (request.DueDate is null && !request.ClearDueDate)
+        {
+            return Results.BadRequest(new ErrorResponse("dueDate 与 clearDueDate 至少要给一个。"));
+        }
+
+        var dueDate = UtcTime.Normalize(request.DueDate);
+        var items = new List<BatchItemResult>(taskIds.Count);
+
+        foreach (var taskId in taskIds)
+        {
+            try
+            {
+                var task = await EnsureTaskAccessAsync(taskId, requestContext, engine, ct).ConfigureAwait(false);
+
+                await TaskAuthorization
+                    .EnsureCanModerateAsync(task, requestContext, executionManager, "修改任务到期时间", ct)
+                    .ConfigureAwait(false);
+
+                await engine.UpdateTaskAsync(
+                        taskId,
+                        new TaskUpdate(DueDate: dueDate, ClearDueDate: request.ClearDueDate),
+                        ct)
+                    .ConfigureAwait(false);
+
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.TaskUpdate,
+                    AdminAuditTargets.Task,
+                    taskId,
+                    task.ProcessInstanceId,
+                    new { dueDate, clearDueDate = request.ClearDueDate, batch = true },
+                    success: true,
+                    ct: ct).ConfigureAwait(false);
+
+                items.Add(new BatchItemResult(taskId, true, null));
+            }
+            catch (EngineException ex)
+            {
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.TaskUpdate,
+                    AdminAuditTargets.Task,
+                    taskId,
+                    processInstanceId: null,
+                    detail: new { dueDate, clearDueDate = request.ClearDueDate, batch = true },
+                    success: false,
+                    error: ex.Message,
+                    ct: ct).ConfigureAwait(false);
+
+                items.Add(new BatchItemResult(taskId, false, ex.Message));
+            }
+        }
+
+        return Results.Ok(ToBatchResult(items));
+    }
+
+    /// <summary>
+    /// 批量迁移流程实例到同一目标定义版本（逐项执行，不是原子操作）。
+    /// <para>
+    /// 迁移不可逆且会改写运行态，逐项结果 + 逐项审计；单项校验失败（活动映射对不上、
+    /// 目标版本挂起等）只影响该条，其余照常迁移。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> BatchMigrateProcessInstancesAsync(
+        BatchMigrateInstancesRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        if (request?.ProcessInstanceIds is not { Count: > 0 } instanceIds)
+        {
+            return Results.BadRequest(new ErrorResponse("processInstanceIds 不能为空。"));
+        }
+
+        if (instanceIds.Count > MaxBatchSize)
+        {
+            return Results.BadRequest(new ErrorResponse($"单次批量操作最多 {MaxBatchSize} 条。"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TargetProcessDefinitionId))
+        {
+            return Results.BadRequest(new ErrorResponse("targetProcessDefinitionId 必填（目标流程定义 id）。"));
+        }
+
+        // 授权在循环外统一判定：缺 scope 整体 403，而不是逐项失败
+        AdminAuthorization.Ensure(requestContext, TaskScopes.AdminInstanceJump, "批量迁移流程实例");
+
+        var mappings = request.ActivityMappings is null
+            ? null
+            : new Dictionary<string, string>(request.ActivityMappings, StringComparer.Ordinal);
+
+        var items = new List<BatchItemResult>(instanceIds.Count);
+
+        foreach (var instanceId in instanceIds)
+        {
+            var detail = new
+            {
+                targetProcessDefinitionId = request.TargetProcessDefinitionId,
+                activityMappingCount = mappings?.Count ?? 0,
+                reason = request.Reason,
+                batch = true,
+            };
+
+            try
+            {
+                await EnsureInstanceAccessAsync(instanceId, requestContext, executionManager, ct)
+                    .ConfigureAwait(false);
+
+                await engine
+                    .MigrateProcessInstanceAsync(
+                        new ProcessInstanceMigrationRequest(
+                            instanceId,
+                            request.TargetProcessDefinitionId,
+                            mappings,
+                            request.Reason,
+                            requestContext.UserId),
+                        ct)
+                    .ConfigureAwait(false);
+
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.InstanceMigrate,
+                    AdminAuditTargets.ProcessInstance,
+                    instanceId,
+                    instanceId,
+                    detail,
+                    success: true,
+                    ct: ct).ConfigureAwait(false);
+
+                items.Add(new BatchItemResult(instanceId, true, null));
+            }
+            catch (EngineException ex)
+            {
+                await auditor.RecordAsync(
+                    requestContext,
+                    AdminAuditActions.InstanceMigrate,
+                    AdminAuditTargets.ProcessInstance,
+                    instanceId,
+                    instanceId,
+                    detail,
+                    success: false,
+                    error: ex.Message,
+                    ct: ct).ConfigureAwait(false);
+
+                items.Add(new BatchItemResult(instanceId, false, ex.Message));
+            }
+        }
+
+        return Results.Ok(ToBatchResult(items));
+    }
+
     /// <summary>批量删除运行中的流程实例（逐项执行，不是原子操作）。</summary>
     private static async Task<IResult> BatchDeleteProcessInstancesAsync(
         BatchDeleteInstancesRequest? request,
@@ -1181,6 +1500,105 @@ public static class RuntimeEndpoints
                     instanceId,
                     instanceId,
                     new { deleteReason = request.DeleteReason },
+                    success: false,
+                    error: ex.Message,
+                    ct: ct).ConfigureAwait(false);
+
+                items.Add(new BatchItemResult(instanceId, false, ex.Message));
+            }
+        }
+
+        return Results.Ok(ToBatchResult(items));
+    }
+
+    /// <summary>批量挂起运行中的流程实例（逐项执行，不是原子操作）。</summary>
+    private static async Task<IResult> BatchSuspendProcessInstancesAsync(
+        BatchInstanceSuspensionRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct) =>
+        await BatchSetInstanceSuspensionAsync(
+                suspend: true, request, requestContext, executionManager, engine, auditor, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>批量激活运行中的流程实例（逐项执行，不是原子操作）。</summary>
+    private static async Task<IResult> BatchActivateProcessInstancesAsync(
+        BatchInstanceSuspensionRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct) =>
+        await BatchSetInstanceSuspensionAsync(
+                suspend: false, request, requestContext, executionManager, engine, auditor, ct)
+            .ConfigureAwait(false);
+
+    private static async Task<IResult> BatchSetInstanceSuspensionAsync(
+        bool suspend,
+        BatchInstanceSuspensionRequest? request,
+        RequestContext requestContext,
+        IExecutionManager executionManager,
+        IProcessEngine engine,
+        AdminActionAuditor auditor,
+        CancellationToken ct)
+    {
+        if (request?.ProcessInstanceIds is not { Count: > 0 } instanceIds)
+        {
+            return Results.BadRequest(new ErrorResponse("processInstanceIds 不能为空。"));
+        }
+
+        if (instanceIds.Count > MaxBatchSize)
+        {
+            return Results.BadRequest(new ErrorResponse($"单次批量操作最多 {MaxBatchSize} 条。"));
+        }
+
+        AdminAuthorization.Ensure(
+            requestContext,
+            TaskScopes.AdminInstanceSuspend,
+            suspend ? "批量挂起流程实例" : "批量激活流程实例");
+
+        var action = suspend ? AdminAuditActions.InstanceSuspend : AdminAuditActions.InstanceActivate;
+        var items = new List<BatchItemResult>(instanceIds.Count);
+
+        foreach (var instanceId in instanceIds)
+        {
+            try
+            {
+                await EnsureInstanceAccessAsync(instanceId, requestContext, executionManager, ct)
+                    .ConfigureAwait(false);
+
+                if (suspend)
+                {
+                    await engine.SuspendProcessInstanceAsync(instanceId, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await engine.ActivateProcessInstanceAsync(instanceId, ct).ConfigureAwait(false);
+                }
+
+                await auditor.RecordAsync(
+                    requestContext,
+                    action,
+                    AdminAuditTargets.ProcessInstance,
+                    instanceId,
+                    instanceId,
+                    new { batch = true },
+                    success: true,
+                    ct: ct).ConfigureAwait(false);
+
+                items.Add(new BatchItemResult(instanceId, true, null));
+            }
+            catch (EngineException ex)
+            {
+                await auditor.RecordAsync(
+                    requestContext,
+                    action,
+                    AdminAuditTargets.ProcessInstance,
+                    instanceId,
+                    instanceId,
+                    new { batch = true },
                     success: false,
                     error: ex.Message,
                     ct: ct).ConfigureAwait(false);

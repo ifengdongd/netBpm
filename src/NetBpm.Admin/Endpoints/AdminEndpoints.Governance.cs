@@ -57,7 +57,7 @@ public static partial class AdminEndpoints
             UtcTime.Normalize(since),
             UtcTime.Normalize(until),
             Math.Max(0, firstResult ?? 0),
-            Math.Clamp(maxResults ?? 20, 1, 200));
+            Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize));
 
         var page = await store.QueryAsync(query, ct).ConfigureAwait(false);
         var items = new List<AdminAuditItem>(page.Items.Count);
@@ -71,6 +71,103 @@ public static partial class AdminEndpoints
             ? Results.Ok(new PagedResponse<AdminAuditItem>(items, page.Total, query.FirstResult, query.MaxResults))
             : Results.Ok(new AdminAuditListResponse(page.Total, items));
     }
+
+    /// <summary>
+    /// 导出审计为 CSV（流式分页写出，最多 10 万行；列：时间 / 操作人 / 鉴权方式 / 动作 /
+    /// 目标 / 实例 / 结果 / 失败原因 / 明细）。
+    /// </summary>
+    private static async Task<IResult> ExportAuditAsync(
+        string? actor,
+        string? action,
+        string? targetType,
+        string? targetId,
+        string? processInstanceId,
+        string? tenantId,
+        bool? success,
+        DateTime? since,
+        DateTime? until,
+        RequestContext requestContext,
+        IAdminAuditStore store,
+        HttpResponse response,
+        CancellationToken ct)
+    {
+        const int pageSize = 500;
+
+        var query = new AdminAuditQuery(
+            actor,
+            action,
+            targetType,
+            targetId,
+            processInstanceId,
+            ResolveTenant(tenantId, requestContext),
+            success,
+            UtcTime.Normalize(since),
+            UtcTime.Normalize(until),
+            0,
+            pageSize);
+
+        response.ContentType = "text/csv; charset=utf-8";
+        response.Headers.ContentDisposition =
+            $"attachment; filename=\"audit-{DateTime.UtcNow:yyyyMMddHHmmss}.csv\"";
+
+        // BOM：Excel 打开中文不乱码
+        await response.WriteAsync("\uFEFF", ct).ConfigureAwait(false);
+        await response.WriteAsync(
+            "createdAt,actor,authMode,action,targetType,targetId,processInstanceId,success,error,detail\r\n",
+            ct).ConfigureAwait(false);
+
+        // 分页拉取后顺序写出，避免把整张审计表读进内存
+        for (var offset = 0; ; offset += pageSize)
+        {
+            var page = await store
+                .QueryAsync(query with { FirstResult = offset }, ct)
+                .ConfigureAwait(false);
+
+            foreach (var entry in page.Items)
+            {
+                await response.WriteAsync(ToCsvRow(entry), ct).ConfigureAwait(false);
+            }
+
+            if (page.Items.Count < pageSize || offset + page.Items.Count >= page.Total)
+            {
+                break;
+            }
+        }
+
+        return Results.Empty;
+    }
+
+    private static string ToCsvRow(AdminAuditEntry entry) =>
+        string.Join(
+            ',',
+            entry.CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            CsvField(entry.Actor),
+            CsvField(entry.AuthMode),
+            CsvField(entry.Action),
+            CsvField(entry.TargetType),
+            CsvField(entry.TargetId),
+            CsvField(entry.ProcessInstanceId),
+            entry.Success ? "true" : "false",
+            CsvField(entry.Error),
+            CsvField(entry.Detail)) + "\r\n";
+
+    /// <summary>CSV 字段转义：统一加引号，内部引号翻倍。</summary>
+    private static string CsvField(string? value) =>
+        string.IsNullOrEmpty(value) ? string.Empty : $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+    /// <summary>
+    /// 审计筛选项：返回出现过的动作 / 目标类型 / 操作人。
+    /// <para>控制台筛选下拉据此生成，不再硬编码动作名；actor 最多 200 个。</para>
+    /// </summary>
+    private static async Task<IResult> GetAuditOptionsAsync(
+        string? tenantId,
+        RequestContext requestContext,
+        IAdminAuditStore store,
+        CancellationToken ct) =>
+        Results.Ok(
+            await store
+                .GetOptionsAsync(ResolveTenant(tenantId, requestContext), ct)
+                .ConfigureAwait(false));
 
     /// <summary>
     /// 审计保留策略：删除写入时间早于 <c>before</c> 的记录（<c>before</c> 必填）。
@@ -277,7 +374,7 @@ public static partial class AdminEndpoints
             processInstanceId,
             UtcTime.Normalize(archivedAfter),
             Math.Max(0, firstResult ?? 0),
-            Math.Clamp(maxResults ?? 20, 1, 200));
+            Math.Clamp(maxResults ?? DefaultPageSize, 1, MaxPageSize));
 
         var page = await store.QueryAsync(query, ct).ConfigureAwait(false);
 

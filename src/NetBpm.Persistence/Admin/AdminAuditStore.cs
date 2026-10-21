@@ -71,6 +71,15 @@ public sealed record AdminAuditPage(IReadOnlyList<AdminAuditEntry> Items, int To
 /// <param name="Count">条数。</param>
 public sealed record AdminAuditSummary(string Action, int Count);
 
+/// <summary>审计筛选项（控制台下拉数据源）。</summary>
+/// <param name="Actions">出现过的动作标识。</param>
+/// <param name="TargetTypes">出现过的目标类型。</param>
+/// <param name="Actors">出现过的操作人（最多 200 个，避免大表下拉过长）。</param>
+public sealed record AdminAuditOptions(
+    IReadOnlyList<string> Actions,
+    IReadOnlyList<string> TargetTypes,
+    IReadOnlyList<string> Actors);
+
 /// <summary>
 /// 管理动作审计存储。宿主可选内存实现（单进程 / 开发）或数据库实现（多实例 / 可追溯）。
 /// </summary>
@@ -87,6 +96,11 @@ public interface IAdminAuditStore
         string? tenantId,
         DateTime since,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 审计筛选项：出现过的动作 / 目标类型 / 操作人（供控制台筛选下拉，避免前端硬编码）。
+    /// </summary>
+    ValueTask<AdminAuditOptions> GetOptionsAsync(string? tenantId, CancellationToken ct = default);
 
     /// <summary>
     /// 删除写入时间早于 <paramref name="before"/> 的审计记录（保留策略）。
@@ -179,6 +193,22 @@ public sealed class InMemoryAdminAuditStore : IAdminAuditStore
             .ToArray();
 
         return ValueTask.FromResult<IReadOnlyList<AdminAuditSummary>>(summary);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<AdminAuditOptions> GetOptionsAsync(string? tenantId, CancellationToken ct = default)
+    {
+        List<AdminAuditEntry> matched;
+
+        lock (_gate)
+        {
+            matched = [.. _entries.Where(entry => TenantMatches(entry.TenantId, tenantId))];
+        }
+
+        return ValueTask.FromResult(new AdminAuditOptions(
+            AuditOptions.DistinctSorted(matched.Select(entry => entry.Action)),
+            AuditOptions.DistinctSorted(matched.Select(entry => entry.TargetType)),
+            AuditOptions.DistinctSorted(matched.Select(entry => entry.Actor), 200)));
     }
 
     /// <inheritdoc />
@@ -344,6 +374,27 @@ public sealed class DapperAdminAuditStore : IAdminAuditStore
     }
 
     /// <inheritdoc />
+    public async ValueTask<AdminAuditOptions> GetOptionsAsync(string? tenantId, CancellationToken ct = default)
+    {
+        await using var connection = _connections.CreateConnection();
+
+        var where = string.IsNullOrWhiteSpace(tenantId) ? string.Empty : " where tenant_id = @tenantId";
+
+        // 只取筛选需要的三列做 distinct：审计表可能很大，不把 detail 拉回来
+        var rows = await connection.QueryAsync<OptionRow>(new CommandDefinition(
+            $"select distinct action as Action, target_type as TargetType, actor as Actor from admin_audit_log{where}",
+            new { tenantId },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        var items = rows.ToArray();
+
+        return new AdminAuditOptions(
+            AuditOptions.DistinctSorted(items.Select(row => row.Action)),
+            AuditOptions.DistinctSorted(items.Select(row => row.TargetType)),
+            AuditOptions.DistinctSorted(items.Select(row => row.Actor), 200));
+    }
+
+    /// <inheritdoc />
     public async ValueTask<int> PurgeAsync(string? tenantId, DateTime before, CancellationToken ct = default)
     {
         await using var connection = _connections.CreateConnection();
@@ -501,6 +552,28 @@ public sealed class DapperAdminAuditStore : IAdminAuditStore
 
         public int Count { get; set; }
     }
+
+    /// <summary>筛选项行的 Dapper 映射类型。</summary>
+    private sealed class OptionRow
+    {
+        public string Action { get; set; } = string.Empty;
+
+        public string TargetType { get; set; } = string.Empty;
+
+        public string? Actor { get; set; }
+    }
+}
+
+/// <summary>审计筛选项的公共整理：去空、去重、按序；操作人限制条数避免下拉过长。</summary>
+internal static class AuditOptions
+{
+    public static string[] DistinctSorted(IEnumerable<string?> values, int limit = int.MaxValue) =>
+        [.. values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .Take(limit)];
 }
 
 /// <summary>审计动作标识（写入与查询共用，避免字符串漂移）。</summary>
@@ -527,6 +600,12 @@ public static class AdminAuditActions
     /// <summary>流程实例迁移到其它定义。</summary>
     public const string InstanceMigrate = "instance.migrate";
 
+    /// <summary>取消指定活动上的活动实例（modify：让一处令牌消失）。</summary>
+    public const string InstanceActivityCancel = "instance.activity_cancel";
+
+    /// <summary>在指定活动之前启动新令牌（modify：多开一条分支）。</summary>
+    public const string InstanceActivityStart = "instance.activity_start";
+
     /// <summary>删除（撤销）流程实例。</summary>
     public const string InstanceDelete = "instance.delete";
 
@@ -551,6 +630,9 @@ public static class AdminAuditActions
     /// <summary>删除任务局部变量。</summary>
     public const string TaskVariableDelete = "task_variable.delete";
 
+    /// <summary>新建流程模型（含导入 / 复制 / 从定义反建）。</summary>
+    public const string ModelCreate = "model.create";
+
     /// <summary>删除流程模型（连同版本历史，不影响已部署定义）。</summary>
     public const string ModelDelete = "model.delete";
 
@@ -559,6 +641,21 @@ public static class AdminAuditActions
 
     /// <summary>清理模型历史（按保留版本数删除）。</summary>
     public const string ModelHistoryPrune = "model.history_prune";
+
+    /// <summary>新建流程类型（workflow_type 注册表）。</summary>
+    public const string ProcessTypeCreate = "process_type.create";
+
+    /// <summary>修改流程类型。</summary>
+    public const string ProcessTypeUpdate = "process_type.update";
+
+    /// <summary>删除流程类型。</summary>
+    public const string ProcessTypeDelete = "process_type.delete";
+
+    /// <summary>修改定时作业到期时间（运维改期）。</summary>
+    public const string JobReschedule = "job.reschedule";
+
+    /// <summary>立即触发定时作业（不等到期，运维手动推进边界定时器）。</summary>
+    public const string JobExecute = "job.execute";
 
     /// <summary>部署（发布）流程定义。</summary>
     public const string DeploymentCreate = "deployment.create";
@@ -602,6 +699,12 @@ public static class AdminAuditTargets
 
     /// <summary>流程定义。</summary>
     public const string ProcessDefinition = "process_definition";
+
+    /// <summary>流程类型（workflow_type 注册表）。</summary>
+    public const string ProcessType = "process_type";
+
+    /// <summary>定时作业（ACT_RU_TIMER_JOB）。</summary>
+    public const string Job = "job";
 
     /// <summary>审计记录本身（保留策略清理）。</summary>
     public const string Audit = "audit";

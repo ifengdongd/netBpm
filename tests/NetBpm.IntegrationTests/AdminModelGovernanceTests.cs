@@ -152,6 +152,117 @@ public sealed class AdminModelGovernanceTests : IClassFixture<AdminEngineFactory
         Assert.Equal("rollback", historyAfterRollback[0].GetProperty("action").GetString());
     }
 
+    /// <summary>
+    /// 乐观并发：带 <c>If-Match</c> 且与服务端版本不一致时 409（并带回当前版本），
+    /// 未带 <c>If-Match</c> 时保持兼容（不做校验）。保存 / PATCH / 发布共用同一口径。
+    /// </summary>
+    [Fact]
+    public async Task Save_ShouldRejectStaleRevision_WithConflict()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        Cleanup();
+
+        using var client = _factory.CreateClient();
+
+        // ① 首次保存 → 版本 1；详情里必须带出 revision（前端据此发 If-Match）
+        using (var first = await PutModelAsync(client, V1))
+        {
+            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+            using var body = JsonDocument.Parse(await first.Content.ReadAsStringAsync(Ct));
+            Assert.Equal(1, body.RootElement.GetProperty("revision").GetInt32());
+        }
+
+        using (var detail = await client.GetAsync(
+            new Uri($"/api/admin/models/{ModelId}", UriKind.Relative), Ct))
+        {
+            using var body = JsonDocument.Parse(await detail.Content.ReadAsStringAsync(Ct));
+            Assert.Equal(1, body.RootElement.GetProperty("revision").GetInt32());
+        }
+
+        // ② 基于版本 1 保存 → 版本 2
+        using (var second = await PutModelAsync(client, V2, ifMatch: "1"))
+        {
+            var body = await second.Content.ReadAsStringAsync(Ct);
+            Assert.True(second.StatusCode == HttpStatusCode.OK, $"基于版本 1 的保存应成功：{second.StatusCode} {body}");
+
+            using var document = JsonDocument.Parse(body);
+            Assert.Equal(2, document.RootElement.GetProperty("revision").GetInt32());
+        }
+
+        // ③ 仍拿着过期的版本 1 提交 PATCH → 409 + 当前版本，且不产生新版本
+        using (var stale = await PatchModelAsync(client, V1, ifMatch: "1"))
+        {
+            var body = await stale.Content.ReadAsStringAsync(Ct);
+            Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+
+            using var document = JsonDocument.Parse(body);
+            Assert.Equal(2, document.RootElement.GetProperty("currentRevision").GetInt32());
+            Assert.Contains(
+                "已被其他人修改",
+                document.RootElement.GetProperty("message").GetString(),
+                StringComparison.Ordinal);
+        }
+
+        Assert.Equal(2, (await HistoryAsync(client)).Count);
+
+        // ④ 不带 If-Match 的旧客户端照旧能保存（不做并发校验，版本继续递增）
+        using (var legacy = await PutModelAsync(client, V1))
+        {
+            var body = await legacy.Content.ReadAsStringAsync(Ct);
+            Assert.True(legacy.StatusCode == HttpStatusCode.OK, body);
+
+            using var document = JsonDocument.Parse(body);
+            Assert.Equal(3, document.RootElement.GetProperty("revision").GetInt32());
+        }
+    }
+
+    /// <summary>
+    /// 同一租户下一个 process_key 只能对应一个模型：第二次新建（或改 key 撞上）返回 409，
+    /// 消息里指出被哪个模型占用。数据库唯一索引是兜底，接口层先给可读错误。
+    /// </summary>
+    [Fact]
+    public async Task CreateModel_ShouldRejectDuplicateProcessKey()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        Cleanup();
+
+        using var client = _factory.CreateClient();
+
+        using var first = await client.PostAsJsonAsync(
+            new Uri("/api/admin/models", UriKind.Relative),
+            new { name = "重名测试", processKey = "governance_process", bpmnXml = V1 },
+            Ct);
+
+        var firstBody = await first.Content.ReadAsStringAsync(Ct);
+        Assert.True(first.StatusCode == HttpStatusCode.Created, $"首次新建应成功：{first.StatusCode} {firstBody}");
+
+        using var document = JsonDocument.Parse(firstBody);
+        var createdId = document.RootElement.GetProperty("id").GetString()!;
+
+        try
+        {
+            using var second = await client.PostAsJsonAsync(
+                new Uri("/api/admin/models", UriKind.Relative),
+                new { name = "重名测试 2", processKey = "governance_process", bpmnXml = V1 },
+                Ct);
+
+            var secondBody = await second.Content.ReadAsStringAsync(Ct);
+
+            Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+            Assert.Contains("已被模型", secondBody, StringComparison.Ordinal);
+            Assert.Contains(createdId, secondBody, StringComparison.Ordinal);
+        }
+        finally
+        {
+            using var delete = await client.DeleteAsync(
+                new Uri($"/api/admin/models/{createdId}", UriKind.Relative),
+                Ct);
+        }
+    }
+
     [Fact]
     public async Task Publish_ShouldDeployCurrentModel_AndBumpVersion()
     {
@@ -325,17 +436,45 @@ public sealed class AdminModelGovernanceTests : IClassFixture<AdminEngineFactory
         return [.. document.RootElement.GetProperty("items").EnumerateArray().Select(element => element.Clone())];
     }
 
-    private async Task<HttpResponseMessage> PutModelAsync(HttpClient client, string xml) =>
-        await client.PutAsJsonAsync(
-            new Uri($"/api/admin/models/{ModelId}", UriKind.Relative),
-            new
+    private static async Task<HttpResponseMessage> PutModelAsync(
+        HttpClient client,
+        string xml,
+        string? ifMatch = null) =>
+        await SendModelAsync(client, HttpMethod.Put, xml, ifMatch);
+
+    /// <summary>PATCH 保存（只提交设计器会写的字段）；<paramref name="ifMatch"/> 为期望版本号。</summary>
+    private static async Task<HttpResponseMessage> PatchModelAsync(
+        HttpClient client,
+        string xml,
+        string? ifMatch = null) =>
+        await SendModelAsync(client, HttpMethod.Patch, xml, ifMatch);
+
+    private static async Task<HttpResponseMessage> SendModelAsync(
+        HttpClient client,
+        HttpMethod method,
+        string xml,
+        string? ifMatch)
+    {
+        using var request = new HttpRequestMessage(
+            method,
+            new Uri($"/api/admin/models/{ModelId}", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new
             {
                 name = "治理测试",
                 processKey = "governance_process",
                 description = "模型治理测试",
                 bpmnXml = xml,
-            },
-            Ct);
+            }),
+        };
+
+        if (ifMatch is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-Match", $"\"{ifMatch}\"");
+        }
+
+        return await client.SendAsync(request, Ct);
+    }
 
     private static async Task<IReadOnlyList<JsonElement>> HistoryAsync(HttpClient client)
     {

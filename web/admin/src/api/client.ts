@@ -91,10 +91,21 @@ function extractMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-function jsonInit(method: string, payload?: unknown): RequestInit {
+/** 请求级扩展头（如写操作的 Idempotency-Key）。 */
+export interface RequestOptions {
+  headers?: Record<string, string>;
+}
+
+function jsonInit(method: string, payload?: unknown, options?: RequestOptions): RequestInit {
+  const headers: Record<string, string> = { ...options?.headers };
+
+  if (payload !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   return {
     method,
-    headers: payload === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: Object.keys(headers).length === 0 ? undefined : headers,
     body: payload === undefined ? undefined : JSON.stringify(payload),
   };
 }
@@ -104,14 +115,39 @@ export const http = {
   get: <T>(path: string, options?: { signal?: AbortSignal }) =>
     request<T>(path, { method: 'GET', signal: options?.signal }),
 
-  post: <T>(path: string, payload?: unknown) => request<T>(path, jsonInit('POST', payload)),
+  post: <T>(path: string, payload?: unknown, options?: RequestOptions) =>
+    request<T>(path, jsonInit('POST', payload, options)),
 
-  put: <T>(path: string, payload?: unknown) => request<T>(path, jsonInit('PUT', payload)),
+  /** POST 纯文本（BPMN XML 导入等），响应仍按 JSON 解析。 */
+  postXml: <T>(path: string, xml: string, options?: RequestOptions) =>
+    request<T>(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8', ...options?.headers },
+      body: xml,
+    }),
 
-  patch: <T>(path: string, payload?: unknown) => request<T>(path, jsonInit('PATCH', payload)),
+  put: <T>(path: string, payload?: unknown, options?: RequestOptions) =>
+    request<T>(path, jsonInit('PUT', payload, options)),
 
-  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  patch: <T>(path: string, payload?: unknown, options?: RequestOptions) =>
+    request<T>(path, jsonInit('PATCH', payload, options)),
+
+  del: <T>(path: string, options?: RequestOptions) =>
+    request<T>(path, { method: 'DELETE', headers: options?.headers }),
 };
+
+/**
+ * 生成幂等键：写操作（发布 / 发起实例 / 完成任务）带上 `Idempotency-Key`，
+ * 网络重试或用户重复点击时服务端只执行一次（同键回放上次结果）。
+ * 每次用户动作应生成一个新的键，并在该动作重试期间保持不变。
+ */
+export function newIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `netbpm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 /**
  * 把参数对象序列化为查询串（跳过 undefined / null / 空串）。
@@ -130,6 +166,29 @@ export function toQueryString(params?: object): string {
 
   const query = search.toString();
   return query.length > 0 ? `?${query}` : '';
+}
+
+/**
+ * 下载非 JSON 响应（CSV 导出等）：带鉴权头，非 2xx 抛 {@link ApiError}。
+ * 直接用 <a href> 不行 —— Bearer / API Key 在请求头里，浏览器导航不会带上。
+ */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const headers = new Headers();
+
+  for (const [name, value] of Object.entries(credentialHeaders(getCredential()))) {
+    headers.set(name, value);
+  }
+
+  const response = await fetch(path, { headers });
+
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      extractMessage(await response.text(), response.statusText),
+    );
+  }
+
+  return response.blob();
 }
 
 /** 列表端点统一走 envelope=true，拿到 items + total，避免读 X-Total-Count 头。 */

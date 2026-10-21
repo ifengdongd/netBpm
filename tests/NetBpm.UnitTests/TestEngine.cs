@@ -159,6 +159,14 @@ internal sealed class TestEngine
     public async ValueTask MoveActivityToAsync(string processInstanceId, string targetActivityId, string? reason = null) =>
         await CommandExecutor.ExecuteAsync(new MoveActivityCommand(processInstanceId, targetActivityId, reason)).ConfigureAwait(false);
 
+    /// <summary>取消指定活动上的活动实例（modify）。</summary>
+    public async ValueTask CancelActivityAsync(string processInstanceId, string activityId, string? reason = null) =>
+        await CommandExecutor.ExecuteAsync(new CancelActivityCommand(processInstanceId, activityId, reason)).ConfigureAwait(false);
+
+    /// <summary>在指定活动之前启动一个新令牌（modify）。</summary>
+    public async ValueTask StartBeforeActivityAsync(string processInstanceId, string activityId) =>
+        await CommandExecutor.ExecuteAsync(new StartBeforeActivityCommand(processInstanceId, activityId)).ConfigureAwait(false);
+
     /// <summary>构建一个带指定服务的流程 XML（start → 顺序流 → end）。</summary>
     public static string SequentialProcess(string delegateName) => $$"""
         <?xml version="1.0" encoding="UTF-8"?>

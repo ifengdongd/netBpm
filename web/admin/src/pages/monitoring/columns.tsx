@@ -1,4 +1,4 @@
-import { DeleteOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { Button, Popconfirm, Space, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
@@ -19,6 +19,9 @@ export interface InstanceColumnHandlers {
 export interface TaskColumnHandlers {
   onDetail: (taskId: string) => void;
   onClaim: (task: TaskResponse) => void;
+  onUnclaim: (task: TaskResponse) => void;
+  /** 修改到期时间 / 优先级。 */
+  onEdit: (task: TaskResponse) => void;
   onOpenAction: (mode: TaskActionMode, task: TaskResponse) => void;
 }
 
@@ -85,7 +88,13 @@ export function buildInstanceColumns({
 }
 
 /** 待办任务表格列。 */
-export function buildTaskColumns({ onDetail, onClaim, onOpenAction }: TaskColumnHandlers): ColumnsType<TaskResponse> {
+export function buildTaskColumns({
+  onDetail,
+  onClaim,
+  onUnclaim,
+  onEdit,
+  onOpenAction,
+}: TaskColumnHandlers): ColumnsType<TaskResponse> {
   return [
     { title: '任务名', dataIndex: 'name', key: 'name', ellipsis: true, render: (v?: string | null) => v ?? '—' },
     {
@@ -113,23 +122,34 @@ export function buildTaskColumns({ onDetail, onClaim, onOpenAction }: TaskColumn
     {
       title: '操作',
       key: 'actions',
-      width: 280,
-      render: (_, record) => (
-        <Space size={4}>
-          <Button size="small" onClick={() => onDetail(record.id)}>
-            详情
-          </Button>
-          <Button size="small" disabled={record.assignee !== null && record.assignee !== ''} onClick={() => onClaim(record)}>
-            认领
-          </Button>
-          <Button size="small" onClick={() => onOpenAction('assignee', record)}>
-            转办
-          </Button>
-          <Button size="small" type="primary" onClick={() => onOpenAction('complete', record)}>
-            完成
-          </Button>
-        </Space>
-      ),
+      width: 370,
+      render: (_, record) => {
+        const claimed = record.assignee !== null && record.assignee !== '';
+
+        return (
+          <Space size={4}>
+            <Button size="small" onClick={() => onDetail(record.id)}>
+              详情
+            </Button>
+            {claimed ? (
+              <Button size="small" onClick={() => onUnclaim(record)}>
+                取消认领
+              </Button>
+            ) : (
+              <Button size="small" onClick={() => onClaim(record)}>
+                认领
+              </Button>
+            )}
+            <Button size="small" icon={<EditOutlined />} title="修改到期时间 / 优先级" onClick={() => onEdit(record)} />
+            <Button size="small" onClick={() => onOpenAction('assignee', record)}>
+              转办
+            </Button>
+            <Button size="small" type="primary" onClick={() => onOpenAction('complete', record)}>
+              完成
+            </Button>
+          </Space>
+        );
+      },
     },
   ];
 }

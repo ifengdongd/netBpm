@@ -167,6 +167,9 @@ public sealed class AdminDiagnosticsTests
             DateTime since,
             CancellationToken ct = default) => ValueTask.FromResult<IReadOnlyList<AdminAuditSummary>>([]);
 
+        public ValueTask<AdminAuditOptions> GetOptionsAsync(string? tenantId, CancellationToken ct = default) =>
+            ValueTask.FromResult(new AdminAuditOptions([], [], []));
+
         public ValueTask<int> PurgeAsync(string? tenantId, DateTime before, CancellationToken ct = default) =>
             ValueTask.FromResult(0);
     }

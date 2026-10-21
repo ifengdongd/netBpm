@@ -128,4 +128,10 @@ public static class TaskScopes
 
     /// <summary>历史归档（把已结束实例的历史行搬运到归档表）。</summary>
     public const string AdminHistoryArchive = "netbpm.admin.history.archive";
+
+    /// <summary>定时作业查询（边界定时器的运维诊断）。</summary>
+    public const string AdminJobRead = "netbpm.admin.job.read";
+
+    /// <summary>定时作业改期（修改到期时间）。</summary>
+    public const string AdminJobWrite = "netbpm.admin.job.write";
 }

@@ -28,6 +28,18 @@ namespace NetBpm.Admin.Endpoints;
 /// </summary>
 public static partial class AdminEndpoints
 {
+    /// <summary>
+    /// Admin 列表接口的默认页大小：与审计 / 归档 / 作业 / 引擎列表统一为 20。
+    /// <para>
+    /// 以前模型列表默认 100、其它 20，客户端不传 <c>maxResults</c> 时页大小随端点漂移；
+    /// 统一后「不传就是第一页 20 条」，控制台都显式分页，不受影响。
+    /// </para>
+    /// </summary>
+    private const int DefaultPageSize = 20;
+
+    /// <summary>Admin 列表接口的页大小上限（避免一次拉全表）。</summary>
+    private const int MaxPageSize = 200;
+
     public static RouteGroupBuilder MapAdminEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/admin").WithTags("admin");
@@ -37,25 +49,51 @@ public static partial class AdminEndpoints
             .Produces<IReadOnlyList<BpmnModelSummary>>()
             .Produces<PagedResponse<BpmnModelSummary>>()
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程模型");
+        group.MapPost("/models", CreateModelAsync).Accepts<SaveBpmnModelRequest>("application/json")
+            .Produces<SaveBpmnModelResponse>(StatusCodes.Status201Created)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "新建流程模型");
+        group.MapPost("/models/import", ImportModelAsync)
+            .Accepts<string>("text/xml")
+            .Accepts<string>("application/xml")
+            .Produces<SaveBpmnModelResponse>(StatusCodes.Status201Created)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "导入流程模型");
+        group.MapPost("/models/from-definition/{processDefinitionId}", CreateModelFromDefinitionAsync)
+            .Produces<SaveBpmnModelResponse>(StatusCodes.Status201Created)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "从已部署定义反建流程模型");
+        group.MapPost("/models/{id}/duplicate", DuplicateModelAsync).Accepts<DuplicateBpmnModelRequest>("application/json")
+            .Produces<SaveBpmnModelResponse>(StatusCodes.Status201Created)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "复制流程模型");
         group.MapGet("/models/{id}", GetModelAsync).Produces<BpmnModelDetail>()
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程模型");
         group.MapPut("/models/{id}", SaveModelAsync).Accepts<SaveBpmnModelRequest>("application/json")
+            .Produces<RevisionConflictResponse>(StatusCodes.Status409Conflict)
             .RequireAdminScope(TaskScopes.AdminModelWrite, "保存流程模型");
+        group.MapPatch("/models/{id}", PatchModelAsync).Accepts<PatchBpmnModelRequest>("application/json")
+            .Produces<RevisionConflictResponse>(StatusCodes.Status409Conflict)
+            .RequireAdminScope(TaskScopes.AdminModelWrite, "保存流程模型");
+        group.MapPost("/models/{id}/validate", ValidateModelAsync).Produces<ModelValidationResponse>()
+            .RequireAdminScope(TaskScopes.AdminModelRead, "校验流程模型");
         group.MapDelete("/models/{id}", DeleteModelAsync)
             .RequireAdminScope(TaskScopes.AdminModelWrite, "删除流程模型");
         group.MapGet("/models/{id}/history", ListModelHistoryAsync)
             .Produces<IReadOnlyList<BpmnModelRevisionSummary>>()
+            .Produces<PagedResponse<BpmnModelRevisionSummary>>()
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看模型历史");
         group.MapGet("/models/{id}/history/{revisionId}", GetModelRevisionAsync)
             .Produces<BpmnModelRevisionDetail>()
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看模型历史");
         group.MapPost("/models/{id}/rollback/{revisionId}", RollbackModelAsync)
             .Produces<BpmnModelDetail>()
+            .Produces<RevisionConflictResponse>(StatusCodes.Status409Conflict)
             .RequireAdminScope(TaskScopes.AdminModelWrite, "回滚模型版本");
         group.MapDelete("/models/{id}/history", PruneModelHistoryAsync).Produces<ModelHistoryPruneResponse>()
             .RequireAdminScope(TaskScopes.AdminModelWrite, "清理模型历史");
         group.MapPost("/models/{id}/publish", PublishModelAsync).Produces<DeployResponse>()
+            .Produces<RevisionConflictResponse>(StatusCodes.Status409Conflict)
             .RequireAdminScope(TaskScopes.AdminModelWrite, "发布流程模型");
+        group.MapGet("/models/{id}/publications", ListModelPublicationsAsync)
+            .Produces<IReadOnlyList<ModelPublicationResponse>>()
+            .RequireAdminScope(TaskScopes.AdminModelRead, "查看模型发布历史");
 
         // ── 流程类型（workflow_type 注册表）──
         group.MapGet("/process-types", ListProcessTypesAsync).Produces<IReadOnlyList<ProcessType>>()
@@ -74,12 +112,29 @@ public static partial class AdminEndpoints
             .Produces<AdminAuditListResponse>()
             .Produces<PagedResponse<AdminAuditItem>>()
             .RequireAdminScope(TaskScopes.AdminAuditRead, "查看管理动作审计");
+        group.MapGet("/audit/options", GetAuditOptionsAsync).Produces<AdminAuditOptions>()
+            .RequireAdminScope(TaskScopes.AdminAuditRead, "查看管理动作审计");
+        group.MapGet("/audit/export", ExportAuditAsync).Produces(StatusCodes.Status200OK, contentType: "text/csv")
+            .RequireAdminScope(TaskScopes.AdminAuditRead, "导出管理动作审计");
         group.MapDelete("/audit", PurgeAuditAsync).Produces<AdminAuditPurgeResponse>()
             .RequireAdminScope(TaskScopes.AdminAuditPurge, "清理管理动作审计");
 
         // ── 管理指标 ──
         group.MapGet("/metrics", GetMetricsAsync).Produces<AdminMetricsResponse>()
             .RequireAdminScope(TaskScopes.AdminMetricsRead, "查看管理指标");
+
+        // ── 定时作业（边界定时器诊断）──
+        group.MapGet("/jobs", FindJobsAsync).Produces<TimerJobSummary>()
+            .Produces<PagedResponse<TimerJobSummary>>()
+            .RequireAdminScope(TaskScopes.AdminJobRead, "查看定时作业");
+        group.MapGet("/jobs/stats", GetJobStatsAsync).Produces<TimerJobStats>()
+            .RequireAdminScope(TaskScopes.AdminJobRead, "查看定时作业");
+        group.MapPost("/jobs/{jobId}/due-date", RescheduleJobAsync).Accepts<RescheduleTimerJobRequest>("application/json")
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "修改定时作业到期时间");
+        group.MapPost("/jobs/{jobId}/execute", ExecuteJobAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status409Conflict)
+            .RequireAdminScope(TaskScopes.AdminJobWrite, "立即触发定时作业");
 
         // ── 历史归档 ──
         group.MapPost("/history/archive", ArchiveHistoryAsync).Produces<HistoryArchiveResult>()

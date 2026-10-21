@@ -36,6 +36,11 @@ export interface DiagramRecord {
    * 已部署版本号（localStorage 模式）；服务端模式恒为 0，部署版本见「流程部署列表」。
    */
   version: number;
+  /**
+   * 服务端模型的最新版本号（乐观并发用：保存时作为 `If-Match`）。
+   * localStorage 模式没有这个概念，缺省 undefined；0 表示还没有任何快照。
+   */
+  revision?: number;
 }
 
 const STORAGE_KEY = 'netbpm.designer.diagrams.v1';
@@ -49,6 +54,8 @@ interface BpmnModelSummary {
   name: string;
   processKey: string;
   modifyTime: string;
+  /** 最新版本号（0 = 尚无快照），保存时作为 If-Match 的期望值。 */
+  revision?: number;
 }
 
 interface BpmnModelDetail {
@@ -58,6 +65,8 @@ interface BpmnModelDetail {
   bpmnXml: string;
   createTime: string;
   modifyTime: string | null;
+  /** 最新版本号（0 = 尚无快照），保存时作为 If-Match 的期望值。 */
+  revision?: number;
 }
 
 interface SaveBpmnModelRequest {
@@ -152,6 +161,7 @@ function summaryToRecord(summary: BpmnModelSummary): DiagramRecord {
     xml: '',
     updatedAt: summary.modifyTime,
     version: 0,
+    revision: summary.revision ?? 0,
   };
 }
 
@@ -163,6 +173,7 @@ function detailToRecord(detail: BpmnModelDetail): DiagramRecord {
     xml: detail.bpmnXml,
     updatedAt: detail.modifyTime ?? detail.createTime,
     version: 0,
+    revision: detail.revision ?? 0,
   };
 }
 
@@ -195,6 +206,11 @@ async function describeSaveFailure(response: Response): Promise<string> {
       errors?: { message?: string; elementId?: string }[];
     };
 
+    // 409：If-Match 与服务端版本不一致（别人先改过），消息里已带服务端版本与处理建议
+    if (response.status === 409) {
+      return `保存冲突：${body.message ?? '模型已被其他人修改，请刷新后重试。'}`;
+    }
+
     const details = (body.errors ?? [])
       .slice(0, 5)
       .map((issue) => (issue.elementId ? `${issue.elementId}: ${issue.message ?? ''}` : issue.message ?? ''))
@@ -216,6 +232,20 @@ async function describeSaveFailure(response: Response): Promise<string> {
     `HTTP ${response.status} ${response.statusText}`,
     MODEL_WRITE_SCOPE,
   )}`;
+}
+
+/**
+ * 读取保存响应里的新版本号（`SaveBpmnModelResponse.revision`），
+ * 后续保存用它做 `If-Match`；响应体异常时返回 undefined（退化为不做并发校验）。
+ */
+async function readSavedRevision(response: Response): Promise<number | undefined> {
+  try {
+    const body = (await response.json()) as { revision?: number };
+
+    return typeof body.revision === 'number' && body.revision > 0 ? body.revision : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ─────────────────────────── 对外 API（异步）───────────────────────────
@@ -256,9 +286,16 @@ export async function findByModelId(modelId: string): Promise<DiagramRecord | un
 
 /**
  * 保存（新增或更新）一条流程模型并返回保存后的记录。
- * 服务端模式：`modelId` 缺省生成新 id（新建），否则 PUT 到该 id（更新）。
+ * 服务端模式：`modelId` 缺省生成新 id（新建），否则 PATCH 到该 id（更新）。
+ *
+ * `revision` 是打开模型时拿到的服务端版本号：带上后以 `If-Match` 提交，
+ * 期间被别人改过时后端返回 409，避免「后保存的人静默覆盖前者」。
  */
-export async function saveDiagramXml(xml: string, modelId?: string): Promise<DiagramRecord> {
+export async function saveDiagramXml(
+  xml: string,
+  modelId?: string,
+  revision?: number,
+): Promise<DiagramRecord> {
   const meta = parseProcessMeta(xml);
   const processId = meta.processId.length > 0 ? meta.processId : `process_${Date.now().toString(36)}`;
   const name = meta.name.length > 0 ? meta.name : '未命名流程';
@@ -267,17 +304,38 @@ export async function saveDiagramXml(xml: string, modelId?: string): Promise<Dia
     const id = modelId ?? newModelId();
     const payload: SaveBpmnModelRequest = { name, processKey: processId, bpmnXml: xml };
 
-    const response = await fetch(`/api/admin/models/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...credentialHeaders() },
-      body: JSON.stringify(payload),
-    });
+    // 后端只认 If-Match；没有已知版本（新建 / 首次保存）时不带，保持旧行为。
+    const ifMatch: Record<string, string> =
+      revision !== undefined && revision > 0 ? { 'If-Match': `"${revision}"` } : {};
+
+    const send = (method: 'PATCH' | 'PUT') =>
+      fetch(`/api/admin/models/${encodeURIComponent(id)}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...ifMatch, ...credentialHeaders() },
+        body: JSON.stringify(payload),
+      });
+
+    // 已有模型用 PATCH：设计器拿不到描述 / SVG，PUT 的全量语义会把它们清空。
+    // 新建（前端生成 id）仍走 PUT upsert；模型已被删除或旧服务端不认识 PATCH 时回退 PUT。
+    let response = modelId === undefined ? await send('PUT') : await send('PATCH');
+
+    if (modelId !== undefined && (response.status === 404 || response.status === 405)) {
+      response = await send('PUT');
+    }
 
     if (!response.ok) {
       throw new Error(await describeSaveFailure(response));
     }
 
-    return { modelId: id, processId, name, xml, updatedAt: new Date().toISOString(), version: 0 };
+    return {
+      modelId: id,
+      processId,
+      name,
+      xml,
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      revision: (await readSavedRevision(response)) ?? revision,
+    };
   }
 
   return saveLocal(xml, modelId);

@@ -12,6 +12,7 @@ public static class AdminServiceCollectionExtensions
 
         services.AddSingleton<BpmnModelStore>();
         services.AddSingleton<ProcessTypeStore>();
+        services.AddSingleton<TimerJobStore>();
 
         return services;
     }

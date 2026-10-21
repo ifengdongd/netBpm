@@ -300,6 +300,12 @@ let services: ModelerServices | null = null;
 let currentModelId: string | null = null;
 
 /**
+ * 当前模型在服务端的最新版本号（打开 / 上次保存时拿到的），保存时作为 `If-Match`。
+ * 期间若被别人改过，后端回 409 而不是让后保存的人静默覆盖。
+ */
+let currentRevision: number | undefined;
+
+/**
  * 画布是否有未保存的修改。
  * 关闭/刷新页面与「返回列表」都会拦截 —— 过去两者都是直接跳走，误点即丢图。
  */
@@ -763,6 +769,7 @@ async function openNewEditor(): Promise<void> {
 /** 打开已有模型进入编辑器，并把 modelId 写进 URL。 */
 function openRecord(record: DiagramRecord): void {
   currentModelId = record.modelId;
+  currentRevision = record.revision;
   syncModelIdToUrl(record.modelId);
   showView('editor');
   void loadDiagram(record.xml, record.name);
@@ -778,9 +785,10 @@ async function save(): Promise<void> {
       return;
     }
 
-    const record = await saveDiagramXml(xml, currentModelId ?? undefined);
+    const record = await saveDiagramXml(xml, currentModelId ?? undefined, currentRevision);
 
     currentModelId = record.modelId;
+    currentRevision = record.revision;
 
     if (editorTitleElement !== null) {
       editorTitleElement.textContent = record.name;
@@ -809,6 +817,14 @@ interface DeployOutcome {
   warnings: string[];
 }
 
+/** 生成幂等键（crypto.randomUUID 优先，非安全上下文退化为时间戳 + 随机串）。 */
+function newIdempotencyKey(): string {
+  const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+
+  return cryptoObj?.randomUUID?.()
+    ?? `designer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
  * 把一段 BPMN XML 提交到后端部署（§6.3 的 POST /api/designer/deploy）。
  * 后端做权威校验，这里只负责上报结果。
@@ -817,7 +833,12 @@ async function deployXml(xml: string): Promise<DeployOutcome> {
   try {
     const response = await fetch('/api/designer/deploy', {
       method: 'POST',
-      headers: { 'Content-Type': 'text/xml', ...credentialHeaders() },
+      // 幂等键：网络重试 / 代理重发时后端只部署一次，不会多出一个定义版本
+      headers: {
+        'Content-Type': 'text/xml',
+        'Idempotency-Key': newIdempotencyKey(),
+        ...credentialHeaders(),
+      },
       body: xml,
     });
 
@@ -1047,6 +1068,7 @@ document.querySelector('#btn-back')?.addEventListener('click', () => {
 
   editorDirty = false;
   currentModelId = null;
+  currentRevision = undefined;
   clearModelIdUrl();
   void renderList();
   showView('models');

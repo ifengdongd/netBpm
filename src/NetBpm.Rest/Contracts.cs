@@ -25,7 +25,8 @@ public sealed record DeployResponse(
     string DeploymentId,
     string ResourceName,
     string? DeploymentName = null,
-    IReadOnlyList<ValidationError>? Warnings = null);
+    IReadOnlyList<ValidationError>? Warnings = null,
+    bool Skipped = false);
 
 /// <summary>
 /// 已部署流程定义 DTO（流程部署列表）。
@@ -732,12 +733,24 @@ public sealed record DeploymentDefinitionResponse(
 /// <param name="DeployTime">部署时间（UTC）。</param>
 /// <param name="TenantId">租户。</param>
 /// <param name="Definitions">该部署下的流程定义。</param>
+/// <summary>部署摘要（按 deploymentId 聚合多个流程定义）。</summary>
+/// <param name="DeploymentId">部署 id。</param>
+/// <param name="Name">部署名（可空）。</param>
+/// <param name="DeployTime">部署时间（UTC）。</param>
+/// <param name="TenantId">租户 id。</param>
+/// <param name="Definitions">该部署内的流程定义（按版本倒序）。</param>
+/// <param name="DefinitionCount">该部署包含的流程定义数量（列表页不必再数数组）。</param>
+/// <param name="LatestVersion">该部署内最高的定义版本号（多定义时取最大）。</param>
+/// <param name="SuspendedCount">该部署内已挂起的定义数量。</param>
 public sealed record DeploymentSummaryResponse(
     string DeploymentId,
     string? Name,
     DateTime? DeployTime,
     string? TenantId,
-    IReadOnlyList<DeploymentDefinitionResponse> Definitions);
+    IReadOnlyList<DeploymentDefinitionResponse> Definitions,
+    int DefinitionCount = 0,
+    int? LatestVersion = null,
+    int SuspendedCount = 0);
 
 /// <summary>部署资源项（资源名 → 流程定义）。</summary>
 /// <param name="Name">资源名（如 <c>designer.bpmn20.xml</c>）。</param>
@@ -757,6 +770,39 @@ public sealed record BatchTaskAssigneeRequest(
 public sealed record BatchDeleteInstancesRequest(
     IReadOnlyList<string>? ProcessInstanceIds = null,
     string? DeleteReason = null);
+
+/// <summary>取消活动实例请求（<c>POST /process-instances/{id}/activities/{activityId}/cancel</c>）。</summary>
+/// <param name="Reason">取消原因（写入任务历史与活动历史收口）；缺省为「控制台取消活动」。</param>
+public sealed record CancelActivityRequest(string? Reason = null);
+
+/// <summary>在活动之前启动请求（<c>POST /process-instances/{id}/activities/{activityId}/start-before</c>）。</summary>
+/// <param name="Reason">审计备注（不影响流程行为）。</param>
+public sealed record StartBeforeActivityRequest(string? Reason = null);
+
+/// <summary>批量挂起 / 激活流程实例请求（<c>POST /process-instances/batch/suspend|activate</c>）。</summary>
+/// <param name="ProcessInstanceIds">流程实例 id 列表（逐项执行，单项失败不影响其它项）。</param>
+public sealed record BatchInstanceSuspensionRequest(
+    IReadOnlyList<string>? ProcessInstanceIds = null);
+
+/// <summary>批量改任务到期时间请求（<c>POST /tasks/batch/due-date</c>）。</summary>
+/// <param name="TaskIds">任务 id 列表（逐项执行，单项失败不影响其它项）。</param>
+/// <param name="DueDate">新的到期时间；与 <paramref name="ClearDueDate"/> 二选一。</param>
+/// <param name="ClearDueDate">true 表示清空到期时间。</param>
+public sealed record BatchTaskDueDateRequest(
+    IReadOnlyList<string>? TaskIds = null,
+    DateTime? DueDate = null,
+    bool ClearDueDate = false);
+
+/// <summary>批量迁移流程实例请求（<c>POST /process-instances/batch/migrate</c>）。</summary>
+/// <param name="ProcessInstanceIds">流程实例 id 列表（逐项执行，单项失败不影响其它项）。</param>
+/// <param name="TargetProcessDefinitionId">目标流程定义 id（同一批共用一个目标版本）。</param>
+/// <param name="ActivityMappings">可选的活动映射（旧活动 id → 新活动 id）。</param>
+/// <param name="Reason">迁移原因（写入迁移记录与审计）。</param>
+public sealed record BatchMigrateInstancesRequest(
+    IReadOnlyList<string>? ProcessInstanceIds = null,
+    string? TargetProcessDefinitionId = null,
+    IReadOnlyDictionary<string, string>? ActivityMappings = null,
+    string? Reason = null);
 
 /// <summary>批量操作的单项结果。</summary>
 /// <param name="Id">任务 / 实例 id。</param>
