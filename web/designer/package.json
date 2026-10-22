@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:opms": "tsc --noEmit && vite build --mode opms",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "esbuild test/designer.test.ts --bundle --platform=node --format=esm --target=node22 --alias:@bpmn-io/properties-panel=./test/propertiesPanelStub.ts --alias:bpmn-js-properties-panel=./test/propertiesPanelStub.ts --outfile=.tmp/designer.test.mjs --log-level=warning && node --test .tmp/designer.test.mjs"

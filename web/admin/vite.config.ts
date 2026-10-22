@@ -11,44 +11,48 @@ import { defineConfig } from 'vitest/config';
 // 生产构建直接输出到 src/NetBpm.Admin/wwwroot，由该宿主的 UseStaticFiles 托管。
 const apiTarget = process.env.NETBPM_API_TARGET ?? 'http://localhost:5081';
 
-// 部署前缀：独立部署（NetBpm.Admin 自己监听 5081）是 `/`；
-// 由 OPMS 反代到 /netbpm/ 时用 NETBPM_WEB_BASE=/netbpm/ 构建。
+// 部署前缀三档：
+//   · 独立部署（NetBpm.Admin 自己监听 5081）→ `/`（npm run build）
+//   · 由 OPMS 反代到 /netbpm/            → `/netbpm/`（npm run build:opms）
+//   · 特殊环境                          → NETBPM_WEB_BASE 显式覆盖（优先级最高）
 // 路由 basename、资源路径、接口前缀都由它派生（见 src/api/base.ts），三者不会走散。
-const webBase = process.env.NETBPM_WEB_BASE ?? '/';
+export default defineConfig(({ mode }) => {
+  const webBase = process.env.NETBPM_WEB_BASE ?? (mode === 'opms' ? '/netbpm/' : '/');
 
-export default defineConfig({
-  base: webBase,
-  plugins: [react()],
-  server: {
-    port: 5274,
-    proxy: {
-      '/api': {
-        target: apiTarget,
-        changeOrigin: true,
-      },
-    },
-  },
-  // vitest 单元测试：jsdom 环境（auth.ts 依赖 localStorage；usePagedList 用 renderHook）
-  test: {
-    environment: 'jsdom',
-    include: ['src/**/*.test.{ts,tsx}'],
-  },
-  build: {
-    // 与设计器共同落在管理宿主 wwwroot：设计器先构建到 wwwroot/designer，
-    // 本构建 emptyOutDir 关闭，避免清掉设计器产物；
-    // 旧哈希文件由 scripts/clean-dist.mjs 在构建前清理（仅清 assets 与 index.html）。
-    outDir: '../../src/NetBpm.Admin/wwwroot',
-    emptyOutDir: false,
-    sourcemap: true,
-    rollupOptions: {
-      output: {
-        // 大依赖拆为独立 chunk：框架与 UI 库变更少，利于浏览器长缓存
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          antd: ['antd'],
-          icons: ['@ant-design/icons'],
+  return {
+    base: webBase,
+    plugins: [react()],
+    server: {
+      port: 5274,
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
         },
       },
     },
-  },
+    // vitest 单元测试：jsdom 环境（auth.ts 依赖 localStorage；usePagedList 用 renderHook）
+    test: {
+      environment: 'jsdom',
+      include: ['src/**/*.test.{ts,tsx}'],
+    },
+    build: {
+      // 与设计器共同落在管理宿主 wwwroot：设计器先构建到 wwwroot/designer，
+      // 本构建 emptyOutDir 关闭，避免清掉设计器产物；
+      // 旧哈希文件由 scripts/clean-dist.mjs 在构建前清理（仅清 assets 与 index.html）。
+      outDir: '../../src/NetBpm.Admin/wwwroot',
+      emptyOutDir: false,
+      sourcemap: true,
+      rollupOptions: {
+        output: {
+          // 大依赖拆为独立 chunk：框架与 UI 库变更少，利于浏览器长缓存
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom'],
+            antd: ['antd'],
+            icons: ['@ant-design/icons'],
+          },
+        },
+      },
+    },
+  };
 });
