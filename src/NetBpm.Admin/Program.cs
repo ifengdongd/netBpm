@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi;
 using NetBpm.Admin.Endpoints;
 using NetBpm.Admin.Storage;
@@ -13,6 +14,18 @@ using NetBpm.Runtime;
 using NetBpm.Workflow.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// 子路径部署：反代「保留前缀」转发（/netbpm/api/x 原样到本宿主）时，用 NetBpm:Admin:PathBase 让宿主
+// 自己认领前缀 —— 路由、Cookie Path、重定向都会自动带前缀，无需代理侧剥路径。
+// 与「反代剥前缀」（OPMS 的当前做法）二选一，两个都配会把前缀吃掉两遍。
+var adminPathBase = builder.Configuration["NetBpm:Admin:PathBase"];
+
+// 反代头：限流按客户端 IP 分区、重定向生成绝对地址都依赖真实 scheme / 来源地址。
+// 默认只信任本机（loopback）转发；代理在另一台机器或容器网络时需自行配置 KnownProxies。
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+});
 
 // OpenAPI
 // OpenAPI 文档：修复 System.Text.Json 对日期与数字的 schema 弱化（OpenAPI 3.1 + JSON Schema）。
@@ -129,6 +142,23 @@ if (rateLimitEnabled)
 
 var app = builder.Build();
 var startedAt = DateTime.UtcNow;
+
+// 反代头必须最先处理：后面的限流分区（按 RemoteIpAddress）与重定向（按 Scheme）都依赖它。
+app.UseForwardedHeaders();
+
+if (!string.IsNullOrWhiteSpace(adminPathBase))
+{
+    var pathBase = adminPathBase.StartsWith('/') ? adminPathBase : "/" + adminPathBase;
+
+    app.UsePathBase(pathBase);
+
+    app.Logger.LogInformation(
+        "管理控制台挂载在子路径 {PathBase}（NetBpm:Admin:PathBase）；前端需用同一前缀构建：" +
+        "管理端 NETBPM_WEB_BASE={WebBase}，设计器 NETBPM_DESIGNER_BASE={DesignerBase}。",
+        pathBase,
+        pathBase + "/",
+        pathBase + "/designer/");
+}
 
 // OpenAPI 文档默认只在开发环境暴露（契约生成 / 联调用）；
 // 生产环境需要时显式打开 NetBpm:Admin:OpenApi:Enabled=true。

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
@@ -169,7 +170,10 @@ public static class NetBpmServiceCollectionExtensions
         services.AddSingleton<IExpressionManager, ExpressionManager>();
 
         // ── P7：身份（最小实现，可替换）──────────────────────────────
-        services.AddSingleton<IUserGroupManager, EmptyUserGroupManager>();
+        // TryAdd 而不是 Add：宿主若在调用 AddNetBpm **之前**就注册了自己的实现（或调用了
+        // AddNetBpmUserGroupManager<T>()），这里不能再补一份空实现 —— 否则容器里有两份，
+        // 单服务解析取最后一份，候选组就会被悄悄展开成 0 个人。
+        services.TryAddSingleton<IUserGroupManager, EmptyUserGroupManager>();
 
         // ── P5：持久化（按模式切换内存 / 数据库）──────────────────────
         RegisterPersistence(services, options);

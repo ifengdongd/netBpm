@@ -455,7 +455,8 @@ NetBpm/
 │   ├── mysql/netbpm_init.sql     # 初始化脚本（建库 + 建表 + 初值，单一数据源生成，请勿手改）
 │   └── sqlserver/netbpm_init.sql # 同上（两方言结构一一对应，仅语法差异）
 ├── docs/
-│   └── process-design-guide.md   # 流程设计操作指引（以请假 / 订单流程为例）
+│   ├── process-design-guide.md   # 流程设计操作指引（以请假 / 订单流程为例）
+│   └── integration-checklist.md  # 新项目引入注意事项：组合根 / 事务 / 委托 / 运行期 / 部署 / 自检清单
 ├── tools/
 │   ├── NetBpm.DbInit/            # 数据库初始化器（生成脚本 → 初始化结构 + 数据 → 校验）
 │   ├── NetBpm.DbMigrate/         # 数据库运维工具（migrate / check / probe / purge / apply）
@@ -698,6 +699,22 @@ npm test          # vitest 单元测试
 需先在两个前端目录各执行一次 `npm run build` 再启动宿主，否则页面 404。
 CI（`.github/workflows/ci.yml`）会在 Build 前完成两段前端构建。
 
+### 被 OPMS 反向代理到子路径（可选）
+
+两个前端都支持「整站被 OPMS 挂到 `/netbpm/` 下」而非独立域名的部署形态：
+
+```bash
+cd web/admin && npm run build:opms        # base = /netbpm/
+cd web/designer && npm run build:opms     # base = /netbpm/designer/
+```
+
+资源路径、路由 basename、接口前缀都从 Vite `base` 派生（`web/*/src/base.ts`、`src/api/base.ts`），
+一次构建即三者一致：管理端资源 `/netbpm/assets/**`、设计器 `/netbpm/designer/**`、
+接口 `/netbpm/api/**`。特殊环境可用 `NETBPM_WEB_BASE` / `NETBPM_DESIGNER_BASE` 覆盖。
+
+⚠️ 反代需**剥离** `/netbpm` 前缀后转发到 `NetBpm.Admin`（`/netbpm/api/x` → `/api/x`、`/netbpm/assets/x` → `/assets/x`），
+后端不需要改配置；若代理必须保留前缀，则需在宿主加 `UsePathBase("/netbpm")`（当前未内置）。
+
 ### 引擎启动步骤（其它 .NET 项目接入）
 
 1. **建库**：执行 `db/mysql/netbpm_init.sql` 或 `db/sqlserver/netbpm_init.sql`
@@ -754,31 +771,33 @@ Demo 的 HTTP 接口（发起 / 实例 / 历史 / 待办 / 提交 / 流程图 / 
 
 ### 在自己的宿主接入审批流（公共类）
 
-流程相关功能已封装为 `NetBpm.Workflow` 的公共类，宿主五步接入：
+流程相关功能已封装为 `NetBpm.Workflow` 的公共类，宿主六步接入：
 
 ```csharp
 builder.Services.AddNetBpm(builder.Configuration);                  // ① 引擎
-builder.Services.AddNetBpmWorkflow<MyWorkflowDataStore>();          // ② 应用层 + 业务数据端口（IWorkflowDataStore）
-builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly); // ③ 服务任务委托（类上标 [ServiceTaskName]）
+builder.Services.AddNetBpmUserGroupManager<MyUserGroupManager>();   // ② 身份适配器（候选组 → 人）
+builder.Services.AddNetBpmWorkflow<MyWorkflowDataStore>();          // ③ 应用层 + 业务数据端口（IWorkflowDataStore）
+builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly); // ④ 服务任务委托（类上标 [ServiceTaskName]）
 
-app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions // ④ 通用流程 HTTP 端点
+app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions // ⑤ 通用流程 HTTP 端点
 {
     ProcessKey = _ => "my_process",
     // TransformStartRequest / DecorateInstanceView / DecorateInstanceSummary / ErrorResponseFactory
     // 是业务定制点：单号生成、DTO 摊平、错误响应形状
 });
 
-await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOptions // ⑤ 启动即部署
+await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOptions // ⑥ 启动即部署
 {
     ResourcePath = "processes/my-process.bpmn20.xml",
     DeploymentName = "我的流程",
-    VerifyAsync = async (sp, engine, definitionId, logger, ct) =>
-    {
-        await ApprovalResultFormGuard.VerifyAsync(engine, definitionId, logger, ct);   // 可选自检钩子
-        await ServiceTaskDelegateGuard.VerifyAsync(sp, engine, definitionId, logger, ct);
-    },
+    // 委托预解析（ServiceTaskDelegateGuard）与候选组空实现告警已默认执行，不用再挂
+    VerifyAsync = async (_, engine, definitionId, logger, ct) =>
+        await ApprovalFormGuard.VerifyAsync(engine, definitionId, logger, ct),   // 业务自检钩子（可选）
 }, app.Logger);
 ```
+
+⚠️ ② 不能省：`AddNetBpm` 默认注册的是空实现（任何组都没有成员），忘了替换时候选组会展开成
+0 个人，**待办静默消失且不报错**。接入时逐条对照 [`docs/integration-checklist.md`](docs/integration-checklist.md)。
 
 核心类型一览：
 
@@ -786,7 +805,8 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 |---|---|
 | `IWorkflowService` / `WorkflowService` | 发起申请 / 获取环节信息 / 提交审批 / 审批历史四件事的应用层门面 |
 | `WorkflowEndpoints` + `WorkflowEndpointOptions` | 通用流程 HTTP 端点（路由约定统一，业务语义经选项注入） |
-| `WorkflowProcessBootstrapper` + `WorkflowDeployOptions` | 启动即部署 BPMN 资源 + 部署期自检钩子 |
+| `WorkflowProcessBootstrapper` + `WorkflowDeployOptions` | 启动即部署 BPMN 资源 + 默认自检（委托预解析、候选组空实现告警）+ 业务自检钩子 |
+| `AddNetBpmUserGroupManager<T>()` | 用业务身份适配器**替换**默认空实现（`Replace` 语义，注册顺序无关） |
 | `WorkflowRuntimeContext` / `WorkflowNodeRegistry` | 部署后运行期上下文：流程定义 id + 环节名 ↔ 环节 id 对照表（随 ② 自动注册） |
 | `IWorkflowDataStore` | 应用层与宿主之间唯一的缝：实例登记 / 审批结论 / 流程参数 / 审批记录 / 当前待办 |
 | `JsonWorkflowDataStore` | 端口的**参考实现**：五个区块直接落一个 JSON 文件（零落库跑通全链路，换真库时数据形状不变） |
@@ -949,6 +969,7 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 ## 相关文档
 
 - 流程设计操作指引（以请假流程为例，含表达式写法、部署红线、应用层封装）：`docs/process-design-guide.md`
+- 新项目引入注意事项（组合根顺序 / 同库事务 / 委托与候选组 / 定时器单位 / 子路径部署 / 发布前自检清单）：`docs/integration-checklist.md`
 - 开发计划：`doc/NetBpm-子集流程引擎-开发计划.md`（同目录另有 HTML 版）
 
 ---

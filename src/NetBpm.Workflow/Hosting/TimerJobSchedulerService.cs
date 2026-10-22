@@ -17,6 +17,11 @@ public sealed class TimerJobSchedulerOptions
 
     /// <summary>每轮最多处理的作业数。</summary>
     public int BatchSize { get; set; } = 50;
+
+    /// <summary>
+    /// 配置自检结论（由配置绑定器写入，宿主一般不用管）：非空时轮询服务启动后会打一条告警。
+    /// </summary>
+    public string? ConfigWarning { get; set; }
 }
 
 /// <summary>
@@ -64,6 +69,11 @@ public sealed class TimerJobSchedulerService : BackgroundService
             : _options.PollInterval;
 
         _logger.LogInformation("定时作业轮询已启动：间隔 {Interval}，每轮最多 {BatchSize} 条。", interval, _options.BatchSize);
+
+        if (!string.IsNullOrWhiteSpace(_options.ConfigWarning))
+        {
+            _logger.LogWarning("{Warning}", _options.ConfigWarning);
+        }
 
         using var timer = new PeriodicTimer(interval);
 
@@ -120,6 +130,7 @@ public static class TimerJobSchedulerExtensions
         if (int.TryParse(section["PollIntervalMs"], out var intervalMs) && intervalMs > 0)
         {
             options.PollInterval = TimeSpan.FromMilliseconds(intervalMs);
+            options.ConfigWarning = DescribeIntervalRisk(intervalMs);
         }
 
         if (int.TryParse(section["BatchSize"], out var batchSize) && batchSize > 0)
@@ -132,6 +143,18 @@ public static class TimerJobSchedulerExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// 单位误配自检：<c>Timer:PollIntervalMs</c> 与 <c>Jobs:PollIntervalSeconds</c> 单位不同，
+    /// 把秒数填进毫秒位会让超时定时器迟发几十分钟（表现为"超时审批永远不触发"），
+    /// 把毫秒填进秒位则变成高频空转（每轮一次全表查询）。
+    /// </summary>
+    private static string? DescribeIntervalRisk(int intervalMs) => intervalMs switch
+    {
+        < 200 => $"NetBpm:Timer:PollIntervalMs={intervalMs} 小于 200ms：轮询会非常密集，确认不是把秒数填进了毫秒位。",
+        >= 600_000 => $"NetBpm:Timer:PollIntervalMs={intervalMs}（约 {intervalMs / 1000} 秒）：边界定时器会迟发这么久，确认不是把毫秒填进了秒位。",
+        _ => null,
+    };
 
     /// <summary>注册定时作业轮询（代码配置，测试 / 自定义宿主用）。</summary>
     public static IServiceCollection AddNetBpmTimerScheduler(

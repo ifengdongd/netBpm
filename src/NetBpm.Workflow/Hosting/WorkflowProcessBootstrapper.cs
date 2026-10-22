@@ -27,10 +27,23 @@ public sealed class WorkflowDeployOptions
     /// 部署成功后的自检钩子（可选）：流程定义级守卫在这里跑，任何一条不过都让宿主<b>起不来</b>。
     /// </summary>
     /// <remarks>
-    /// 典型用法：审批选项与业务枚举一致性自检（<c>ApprovalResultFormGuard</c>）、
-    /// 服务任务委托预解析（<c>ServiceTaskDelegateGuard</c>）—— 两个守卫都是通用类，直接往里塞。
+    /// 典型用法：审批选项与业务枚举一致性自检（<c>ApprovalResultFormGuard</c>）。
+    /// <para>
+    /// 服务任务委托预解析（<c>ServiceTaskDelegateGuard</c>）<b>不需要</b>在这里再写一遍 ——
+    /// 引导器默认就会跑（见 <see cref="SkipServiceTaskDelegateCheck"/>）。
+    /// </para>
     /// </remarks>
     public Func<IServiceProvider, IProcessEngine, string, ILogger, CancellationToken, ValueTask>? VerifyAsync { get; init; }
+
+    /// <summary>
+    /// 跳过默认的服务任务委托自检（默认 <see langword="false"/>，即默认开启）。
+    /// </summary>
+    /// <remarks>
+    /// 自检会借用引擎自己的解析器，把 BPMN 里每个 <c>class</c> / <c>delegateExpression</c>
+    /// 以及各类监听器逐个预解析一遍：解析不到就让宿主起不来，而不是等流程跑到该节点才炸。
+    /// 只有「委托在运行时才动态注册」这种非常规宿主才需要关掉它。
+    /// </remarks>
+    public bool SkipServiceTaskDelegateCheck { get; init; }
 }
 
 /// <summary>
@@ -38,9 +51,9 @@ public sealed class WorkflowDeployOptions
 /// </summary>
 /// <remarks>
 /// <para>
-/// 职责只有四件：找到资源文件 → 部署 → 跑自检钩子 → 填充 <see cref="WorkflowRuntimeContext"/>。
-/// 流程相关的业务语义（守卫、运行期数据）全部通过 <see cref="WorkflowDeployOptions"/> 注入，
-/// 本类不认识任何具体流程。
+/// 职责：找到资源文件 → 部署 → 跑自检（宿主钩子 + 默认的委托 / 候选组守卫）→ 填充
+/// <see cref="WorkflowRuntimeContext"/>。流程相关的业务语义（守卫、运行期数据）全部通过
+/// <see cref="WorkflowDeployOptions"/> 注入，本类不认识任何具体流程。
 /// </para>
 /// <para>
 /// ⚠️ 每次启动都会产生一个新部署（内存宿主下版本恒为 1；接数据库后版本会递增）。
@@ -92,6 +105,18 @@ public static class WorkflowProcessBootstrapper
         {
             await options.VerifyAsync(services, engine, definition.Id, logger, ct).ConfigureAwait(false);
         }
+
+        // 默认守卫 ①：委托预解析。放在宿主钩子之后是为了「业务一致性先报错」的优先级更直观，
+        // 但无论宿主是否提供了 VerifyAsync 都会跑 —— 忘了调用是集成期最常见的坑，
+        // 代价是流程跑到该节点才炸（那时实例已经推进了一半）。
+        if (!options.SkipServiceTaskDelegateCheck)
+        {
+            await ServiceTaskDelegateGuard.VerifyAsync(services, engine, definition.Id, logger, ct).ConfigureAwait(false);
+        }
+
+        // 默认守卫 ②：候选组自检（只告警）。IUserGroupManager 仍是空实现时，
+        // 候选组会展开成 0 个人，流程卡在第一个 userTask 且日志无异常。
+        await CandidateGroupGuard.WarnIfUnresolvableAsync(services, engine, definition.Id, logger, ct).ConfigureAwait(false);
 
         if (options.InitializeRuntimeContext)
         {
