@@ -161,6 +161,71 @@ public sealed class DapperTimerJobManager : ITimerJobManager
     }
 
     /// <inheritdoc />
+    public async ValueTask<bool> TryAcquireAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+
+        if (leaseDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration), "租约时长必须为正。");
+        }
+
+        using var lease = _sessions.Acquire();
+
+        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
+            AcquireLeaseSql,
+            new { id = jobId, owner, now = nowUtc, leaseUntil = nowUtc + leaseDuration },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows == 1;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> RenewAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+
+        using var lease = _sessions.Acquire();
+
+        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
+            RenewLeaseSql,
+            new { id = jobId, owner, leaseUntil = nowUtc + leaseDuration },
+        lease.Session.Transaction,
+        cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows == 1;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> ReleaseAsync(string jobId, string owner, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        using var lease = _sessions.Acquire();
+
+        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
+            ReleaseLeaseSql,
+            new { id = jobId, owner },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows == 1;
+    }
+
+    /// <inheritdoc />
     public async ValueTask<int> DeleteByProcessInstanceAsync(
         string processInstanceId,
         CancellationToken ct = default)
@@ -349,7 +414,31 @@ public sealed class DapperTimerJobManager : ITimerJobManager
     private const string Columns = """
         ID_, REV_, TYPE_, EXECUTION_ID_, PROCESS_INSTANCE_ID_, PROC_DEF_ID_,
         ACTIVITY_ID_, BOUNDARY_EVENT_ID_, DUEDATE_, TENANT_ID_, CREATE_TIME_,
-        RETRIES_, DEAD_LETTER_, EXCEPTION_MSG_, LAST_FAILURE_
+        RETRIES_, DEAD_LETTER_, EXCEPTION_MSG_, LAST_FAILURE_,
+        LOCK_OWNER_, LOCK_EXP_TIME_
+        """;
+
+    /// <summary>
+    /// 抢占租约：<c>无人持有</c> 或 <c>租约已过期</c> 或 <c>本来就是自己持有</c> 才成功。
+    /// 最后一项保证嵌套调用（外层轮询抢占 → 内层命令再抢一次）不会自我否决。
+    /// </summary>
+    private const string AcquireLeaseSql = """
+        update ACT_RU_TIMER_JOB
+        set LOCK_OWNER_ = @owner, LOCK_EXP_TIME_ = @leaseUntil
+        where ID_ = @id and DEAD_LETTER_ = 0
+          and (LOCK_EXP_TIME_ is null or LOCK_EXP_TIME_ <= @now or LOCK_OWNER_ = @owner)
+        """;
+
+    private const string RenewLeaseSql = """
+        update ACT_RU_TIMER_JOB
+        set LOCK_EXP_TIME_ = @leaseUntil
+        where ID_ = @id and LOCK_OWNER_ = @owner
+        """;
+
+    private const string ReleaseLeaseSql = """
+        update ACT_RU_TIMER_JOB
+        set LOCK_OWNER_ = null, LOCK_EXP_TIME_ = null
+        where ID_ = @id and LOCK_OWNER_ = @owner
         """;
 
     private const string SelectByIdSql = $"""

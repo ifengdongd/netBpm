@@ -114,11 +114,14 @@ public sealed class InclusiveGatewayActivityBehavior : GatewayActivityBehavior
     /// 包含网关的离开：**要判定条件**（可能同时走多条出流），
     /// 一条都选不中时由 <c>TakeOutgoingSequenceFlowsOperation</c> 走默认流或报错。
     /// </summary>
-    public override ValueTask LeaveAsync(IDelegateExecution execution, CancellationToken ct = default)
+    public override async ValueTask LeaveAsync(IDelegateExecution execution, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(execution);
 
+        // 先把所有出流条件里的变量一次取回：包含网关要判定全部出流，往返次数原本是 ×N
+        await PrefetchConditionVariablesAsync((Gateway)execution.CurrentFlowElement!, execution, ct)
+            .ConfigureAwait(false);
+
         Services.Agenda.PlanTakeOutgoingSequenceFlowsOperation(execution.AsEntity(), evaluateConditions: true);
-        return ValueTask.CompletedTask;
     }
 }

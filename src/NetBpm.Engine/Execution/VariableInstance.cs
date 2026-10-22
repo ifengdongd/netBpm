@@ -13,6 +13,8 @@ namespace NetBpm.Engine.Execution;
 ///     之后每次更新 +1（乐观锁）；</description></item>
 ///   <item><description><c>TYPE_</c> 取变量类型名（<c>string</c> / <c>integer</c> / <c>long</c> / <c>double</c> /
 ///     <c>boolean</c> / <c>date</c> / <c>null</c> …），值列由类型决定（见 <c>DapperVariableInstanceManager</c>）。</description></item>
+///   <item><description><c>TENANT_ID_</c>：变量所属租户。变量表是唯一「带业务数据却不带租户」的引擎表，
+///     缺列会导致跨租户变量可见（安全缺陷），因此本子集补列并逐层回填（见 <c>ExecutionEntity.SetLocalVariableAsync</c>）。</description></item>
 /// </list>
 /// </para>
 /// </summary>
@@ -41,6 +43,15 @@ public sealed class VariableInstance
 
     /// <summary><c>TASK_ID_</c>（任务局部变量）。</summary>
     public string? TaskId { get; set; }
+
+    /// <summary>
+    /// <c>TENANT_ID_</c>：变量所属租户。
+    /// <para>
+    /// 取值来自持有该变量的执行（<c>ExecutionEntity.TenantId</c>），缺省 <c>null</c>，
+    /// 由仓储层落库时归一成 <c>''</c>（与其余引擎表的缺省口径一致）。
+    /// </para>
+    /// </summary>
+    public string? TenantId { get; set; }
 
     /// <summary>
     /// <c>BYTEARRAY_ID_</c>：超长值（<c>longString</c>）指向 <c>ACT_GE_BYTEARRAY</c> 的行；

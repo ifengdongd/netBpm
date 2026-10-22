@@ -14,6 +14,19 @@ internal abstract class ElNode
     /// <summary>赋值。仅左值节点（标识符 / 属性 / 索引）支持。</summary>
     public virtual ValueTask SetValueAsync(object? value, ElContext context, CancellationToken ct) =>
         throw new ElException($"表达式不可赋值（不是左值）。");
+
+    /// <summary>
+    /// 收集该子树求值时会读取的<b>顶层变量名</b>，写进 <paramref name="names"/>。
+    /// <para>
+    /// 用途：网关在逐个判定出流条件之前，先把所有条件里出现的变量名一次查回来，
+    /// 把「每个变量一次往返」压成「一条 SQL」。
+    /// </para>
+    /// <para>
+    /// 只取顶层标识符（<c>${a.b(c)}</c> 只记 <c>a</c>）—— 与求值口径一致：
+    /// 属性 / 方法调用都是在顶层变量拿到对象之后再往下走，不需要额外查库。
+    /// </para>
+    /// </summary>
+    public abstract void CollectVariableNames(ISet<string> names);
 }
 
 /// <summary>纯文本段。对应 JUEL 的 <c>AstText</c>。</summary>
@@ -31,6 +44,12 @@ internal sealed class ElTextNode : ElNode
 
     public override ValueTask<object?> EvalAsync(ElContext context, CancellationToken ct) =>
         ValueTask.FromResult<object?>(_text);
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        // 纯文本不读变量
+    }
 }
 
 /// <summary>
@@ -59,6 +78,15 @@ internal sealed class ElCompositeNode : ElNode
 
         return builder.ToString();
     }
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        foreach (var node in _nodes)
+        {
+            node.CollectVariableNames(names);
+        }
+    }
 }
 
 /// <summary>括号表达式 <c>(expr)</c>。对应 JUEL 的 <c>AstNested</c>。</summary>
@@ -77,6 +105,10 @@ internal sealed class ElNestedNode : ElNode
 
     public override ValueTask SetValueAsync(object? value, ElContext context, CancellationToken ct) =>
         _inner.SetValueAsync(value, context, ct);
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names) =>
+        _inner.CollectVariableNames(names);
 }
 
 /// <summary>字面量。对应 JUEL 的 <c>Ast*Literal</c>。</summary>
@@ -88,4 +120,10 @@ internal sealed class ElLiteralNode : ElNode
 
     public override ValueTask<object?> EvalAsync(ElContext context, CancellationToken ct) =>
         ValueTask.FromResult(_value);
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        // 字面量不读变量
+    }
 }

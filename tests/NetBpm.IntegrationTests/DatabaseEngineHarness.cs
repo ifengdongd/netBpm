@@ -18,6 +18,7 @@ using NetBpm.Persistence.Deployment;
 using NetBpm.Persistence.Events;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
+using NetBpm.Persistence.Idempotency;
 using NetBpm.Persistence.Jobs;
 using NetBpm.Persistence.Migration;
 using NetBpm.Persistence.Tasks;
@@ -52,16 +53,27 @@ internal sealed class DatabaseEngineHarness
     /// <param name="spec">目标库。</param>
     /// <param name="retryPolicy">重试策略；缺省用引擎默认（3 次）。并发用例可抬高上限。</param>
     /// <param name="xmlConverter">XML 转换器；缺省用真实实现，性能用例可注入计数器。</param>
+    /// <param name="sqlCounter">
+    /// SQL 语句计数器；缺省不计数（零开销，绝大多数用例用不到）。
+    /// 传入后本 harness 建出的所有会话都会经过可计数的连接代理，
+    /// 用例即可断言「跑完一个流程实例的语句条数上限」来防 N+1 回归。
+    /// </param>
     public DatabaseEngineHarness(
         TestDatabaseSpec spec,
         CommandRetryPolicy? retryPolicy = null,
-        IBpmnXmlConverter? xmlConverter = null)
+        IBpmnXmlConverter? xmlConverter = null,
+        SqlStatementCounter? sqlCounter = null)
     {
         // 与生产组合根同策略：乐观锁 + 数据库死锁/锁等待超时
         var effectivePolicy = (retryPolicy ?? TransientDatabaseErrors.CreateRetryPolicy())
             .WithOnRetry((_, _) => Interlocked.Increment(ref _retryCount));
 
-        SessionFactory = TestDatabases.CreateSessionFactory(spec);
+        SessionFactory = sqlCounter is null
+            ? TestDatabases.CreateSessionFactory(spec)
+            : new DbSessionFactory(
+                new CountingDbConnectionFactory(
+                    new DbConnectionFactory(spec.Type, spec.ConnectionString),
+                    sqlCounter));
 
         var sessions = new CommandScopedDbSessionProvider(SessionFactory);
         Sessions = sessions;
@@ -76,6 +88,7 @@ internal sealed class DatabaseEngineHarness
         AsyncJobs = new DapperAsyncJobManager(sessions);
         Outbox = new DapperEventOutbox(sessions);
         MigrationLog = new DapperMigrationLog(sessions);
+        CommandIdempotency = new DapperCommandIdempotencyStore(sessions, IdGenerator);
         Executions = new DapperExecutionManager(
             sessions, IdGenerator, TaskManager, VariableInstances, HistoryManager, TimerJobs);
         XmlConverter = xmlConverter ?? new BpmnXmlConverter();
@@ -97,7 +110,8 @@ internal sealed class DatabaseEngineHarness
             logger: null,
             TimerJobs,
             AsyncJobs,
-            Outbox);
+            Outbox,
+            CommandIdempotency);
 
         holder = services;
 
@@ -139,6 +153,8 @@ internal sealed class DatabaseEngineHarness
     public DapperEventOutbox Outbox { get; }
 
     public DapperMigrationLog MigrationLog { get; }
+
+    public DapperCommandIdempotencyStore CommandIdempotency { get; }
 
     public DapperProcessDefinitionStore Definitions { get; }
 

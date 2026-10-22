@@ -333,7 +333,52 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
         return value is true;
     }
 
-    // ─────────────────────────── 办理关系 ───────────────────────────
+    // ─────────────────────────── 办理关系 / 审批链 ───────────────────────────
+
+    /// <summary>
+    /// 审批链的预处理结果：节点要不要被自动跳过，以及最终该给谁。
+    /// </summary>
+    /// <param name="Approvers">最终办理人（空 ⇒ 自动跳过）。</param>
+    /// <param name="SkipReason">跳过原因（仅自动跳过时非空）。</param>
+    private sealed record ApprovalChainPlan(
+        IReadOnlyList<string> Approvers,
+        string? SkipReason);
+
+    /// <summary>
+    /// 审批链预处理：把节点解析出的办理人集合交给可选的
+    /// <see cref="IApproverResolver"/> 做最终整形。
+    /// </summary>
+    /// <remarks>
+    /// <b>不配置钩子时返回 <see langword="null"/>，行为与改造前完全一致</b> ——
+    /// 这是这次改动的底线：审批链整形属于产品策略，不应由引擎替业务做决定。
+    /// </remarks>
+    private async ValueTask<ApprovalChainPlan?> PlanApprovalChainAsync(
+        UserTask userTask,
+        IDelegateExecution execution,
+        string? startUserId,
+        IReadOnlyList<string> approvers,
+        CancellationToken ct)
+    {
+        var resolver = Services.ApproverResolver;
+
+        if (resolver is null)
+        {
+            return null;
+        }
+
+        var entity = execution.AsEntity();
+
+        var context = new ApprovalChainContext(
+            entity.ProcessDefinitionId ?? string.Empty,
+            userTask.Id ?? string.Empty,
+            startUserId,
+            entity.TenantId);
+
+        var resolved = await resolver.PostProcessAsync(context, approvers, ct)
+            .ConfigureAwait(false);
+
+        return new ApprovalChainPlan(resolved, SkipReason: null);
+    }
 
     /// <summary>处理 assignee / owner / candidateGroups / candidateUsers。顺序与 Activiti 一致。</summary>
     private async ValueTask HandleAssignmentsAsync(
@@ -346,7 +391,28 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
         if (!string.IsNullOrEmpty(userTask.Assignee))
         {
             var assignee = await EvaluateToStringAsync(userTask.Assignee, execution, ct).ConfigureAwait(false);
-            await taskManager.ChangeTaskAssigneeAsync(task, assignee, ct).ConfigureAwait(false);
+
+            if (assignee is not null)
+            {
+                // 审批链预处理：发起人本人跳过 / 连续相同合并 / 空审批人转管理员
+                var entity = execution.AsEntity();
+                var plan = await PlanApprovalChainAsync(
+                    userTask,
+                    execution,
+                    startUserId: entity.StartUserId,
+                    approvers: [assignee],
+                    ct: ct).ConfigureAwait(false);
+
+                if (plan is not null)
+                {
+                    assignee = plan.Approvers.Count > 0 ? plan.Approvers[0] : null;
+                }
+            }
+
+            if (assignee is not null)
+            {
+                await taskManager.ChangeTaskAssigneeAsync(task, assignee, ct).ConfigureAwait(false);
+            }
         }
 
         if (!string.IsNullOrEmpty(userTask.Owner))

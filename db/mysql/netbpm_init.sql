@@ -215,6 +215,7 @@ create table if not exists ACT_RU_VARIABLE (
     LONG_ bigint,
     TEXT_ varchar(4000),
     TEXT2_ varchar(4000),
+    TENANT_ID_ varchar(255) default '',
     primary key (ID_)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='运行时变量表：流程实例、执行与任务级变量';
 
@@ -295,6 +296,7 @@ create table if not exists ACT_HI_VARINST (
     TEXT2_ varchar(4000),
     CREATE_TIME_ datetime(3),
     LAST_UPDATED_TIME_ datetime(3),
+    TENANT_ID_ varchar(255) default '',
     primary key (ID_)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='历史变量实例表：变量在流程结束时的最终值';
 
@@ -1338,6 +1340,8 @@ create table if not exists ACT_RU_TIMER_JOB (
     DEAD_LETTER_ tinyint default 0 comment '1=已进死信，不再参与到期轮询',
     EXCEPTION_MSG_ varchar(1000) comment '最后一次失败原因',
     LAST_FAILURE_ datetime(3) comment '最后一次失败时间（UTC）',
+    LOCK_OWNER_ varchar(64) comment '持有该作业租约的宿主实例 id',
+    LOCK_EXP_TIME_ datetime(3) comment '租约到期时间（UTC）；为 null 表示无人持有',
     primary key (ID_),
     index ACT_IDX_TIMER_JOB_DUEDATE (DUEDATE_),
     index ACT_IDX_TIMER_JOB_EXECUTION (EXECUTION_ID_),
@@ -1602,6 +1606,8 @@ create table if not exists ACT_RU_JOB (
     DEAD_LETTER_ tinyint not null default 0 comment '1=已进死信',
     EXCEPTION_MSG_ varchar(1000) comment '最后一次失败原因',
     LAST_FAILURE_ datetime(3) comment '最后一次失败时间（UTC）',
+    LOCK_OWNER_ varchar(64) comment '持有该作业租约的宿主实例 id',
+    LOCK_EXP_TIME_ datetime(3) comment '租约到期时间（UTC）；为 null 表示无人持有',
     primary key (ID_),
     index ACT_IDX_JOB_DUE (DUEDATE_, DEAD_LETTER_),
     index ACT_IDX_JOB_EXECUTION (EXECUTION_ID_),
@@ -1670,12 +1676,41 @@ prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
 
+create table if not exists ACT_CMD_IDEMPOTENCY (
+    ID_ varchar(64) not null comment '记录 id（IIdGenerator 分配）',
+    COMMAND_KEY_ varchar(200) not null comment '去重键（cmd:<commandId>:<targetId>）',
+    COMMAND_NAME_ varchar(120) not null comment '命令类型名（同一键只允许同一类命令占位）',
+    RESULT_PAYLOAD_ mediumtext comment '首次执行的结果快照（审计 / 诊断）',
+    CREATED_AT_ datetime(3) not null comment '首次占位时间（UTC）',
+    EXPIRES_AT_ datetime(3) not null comment '过期时间（UTC）',
+    primary key (ID_),
+    unique key ACT_IDX_CMD_IDEMP_KEY (COMMAND_KEY_),
+    index ACT_IDX_CMD_IDEMP_EXPIRES (EXPIRES_AT_)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='命令级幂等：同一 commandId 重复执行同一命令只生效一次（outbox 重投 / 作业重试 / 消息重复消费）';
+
+set @ddl = (select if(count(*) = 0,
+        'create unique index ACT_IDX_CMD_IDEMP_KEY on ACT_CMD_IDEMPOTENCY (COMMAND_KEY_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_CMD_IDEMPOTENCY' and index_name = 'ACT_IDX_CMD_IDEMP_KEY');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_CMD_IDEMP_EXPIRES on ACT_CMD_IDEMPOTENCY (EXPIRES_AT_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_CMD_IDEMPOTENCY' and index_name = 'ACT_IDX_CMD_IDEMP_EXPIRES');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
 
 --  这一节只为「用旧版脚本建过库」的环境准备：
 --    · 模型大文本列仍是 text（64KB）→ 扩容到 mediumtext；
---    · 定时作业表缺重试 / 死信列 → 补列。
+--    · 定时作业表缺重试 / 死信列 → 补列；
+--    · 变量表缺租户列 → 补列并按流程实例回填。
 --  新库在上面已经把表建成最终形态，这里全部是空操作。
 
 set @ddl = ifnull((select if(data_type in ('mediumtext', 'longtext'), 'select 1', 'alter table bpmn_model modify column bpmn_xml mediumtext not null')
@@ -1737,6 +1772,101 @@ set @ddl = (select if(count(*) = 0,
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'alter table ACT_RU_VARIABLE add column TENANT_ID_ varchar(255) default ''''',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'ACT_RU_VARIABLE' and column_name = 'TENANT_ID_');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'alter table ACT_HI_VARINST add column TENANT_ID_ varchar(255) default ''''',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'ACT_HI_VARINST' and column_name = 'TENANT_ID_');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+-- 0011 变量租户回填：把执行 / 流程实例上的租户刷进已有的变量行
+update ACT_RU_VARIABLE v
+    left join ACT_RU_EXECUTION e on e.ID_ = v.EXECUTION_ID_
+    left join ACT_RU_EXECUTION p on p.ID_ = v.PROC_INST_ID_
+set v.TENANT_ID_ = coalesce(e.TENANT_ID_, p.TENANT_ID_, '')
+where v.TENANT_ID_ is null;
+update ACT_HI_VARINST v
+    left join ACT_HI_PROCINST p on p.PROC_INST_ID_ = v.PROC_INST_ID_
+set v.TENANT_ID_ = coalesce(p.TENANT_ID_, '')
+where v.TENANT_ID_ is null;
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_VARIABLE_TENANT_EXEC on ACT_RU_VARIABLE (TENANT_ID_, EXECUTION_ID_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_RU_VARIABLE' and index_name = 'ACT_IDX_VARIABLE_TENANT_EXEC');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_HI_VARINST_TENANT on ACT_HI_VARINST (TENANT_ID_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_HI_VARINST' and index_name = 'ACT_IDX_HI_VARINST_TENANT');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+
+
+set @ddl = (select if(count(*) = 0,
+        'alter table ACT_RU_JOB add column LOCK_OWNER_ varchar(64)',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'ACT_RU_JOB' and column_name = 'LOCK_OWNER_');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'alter table ACT_RU_JOB add column LOCK_EXP_TIME_ datetime(3)',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'ACT_RU_JOB' and column_name = 'LOCK_EXP_TIME_');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'alter table ACT_RU_TIMER_JOB add column LOCK_OWNER_ varchar(64)',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'ACT_RU_TIMER_JOB' and column_name = 'LOCK_OWNER_');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'alter table ACT_RU_TIMER_JOB add column LOCK_EXP_TIME_ datetime(3)',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'ACT_RU_TIMER_JOB' and column_name = 'LOCK_EXP_TIME_');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_JOB_LOCK_EXP on ACT_RU_JOB (LOCK_EXP_TIME_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_RU_JOB' and index_name = 'ACT_IDX_JOB_LOCK_EXP');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_TIMER_JOB_LOCK_EXP on ACT_RU_TIMER_JOB (LOCK_EXP_TIME_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_RU_TIMER_JOB' and index_name = 'ACT_IDX_TIMER_JOB_LOCK_EXP');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
 
 
 -- ─────────────────────────── 执行结果自检 ───────────────────────────

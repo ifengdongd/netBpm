@@ -65,6 +65,16 @@ public sealed class AsyncJobEntity
     /// <summary>最后一次失败时间（UTC，<c>LAST_FAILURE_</c>）。</summary>
     public DateTime? LastFailureTime { get; set; }
 
+    /// <summary>
+    /// 租约持有者（<c>LOCK_OWNER_</c>）：宿主实例 id；<see langword="null"/> 表示无人持有。
+    /// </summary>
+    public string? LockOwner { get; set; }
+
+    /// <summary>
+    /// 租约到期时间（UTC，<c>LOCK_EXP_TIME_</c>）：持有者崩溃后不再续租即自动回收。
+    /// </summary>
+    public DateTime? LockExpirationTime { get; set; }
+
     /// <summary><c>PHASE_</c> 的持久化值。</summary>
     public string PhaseValue => Phase == AsyncJobPhase.Before ? "before" : "after";
 }
@@ -128,8 +138,48 @@ public interface IAsyncJobManager
     /// <summary>作业总数（运行中 + 死信）。</summary>
     ValueTask<int> CountAsync(CancellationToken ct = default);
 
-    /// <summary>删除作业并返回是否删到（<b>抢占</b>语义）。</summary>
+    /// <summary>
+    /// 删除作业并返回是否删到（<b>抢占</b>语义）。
+    /// <para>
+    /// ⚠️ 这是<b>旧的「先删后执行」抢占</b>：宿主在执行中途崩溃即永久丢作业。
+    /// 新代码请用 <see cref="TryAcquireAsync"/> + 成功后删除的<b>租约式</b>流程。
+    /// </para>
+    /// </summary>
     ValueTask<bool> TryDeleteAsync(string jobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 取得作业的租约（<b>租约式抢占</b>的第一步）：只标记归属，不删除行。
+    /// </summary>
+    /// <remarks>
+    /// 仅当作业「无人持有」或「租约已过期」时才成功，从而保证多宿主之间互斥；
+    /// 持有者崩溃后不再续租，租约到期即自动回收。
+    /// </remarks>
+    /// <param name="jobId">作业 id。</param>
+    /// <param name="owner">持有者标识（宿主实例 id）。</param>
+    /// <param name="nowUtc">当前时间（UTC）。</param>
+    /// <param name="leaseDuration">租约时长。</param>
+    /// <param name="ct">取消标记。</param>
+    /// <returns><see langword="true"/> 表示抢到；<see langword="false"/> 表示已被别的宿主持有。</returns>
+    ValueTask<bool> TryAcquireAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 续租（心跳）。长时间作业应在执行过程中周期性调用。
+    /// </summary>
+    /// <returns><see langword="false"/> 表示租约已被别的宿主接管，调用方应停止执行。</returns>
+    ValueTask<bool> RenewAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default);
+
+    /// <summary>释放租约（放弃执行，把作业还给队列），返回是否成功。</summary>
+    ValueTask<bool> ReleaseAsync(string jobId, string owner, CancellationToken ct = default);
 
     /// <summary>删除某执行上的全部作业。</summary>
     ValueTask<int> DeleteByExecutionAsync(string executionId, CancellationToken ct = default);
@@ -343,6 +393,85 @@ public sealed class InMemoryAsyncJobManager : IAsyncJobManager
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> TryAcquireAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+
+        if (!_jobs.TryGetValue(jobId, out var job))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (job)
+        {
+            // 内存宿主是单进程：租约只做「记录归属」，不参与并发判定
+            job.LockOwner = owner;
+            job.LockExpirationTime = nowUtc + leaseDuration;
+        }
+
+        return ValueTask.FromResult(true);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> RenewAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+
+        if (!_jobs.TryGetValue(jobId, out var job))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (job)
+        {
+            if (job.LockOwner is not null && !string.Equals(job.LockOwner, owner, StringComparison.Ordinal))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            job.LockExpirationTime = nowUtc + leaseDuration;
+        }
+
+        return ValueTask.FromResult(true);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> ReleaseAsync(string jobId, string owner, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        if (!_jobs.TryGetValue(jobId, out var job))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (job)
+        {
+            if (job.LockOwner is not null && !string.Equals(job.LockOwner, owner, StringComparison.Ordinal))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            job.LockOwner = null;
+            job.LockExpirationTime = null;
+        }
+
+        return ValueTask.FromResult(true);
     }
 
     private int RemoveAll(Func<KeyValuePair<string, AsyncJobEntity>, bool> predicate)

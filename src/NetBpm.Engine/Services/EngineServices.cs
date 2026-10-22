@@ -32,7 +32,10 @@ public sealed class EngineServices : IEngineServices
         ILogger? logger = null,
         Jobs.ITimerJobManager? timerJobManager = null,
         Jobs.IAsyncJobManager? asyncJobManager = null,
-        Events.IEventOutbox? eventOutbox = null)
+        Events.IEventOutbox? eventOutbox = null,
+        Command.ICommandIdempotencyStore? commandIdempotency = null,
+        Tasks.IApproverResolver? approverResolver = null,
+        Jobs.IJobQueue? jobQueue = null)
     {
         ExecutionManager = executionManager ?? throw new ArgumentNullException(nameof(executionManager));
         HistoryManager = historyManager ?? throw new ArgumentNullException(nameof(historyManager));
@@ -43,6 +46,9 @@ public sealed class EngineServices : IEngineServices
         TaskManager = taskManager;
         ProcessDefinitionResolver = processDefinitionResolver;
         Logger = logger;
+        CommandIdempotency = commandIdempotency;
+        ApproverResolver = approverResolver;
+        JobQueue = jobQueue;
         TimerJobManager = timerJobManager;
         AsyncJobManager = asyncJobManager;
         EventOutbox = eventOutbox;
@@ -79,6 +85,15 @@ public sealed class EngineServices : IEngineServices
 
     public Events.IEventOutbox? EventOutbox { get; }
 
+    /// <inheritdoc />
+    public Command.ICommandIdempotencyStore? CommandIdempotency { get; }
+
+    /// <inheritdoc />
+    public Tasks.IApproverResolver? ApproverResolver { get; }
+
+    /// <inheritdoc />
+    public Jobs.IJobQueue? JobQueue { get; }
+
     public ILogger? Logger { get; }
 
     /// <summary>装配入口（保留工厂形态，宿主与测试统一走这里）。</summary>
@@ -94,7 +109,10 @@ public sealed class EngineServices : IEngineServices
         ILogger? logger = null,
         Jobs.ITimerJobManager? timerJobManager = null,
         Jobs.IAsyncJobManager? asyncJobManager = null,
-        Events.IEventOutbox? eventOutbox = null) =>
+        Events.IEventOutbox? eventOutbox = null,
+        Command.ICommandIdempotencyStore? commandIdempotency = null,
+        Tasks.IApproverResolver? approverResolver = null,
+        Jobs.IJobQueue? jobQueue = null) =>
         new(
             executionManager,
             historyManager,
@@ -107,5 +125,9 @@ public sealed class EngineServices : IEngineServices
             logger,
             timerJobManager,
             asyncJobManager,
-            eventOutbox);
+            eventOutbox,
+            commandIdempotency,
+            approverResolver,
+            jobQueue);
 }
+

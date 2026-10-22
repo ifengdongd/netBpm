@@ -189,6 +189,9 @@ internal static class SchemaCatalog
                 C("LONG_", ColType.Long),
                 C("TEXT_", ColType.Varchar, 4000),
                 C("TEXT2_", ColType.Varchar, 4000),
+                // 0011：补租户列。变量承载业务数据，原先是全引擎唯一「不带租户」的运行表，
+                // 跨租户查询会看到彼此的变量（安全缺陷）。缺省 '' 与其余 ACT_* 表同口径。
+                C("TENANT_ID_", ColType.Varchar, 255, def: "''"),
             ],
             ["ID_"], [], [], [],
             EngineCharset: true),
@@ -284,6 +287,8 @@ internal static class SchemaCatalog
                 C("TEXT2_", ColType.Varchar, 4000),
                 C("CREATE_TIME_", ColType.DateTime3),
                 C("LAST_UPDATED_TIME_", ColType.DateTime3),
+                // 0011：补租户列（与 ACT_RU_VARIABLE 同因）
+                C("TENANT_ID_", ColType.Varchar, 255, def: "''"),
             ],
             ["ID_"], [], [], [],
             EngineCharset: true),
@@ -383,6 +388,21 @@ internal static class SchemaCatalog
         // 否则新库按 0004 → 0007 顺序执行时会在不存在的表上建索引而失败。
         TI("ACT_IDX_BYTEARRAY_DEPLOYMENT", "ACT_GE_BYTEARRAY", ["DEPLOYMENT_ID_"]),
         TI("ACT_IDX_DEPLOYMENT_TIME", "ACT_RE_DEPLOYMENT", ["DEPLOY_TIME_"]),
+    ];
+
+    /// <summary>
+    /// 0011 迁移：变量表的租户列及其索引。
+    /// <para>
+    /// 之所以<b>不放进 <see cref="PerfIndexes"/></b>：那一节在 ④ 渲染，而补列（ALTER）在 ⑥，
+    /// 老库升级时会先跑 ④ —— 此时列还不存在，建索引直接报
+    /// <c>Key column 'TENANT_ID_' doesn't exist in table</c>。
+    /// 放在 ⑥ 的补列之后即可保证「先加列、再建索引」。
+    /// </para>
+    /// </summary>
+    internal static readonly IReadOnlyList<TableIndexDef> VariableTenantIndexes =
+    [
+        TI("ACT_IDX_VARIABLE_TENANT_EXEC", "ACT_RU_VARIABLE", ["TENANT_ID_", "EXECUTION_ID_"]),
+        TI("ACT_IDX_HI_VARINST_TENANT", "ACT_HI_VARINST", ["TENANT_ID_"]),
     ];
 
     // ────────────────────────────────────────────────────────────────────────
@@ -841,6 +861,24 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: false);
 
+    // 0012 命令级幂等表（引擎扩展；与 HTTP 幂等键表区分，见 CommandIdempotencyKeys）
+    internal static readonly TableDef CommandIdempotencyTable = new(
+        "ACT_CMD_IDEMPOTENCY",
+        "命令级幂等：同一 commandId 重复执行同一命令只生效一次（outbox 重投 / 作业重试 / 消息重复消费）",
+        [
+            C("ID_", ColType.Varchar, 64, nullable: false, comment: "记录 id（IIdGenerator 分配）"),
+            C("COMMAND_KEY_", ColType.Varchar, 200, nullable: false, comment: "去重键（cmd:<commandId>:<targetId>）"),
+            C("COMMAND_NAME_", ColType.Varchar, 120, nullable: false, comment: "命令类型名（同一键只允许同一类命令占位）"),
+            C("RESULT_PAYLOAD_", ColType.MediumText, comment: "首次执行的结果快照（审计 / 诊断）"),
+            C("CREATED_AT_", ColType.DateTime2, nullable: false, comment: "首次占位时间（UTC）"),
+            C("EXPIRES_AT_", ColType.DateTime2, nullable: false, comment: "过期时间（UTC）"),
+        ],
+        ["ID_"],
+        [new IndexDef("ACT_IDX_CMD_IDEMP_EXPIRES", ["EXPIRES_AT_"])],
+        [new IndexDef("ACT_IDX_CMD_IDEMP_KEY", ["COMMAND_KEY_"])],
+        [],
+        EngineCharset: false);
+
     // 0006 定时作业表（引擎扩展，Activiti 原表裁列后保留核心列）
     internal static readonly TableDef TimerJobTable = new(
         "ACT_RU_TIMER_JOB",
@@ -862,6 +900,9 @@ internal static class SchemaCatalog
             C("DEAD_LETTER_", ColType.TinyInt, def: "0", comment: "1=已进死信，不再参与到期轮询"),
             C("EXCEPTION_MSG_", ColType.Varchar, 1000, comment: "最后一次失败原因"),
             C("LAST_FAILURE_", ColType.DateTime3, comment: "最后一次失败时间（UTC）"),
+            // 0012 作业租约：执行前只标记归属，执行成功后才删除（宿主崩溃后作业自动回收）
+            C("LOCK_OWNER_", ColType.Varchar, 64, comment: "持有该作业租约的宿主实例 id"),
+            C("LOCK_EXP_TIME_", ColType.DateTime3, comment: "租约到期时间（UTC）；为 null 表示无人持有"),
         ],
         ["ID_"],
         [
@@ -915,6 +956,9 @@ internal static class SchemaCatalog
             C("DEAD_LETTER_", ColType.TinyInt, nullable: false, def: "0", comment: "1=已进死信"),
             C("EXCEPTION_MSG_", ColType.Varchar, 1000, comment: "最后一次失败原因"),
             C("LAST_FAILURE_", ColType.DateTime3, comment: "最后一次失败时间（UTC）"),
+            // 0012 作业租约：执行前只标记归属，执行成功后才删除（宿主崩溃后作业自动回收）
+            C("LOCK_OWNER_", ColType.Varchar, 64, comment: "持有该作业租约的宿主实例 id"),
+            C("LOCK_EXP_TIME_", ColType.DateTime3, comment: "租约到期时间（UTC）；为 null 表示无人持有"),
         ],
         ["ID_"],
         [

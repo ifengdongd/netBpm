@@ -19,8 +19,14 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <!--
+      可选：仅当 NetBpm:Jobs:Queue:Provider = Redis 时才会建连。
+      与 Persistence 同时引用 MySql / SqlClient 的做法一致（提供方可全量引用，运行时按配置选择）。
+    -->
+    <PackageReference Include="StackExchange.Redis" />
   </ItemGroup>
 
 </Project>

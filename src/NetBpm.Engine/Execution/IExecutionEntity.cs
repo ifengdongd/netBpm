@@ -83,4 +83,15 @@ public interface IExecutionEntity : IDelegateExecution
     /// </para>
     /// </summary>
     IExecutionManager? ParentLoader { get; set; }
+
+    /// <summary>
+    /// 沿作用域链<b>批量</b>预取变量：一次往返填满链上所有作用域的变量缓存。
+    /// <para>
+    /// 网关在逐个判定出流条件之前调用它，把「每个变量一次往返」压成「一条 SQL」。
+    /// 只做提前填充，不改变求值口径；内存宿主（<c>VariableInstanceManager == null</c>）为空操作。
+    /// </para>
+    /// </summary>
+    /// <param name="names">调用方接下来要读的变量名；为空时不发查询。</param>
+    /// <param name="ct">取消标记。</param>
+    ValueTask PrefetchVariablesAsync(IReadOnlyCollection<string> names, CancellationToken ct = default);
 }

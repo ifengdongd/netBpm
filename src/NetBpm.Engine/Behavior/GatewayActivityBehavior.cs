@@ -1,3 +1,4 @@
+using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Services;
 
@@ -23,6 +24,62 @@ public abstract class GatewayActivityBehavior : FlowNodeActivityBehavior
         ArgumentNullException.ThrowIfNull(execution);
         Services.Agenda.PlanTakeOutgoingSequenceFlowsOperation(execution.AsEntity(), evaluateConditions: false);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// 预取本网关<b>全部出流条件</b>里会读到的流程变量（一次往返，消除 N+1）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为什么需要：网关条件里的变量通常落在<b>流程实例执行</b>上，而判定发生在子执行上。
+    /// 若不预取，每个变量取值都要「本作用域查一次 → 未命中 → 父作用域再查一次……」，
+    /// 出流越多、作用域链越深，往返次数越多。
+    /// </para>
+    /// <para>
+    /// 这里一次性把「所有出流条件里出现的变量」查回来，之后逐个判定条件就是纯内存操作；
+    /// 结果与逐条查询完全一致 —— 预取不改变作用域上溯语义，只改变往返次数。
+    /// </para>
+    /// <para>
+    /// 无法静态提取变量名的场景（如变量值本身是动态拼出的表达式）不受影响：
+    /// 求值时仍会走原有的懒加载路径。
+    /// </para>
+    /// </remarks>
+    protected async ValueTask PrefetchConditionVariablesAsync(
+        Gateway gateway,
+        IDelegateExecution execution,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(gateway);
+        ArgumentNullException.ThrowIfNull(execution);
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var sequenceFlow in gateway.OutgoingFlows)
+        {
+            var conditionExpression = sequenceFlow.ConditionExpression;
+
+            if (string.IsNullOrEmpty(conditionExpression))
+            {
+                continue;
+            }
+
+            // 表达式实例按原文缓存，提取结果也随之复用，这里没有重复解析成本
+            foreach (var name in Services.ExpressionManager
+                         .CreateExpression(conditionExpression)
+                         .GetVariableNames())
+            {
+                names.Add(name);
+            }
+        }
+
+        if (names.Count == 0)
+        {
+            return;
+        }
+
+        await execution.AsEntity()
+            .PrefetchVariablesAsync(names, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

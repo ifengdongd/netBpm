@@ -194,6 +194,7 @@ internal static class SqlGenerator
         SchemaCatalog.HistoryArchiveTable,
         SchemaCatalog.AsyncJobTable,
         SchemaCatalog.EventOutboxTable,
+        SchemaCatalog.CommandIdempotencyTable,
     ];
 
     /// <summary>脚本内出现过的全部表（SQL Server 注释渲染用）。</summary>
@@ -250,14 +251,15 @@ internal static class SqlGenerator
         return lines;
     }
 
-    /// <summary>老库补齐：新库执行是空操作，老库才真正扩列 / 扩文本。</summary>
+    /// <summary>老库补齐：新库执行是空操作，老库才真正扩列 / 扩文本 / 回填。</summary>
     private static List<string> RenderTransitionalUpgrade(Dialect dialect)
     {
         var lines = new List<string>
         {
             "--  这一节只为「用旧版脚本建过库」的环境准备：",
             "--    · 模型大文本列仍是 text（64KB）→ 扩容到 mediumtext；",
-            "--    · 定时作业表缺重试 / 死信列 → 补列。",
+            "--    · 定时作业表缺重试 / 死信列 → 补列；",
+            "--    · 变量表缺租户列 → 补列并按流程实例回填。",
             "--  新库在上面已经把表建成最终形态，这里全部是空操作。",
             string.Empty,
         };
@@ -280,6 +282,103 @@ internal static class SqlGenerator
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "EXCEPTION_MSG_", "varchar(1000)", "nvarchar(1000)"));
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "LAST_FAILURE_", "datetime(3)", "datetime"));
 
+        // 0011：变量表补租户列（新库上面已建成最终形态，这里只服务老库）
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_VARIABLE", "TENANT_ID_", "varchar(255) default ''", "nvarchar(255) default ''"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_HI_VARINST", "TENANT_ID_", "varchar(255) default ''", "nvarchar(255) default ''"));
+        lines.AddRange(RenderBackfillVariableTenant(dialect));
+
+        // 0012：作业表补租约列（新库上面已建成最终形态，这里只服务老库）
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_JOB", "LOCK_OWNER_", "varchar(64)", "nvarchar(64)"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_JOB", "LOCK_EXP_TIME_", "datetime(3)", "datetime"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "LOCK_OWNER_", "varchar(64)", "nvarchar(64)"));
+        lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "LOCK_EXP_TIME_", "datetime(3)", "datetime"));
+
+        // 索引必须排在补列之后：老库缺列时先建索引会报 Key column ... doesn't exist
+        lines.AddRange(RenderEngineIndex(
+            new TableIndexDef("ACT_RU_JOB", "ACT_IDX_JOB_LOCK_EXP", ["LOCK_EXP_TIME_"]),
+            dialect,
+            idempotent: true));
+        lines.Add(string.Empty);
+
+        lines.AddRange(RenderEngineIndex(
+            new TableIndexDef("ACT_RU_TIMER_JOB", "ACT_IDX_TIMER_JOB_LOCK_EXP", ["LOCK_EXP_TIME_"]),
+            dialect,
+            idempotent: true));
+        lines.Add(string.Empty);
+
+        return lines;
+    }
+
+    /// <summary>
+    /// 0011 回填：把「流程实例的租户」刷进变量行。
+    /// <para>
+    /// 为什么必须回填而不是只补空列：老库里已有大量变量行，若只补列不回填，
+    /// 这些历史行仍带着 <c>NULL</c>，按 <c>TENANT_ID_ = 'x'</c> 过滤时会被整体漏掉，
+    /// 表现为「升级后变量凭空消失」。
+    /// </para>
+    /// <para>
+    /// 幂等性由 <c>where TENANT_ID_ is null</c> 保证：新库建表时列带 <c>default ''</c>，
+    /// 没有 NULL 行，因此整句是空操作；重复执行也只会处理尚未回填的行。
+    /// </para>
+    /// <para>
+    /// 回填源优先取所属执行（<c>EXECUTION_ID_</c>），回退到流程实例
+    /// （<c>PROC_INST_ID_</c>）：任务局部变量的 <c>EXECUTION_ID_</c> 与流程实例一致，
+    /// 两条路径结果相同，但在并发分支下执行行更贴近真实作用域。
+    /// </para>
+    /// </summary>
+    private static List<string> RenderBackfillVariableTenant(Dialect dialect)
+    {
+        var lines = new List<string> { "-- 0011 变量租户回填：把执行 / 流程实例上的租户刷进已有的变量行" };
+
+        if (dialect == Dialect.MySql)
+        {
+            lines.AddRange(
+            [
+                """
+                update ACT_RU_VARIABLE v
+                    left join ACT_RU_EXECUTION e on e.ID_ = v.EXECUTION_ID_
+                    left join ACT_RU_EXECUTION p on p.ID_ = v.PROC_INST_ID_
+                set v.TENANT_ID_ = coalesce(e.TENANT_ID_, p.TENANT_ID_, '')
+                where v.TENANT_ID_ is null;
+                """,
+                """
+                update ACT_HI_VARINST v
+                    left join ACT_HI_PROCINST p on p.PROC_INST_ID_ = v.PROC_INST_ID_
+                set v.TENANT_ID_ = coalesce(p.TENANT_ID_, '')
+                where v.TENANT_ID_ is null;
+                """,
+            ]);
+        }
+        else
+        {
+            lines.AddRange(
+            [
+                """
+                update v
+                set v.TENANT_ID_ = coalesce(e.TENANT_ID_, p.TENANT_ID_, N'')
+                from ACT_RU_VARIABLE v
+                    left join ACT_RU_EXECUTION e on e.ID_ = v.EXECUTION_ID_
+                    left join ACT_RU_EXECUTION p on p.ID_ = v.PROC_INST_ID_
+                where v.TENANT_ID_ is null;
+                """,
+                """
+                update v
+                set v.TENANT_ID_ = coalesce(p.TENANT_ID_, N'')
+                from ACT_HI_VARINST v
+                    left join ACT_HI_PROCINST p on p.PROC_INST_ID_ = v.PROC_INST_ID_
+                where v.TENANT_ID_ is null;
+                """,
+            ]);
+        }
+
+        // 索引必须排在补列之后：老库缺列时先建索引会报 Key column ... doesn't exist
+        foreach (var index in SchemaCatalog.VariableTenantIndexes)
+        {
+            lines.AddRange(RenderEngineIndex(index, dialect, idempotent: true));
+            lines.Add(string.Empty);
+        }
+
+        lines.Add(string.Empty);
         return lines;
     }
 
@@ -572,10 +671,14 @@ internal static class SqlGenerator
     /// </summary>
     private static List<string> RenderMySqlGuardedAlter(string statement, string guard)
     {
+        // 语句要作为字符串字面量塞进 @ddl，其中的单引号必须翻倍 ——
+        // 否则带 default '' 的补列语句会被截断，MySQL 报 "near ''' at line 1"。
+        var literal = statement.Replace("'", "''", StringComparison.Ordinal);
+
         return
         [
             "set @ddl = (select if(count(*) = 0,",
-            $"        '{statement}',",
+            $"        '{literal}',",
             "        'select 1')",
             $"    {guard});",
             "prepare stmt from @ddl;",

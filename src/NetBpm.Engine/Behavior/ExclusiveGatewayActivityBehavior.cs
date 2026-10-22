@@ -32,6 +32,9 @@ public sealed class ExclusiveGatewayActivityBehavior : GatewayActivityBehavior
         SequenceFlow? defaultSequenceFlow = null;
         var defaultSequenceFlowId = exclusiveGateway.DefaultFlow;
 
+        // 先把所有出流条件里的变量一次取回，避免逐条件 / 逐作用域往返（N+1）
+        await PrefetchConditionVariablesAsync(exclusiveGateway, execution, ct).ConfigureAwait(false);
+
         // 判定要走哪条流。注意：一旦选中就不再继续判定条件（与 Activiti 的 while 循环等价）
         foreach (var sequenceFlow in exclusiveGateway.OutgoingFlows)
         {

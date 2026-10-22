@@ -62,6 +62,16 @@ public interface IProcessEngine
     /// <summary>立即执行一条异步作业（运维手动触发；不做失败记录）。</summary>
     ValueTask<bool> ExecuteAsyncJobAsync(string jobId, CancellationToken ct = default);
 
+    /// <summary>
+    /// 立即执行一批指定 id 的异步作业（队列驱动路径：提示里已经带到期时间，
+    /// 这里再按 <paramref name="utcNow"/> 与 <c>DUEDATE_</c> 复核一次）。
+    /// </summary>
+    /// <returns>实际执行成功的作业数。</returns>
+    ValueTask<int> ExecuteAsyncJobsByIdAsync(
+        IReadOnlyList<string> jobIds,
+        DateTime utcNow,
+        CancellationToken ct = default);
+
     /// <summary>按 id 查异步作业。</summary>
     ValueTask<AsyncJobEntity?> FindAsyncJobAsync(string jobId, CancellationToken ct = default);
 
@@ -417,6 +427,25 @@ public interface IProcessEngine
         string taskId,
         IDictionary<string, object?>? variables,
         int? expectedRevision,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 带<b>幂等键</b>地完成任务：同一 <paramref name="commandId"/> 重复调用只生效一次。
+    /// <para>
+    /// 供 outbox 重投、异步作业重试、消息重复消费等「绕过 HTTP 幂等中间件」的场景使用；
+    /// 走 HTTP 的请求仍由 <c>Idempotency-Key</c> 中间件兜底。
+    /// </para>
+    /// </summary>
+    /// <param name="taskId">任务 id。</param>
+    /// <param name="commandId">幂等键。必须非空（否则调用方应改用 <see cref="CompleteTaskAsync"/>）。</param>
+    /// <param name="variables">随完成写入的流程变量。</param>
+    /// <param name="expectedRevision">期望版本号（乐观锁）。</param>
+    /// <param name="ct">取消标记。</param>
+    ValueTask CompleteTaskIdempotentlyAsync(
+        string taskId,
+        string commandId,
+        IDictionary<string, object?>? variables = null,
+        int? expectedRevision = null,
         CancellationToken ct = default);
 
     /// <summary>

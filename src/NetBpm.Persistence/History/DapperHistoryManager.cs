@@ -452,6 +452,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
                     textValue2 = columns.TextValue2,
                     createTime = now,
                     lastUpdatedTime = now,
+                    tenantId = variable.TenantId ?? string.Empty,
                 },
                 lease.Session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
@@ -1149,10 +1150,10 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
     private const string InsertHistoricVariableInstanceSql = """
         insert into ACT_HI_VARINST (
             ID_, PROC_INST_ID_, EXECUTION_ID_, TASK_ID_, NAME_, REV_, VAR_TYPE_,
-            BYTEARRAY_ID_, DOUBLE_, LONG_, TEXT_, TEXT2_, CREATE_TIME_, LAST_UPDATED_TIME_)
+            BYTEARRAY_ID_, DOUBLE_, LONG_, TEXT_, TEXT2_, CREATE_TIME_, LAST_UPDATED_TIME_, TENANT_ID_)
         values (
             @id, @processInstanceId, @executionId, @taskId, @name, @revision, @type,
-            @bytearrayId, @doubleValue, @longValue, @textValue, @textValue2, @createTime, @lastUpdatedTime)
+            @bytearrayId, @doubleValue, @longValue, @textValue, @textValue2, @createTime, @lastUpdatedTime, @tenantId)
         """;
 
     private const string UpdateHistoricVariableInstanceSql = """

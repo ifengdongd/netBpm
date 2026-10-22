@@ -56,6 +56,26 @@ public interface IEngineServices
     Events.IEventOutbox? EventOutbox { get; }
 
     /// <summary>
+    /// 命令级幂等存储（可选）。注入后，带 <see cref="ICommandContext.CommandId"/> 的命令
+    /// 重复执行会返回首次结果而不是重复生效。
+    /// </summary>
+    Command.ICommandIdempotencyStore? CommandIdempotency { get; }
+
+    /// <summary>
+    /// 审批链预处理钩子（可选）。注入后，用户任务在写入办理关系之前会先经过它，
+    /// 典型用途是发起人去重、连续相同审批人合并、空审批人兜底。
+    /// </summary>
+    Tasks.IApproverResolver? ApproverResolver { get; }
+
+    /// <summary>
+    /// 延迟作业队列（可选）。注入后，异步作业落库的同时投递一个「到期提示」，
+    /// 后台执行器据此即时唤醒；未注入时执行器退化为固定间隔扫库。
+    /// <para>队列只传作业 id，不传业务负载：作业数据与租约始终以数据库为准，
+    /// 因此队列丢失或重复投递都不会造成丢作业 / 重复执行。</para>
+    /// </summary>
+    Jobs.IJobQueue? JobQueue { get; }
+
+    /// <summary>
     /// 引擎日志（可空）。事件监听器 throwOnFailure=false 的失败通过它记警告；
     /// 未注入时此类失败会响亮抛出，避免静默丢失语义。
     /// </summary>

@@ -85,6 +85,8 @@ public sealed class CommandExecutor : ICommandExecutor
         var startedAt = Stopwatch.GetTimestamp();
         var result = "success";
         var context = _contextFactory();
+        context.ApplyCommandId(command.CommandId);
+
         var previous = CommandContext.Swap(context);
 
         try

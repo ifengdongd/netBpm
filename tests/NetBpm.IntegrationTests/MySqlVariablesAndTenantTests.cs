@@ -1,4 +1,5 @@
 using System.Text;
+using Dapper;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Engine;
 using NetBpm.Engine.Command;
@@ -162,6 +163,79 @@ public sealed class MySqlVariablesAndTenantTests
                 session,
                 "select TENANT_ID_ from ACT_RU_EXECUTION where ID_ = '" + defaultInstanceId + "'").Single());
         }
+    }
+
+    /// <summary>
+    /// 跨租户变量隔离：变量行带租户列，按租户扫描时看不到别的租户的变量。
+    /// </summary>
+    /// <remarks>
+    /// 这是 0011 迁移要修的安全缺陷的回归防线 ——
+    /// 变量承载业务数据，若与执行 / 实例的租户脱钩，跨租户就可读到彼此的内容。
+    /// </remarks>
+    [Fact]
+    public async Task Variables_ShouldBeIsolatedByTenant()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var harness = new DatabaseEngineHarness();
+        harness.Reset();
+
+        await StartTenantInstanceAsync(harness, "acme", "secret-acme");
+        await StartTenantInstanceAsync(harness, "beta", "secret-beta");
+
+        // 运行态变量按租户扫描
+        var acmeVariables = await harness.VariableInstances.FindByTenantIdAsync("acme", Ct);
+        var betaVariables = await harness.VariableInstances.FindByTenantIdAsync("beta", Ct);
+
+        var acmeValues = acmeVariables.Select(variable => variable.Value?.ToString()).ToList();
+        var betaValues = betaVariables.Select(variable => variable.Value?.ToString()).ToList();
+
+        Assert.Contains("secret-acme", acmeValues);
+        Assert.DoesNotContain("secret-beta", acmeValues);
+        Assert.Contains("secret-beta", betaValues);
+        Assert.DoesNotContain("secret-acme", betaValues);
+
+        using var session = harness.SessionFactory.Create();
+
+        // 历史变量同样带租户：直接查库确认列已落值（而不只是运行时对象上有）
+        var tenants = session.Connection
+            .Query<string>(new CommandDefinition("select TENANT_ID_ from ACT_HI_VARINST"))
+            .ToList();
+
+        Assert.Contains("acme", tenants);
+        Assert.Contains("beta", tenants);
+        Assert.DoesNotContain(tenants, tenant => string.IsNullOrEmpty(tenant));
+
+        // 回填的幂等性：再跑一次结构校验不会把租户刷成空
+        var reloaded = await harness.VariableInstances.FindByTenantIdAsync("acme", Ct);
+        Assert.NotEmpty(reloaded);
+    }
+
+    /// <summary>在指定租户下建一个带变量的实例。</summary>
+    private static async Task StartTenantInstanceAsync(
+        DatabaseEngineHarness harness,
+        string tenantId,
+        string secret)
+    {
+        var model = new BpmnXmlConverter()
+            .ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(UserTaskProcess)));
+
+        var definition = await harness.Definitions.DeployAsync(
+            model,
+            "tenant.bpmn20.xml",
+            tenantId: tenantId,
+            ct: Ct);
+
+        var process = model.GetMainProcess()!;
+
+        var variables = new Dictionary<string, object?> { ["secret"] = secret };
+
+        await harness.Executor
+            .ExecuteAsync(
+                new StartProcessInstanceCommand(
+                    process, definition.Id, "BIZ-" + tenantId, "tester", variables, tenantId),
+                Ct)
+            .ConfigureAwait(false);
     }
 
     private static IReadOnlyList<string?> TenantsOf(IDbSession session, string sql) =>

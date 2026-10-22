@@ -83,6 +83,15 @@ internal sealed class ElBinaryNode : ElNode
             _ => throw new ElException($"未知运算符 '{_operatorText}'。"),
         };
     }
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        _left.CollectVariableNames(names);
+        _right.CollectVariableNames(names);
+    }
 }
 
 /// <summary>一元运算符。</summary>
@@ -126,6 +135,13 @@ internal sealed class ElUnaryNode : ElNode
             _ => throw new ElException("未知的一元运算符。"),
         };
     }
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        _operand.CollectVariableNames(names);
+    }
 }
 
 /// <summary>三目 <c>${a ? b : c}</c>。对应 JUEL 的 <c>AstConditional</c>（两分支各自惰性求值）。</summary>
@@ -155,5 +171,17 @@ internal sealed class ElConditionalNode : ElNode
         return condition
             ? await _yes.EvalAsync(context, ct).ConfigureAwait(false)
             : await _no.EvalAsync(context, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        // 三目是惰性求值，但预取阶段无法判定走哪个分支，取并集最稳妥：
+        // 多查一个变量只是多读一行，漏查则会在求值时退化成 N+1。
+        _condition.CollectVariableNames(names);
+        _yes.CollectVariableNames(names);
+        _no.CollectVariableNames(names);
     }
 }

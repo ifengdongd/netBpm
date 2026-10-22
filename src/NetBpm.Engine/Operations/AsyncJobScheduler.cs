@@ -33,11 +33,12 @@ internal static class AsyncJobScheduler
                 "但宿主未注册 IAsyncJobManager（见 AddNetBpmAsyncJobExecutor）。");
 
         var now = DateTime.UtcNow;
+        var jobId = services.IdGenerator.NextId();
 
         await manager.InsertAsync(
             new AsyncJobEntity
             {
-                Id = services.IdGenerator.NextId(),
+                Id = jobId,
                 Revision = 1,
                 ExecutionId = execution.Id,
                 ProcessInstanceId = execution.ProcessInstanceId ?? string.Empty,
@@ -50,5 +51,25 @@ internal static class AsyncJobScheduler
                 Retries = AsyncJobRetry.DefaultMaxRetries,
             },
             ct).ConfigureAwait(false);
+
+        // 队列只是「到期提示」通道：丢提示最多退化成定期扫库，不会丢作业。
+        // 这里在事务提交后才投递，避免回滚的作业把提示留在队列里。
+        var context = Command.CommandContext.Current;
+        var queue = services.JobQueue;
+
+        if (queue is null)
+        {
+            return;
+        }
+
+        var item = new JobQueueItem(jobId, now);
+
+        if (context is null)
+        {
+            await queue.EnqueueAsync(item, ct).ConfigureAwait(false);
+            return;
+        }
+
+        context.OnCommitted(() => queue.EnqueueAsync(item, CancellationToken.None));
     }
 }

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NetBpm.Engine.Agenda;
 using NetBpm.Engine.Services;
 
@@ -29,21 +30,106 @@ public sealed class CommandContext : ICommandContext
     /// 事务工厂。提供时用于<b>重试</b>：每次重新尝试都换一个全新的会话，
     /// 从而换掉一级缓存 —— 旧会话里被回滚的脏实体（以及自增过的 <c>REV_</c>）不得带入下一次尝试。
     /// </param>
+    /// <param name="commandId">
+    /// 幂等键。同一个键重复执行同一条命令时，仓储应当返回「首次执行」的结果快照而非再次生效。
+    /// 典型的键来源：HTTP <c>Idempotency-Key</c>、消息 id、outbox 事件 id。
+    /// </param>
     public CommandContext(
         IEngineServices services,
         ICommandTransaction? transaction = null,
-        Func<ICommandTransaction?>? transactionFactory = null)
+        Func<ICommandTransaction?>? transactionFactory = null,
+        string? commandId = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
         Services = services;
         Transaction = transactionFactory is not null ? transactionFactory() : transaction;
         Agenda = new EngineAgenda(() => services);
+        CommandId = commandId;
         _transactionFactory = transactionFactory;
+    }
+
+    /// <inheritdoc />
+    public string? CommandId { get; private set; }
+
+    /// <summary>
+    /// 由 <see cref="CommandExecutor"/> 在拿到上下文后立即写入幂等键。
+    /// <para>
+    /// 之所以不走构造函数：上下文由宿主的 <c>Func&lt;CommandContext&gt;</c> 工厂创建
+    /// （DI 组合根 / 测试 harness 各自装配），把「命令自带的幂等键」也塞进工厂签名
+    /// 会让所有调用方跟着改；这里是一次幂等的后置赋值，且必须在命令执行前完成。
+    /// </para>
+    /// <para>空 / 空白视为未启用幂等，保持 <see langword="null"/>。</para>
+    /// </summary>
+    internal void ApplyCommandId(string? commandId)
+    {
+        if (!string.IsNullOrWhiteSpace(commandId))
+        {
+            CommandId = commandId;
+        }
     }
 
     /// <summary>当前命令上下文；不在命令中时为 <see langword="null"/>。</summary>
     public static CommandContext? Current => CurrentHolder.Value;
+
+    /// <summary>事务提交后的回调（事务上下文里按注册顺序执行）。</summary>
+    private readonly List<Func<ValueTask>> _committedHooks = [];
+
+    /// <summary>
+    /// 注册一个「事务成功提交后」才执行的动作。
+    /// </summary>
+    /// <remarks>
+    /// 典型用途：向作业队列投递提示。若放在命令体里直接投递，一旦事务回滚，
+    /// 作业行不存在而提示却留下了（虽然是无效提示，但会污染队列并造成无谓查询）。
+    /// </remarks>
+    public void OnCommitted(Func<ValueTask> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        lock (_committedHooks)
+        {
+            _committedHooks.Add(action);
+        }
+    }
+
+    /// <summary>
+    /// 触发并清空提交后钩子（由 <see cref="Interceptors.TransactionInterceptor"/> 在提交后调用）。
+    /// </summary>
+    /// <remarks>
+    /// 单个钩子抛异常<b>不</b>影响其它钩子，也不影响命令结果 —— 它们只是副作用，
+    /// 失败最多退化成定期扫库。
+    /// </remarks>
+    internal async ValueTask RunCommittedHooksAsync(ILogger? logger, CancellationToken ct)
+    {
+        Func<ValueTask>[] hooks;
+
+        lock (_committedHooks)
+        {
+            if (_committedHooks.Count == 0)
+            {
+                return;
+            }
+
+            hooks = _committedHooks.ToArray();
+            _committedHooks.Clear();
+        }
+
+        foreach (var hook in hooks)
+        {
+            try
+            {
+                await hook().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger?.LogWarning(exception, "命令提交后的回调执行失败（已忽略）。");
+            }
+        }
+    }
 
     /// <inheritdoc />
     public IEngineServices Services { get; }

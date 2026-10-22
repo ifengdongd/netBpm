@@ -42,7 +42,12 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
     }
 
     /// <inheritdoc />
-    public VariableInstance Create(string executionId, string? processInstanceId, string name, object? value)
+    public VariableInstance Create(
+        string executionId,
+        string? processInstanceId,
+        string name,
+        object? value,
+        string? tenantId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -56,6 +61,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
             TypeName = VariableTypeMapper.ToColumns(value).TypeName,
             ExecutionId = executionId,
             ProcessInstanceId = processInstanceId,
+            TenantId = tenantId,
         };
     }
 
@@ -91,6 +97,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
                     processInstanceId = variable.ProcessInstanceId,
                     taskId = variable.TaskId,
                     bytearrayId = variable.ByteArrayId,
+                    tenantId = variable.TenantId ?? string.Empty,
                     longValue = columns.LongValue,
                     doubleValue = columns.DoubleValue,
                     textValue = columns.TextValue,
@@ -271,6 +278,76 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
     }
 
     /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<VariableInstance>> FindByExecutionIdsAsync(
+        IReadOnlyCollection<string> executionIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(executionIds);
+
+        // 空集不查全表：调用方按「有作用域要查」才调进来，空集直接短路，
+        // 避免一次无谓的全表扫描（也是防止 SQL 里出现空的 in () 语法错误）。
+        var distinct = executionIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (distinct.Count == 0)
+        {
+            return [];
+        }
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(
+                SelectByExecutionIdsSql,
+                new { ids = distinct },
+                session.Transaction,
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var variables = new List<VariableInstance>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            variables.Add(Read(row));
+        }
+
+        await DecodeLongStringsAsync(session, variables, ct).ConfigureAwait(false);
+
+        return variables;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<VariableInstance>> FindByTenantIdAsync(
+        string tenantId,
+        CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(
+                SelectByTenantIdSql,
+                new { tenantId = tenantId ?? string.Empty },
+                session.Transaction,
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var variables = new List<VariableInstance>();
+
+        foreach (IDictionary<string, object> row in rows)
+        {
+            variables.Add(Read(row));
+        }
+
+        await DecodeLongStringsAsync(session, variables, ct).ConfigureAwait(false);
+
+        return variables;
+    }
+
+    /// <inheritdoc />
     public async ValueTask DeleteByTaskIdAsync(string taskId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
@@ -324,6 +401,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
             ProcessInstanceId = Text(row, "PROC_INST_ID_"),
             TaskId = Text(row, "TASK_ID_"),
             ByteArrayId = Text(row, "BYTEARRAY_ID_"),
+            TenantId = Text(row, "TENANT_ID_"),
         };
     }
 
@@ -415,16 +493,16 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
     // ─────────────────────────── SQL（对应 VariableInstance.xml）───────────────────────────
 
     private const string Columns =
-        "ID_, REV_, TYPE_, NAME_, PROC_INST_ID_, EXECUTION_ID_, TASK_ID_, BYTEARRAY_ID_, DOUBLE_, LONG_, TEXT_, TEXT2_";
+        "ID_, REV_, TYPE_, NAME_, PROC_INST_ID_, EXECUTION_ID_, TASK_ID_, BYTEARRAY_ID_, DOUBLE_, LONG_, TEXT_, TEXT2_, TENANT_ID_";
 
     /// <summary>INSERT 语句把 <c>REV_</c> 写死为 1（与 Activiti 的 XML 一致）。</summary>
     private const string InsertSql = """
         insert into ACT_RU_VARIABLE (
             ID_, REV_, TYPE_, NAME_, PROC_INST_ID_, EXECUTION_ID_, TASK_ID_,
-            BYTEARRAY_ID_, DOUBLE_, LONG_, TEXT_, TEXT2_)
+            BYTEARRAY_ID_, DOUBLE_, LONG_, TEXT_, TEXT2_, TENANT_ID_)
         values (
             @id, 1, @type, @name, @processInstanceId, @executionId, @taskId,
-            @bytearrayId, @doubleValue, @longValue, @textValue, @textValue2)
+            @bytearrayId, @doubleValue, @longValue, @textValue, @textValue2, @tenantId)
         """;
 
     private const string UpdateSql = """
@@ -468,6 +546,20 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
 
     private const string SelectByExecutionIdSql =
         "select " + Columns + " from ACT_RU_VARIABLE where EXECUTION_ID_ = @executionId and TASK_ID_ is null";
+
+    /// <summary>
+    /// 批量版 <see cref="SelectByExecutionIdSql"/>。Dapper 会把 <c>@ids</c> 展开成 <c>in (@ids1, @ids2 …)</c>。
+    /// <para>
+    /// 过滤口径必须与单条版逐字一致（<c>TASK_ID_ is null</c>），否则「批量查」与「单条查」
+    /// 会看到不同的变量集合 —— 这类差异在差分对拍里极难定位。
+    /// </para>
+    /// </summary>
+    private const string SelectByExecutionIdsSql =
+        "select " + Columns + " from ACT_RU_VARIABLE where EXECUTION_ID_ in @ids and TASK_ID_ is null";
+
+    /// <summary>按租户扫描运行态变量（隔离回归用；走 ACT_IDX_VARIABLE_TENANT_EXEC 索引前缀）。</summary>
+    private const string SelectByTenantIdSql =
+        "select " + Columns + " from ACT_RU_VARIABLE where coalesce(TENANT_ID_, '') = @tenantId";
 
     private const string SelectByExecutionAndNameSql =
         "select " + Columns

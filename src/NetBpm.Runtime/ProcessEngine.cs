@@ -12,6 +12,7 @@ using NetBpm.Engine.Migration;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
 using NetBpm.Persistence.Deployment;
+using NetBpm.Runtime.Hosting.JobQueue;
 using NetBpm.Runtime.Migration;
 
 namespace NetBpm.Runtime;
@@ -31,6 +32,9 @@ public sealed class ProcessEngine : IProcessEngine
     private readonly IAsyncJobManager? _asyncJobs;
     private readonly IMigrationLog? _migrationLog;
     private readonly ILogger<ProcessEngine>? _logger;
+    private readonly NetBpmEngineOptions _engineOptions;
+    private readonly string _jobOwner;
+    private readonly IJobQueue _queue;
 
     public ProcessEngine(
         ICommandExecutor commandExecutor,
@@ -44,7 +48,9 @@ public sealed class ProcessEngine : IProcessEngine
         ITimerJobManager? timerJobs = null,
         IMigrationLog? migrationLog = null,
         ILogger<ProcessEngine>? logger = null,
-        IAsyncJobManager? asyncJobs = null)
+        IAsyncJobManager? asyncJobs = null,
+        NetBpmEngineOptions? engineOptions = null,
+        IJobQueue? jobQueue = null)
     {
         ArgumentNullException.ThrowIfNull(commandExecutor);
         ArgumentNullException.ThrowIfNull(xmlConverter);
@@ -67,6 +73,14 @@ public sealed class ProcessEngine : IProcessEngine
         _asyncJobs = asyncJobs;
         _migrationLog = migrationLog;
         _logger = logger;
+        _engineOptions = engineOptions ?? new NetBpmEngineOptions();
+        _queue = jobQueue ?? new InMemoryJobQueue();
+
+        // 宿主实例标识：多实例部署时用于作业租约抢占。
+        // 默认用机器名 + 进程 id，保证同一台机器上跑多个宿主也不冲突。
+        _jobOwner = string.IsNullOrWhiteSpace(_engineOptions.JobOwner)
+            ? $"{Environment.MachineName}#{Environment.ProcessId}"
+            : _engineOptions.JobOwner!.Trim();
     }
 
     /// <inheritdoc />
@@ -174,6 +188,48 @@ public sealed class ProcessEngine : IProcessEngine
     }
 
     /// <inheritdoc />
+    public async ValueTask<int> ExecuteAsyncJobsByIdAsync(
+        IReadOnlyList<string> jobIds,
+        DateTime utcNow,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(jobIds);
+
+        if (_asyncJobs is null)
+        {
+            return 0;
+        }
+
+        var executed = 0;
+        var failed = 0;
+
+        foreach (var jobId in jobIds)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (await _commandExecutor
+                    .ExecuteAsync(new ExecuteAsyncJobCommand(jobId, _jobOwner), ct)
+                    .ConfigureAwait(false))
+            {
+                executed++;
+                await _queue.CompleteAsync(jobId, ct).ConfigureAwait(false);
+                continue;
+            }
+
+            // 没执行成功：可能是被别的宿主持有、作业不存在、或已经执行过。
+            // 这都属于「提示已消费掉」，直接确认掉，不要把提示留在在途集合里等超时。
+            await _queue.CompleteAsync(jobId, ct).ConfigureAwait(false);
+        }
+
+        if (failed > 0)
+        {
+            _logger?.LogWarning("本轮 {Failed} 条异步作业未能执行（已被处理或已失效）。", failed);
+        }
+
+        return executed;
+    }
+
+    /// <inheritdoc />
     public async ValueTask<int> ExecuteDueAsyncJobsAsync(
         DateTime utcNow,
         int maxJobs = 50,
@@ -193,15 +249,24 @@ public sealed class ProcessEngine : IProcessEngine
         {
             ct.ThrowIfCancellationRequested();
 
+            // 租约式抢占：先标记归属，执行成功后才删除。
+            // 若本轮并发的其它宿主已抢到（或上一轮崩溃的租约尚未过期），跳过即可。
+            if (!await _asyncJobs
+                    .TryAcquireAsync(job.Id, _jobOwner, utcNow, _engineOptions.JobLease, ct)
+                    .ConfigureAwait(false))
+            {
+                continue;
+            }
+
             try
             {
                 // 每条作业一个独立事务：某一条失败（外部系统抖动 / 数据损坏）不影响其它作业
                 if (await _commandExecutor
-                        .ExecuteAsync(new ExecuteAsyncJobCommand(job.Id), ct)
+                        .ExecuteAsync(new ExecuteAsyncJobCommand(job.Id, _jobOwner), ct)
                         .ConfigureAwait(false))
-                {
-                    executed++;
-                }
+                        {
+                        executed++;
+                        }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -1051,6 +1116,43 @@ public sealed class ProcessEngine : IProcessEngine
 
         await _commandExecutor
             .ExecuteAsync(new CompleteTaskCommand(taskId, variables, expectedRevision), ct)
+        .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 带<b>幂等键</b>地完成任务。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <c>CompleteTaskAsync</c> 的差别只在：同一个 <paramref name="commandId"/> 重复调用时，
+    /// 第二次及以后直接返回，不会再次推进流程 —— 从而让「outbox 重投 / 作业重试 / 消息重复消费」
+    /// 这些绕过 HTTP 的重复驱动也安全。
+    /// </para>
+    /// <para>
+    /// 幂等记录与本次业务写入<b>同事务</b>：命令回滚 ⇒ 占位行一并消失 ⇒ 客户端可以用同一个键重试。
+    /// </para>
+    /// </remarks>
+    /// <param name="taskId">任务 id。</param>
+    /// <param name="commandId">幂等键（如消息 id / outbox 事件 id）；为空则退化成非幂等完成。</param>
+    /// <param name="variables">随完成写入的流程变量。</param>
+    /// <param name="expectedRevision">期望版本号（乐观锁）。</param>
+    /// <param name="ct">取消标记。</param>
+    public async ValueTask CompleteTaskIdempotentlyAsync(
+        string taskId,
+        string commandId,
+        IDictionary<string, object?>? variables = null,
+        int? expectedRevision = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+
+        if (string.IsNullOrWhiteSpace(commandId))
+        {
+            throw new EngineException("幂等完成必须提供 commandId；不需要幂等请改用 CompleteTaskAsync。");
+        }
+
+        await _commandExecutor
+            .ExecuteAsync(new CompleteTaskCommand(taskId, variables, expectedRevision, commandId), ct)
             .ConfigureAwait(false);
     }
 

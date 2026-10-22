@@ -55,6 +55,18 @@ public sealed class TimerJobEntity
 
     /// <summary>最后一次失败时间（UTC，<c>LAST_FAILURE_</c>）。</summary>
     public DateTime? LastFailureTime { get; set; }
+
+    /// <summary>
+    /// 租约持有者（<c>LOCK_OWNER_</c>）：宿主实例 id。
+    /// <para>为 <see langword="null"/> 表示无人持有，可被拾取。</para>
+    /// </summary>
+    public string? LockOwner { get; set; }
+
+    /// <summary>
+    /// 租约到期时间（UTC，<c>LOCK_EXP_TIME_</c>）。
+    /// <para>持有者崩溃后不再续租，到期即自动回收（作业重新可见）。</para>
+    /// </summary>
+    public DateTime? LockExpirationTime { get; set; }
 }
 
 /// <summary>定时作业重试策略的公共常量。</summary>
@@ -95,8 +107,48 @@ public interface ITimerJobManager
         int maxCount,
         CancellationToken ct = default);
 
-    /// <summary>删除作业并返回是否删到（<b>抢占</b>语义：false 表示已被别的宿主处理）。</summary>
+    /// <summary>
+    /// 删除作业并返回是否删到（<b>抢占</b>语义：false 表示已被别的宿主处理）。
+    /// <para>
+    /// ⚠️ 这是<b>旧的两步式抢占</b>：先删后执行，宿主崩溃即丢作业。
+    /// 新代码请用 <see cref="TryAcquireAsync"/> + <see cref="CompleteAsync"/> 的租约式抢占。
+    /// </para>
+    /// </summary>
     ValueTask<bool> TryDeleteAsync(string jobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 取得作业的租约（<b>租约式抢占</b>的第一步）。
+    /// </summary>
+    /// <remarks>
+    /// 语义：仅当作业「无人持有」或「租约已过期」时才标记成功。
+    /// 这样宿主崩溃后，作业会在租约到期时自动重新可见，不会永久丢失。
+    /// </remarks>
+    /// <param name="jobId">作业 id。</param>
+    /// <param name="owner">持有者标识（宿主实例 id）。</param>
+    /// <param name="nowUtc">当前时间（UTC）。</param>
+    /// <param name="leaseDuration">租约时长。</param>
+    /// <param name="ct">取消标记。</param>
+    /// <returns><see langword="true"/> 表示抢到；<see langword="false"/> 表示已被别的宿主持有。</returns>
+    ValueTask<bool> TryAcquireAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 续租（心跳）。长时间作业应在执行过程中周期性调用。
+    /// </summary>
+    /// <returns><see langword="false"/> 表示租约已被别的宿主接管，调用方应停止执行。</returns>
+    ValueTask<bool> RenewAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default);
+
+    /// <summary>释放租约（放弃执行，把作业还给队列），返回是否成功。</summary>
+    ValueTask<bool> ReleaseAsync(string jobId, string owner, CancellationToken ct = default);
 
     /// <summary>删除某执行上的全部作业（任务完成 / 跳转时调用）。</summary>
     ValueTask<int> DeleteByExecutionAsync(string executionId, CancellationToken ct = default);
@@ -212,6 +264,85 @@ public sealed class InMemoryTimerJobManager : ITimerJobManager
 
     /// <inheritdoc />
     public ValueTask<int> CountAsync(CancellationToken ct = default) => ValueTask.FromResult(_jobs.Count);
+
+    /// <inheritdoc />
+    public ValueTask<bool> TryAcquireAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+
+        if (!_jobs.TryGetValue(jobId, out var job))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (job)
+        {
+            // 内存宿主是单进程：租约只做「记录归属」，不参与并发判定
+            job.LockOwner = owner;
+            job.LockExpirationTime = nowUtc + leaseDuration;
+        }
+
+        return ValueTask.FromResult(true);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> RenewAsync(
+        string jobId,
+        string owner,
+        DateTime nowUtc,
+        TimeSpan leaseDuration,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+
+        if (!_jobs.TryGetValue(jobId, out var job))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (job)
+        {
+            if (job.LockOwner is not null && !string.Equals(job.LockOwner, owner, StringComparison.Ordinal))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            job.LockExpirationTime = nowUtc + leaseDuration;
+        }
+
+        return ValueTask.FromResult(true);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> ReleaseAsync(string jobId, string owner, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
+
+        if (!_jobs.TryGetValue(jobId, out var job))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (job)
+        {
+            if (job.LockOwner is not null && !string.Equals(job.LockOwner, owner, StringComparison.Ordinal))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            job.LockOwner = null;
+            job.LockExpirationTime = null;
+        }
+
+        return ValueTask.FromResult(true);
+    }
 
     /// <inheritdoc />
     public ValueTask RescheduleAsync(string jobId, DateTime dueDate, CancellationToken ct = default)

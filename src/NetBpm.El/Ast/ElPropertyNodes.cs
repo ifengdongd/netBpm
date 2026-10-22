@@ -17,6 +17,13 @@ internal sealed class ElIdentifierNode : ElNode
     public override ValueTask<object?> EvalAsync(ElContext context, CancellationToken ct) =>
         ElResolver.ResolveIdentifierAsync(context, _name, ct);
 
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        names.Add(_name);
+    }
+
     public override async ValueTask SetValueAsync(object? value, ElContext context, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -75,6 +82,16 @@ internal abstract class ElPropertyNode : ElNode
         }
 
         return await ResolveAsync(context, baseValue, property, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        // 属性 / 索引访问只依赖其基表达式的顶层标识符：
+        // .b / [c] 是在拿到基对象之后的内存内操作，不会再去查库。
+        Prefix.CollectVariableNames(names);
     }
 
     protected abstract ValueTask<(object? Property, bool IsNull)> GetPropertyAsync(
@@ -178,6 +195,17 @@ internal sealed class ElParametersNode
 
         return values;
     }
+
+    /// <summary>收集实参列表里会读到的变量名。</summary>
+    public void CollectVariableNames(ISet<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        foreach (var parameter in _parameters)
+        {
+            parameter.CollectVariableNames(names);
+        }
+    }
 }
 
 /// <summary>
@@ -215,5 +243,15 @@ internal sealed class ElMethodNode : ElNode
         var arguments = await _parameters.EvalAsync(context, ct).ConfigureAwait(false);
 
         return await ElResolver.InvokeAsync(context, baseValue, _method, arguments, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public override void CollectVariableNames(ISet<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        // 方法调用：基表达式 + 实参列表都可能读变量
+        _prefix.CollectVariableNames(names);
+        _parameters.CollectVariableNames(names);
     }
 }

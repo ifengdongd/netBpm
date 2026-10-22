@@ -29,14 +29,19 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
     public CompleteTaskCommand(
         string taskId,
         IDictionary<string, object?>? variables = null,
-        int? expectedRevision = null)
+        int? expectedRevision = null,
+        string? commandId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
 
         _taskId = taskId;
         _variables = variables;
         _expectedRevision = expectedRevision;
+        CommandId = commandId;
     }
+
+    /// <inheritdoc />
+    public string? CommandId { get; }
 
     /// <inheritdoc />
     public async ValueTask<Unit> ExecuteAsync(ICommandContext context, CancellationToken ct = default)
@@ -44,6 +49,42 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
         ArgumentNullException.ThrowIfNull(context);
 
         var services = context.Services;
+
+        // ── 引擎层幂等：同一 commandId 重复执行同一任务 ⇒ 直接返回，不重复生效 ──
+        var dedup = services.CommandIdempotency;
+        var commandId = context.CommandId ?? CommandId;
+
+        // 没有幂等键 ⇒ 完全走旧路径（对既有调用方零影响）
+        var dedupKey = dedup is not null && !string.IsNullOrWhiteSpace(commandId)
+            ? CommandIdempotencyKeys.ForTask(commandId, _taskId)
+            : null;
+
+        if (dedup is not null && dedupKey is not null)
+        {
+            var existing = await dedup.FindAsync(dedupKey, ct).ConfigureAwait(false);
+
+            if (existing is not null)
+            {
+                return Unit.Value;
+            }
+
+            var claimed = await dedup
+                .TryRecordAsync(
+                    new CommandExecutionRecord(
+                        dedupKey,
+                        nameof(CompleteTaskCommand),
+                        ResultPayload: string.Empty,
+                        CreatedAt: DateTime.UtcNow,
+                        ExpiresAt: DateTime.UtcNow + DefaultCommandRetention),
+                    ct)
+                .ConfigureAwait(false);
+
+            if (!claimed)
+            {
+                // 并发的另一方已占位（首次仍在执行）⇒ 同样不重复生效
+                return Unit.Value;
+            }
+        }
         var taskManager = services.TaskManager
             ?? throw new EngineNotImplementedException(
                 "任务管理器（ITaskManager）",
@@ -129,6 +170,15 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
 
         return Unit.Value;
     }
+
+    /// <summary>
+    /// 命令去重记录的保留时长。
+    /// <para>
+    /// 与 HTTP 幂等键的保留期保持一致（24h）：超过这个时间窗口的重复投递
+    /// 已经超出「网络重试」的合理范围，不应再被静默吞掉。
+    /// </para>
+    /// </summary>
+    internal static readonly TimeSpan DefaultCommandRetention = TimeSpan.FromHours(24);
 
     /// <summary>
     /// 取任务所属的用户任务元素（拿它的任务监听器配置）。

@@ -232,6 +232,7 @@ if object_id(N'ACT_RU_VARIABLE', N'U') is null
     LONG_ numeric(19,0),
     TEXT_ nvarchar(4000),
     TEXT2_ nvarchar(4000),
+    TENANT_ID_ nvarchar(255) default '',
     primary key (ID_)
     );
 go
@@ -320,6 +321,7 @@ if object_id(N'ACT_HI_VARINST', N'U') is null
     TEXT2_ nvarchar(4000),
     CREATE_TIME_ datetime,
     LAST_UPDATED_TIME_ datetime,
+    TENANT_ID_ nvarchar(255) default '',
     primary key (ID_)
     );
 go
@@ -1063,6 +1065,8 @@ if object_id(N'ACT_RU_TIMER_JOB', N'U') is null
     DEAD_LETTER_ tinyint default 0,
     EXCEPTION_MSG_ nvarchar(1000),
     LAST_FAILURE_ datetime,
+    LOCK_OWNER_ nvarchar(64),
+    LOCK_EXP_TIME_ datetime,
     primary key (ID_)
     );
 go
@@ -1225,6 +1229,8 @@ if object_id(N'ACT_RU_JOB', N'U') is null
     DEAD_LETTER_ tinyint not null default 0,
     EXCEPTION_MSG_ nvarchar(1000),
     LAST_FAILURE_ datetime,
+    LOCK_OWNER_ nvarchar(64),
+    LOCK_EXP_TIME_ datetime,
     primary key (ID_)
     );
 go
@@ -1266,12 +1272,31 @@ go
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_OUTBOX_PROC_INST' and object_id = object_id('ACT_EVT_OUTBOX'))
 create index ACT_IDX_OUTBOX_PROC_INST on ACT_EVT_OUTBOX (PROCESS_INSTANCE_ID_);
 go
+if object_id(N'ACT_CMD_IDEMPOTENCY', N'U') is null
+    create table ACT_CMD_IDEMPOTENCY (
+    ID_ nvarchar(64) not null,
+    COMMAND_KEY_ nvarchar(200) not null,
+    COMMAND_NAME_ nvarchar(120) not null,
+    RESULT_PAYLOAD_ nvarchar(max),
+    CREATED_AT_ datetime2(3) not null,
+    EXPIRES_AT_ datetime2(3) not null,
+    constraint pk_ACT_CMD_IDEMPOTENCY primary key clustered (ID_)
+    );
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_CMD_IDEMP_KEY' and object_id = object_id('ACT_CMD_IDEMPOTENCY'))
+create unique index ACT_IDX_CMD_IDEMP_KEY on ACT_CMD_IDEMPOTENCY (COMMAND_KEY_);
+go
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_CMD_IDEMP_EXPIRES' and object_id = object_id('ACT_CMD_IDEMPOTENCY'))
+create index ACT_IDX_CMD_IDEMP_EXPIRES on ACT_CMD_IDEMPOTENCY (EXPIRES_AT_);
+go
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
 
 --  这一节只为「用旧版脚本建过库」的环境准备：
 --    · 模型大文本列仍是 text（64KB）→ 扩容到 mediumtext；
---    · 定时作业表缺重试 / 死信列 → 补列。
+--    · 定时作业表缺重试 / 死信列 → 补列；
+--    · 变量表缺租户列 → 补列并按流程实例回填。
 --  新库在上面已经把表建成最终形态，这里全部是空操作。
 
 -- bpmn_xml / svg 在 SQL Server 已是 nvarchar(max)，无需扩容。
@@ -1290,6 +1315,59 @@ go
 
 if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_TIMER_JOB') and name = 'LAST_FAILURE_')
     alter table ACT_RU_TIMER_JOB add LAST_FAILURE_ datetime;
+go
+
+if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_VARIABLE') and name = 'TENANT_ID_')
+    alter table ACT_RU_VARIABLE add TENANT_ID_ nvarchar(255) default '';
+go
+
+if not exists (select 1 from sys.columns where object_id = object_id('ACT_HI_VARINST') and name = 'TENANT_ID_')
+    alter table ACT_HI_VARINST add TENANT_ID_ nvarchar(255) default '';
+go
+
+-- 0011 变量租户回填：把执行 / 流程实例上的租户刷进已有的变量行
+update v
+set v.TENANT_ID_ = coalesce(e.TENANT_ID_, p.TENANT_ID_, N'')
+from ACT_RU_VARIABLE v
+    left join ACT_RU_EXECUTION e on e.ID_ = v.EXECUTION_ID_
+    left join ACT_RU_EXECUTION p on p.ID_ = v.PROC_INST_ID_
+where v.TENANT_ID_ is null;
+update v
+set v.TENANT_ID_ = coalesce(p.TENANT_ID_, N'')
+from ACT_HI_VARINST v
+    left join ACT_HI_PROCINST p on p.PROC_INST_ID_ = v.PROC_INST_ID_
+where v.TENANT_ID_ is null;
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_VARIABLE_TENANT_EXEC' and object_id = object_id('ACT_RU_VARIABLE'))
+create index ACT_IDX_VARIABLE_TENANT_EXEC on ACT_RU_VARIABLE (TENANT_ID_, EXECUTION_ID_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_VARINST_TENANT' and object_id = object_id('ACT_HI_VARINST'))
+create index ACT_IDX_HI_VARINST_TENANT on ACT_HI_VARINST (TENANT_ID_);
+go
+
+
+if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_JOB') and name = 'LOCK_OWNER_')
+    alter table ACT_RU_JOB add LOCK_OWNER_ nvarchar(64);
+go
+
+if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_JOB') and name = 'LOCK_EXP_TIME_')
+    alter table ACT_RU_JOB add LOCK_EXP_TIME_ datetime;
+go
+
+if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_TIMER_JOB') and name = 'LOCK_OWNER_')
+    alter table ACT_RU_TIMER_JOB add LOCK_OWNER_ nvarchar(64);
+go
+
+if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_TIMER_JOB') and name = 'LOCK_EXP_TIME_')
+    alter table ACT_RU_TIMER_JOB add LOCK_EXP_TIME_ datetime;
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_JOB_LOCK_EXP' and object_id = object_id('ACT_RU_JOB'))
+create index ACT_IDX_JOB_LOCK_EXP on ACT_RU_JOB (LOCK_EXP_TIME_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_TIMER_JOB_LOCK_EXP' and object_id = object_id('ACT_RU_TIMER_JOB'))
+create index ACT_IDX_TIMER_JOB_LOCK_EXP on ACT_RU_TIMER_JOB (LOCK_EXP_TIME_);
 go
 
 
@@ -2586,6 +2664,24 @@ if exists (select 1 from sys.columns
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
         @level2type = N'COLUMN', @level2name = N'LAST_FAILURE_';
 go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_TIMER_JOB') and name = N'LOCK_OWNER_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'LOCK_OWNER_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'持有该作业租约的宿主实例 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+        @level2type = N'COLUMN', @level2name = N'LOCK_OWNER_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_TIMER_JOB') and name = N'LOCK_EXP_TIME_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_TIMER_JOB') and c.name = N'LOCK_EXP_TIME_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租约到期时间（UTC）；为 null 表示无人持有',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_TIMER_JOB',
+        @level2type = N'COLUMN', @level2name = N'LOCK_EXP_TIME_';
+go
 
 if object_id('ACT_HI_MIGRATION', 'U') is not null
     and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
@@ -3188,6 +3284,24 @@ if exists (select 1 from sys.columns
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
         @level2type = N'COLUMN', @level2name = N'LAST_FAILURE_';
 go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'LOCK_OWNER_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'LOCK_OWNER_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'持有该作业租约的宿主实例 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'LOCK_OWNER_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_RU_JOB') and name = N'LOCK_EXP_TIME_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_RU_JOB') and c.name = N'LOCK_EXP_TIME_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租约到期时间（UTC）；为 null 表示无人持有',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_RU_JOB',
+        @level2type = N'COLUMN', @level2name = N'LOCK_EXP_TIME_';
+go
 
 if object_id('ACT_EVT_OUTBOX', 'U') is not null
     and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
@@ -3340,6 +3454,69 @@ if exists (select 1 from sys.columns
     exec sp_addextendedproperty @name = N'MS_Description', @value = N'发布时间（UTC）',
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_EVT_OUTBOX',
         @level2type = N'COLUMN', @level2name = N'PUBLISHED_TIME_';
+go
+
+if object_id('ACT_CMD_IDEMPOTENCY', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('ACT_CMD_IDEMPOTENCY') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'命令级幂等：同一 commandId 重复执行同一命令只生效一次（outbox 重投 / 作业重试 / 消息重复消费）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'ACT_CMD_IDEMPOTENCY';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_CMD_IDEMPOTENCY') and name = N'ID_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_CMD_IDEMPOTENCY') and c.name = N'ID_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'记录 id（IIdGenerator 分配）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_CMD_IDEMPOTENCY',
+        @level2type = N'COLUMN', @level2name = N'ID_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_CMD_IDEMPOTENCY') and name = N'COMMAND_KEY_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_CMD_IDEMPOTENCY') and c.name = N'COMMAND_KEY_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'去重键（cmd:<commandId>:<targetId>）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_CMD_IDEMPOTENCY',
+        @level2type = N'COLUMN', @level2name = N'COMMAND_KEY_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_CMD_IDEMPOTENCY') and name = N'COMMAND_NAME_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_CMD_IDEMPOTENCY') and c.name = N'COMMAND_NAME_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'命令类型名（同一键只允许同一类命令占位）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_CMD_IDEMPOTENCY',
+        @level2type = N'COLUMN', @level2name = N'COMMAND_NAME_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_CMD_IDEMPOTENCY') and name = N'RESULT_PAYLOAD_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_CMD_IDEMPOTENCY') and c.name = N'RESULT_PAYLOAD_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'首次执行的结果快照（审计 / 诊断）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_CMD_IDEMPOTENCY',
+        @level2type = N'COLUMN', @level2name = N'RESULT_PAYLOAD_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_CMD_IDEMPOTENCY') and name = N'CREATED_AT_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_CMD_IDEMPOTENCY') and c.name = N'CREATED_AT_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'首次占位时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_CMD_IDEMPOTENCY',
+        @level2type = N'COLUMN', @level2name = N'CREATED_AT_';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('ACT_CMD_IDEMPOTENCY') and name = N'EXPIRES_AT_')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('ACT_CMD_IDEMPOTENCY') and c.name = N'EXPIRES_AT_')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'过期时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'ACT_CMD_IDEMPOTENCY',
+        @level2type = N'COLUMN', @level2name = N'EXPIRES_AT_';
 go
 
 

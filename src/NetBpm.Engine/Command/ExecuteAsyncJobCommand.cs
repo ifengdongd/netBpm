@@ -14,13 +14,30 @@ namespace NetBpm.Engine.Command;
 /// </summary>
 public sealed class ExecuteAsyncJobCommand : ICommand<bool>
 {
-    private readonly string _jobId;
+    /// <summary>
+    /// 单次拾取的租约时长。
+    /// <para>
+    /// 与定时作业取同一个量级（5min）：应远大于任何单条作业的合理执行时长，
+    /// 避免正常长作业被误判为「宿主已崩溃」而被并发接管。
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan JobLease = TimeSpan.FromMinutes(5);
 
-    public ExecuteAsyncJobCommand(string jobId)
+    private readonly string _jobId;
+    private readonly string? _owner;
+
+    /// <param name="jobId">作业 id。</param>
+    /// <param name="owner">
+    /// 持有者标识（宿主实例 id）。传入时先按租约抢占（无人持有 / 租约已过期才成功），
+    /// 执行成功后删除作业行 —— 宿主崩溃后作业会在租约到期时自动回收，不会永久丢失。
+    /// 为 <see langword="null"/> 时退化为旧的「条件删除抢占」（不推荐）。
+    /// </param>
+    public ExecuteAsyncJobCommand(string jobId, string? owner = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
         _jobId = jobId;
+        _owner = owner;
     }
 
     /// <inheritdoc />
@@ -31,6 +48,14 @@ public sealed class ExecuteAsyncJobCommand : ICommand<bool>
         var services = context.Services;
         var jobs = services.AsyncJobManager
             ?? throw new EngineException("异步作业存储未注册（IAsyncJobManager）。");
+
+        // 租约式抢占：执行前只标记归属，成功后才删除。
+        // 与旧的「先删后执行」相比，宿主崩溃不会丢作业。
+        if (!string.IsNullOrWhiteSpace(_owner)
+            && !await jobs.TryAcquireAsync(_jobId, _owner!, DateTime.UtcNow, JobLease, ct).ConfigureAwait(false))
+        {
+            return false;
+        }
 
         var job = await jobs.FindByIdAsync(_jobId, ct).ConfigureAwait(false);
 
@@ -76,13 +101,11 @@ public sealed class ExecuteAsyncJobCommand : ICommand<bool>
             return false;
         }
 
-        // 抢占：删不到说明别的宿主已经处理
-        if (!await jobs.TryDeleteAsync(_jobId, ct).ConfigureAwait(false))
-        {
-            return false;
-        }
+        // 租约式抢占的收口：代码走到这里说明业务已执行成功，此时才真正删除作业行
+        await jobs.TryDeleteAsync(_jobId, ct).ConfigureAwait(false);
 
         execution.CurrentFlowElement = activity;
+
         execution.CurrentActivityId = activity.Id;
         execution.IsActive = true;
 

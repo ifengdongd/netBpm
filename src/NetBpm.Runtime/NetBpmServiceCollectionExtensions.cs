@@ -12,6 +12,7 @@ using NetBpm.Engine.Command.Interceptors;
 using NetBpm.Engine.Events;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
+using NetBpm.Runtime.Hosting.JobQueue;
 using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Migration;
 using NetBpm.Engine.Services;
@@ -35,6 +36,36 @@ namespace NetBpm.Runtime;
 public static class NetBpmServiceCollectionExtensions
 {
     /// <summary>
+    /// 注册审批链预处理钩子（发起人本人跳过 / 连续相同审批人合并 / 空审批人转管理员）。
+    /// </summary>
+    /// <remarks>
+    /// <b>必须显式调用</b>：审批链整形是产品策略 —— 「发起人是否跳过」在不同业务里
+    /// 有相反的答案，引擎不应替业务做决定。不调用时行为与改造前完全一致。
+    /// </remarks>
+    public static IServiceCollection AddNetBpmApproverDeduplication(
+        this IServiceCollection services,
+        Action<ApproverDeduplicationOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var options = new ApproverDeduplicationOptions();
+        configure?.Invoke(options);
+
+        return services.AddNetBpmApproverResolver(new ApproverDeduplicationResolver(options));
+    }
+
+    /// <summary>注册自定义的审批链预处理钩子实现。</summary>
+    public static IServiceCollection AddNetBpmApproverResolver(
+        this IServiceCollection services,
+        IApproverResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(resolver);
+
+        return services.AddSingleton(resolver);
+    }
+
+    /// <summary>
     /// 注册异步作业后台执行器（<c>asyncBefore</c> / <c>asyncAfter</c>）。
     /// <para>不注册时作业仍会落库，但只有调用 <c>IProcessEngine.ExecuteDueAsyncJobsAsync</c> 才会推进。</para>
     /// </summary>
@@ -51,10 +82,28 @@ public static class NetBpmServiceCollectionExtensions
             options.Configure(configure);
         }
 
+        // 兜底默认：进程内队列。宿主若自行注册过 IJobQueue，TryAdd 不会覆盖。
+        services.TryAddSingleton<IJobQueue, InMemoryJobQueue>();
+
         services.AddHostedService<Hosting.AsyncJobExecutorService>();
 
         return services;
     }
+
+    /// <summary>
+    /// 按 <c>NetBpm:Jobs:Queue:Provider</c> 选择延迟作业队列的实现。
+    /// </summary>
+    /// <remarks>
+    /// 可选值：<c>Memory</c>（默认，进程内）/ <c>Redis</c>（多宿主共享）。
+    /// Redis 段的键形如 <c>NetBpm:Jobs:Queue:Redis:Host</c>。
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">配置了未知的实现名。</exception>
+    public static IServiceCollection AddNetBpmJobQueue(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string sectionName = "NetBpm:Jobs:Queue") =>
+        Hosting.JobQueue.JobQueueServiceCollectionExtensions
+            .AddNetBpmJobQueue(services, configuration, sectionName);
 
     /// <summary>
     /// 注册 outbox 后台发布器。只有同时开启 <see cref="NetBpmOptions.EnableOutbox"/> 才有事件可发；
@@ -209,6 +258,14 @@ public static class NetBpmServiceCollectionExtensions
             services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
         }
 
+        // ── 命令级幂等（引擎层去重，与 HTTP 幂等表分开）────────────────
+        // 数据库宿主才落库去重；内存宿主单进程内无意义，故不注册 ——
+        // 引擎侧发现端口为 null 时自动按「不启用幂等」处理，行为与旧版一致。
+        if (options.UsesDatabase)
+        {
+            services.AddSingleton<ICommandIdempotencyStore, DapperCommandIdempotencyStore>();
+        }
+
         // ── 管理治理：动作审计 + 历史归档 ─────────────────────────────
         // 审计：内存宿主持有最近 N 条（开发可查）；数据库宿主可长期追溯。
         // 归档：只在数据库宿主可用 —— 内存宿主没有 ACT_HI_*，明确返回 501 而不是静默空操作。
@@ -244,7 +301,9 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetService<ILoggerFactory>()?.CreateLogger("NetBpm.Engine"),
             provider.GetRequiredService<ITimerJobManager>(),
             provider.GetRequiredService<IAsyncJobManager>(),
-            provider.GetService<IEventOutbox>()));
+            provider.GetService<IEventOutbox>(),
+            provider.GetService<ICommandIdempotencyStore>(),
+            provider.GetService<IApproverResolver>()));
 
         // ── 命令与拦截器 ────────────────────────────────────────────
         // 链序：Log → Retry → Transaction → CommandContext

@@ -211,8 +211,15 @@ public class ExecutionEntity : IExecutionEntity
         }
 
         var variable = VariableInstanceManager is null
-            ? new VariableInstance { Name = name, Value = value, ExecutionId = Id, ProcessInstanceId = ProcessInstanceId ?? Id }
-            : VariableInstanceManager.Create(Id, ProcessInstanceId ?? Id, name, value);
+            ? new VariableInstance
+            {
+                Name = name,
+                Value = value,
+                ExecutionId = Id,
+                ProcessInstanceId = ProcessInstanceId ?? Id,
+                TenantId = TenantId,
+            }
+            : VariableInstanceManager.Create(Id, ProcessInstanceId ?? Id, name, value, TenantId);
 
         _variables[name] = variable;
 
@@ -281,6 +288,118 @@ public class ExecutionEntity : IExecutionEntity
         // 作用域链上溯：变量可能在更高的作用域上
         var parent = await ResolveParentAsync(ct).ConfigureAwait(false);
         return parent is not null && await parent.RemoveVariableAsync(name, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 沿作用域链<b>批量</b>预取变量，一次往返填满链上所有作用域的缓存（N+1 消除）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为什么需要它：流程变量落在<b>流程实例执行</b>上，而网关判定常发生在<b>子执行</b>上。
+    /// 原来的 <see cref="EnsureVariablesLoadedAsync"/> 是「每个作用域一次查询」，
+    /// 作用域链越长、网关越多，SQL 往返越多 —— 典型 N+1。
+    /// </para>
+    /// <para>
+    /// 本方法分两步：① 沿 <c>PARENT_ID_</c> 上溯收集整条链的执行实体；
+    /// ② 用 <see cref="IVariableInstanceManager.FindByExecutionIdsAsync"/> 一次取回全部变量行，
+    /// 再按 <c>EXECUTION_ID_</c> 回填到各作用域并标记为已加载。
+    /// 之后链上任何一次 <c>GetVariableAsync</c> 都是纯内存命中。
+    /// </para>
+    /// <para>
+    /// 语义安全：预取只做「提前填充」，不改变求值口径 ——
+    /// 未命中预取的变量仍会在求值时按原有作用域链上溯（不会因预取而查不到）。
+    /// 内存宿主（无端口）或已加载时直接短路。
+    /// </para>
+    /// </remarks>
+    /// <param name="names">需要预取的变量名；为空时不做任何查询。</param>
+    /// <param name="ct">取消标记。</param>
+    public async ValueTask PrefetchVariablesAsync(
+        IReadOnlyCollection<string> names,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        if (names.Count == 0 || VariableInstanceManager is null)
+        {
+            return;
+        }
+
+        var chain = await CollectScopeChainAsync(ct).ConfigureAwait(false);
+
+        // 需要的名字已在本作用域命中 ⇒ 不必上溯（流程实例执行时是最常见的快路径）
+        if (chain[0]._variablesLoaded && names.All(name => chain[0]._variables.ContainsKey(name)))
+        {
+            return;
+        }
+
+        var pending = chain
+            .Where(execution => !execution._variablesLoaded)
+            .Select(execution => execution.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        var rows = await VariableInstanceManager
+            .FindByExecutionIdsAsync(pending, ct)
+            .ConfigureAwait(false);
+
+        var byExecution = rows
+            .GroupBy(row => row.ExecutionId ?? string.Empty, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
+
+        foreach (var execution in chain)
+        {
+            // 只把调用方点名的变量预热进缓存：其余变量等真正访问时再按原路径加载。
+            // 这样「预取」不会把大对象 / 超长文本无谓地拖进内存。
+            if (byExecution.TryGetValue(execution.Id, out var variables))
+            {
+                foreach (var variable in variables)
+                {
+                    // 已存在的条目是本命令内刚写过的「真身」，保留它，避免被库里的旧值覆盖
+                    if (!execution._variables.ContainsKey(variable.Name))
+                    {
+                        execution._variables[variable.Name] = variable;
+                    }
+                }
+            }
+
+            execution._variablesLoaded = true;
+        }
+    }
+
+    /// <summary>
+    /// 收集从本执行一路到根的完整作用域链（本执行在最前）。
+    /// </summary>
+    private async ValueTask<List<ExecutionEntity>> CollectScopeChainAsync(CancellationToken ct)
+    {
+        var chain = new List<ExecutionEntity>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var current = this;
+
+        // 执行树深度有限，这里的上限只是防御性的（避免脏数据 / 自引用造成死循环）
+        for (var depth = 0; current is not null && depth < 64; depth++)
+        {
+            if (!seen.Add(current.Id))
+            {
+                break;
+            }
+
+            chain.Add(current);
+
+            if (current.ParentId is null || ParentLoader is null)
+            {
+                break;
+            }
+
+            current = current.Parent as ExecutionEntity
+                ?? await ParentLoader.FindByIdAsync(current.ParentId, ct) as ExecutionEntity;
+        }
+
+        return chain;
     }
 
     /// <summary>

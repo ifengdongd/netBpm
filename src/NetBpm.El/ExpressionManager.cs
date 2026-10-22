@@ -44,6 +44,8 @@ public sealed class ExpressionManager : IExpressionManager
     {
         private readonly ElNode _root;
 
+        private IReadOnlyCollection<string>? _variableNames;
+
         public ValueExpression(string text, ElNode root)
         {
             ExpressionText = text;
@@ -51,6 +53,25 @@ public sealed class ExpressionManager : IExpressionManager
         }
 
         public string ExpressionText { get; }
+
+        /// <inheritdoc />
+        public IReadOnlyCollection<string> GetVariableNames()
+        {
+            // 表达式实例不可变、且按原文复用，因此变量名集合只需提取一次；
+            // 这里的懒加载天然是幂等的（并发算出两份等价集合也不影响正确性）。
+            if (_variableNames is { } cached)
+            {
+                return cached;
+            }
+
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            _root.CollectVariableNames(names);
+
+            var snapshot = (IReadOnlyCollection<string>)names.ToArray();
+            _variableNames = snapshot;
+
+            return snapshot;
+        }
 
         /// <summary>是否为纯文本（JUEL 的 <c>isLiteralText()</c>）。</summary>
         public bool IsLiteralText => _root.IsLiteralText;

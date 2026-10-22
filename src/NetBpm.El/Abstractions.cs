@@ -43,6 +43,18 @@ public interface IExpression
 
     /// <summary>赋值（用于 <c>SetValue</c> 语义的表达式）。</summary>
     ValueTask SetValueAsync(object? value, IVariableScope scope, CancellationToken ct = default);
+
+    /// <summary>
+    /// 求值时会读取的<b>顶层变量名</b>集合（如 <c>${amount > 1000}</c> → <c>["amount"]</c>）。
+    /// <para>
+    /// 用于「批量预取」：调用方可以先拿到所有需要的变量名，一次性从库里取回，
+    /// 避免每个变量一次往返（网关多出流场景下的典型 N+1）。
+    /// </summary></para>
+    /// <para>
+    /// 返回的集合<b>只读</b>且可安全缓存（表达式实例本身由 <see cref="IExpressionManager"/> 缓存）。
+    /// </para>
+    /// </summary>
+    IReadOnlyCollection<string> GetVariableNames();
 }
 
 /// <summary>

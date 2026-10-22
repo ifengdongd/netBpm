@@ -1,7 +1,10 @@
+using System.Text;
 using Dapper;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine;
+using NetBpm.Engine.Command;
+using NetBpm.Persistence;
 using NetBpm.Persistence.Database;
 
 // BPMN 模型里也有 Task 类型，会与 System.Threading.Tasks.Task 冲突
@@ -126,6 +129,77 @@ public sealed class PerformanceOptimizationIntegrationTests
         Assert.Single(byCandidate);
     }
 
+    // ─────────────────────────── SQL 语句数门禁 ───────────────────────────
+
+    /// <summary>
+    /// 跑完一个「含 N 个排他网关」实例的语句条数必须落在预算内，且<b>不随网关数量线性增长</b>。
+    /// </summary>
+    /// <remarks>
+    /// 这条用例是变量 N+1 的回归防线。它盯的不是绝对值，而是「<b>增量</b>」：
+    /// 把网关数量翻倍，语句数的增量应当是常数级（每个网关固定的几次往返），
+    /// 而不是「每多一个网关就多一次变量往返」。
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task SqlStatementBudget_ShouldNotGrowWithGatewayCount(string provider)
+    {
+        var counter = new SqlStatementCounter();
+        var harness = await SetupAsync(provider, sqlCounter: counter);
+
+        var small = await MeasureGatewayProcessAsync(harness, counter, gatewayCount: 2);
+        var large = await MeasureGatewayProcessAsync(harness, counter, gatewayCount: 6);
+
+        // 预算留了一定余量（不同驱动 / 版本的预编译语句探测行为略有差异），
+        // 但足以拦住「从常量次往返退化成每网关 × 作用域深度次往返」这类回归。
+        Assert.True(
+            small <= SqlBudgetFor(gatewayCount: 2),
+            $"2 个网关的语句数 {small} 超出预算 {SqlBudgetFor(gatewayCount: 2)}。");
+
+        Assert.True(
+            large <= SqlBudgetFor(gatewayCount: 6),
+            $"6 个网关的语句数 {large} 超出预算 {SqlBudgetFor(gatewayCount: 6)}。");
+
+        // 关键断言：增幅必须是线性小常数，不能随网关数 × 作用域深度膨胀
+        var growth = large - small;
+
+        Assert.True(
+            growth <= 40,
+            $"网关数从 2 增到 6，语句数却增加了 {growth} 条 —— 疑似变量作用域链上溯出现 N+1 回归。");
+    }
+
+    /// <summary>
+    /// 预取本身必须是「一次往返」，不能每读一个变量就多一条 SQL。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Providers))]
+    public async Task PrefetchVariables_ShouldResolveFromMemoryAfterwards(string provider)
+    {
+        var counter = new SqlStatementCounter();
+        var harness = await SetupAsync(provider, sqlCounter: counter);
+
+        // 变量落在流程实例执行上，网关判定发生在 fork 出来的子执行上
+        var (_, processInstanceId) = await harness.DeployAndStartAsync(
+            GatewayChainProcess(gatewayCount: 3),
+            new Dictionary<string, object?> { ["amount"] = 500, ["level"] = 3 },
+            Ct);
+
+        // 预取之后，连续读同一批变量必须全部内存命中，不再产生任何 SQL
+        var execution = (await harness.Executions.FindByIdAsync(processInstanceId, Ct))!;
+
+        await execution.PrefetchVariablesAsync(["amount", "level"], Ct)
+            .ConfigureAwait(false);
+
+        counter.Reset();
+
+        for (var i = 0; i < 20; i++)
+        {
+            Assert.Equal(500, await execution.GetVariableAsync("amount", Ct));
+            Assert.Equal(3, await execution.GetVariableAsync("level", Ct));
+        }
+
+        Assert.Equal(0, counter.Value);
+    }
+
     // ─────────────────────────── 历史耗时 ───────────────────────────
 
     [Theory]
@@ -158,6 +232,94 @@ public sealed class PerformanceOptimizationIntegrationTests
         Assert.True(duration >= 0, $"耗时列不应为负：{duration}");
     }
 
+    /// <summary>
+    /// 建一个「网关跑在子执行上」的流程：
+    /// <c>start → fork ┬→ gw_1 → … → gw_N → endA</c>
+    /// <c>             └→ side（用户任务，永久等待，保证实例不结束）</c>
+    /// </summary>
+    /// <remarks>
+    /// 关键是 fork：它会派生子执行，于是排他网关的判定发生在<b>子执行</b>上，
+    /// 而流程变量落在<b>流程实例执行</b>上 —— 这正是变量作用域链必须上溯的场景。
+    /// 每个网关配一真一假两个条件，确保两个条件都会被求值。
+    /// </remarks>
+    private static string GatewayChainProcess(int gatewayCount)
+    {
+        var xml = new StringBuilder();
+
+        xml.AppendLine("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="perf-gw-chain" isExecutable="true">
+                <startEvent id="start" />
+                <parallelGateway id="fork" />
+                <sequenceFlow id="f_start" sourceRef="start" targetRef="fork" />
+                <sequenceFlow id="f_branch" sourceRef="fork" targetRef="gw_1" />
+                <sequenceFlow id="f_side" sourceRef="fork" targetRef="side" />
+            """);
+
+        for (var index = 1; index <= gatewayCount; index++)
+        {
+            var target = index == gatewayCount ? "endA" : $"gw_{index + 1}";
+
+            xml.AppendLine($$"""
+                    <exclusiveGateway id="gw_{{index}}" />
+                    <sequenceFlow id="f_{{index}}_taken" sourceRef="gw_{{index}}" targetRef="{{target}}">
+                      <conditionExpression xsi:type="tFormalExpression">${amount > 0}</conditionExpression>
+                    </sequenceFlow>
+                    <sequenceFlow id="f_{{index}}_halt" sourceRef="gw_{{index}}" targetRef="alt_{{index}}">
+                      <conditionExpression xsi:type="tFormalExpression">${level > 99}</conditionExpression>
+                    </sequenceFlow>
+                    <userTask id="alt_{{index}}" activiti:assignee="nobody" />
+                """);
+        }
+
+        xml.AppendLine("""
+                <endEvent id="endA" />
+                <userTask id="side" activiti:assignee="kermit" />
+              </process>
+            </definitions>
+            """);
+
+        return xml.ToString();
+    }
+
+    /// <summary>测一次「部署 + 启动」，返回<b>启动阶段</b>实际发出的语句条数。</summary>
+    private static async Task<int> MeasureGatewayProcessAsync(
+        DatabaseEngineHarness harness,
+        SqlStatementCounter counter,
+        int gatewayCount)
+    {
+        var model = harness.XmlConverter.ConvertToBpmnModel(
+            new MemoryStream(Encoding.UTF8.GetBytes(GatewayChainProcess(gatewayCount))));
+        var process = model.GetMainProcess()!;
+
+        // 部署阶段不计入（它是一次性的、与网关判定无关的常量开销）
+        var definition = await harness.Definitions.DeployAsync(model, "perf-gw.bpmn20.xml", ct: Ct);
+
+        var variables = new Dictionary<string, object?>
+        {
+            ["amount"] = 500,
+            ["level"] = 3,
+        };
+
+        counter.Reset();
+
+        await harness.Executor.ExecuteAsync(
+            new StartProcessInstanceCommand(process, definition.Id, "BIZ-PERF", "tester", variables),
+            Ct);
+
+        return counter.Value;
+    }
+
+    /// <summary>
+    /// 语句数预算。刻意留宽（不同驱动 / 版本的语句探测次数有差异），
+    /// 但在「每个网关 × 作用域深度」的 N+1 退化面前会明确失败。
+    /// </summary>
+    private static int SqlBudgetFor(int gatewayCount) => 40 + (gatewayCount * 12);
+
     private static IReadOnlyList<string> ExpectedIndexes(string provider)
     {
         string[] common =
@@ -187,7 +349,8 @@ public sealed class PerformanceOptimizationIntegrationTests
 
     private static Task<DatabaseEngineHarness> SetupAsync(
         string provider,
-        IBpmnXmlConverter? xmlConverter = null)
+        IBpmnXmlConverter? xmlConverter = null,
+        SqlStatementCounter? sqlCounter = null)
     {
         var spec = provider switch
         {
@@ -198,7 +361,7 @@ public sealed class PerformanceOptimizationIntegrationTests
 
         Assert.SkipUnless(spec is not null, $"方言 {provider} 不可用。");
 
-        var harness = new DatabaseEngineHarness(spec!, xmlConverter: xmlConverter);
+        var harness = new DatabaseEngineHarness(spec!, xmlConverter: xmlConverter, sqlCounter: sqlCounter);
         harness.Reset();
 
         return Task.FromResult(harness);
