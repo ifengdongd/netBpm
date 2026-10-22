@@ -2,6 +2,8 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Button, Space, Typography } from 'antd';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
+import { APP_BASE } from '../api/base';
+
 /**
  * 内嵌设计器的全屏编辑页。设计器由同一宿主托管在 /designer/index.html，
  * 通过 ?modelId= 打开已有模型、?action=new 新建模型；
@@ -24,7 +26,9 @@ export default function ModelEditorPage() {
 
   designerParams.set('embed', '1');
 
-  const designerSrc = `/designer/index.html?${designerParams.toString()}`;
+  // 设计器与自己的部署前缀同源：独立部署 → /designer/index.html；
+  // 反代到 /netbpm/ → /netbpm/designer/index.html
+  const designerSrc = `${APP_BASE}/designer/index.html?${designerParams.toString()}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)' }}>

@@ -11,7 +11,13 @@ import { defineConfig } from 'vitest/config';
 // 生产构建直接输出到 src/NetBpm.Admin/wwwroot，由该宿主的 UseStaticFiles 托管。
 const apiTarget = process.env.NETBPM_API_TARGET ?? 'http://localhost:5081';
 
+// 部署前缀：独立部署（NetBpm.Admin 自己监听 5081）是 `/`；
+// 由 OPMS 反代到 /netbpm/ 时用 NETBPM_WEB_BASE=/netbpm/ 构建。
+// 路由 basename、资源路径、接口前缀都由它派生（见 src/api/base.ts），三者不会走散。
+const webBase = process.env.NETBPM_WEB_BASE ?? '/';
+
 export default defineConfig({
+  base: webBase,
   plugins: [react()],
   server: {
     port: 5274,

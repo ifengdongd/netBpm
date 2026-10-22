@@ -20,6 +20,7 @@ import {
   MODEL_READ_SCOPE,
   MODEL_WRITE_SCOPE,
 } from './auth';
+import { apiPath } from './base';
 
 export interface DiagramRecord {
   /** 模型唯一 id（服务端 bpmn_model.id；localStorage 模式 = 旧 modelId，用于 ?modelId= 直接打开）。 */
@@ -89,7 +90,7 @@ async function resolveMode(): Promise<'server' | 'local'> {
   }
 
   try {
-    const response = await fetch('/api/admin/models', { method: 'GET', headers: credentialHeaders() });
+    const response = await fetch(apiPath('/api/admin/models'), { method: 'GET', headers: credentialHeaders() });
 
     // 403 = 后端存在但当前凭据没有管理权限：必须留在 server 模式，
     // 让列表/保存把 403 明确报出来；静默回退到 localStorage 会让人误以为「数据丢了」。
@@ -253,7 +254,7 @@ async function readSavedRevision(response: Response): Promise<number | undefined
 /** 模型列表（不含 XML 正文，按最近修改倒序）。 */
 export async function readDiagrams(): Promise<DiagramRecord[]> {
   if ((await resolveMode()) === 'server') {
-    const response = await fetch('/api/admin/models', { headers: credentialHeaders() });
+    const response = await fetch(apiPath('/api/admin/models'), { headers: credentialHeaders() });
 
     ensureOk(response, '加载模型列表');
 
@@ -268,7 +269,7 @@ export async function readDiagrams(): Promise<DiagramRecord[]> {
 /** 按 modelId 取模型（含 XML）；不存在返回 undefined。 */
 export async function findByModelId(modelId: string): Promise<DiagramRecord | undefined> {
   if ((await resolveMode()) === 'server') {
-    const response = await fetch(`/api/admin/models/${encodeURIComponent(modelId)}`, {
+    const response = await fetch(apiPath(`/api/admin/models/${encodeURIComponent(modelId)}`), {
       headers: credentialHeaders(),
     });
 
@@ -309,7 +310,7 @@ export async function saveDiagramXml(
       revision !== undefined && revision > 0 ? { 'If-Match': `"${revision}"` } : {};
 
     const send = (method: 'PATCH' | 'PUT') =>
-      fetch(`/api/admin/models/${encodeURIComponent(id)}`, {
+      fetch(apiPath(`/api/admin/models/${encodeURIComponent(id)}`), {
         method,
         headers: { 'Content-Type': 'application/json', ...ifMatch, ...credentialHeaders() },
         body: JSON.stringify(payload),
@@ -344,7 +345,7 @@ export async function saveDiagramXml(
 /** 按 modelId 删除模型。 */
 export async function deleteDiagram(modelId: string): Promise<void> {
   if ((await resolveMode()) === 'server') {
-    const response = await fetch(`/api/admin/models/${encodeURIComponent(modelId)}`, {
+    const response = await fetch(apiPath(`/api/admin/models/${encodeURIComponent(modelId)}`), {
       method: 'DELETE',
       headers: credentialHeaders(),
     });

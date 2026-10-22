@@ -22,6 +22,7 @@ import {
   MODEL_WRITE_SCOPE,
 } from './auth';
 import activitiModdle from './activiti-moddle.json';
+import { apiPath } from './base';
 import NetBpmPaletteProvider from './palette';
 import NetBpmPropertiesProvider from './designer/propertiesProvider';
 import { renderIssues } from './issues';
@@ -499,7 +500,7 @@ async function renderDeployList(): Promise<void> {
   let definitions: DeployedDefinition[] = [];
 
   try {
-    const response = await fetch('/api/designer/definitions', { headers: credentialHeaders() });
+    const response = await fetch(apiPath('/api/designer/definitions'), { headers: credentialHeaders() });
 
     // 先读原始文本：后端异常时可能返回空/非 JSON 响应体，
     // 直接 response.json() 会抛「Unexpected end of JSON input」且丢失状态码信息。
@@ -831,7 +832,7 @@ function newIdempotencyKey(): string {
  */
 async function deployXml(xml: string): Promise<DeployOutcome> {
   try {
-    const response = await fetch('/api/designer/deploy', {
+    const response = await fetch(apiPath('/api/designer/deploy'), {
       method: 'POST',
       // 幂等键：网络重试 / 代理重发时后端只部署一次，不会多出一个定义版本
       headers: {
@@ -942,7 +943,7 @@ async function loadDefinitionFromQuery(): Promise<boolean> {
 
   showView('editor');
 
-  const response = await fetch(`/api/designer/definition/${encodeURIComponent(definitionId)}/xml`, {
+  const response = await fetch(apiPath(`/api/designer/definition/${encodeURIComponent(definitionId)}/xml`), {
     headers: credentialHeaders(),
   });
 

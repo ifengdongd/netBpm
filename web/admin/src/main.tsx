@@ -6,6 +6,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 
 import App from './App';
+import { APP_BASE } from './api/base';
 import AppErrorBoundary from './components/AppErrorBoundary';
 
 import 'antd/dist/reset.css';
@@ -33,7 +34,8 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
         <AntdApp>
           {/* 在 ConfigProvider / AntdApp 之内：兜底页用到 antd 组件与主题 */}
           <AppErrorBoundary>
-            <BrowserRouter>
+            {/* basename = 部署前缀：挂在 /netbpm/ 下时路由与链接都自动带上前缀 */}
+            <BrowserRouter basename={APP_BASE === '' ? undefined : APP_BASE}>
               <App />
             </BrowserRouter>
           </AppErrorBoundary>

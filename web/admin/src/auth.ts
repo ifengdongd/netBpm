@@ -17,6 +17,7 @@
  *   - JWT：请求头 Authorization: Bearer <token>（身份来自令牌的 sub / tenant 声明）。
  * 都未配置时后端放行（开放模式），此时前端不带凭据也能正常访问。
  */
+import { apiPath } from './api/base';
 
 export type AuthMode = 'apiKey' | 'bearer';
 
@@ -182,7 +183,7 @@ export function credentialHeaders(credential: Credential | null): Record<string,
  */
 export async function verifyCredential(credential: Credential): Promise<boolean> {
   try {
-    const response = await fetch('/api/auth/me', { headers: credentialHeaders(credential) });
+    const response = await fetch(apiPath('/api/auth/me'), { headers: credentialHeaders(credential) });
 
     return response.ok;
   } catch {

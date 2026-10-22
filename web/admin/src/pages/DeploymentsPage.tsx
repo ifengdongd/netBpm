@@ -3,13 +3,28 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   FileTextOutlined,
+  FolderOpenOutlined,
   HistoryOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   RocketOutlined,
 } from '@ant-design/icons';
-import { Alert, App, Button, Form, Input, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd';
+import {
+  Alert,
+  App,
+  Button,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
@@ -225,24 +240,34 @@ export default function DeploymentsPage() {
     }
   };
 
+  // 展开行（某次部署包含的流程定义）：版本 / Key / 名称 / 状态一眼可见，
+  // 操作收成「发起」+ 图标（都带 Tooltip）—— 六个文字按钮并排会把表格撑到 470px，
+  // 反而看不清列与列的对应关系。
   const definitionColumns: ColumnsType<DeploymentDefinitionResponse> = [
-    { title: '流程 Key', dataIndex: 'key', key: 'key', render: (key: string) => <Tag>{key}</Tag> },
-    { title: '名称', dataIndex: 'name', key: 'name', render: (name?: string | null) => name ?? '—' },
-    { title: '版本', dataIndex: 'version', key: 'version', width: 80, render: (v: number) => `v${v}` },
+    { title: '版本', dataIndex: 'version', key: 'version', width: 72, render: (v: number) => <Tag color="blue">v{v}</Tag> },
+    {
+      title: '流程 Key',
+      dataIndex: 'key',
+      key: 'key',
+      width: 170,
+      render: (key: string) => <Typography.Text code>{key}</Typography.Text>,
+    },
+    { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, render: (name?: string | null) => name ?? '—' },
     { title: '资源名', dataIndex: 'resourceName', key: 'resourceName', ellipsis: true },
     {
       title: '状态',
       dataIndex: 'isSuspended',
       key: 'isSuspended',
-      width: 90,
+      width: 92,
       render: (suspended: boolean) => (suspended ? <Tag color="warning">已挂起</Tag> : <Tag color="success">运行中</Tag>),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 470,
+      width: 250,
+      align: 'right',
       render: (_, record) => (
-        <Space>
+        <Space size={4}>
           <Button
             size="small"
             type="primary"
@@ -254,68 +279,118 @@ export default function DeploymentsPage() {
           >
             发起
           </Button>
-          <Button
-            size="small"
-            icon={<CopyOutlined />}
-            title="把该定义另存为设计器模型"
-            onClick={() => void saveAsModel(record)}
-          />
-          <Button
-            size="small"
-            icon={record.isSuspended ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
-            onClick={() => void toggleSuspension(record)}
-          >
-            {record.isSuspended ? '激活' : '挂起'}
-          </Button>
-          <Button size="small" icon={<HistoryOutlined />} onClick={() => setVersionsKey(record.key)}>
-            版本
-          </Button>
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => setXmlTarget(record)}>
-            XML
-          </Button>
-          <Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadDefinition(record)}>
-            下载
-          </Button>
+          <Tooltip title="另存为设计器模型">
+            <Button size="small" icon={<CopyOutlined />} onClick={() => void saveAsModel(record)} />
+          </Tooltip>
+          <Tooltip title={record.isSuspended ? '激活该版本' : '挂起该版本'}>
+            <Button
+              size="small"
+              icon={record.isSuspended ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
+              onClick={() => void toggleSuspension(record)}
+            />
+          </Tooltip>
+          <Tooltip title="查看历史版本">
+            <Button size="small" icon={<HistoryOutlined />} onClick={() => setVersionsKey(record.key)} />
+          </Tooltip>
+          <Tooltip title="查看 BPMN XML">
+            <Button size="small" icon={<FileTextOutlined />} onClick={() => setXmlTarget(record)} />
+          </Tooltip>
+          <Tooltip title="下载 BPMN 文件">
+            <Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadDefinition(record)} />
+          </Tooltip>
         </Space>
       ),
     },
   ];
 
+  // 租户列只在真有租户时出现：OPMS 部署的流程都不带租户，常年一列「—」纯占宽
+  const showTenant = deployments.some((d) => (d.tenantId ?? '').trim() !== '');
+
   const columns: ColumnsType<DeploymentSummaryResponse> = [
     {
-      title: '部署名',
+      title: '部署',
       key: 'name',
-      render: (_, record) => <Typography.Text strong>{record.name || '（未命名部署）'}</Typography.Text>,
-    },
-    { title: '部署时间', dataIndex: 'deployTime', key: 'deployTime', width: 200, render: (v?: string | null) => formatTime(v) },
-    {
-      title: '定义',
-      key: 'definitionCount',
-      width: 110,
+      ellipsis: true,
       render: (_, record) => {
         const count = record.definitionCount ?? record.definitions.length;
-        const latest = record.latestVersion ?? Math.max(0, ...record.definitions.map((d) => d.version));
         const suspended = record.suspendedCount ?? 0;
 
         return (
-          <Space size={4} wrap>
-            <Tag>{count} 个</Tag>
-            {latest > 0 ? <Tag color="blue">v{latest}</Tag> : null}
-            {suspended > 0 ? <Tag color="orange">挂起 {suspended}</Tag> : null}
+          <Space direction="vertical" size={0} style={{ lineHeight: 1.6 }}>
+            <Space size={6}>
+              <Typography.Text strong ellipsis={{ tooltip: record.name ?? '' }}>
+                {record.name || '（未命名部署）'}
+              </Typography.Text>
+              {suspended > 0 ? <Tag color="orange">挂起 {suspended}</Tag> : null}
+            </Space>
+            <Typography.Text
+              type="secondary"
+              style={{ fontSize: 12 }}
+              // 部署 ID 只在排查时要，收起成次要信息 + 一键复制，不再单独占一列
+              copyable={{ text: record.deploymentId, tooltips: ['复制部署 ID', '已复制'] }}
+            >
+              {count} 个定义
+            </Typography.Text>
           </Space>
         );
       },
     },
-    { title: '租户', dataIndex: 'tenantId', key: 'tenantId', width: 120, render: (v?: string | null) => v || '—' },
+    {
+      title: '流程 Key',
+      key: 'keys',
+      width: 190,
+      render: (_, record) => {
+        // 一次部署可能含多个定义：只铺前两个，其余折成「+N」，避免把列撑爆
+        const keys = [...new Set(record.definitions.map((d) => d.key))];
+        if (keys.length === 0) return <Typography.Text type="secondary">—</Typography.Text>;
+
+        return (
+          <Space size={4} wrap>
+            {keys.slice(0, 2).map((key) => (
+              <Tag key={key} style={{ marginInlineEnd: 0 }}>
+                {key}
+              </Tag>
+            ))}
+            {keys.length > 2 ? <Tag style={{ marginInlineEnd: 0 }}>+{keys.length - 2}</Tag> : null}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '部署时间',
+      dataIndex: 'deployTime',
+      key: 'deployTime',
+      width: 170,
+      render: (v?: string | null) => formatTime(v),
+    },
+    {
+      title: '最新版本',
+      key: 'latestVersion',
+      width: 110,
+      render: (_, record) => {
+        const latest = record.latestVersion ?? Math.max(0, ...record.definitions.map((d) => d.version));
+        return latest > 0 ? <Tag color="blue">v{latest}</Tag> : <Typography.Text type="secondary">—</Typography.Text>;
+      },
+    },
+    ...(showTenant
+      ? [{
+          title: '租户',
+          dataIndex: 'tenantId' as const,
+          key: 'tenantId',
+          width: 110,
+          render: (v?: string | null) => v || '—',
+        }]
+      : []),
     {
       title: '操作',
       key: 'actions',
-      width: 180,
+      width: 96,
+      align: 'right' as const,
       render: (_, record) => (
-        <Space>
-          <Button size="small" onClick={() => setResourcesTarget(record)}>
-            资源
-          </Button>
+        <Space size={4}>
+          <Tooltip title="查看资源清单">
+            <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setResourcesTarget(record)} />
+          </Tooltip>
           <Popconfirm
             title={`删除部署「${record.name || record.deploymentId}」？`}
             description="将级联删除其运行中的流程实例（历史保留）。"
@@ -324,7 +399,9 @@ export default function DeploymentsPage() {
             cancelText="取消"
             onConfirm={() => void removeDeployment(record)}
           >
-            <Button size="small" danger icon={<DeleteOutlined />} />
+            <Tooltip title="删除部署">
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Tooltip>
           </Popconfirm>
         </Space>
       ),
@@ -333,48 +410,53 @@ export default function DeploymentsPage() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
-        <Space wrap>
-          <Input.Search
-            allowClear
-            placeholder="搜索部署名 / 部署 ID / 流程 Key"
-            style={{ width: 300 }}
-            value={keywordInput}
-            onChange={(event) => {
-              setKeywordInput(event.target.value);
+      {/* 工具条：搜索 + 计数在左，刷新在右；与表格同宽，不再各占一行 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <Input.Search
+          allowClear
+          placeholder="搜索部署名 / 部署 ID / 流程 Key"
+          style={{ width: 320 }}
+          value={keywordInput}
+          onChange={(event) => {
+            setKeywordInput(event.target.value);
 
-              // 清空输入即撤销过滤（allowClear 不保证触发 onSearch）
-              if (event.target.value === '' && keyword !== '') {
-                setKeyword('');
-              }
-            }}
-            onSearch={applyKeyword}
-          />
-          <Typography.Text type="secondary">
-            {keyword ? `匹配 ${deployments.length} 次部署（共 ${totalDeployments} 次）` : `共 ${totalDeployments} 次部署`}
-          </Typography.Text>
-        </Space>
-        <Button icon={<ReloadOutlined />} onClick={() => void deploymentsQuery.refetch()}>
+            // 清空输入即撤销过滤（allowClear 不保证触发 onSearch）
+            if (event.target.value === '' && keyword !== '') {
+              setKeyword('');
+            }
+          }}
+          onSearch={applyKeyword}
+        />
+        <Typography.Text type="secondary">
+          {keyword ? `匹配 ${deployments.length} 次部署（共 ${totalDeployments} 次）` : `共 ${totalDeployments} 次部署`}
+        </Typography.Text>
+        <div style={{ flex: 1 }} />
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void deploymentsQuery.refetch()}>
           刷新
         </Button>
-      </Space>
+      </div>
       <Table<DeploymentSummaryResponse>
         rowKey="deploymentId"
+        // fixed：列宽按配置走，宽屏下「部署」列不会把其它列挤到两端
+        tableLayout="fixed"
         columns={columns}
         dataSource={filteredDeployments}
         loading={loading}
+        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有部署记录" /> }}
         expandable={{
           expandedRowRender: (record) => (
             <Table<DeploymentDefinitionResponse>
               rowKey="processDefinitionId"
+              tableLayout="fixed"
               columns={definitionColumns}
               dataSource={record.definitions}
               pagination={false}
               size="small"
+              style={{ margin: '-4px 0' }}
             />
           ),
         }}
-        pagination={{ pageSize: 20, hideOnSinglePage: true }}
+        pagination={{ pageSize: 20, hideOnSinglePage: true, showSizeChanger: false }}
       />
 
       <Modal

@@ -8,8 +8,9 @@ import { defineConfig } from 'vite';
 // 端口别指错：Rest=5080 只有 designer / runtime / identity，管理端点（/api/admin/**）
 // 只在 Admin=5081 提供；需要 /api/admin/models 时目标必须是 5081。
 export default defineConfig({
-  // 部署在管理宿主的 /designer/ 子路径下，base 必须是 /designer/，否则资源会请求到 /assets/（管理端）
-  base: '/designer/',
+  // 默认部署在管理宿主的 /designer/ 子路径下，base 必须是 /designer/，否则资源会请求到 /assets/（管理端）。
+  // 被 OPMS 反代到 /netbpm/ 时用 NETBPM_DESIGNER_BASE=/netbpm/designer/ 构建。
+  base: process.env.NETBPM_DESIGNER_BASE ?? '/designer/',
   server: {
     port: 5273,
     proxy: {

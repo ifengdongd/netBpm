@@ -3,6 +3,7 @@ import { Alert, Button, Card, Checkbox, Form, Input, Segmented, Space, Typograph
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
+import { APP_BASE } from '../api/base';
 import { login } from '../api/auth';
 import { ApiError } from '../api/client';
 import { setCredential, verifyCredential, type AuthMode } from '../auth';
@@ -58,8 +59,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   const rawRedirect = searchParams.get('redirect') ?? '/models';
+  // redirect 来自 window.location.pathname，挂在子路径部署（/netbpm/）时形如 /netbpm/models；
+  // navigate 会自动再补一次 basename，所以先把前缀去掉，否则会变成 /netbpm/netbpm/models。
+  const legacyRedirect = APP_BASE !== '' && rawRedirect.startsWith(APP_BASE)
+    ? (rawRedirect.slice(APP_BASE.length) || '/models')
+    : rawRedirect;
   // 只允许同源站内路径，防开放重定向
-  const redirect = rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/models';
+  const redirect = legacyRedirect.startsWith('/') && !legacyRedirect.startsWith('//') ? legacyRedirect : '/models';
 
   const handlePasswordSubmit = async (values: PasswordFormValues) => {
     setSubmitting(true);

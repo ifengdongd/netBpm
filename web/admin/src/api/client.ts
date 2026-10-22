@@ -1,4 +1,5 @@
 import { clearCredential, credentialHeaders, getCredential } from '../auth';
+import { apiPath } from './base';
 import type { ErrorResponse, PagedResponse } from './types';
 
 /**
@@ -32,11 +33,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set(name, value);
   }
 
-  const response = await fetch(path, { ...init, headers });
+  // 统一挂部署前缀（独立部署为 ''，反代到 /netbpm/ 时为 '/netbpm'）
+  const response = await fetch(apiPath(path), { ...init, headers });
 
   // 401：凭据缺失 / 失效 → 清掉并广播事件（登录页自身用 verifyCredential 直连，不经过这里）。
   // 抛出 401 终止后续处理：既避免继续解析响应体产生二次错误，也让调用方的 catch 有据可依。
-  if (response.status === 401 && window.location.pathname !== '/login') {
+  if (response.status === 401 && window.location.pathname !== apiPath('/login')) {
     clearCredential();
     window.dispatchEvent(
       new CustomEvent(AUTH_EXPIRED_EVENT, {
@@ -179,7 +181,7 @@ export async function fetchBlob(path: string): Promise<Blob> {
     headers.set(name, value);
   }
 
-  const response = await fetch(path, { headers });
+  const response = await fetch(apiPath(path), { headers });
 
   if (!response.ok) {
     throw new ApiError(

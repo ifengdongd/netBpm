@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { credentialHeaders, getCredential } from '../auth';
+import { apiPath } from './base';
 import { ApiError } from './client';
 
 /**
@@ -36,7 +37,7 @@ export type AdminHostCheck = 'checking' | 'ok' | 'missingAdmin' | 'staleAdmin' |
  */
 async function probeStatus(path: string): Promise<number | null> {
   try {
-    const response = await fetch(path, {
+    const response = await fetch(apiPath(path), {
       headers: { Accept: 'application/json', ...credentialHeaders(getCredential()) },
     });
 
