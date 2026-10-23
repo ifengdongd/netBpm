@@ -22,7 +22,7 @@ public class JobQueueTests
                 ["NetBpm:Jobs:Queue:Provider"] = provider,
                 ["NetBpm:Jobs:Queue:Redis:Host"] = "127.0.0.1",
                 ["NetBpm:Jobs:Queue:Redis:Port"] = "6379",
-                ["NetBpm:Jobs:Queue:Redis:KeyPrefix"] = "opms:",
+                ["NetBpm:Jobs:Queue:Redis:KeyPrefix"] = "netbpm:",
             })
             .Build();
 
@@ -70,6 +70,23 @@ public class JobQueueTests
 
         Assert.Contains(nameof(JobQueueProvider.Memory), exception.Message, StringComparison.Ordinal);
         Assert.Contains(nameof(JobQueueProvider.Redis), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Memory")]
+    [InlineData("Redis")]
+    public void 队列_容器同步释放_不应抛异常(string provider)
+    {
+        // 宿主停机走的是 provider.Dispose()（同步路径）。只实现 IAsyncDisposable 的实现
+        // 会让容器在这里抛「type only implements IAsyncDisposable」，把正常停机关变成崩溃。
+        // Redis 实现按配置惰性建连，因此本用例不需要真实 Redis。
+        var services = BuildServices(provider).BuildServiceProvider();
+
+        services.GetRequiredService<IJobQueue>();
+
+        var exception = Record.Exception(services.Dispose);
+
+        Assert.Null(exception);
     }
 
     [Fact]
