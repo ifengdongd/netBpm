@@ -20,12 +20,15 @@ namespace NetBpm.Runtime.Hosting.JobQueue;
 /// 多宿主共享请改用 <see cref="RedisJobQueue"/>。
 /// </para>
 /// </remarks>
-public sealed class InMemoryJobQueue : IJobQueue
+public sealed class InMemoryJobQueue : IJobQueue, IDisposable
 {
     private readonly PriorityQueue<JobQueueItem, DateTime> _queue = new();
     private readonly SemaphoreSlim _wakeup = new(0);
     private readonly object _gate = new();
     private bool _disposed;
+
+    /// <summary>最短等待：避免「马上就到点」被算成 0 等待后自旋。</summary>
+    private static readonly TimeSpan MinimumWait = TimeSpan.FromMilliseconds(1);
 
     /// <param name="maxWait">空闲时的兜底等待上限；<see langword="null"/> 用默认值 30s。</param>
     public InMemoryJobQueue(TimeSpan? maxWait = null)
@@ -76,6 +79,10 @@ public sealed class InMemoryJobQueue : IJobQueue
         // 保证「提示丢失」时最多 MaxWait 就能回落到扫库。
         var wait = waitTimeout < MaxWait ? waitTimeout : MaxWait;
 
+        // wait 是「本轮总共最多等这么久」的**截止时刻**，不是每次循环的睡眠时长：
+        // 若把它当成每轮睡眠，被唤醒 / 超时后重入循环会再睡一整轮，调用方永远拿不到结果。
+        var startedAt = DateTime.UtcNow;
+
         while (true)
         {
             ct.ThrowIfCancellationRequested();
@@ -87,11 +94,19 @@ public sealed class InMemoryJobQueue : IJobQueue
                 return taken;
             }
 
-            var untilNext = NextDelay(wait);
+            var remaining = wait - (DateTime.UtcNow - startedAt);
 
-            if (untilNext <= TimeSpan.Zero)
+            if (remaining <= TimeSpan.Zero)
             {
                 return Array.Empty<JobQueueItem>();
+            }
+
+            // 睡到「下一个到期时刻」或剩余时间，二者取小；被入队唤醒则提前重试
+            var untilNext = NextDelay(remaining);
+
+            if (untilNext < MinimumWait)
+            {
+                untilNext = MinimumWait;
             }
 
             await _wakeup.WaitAsync(untilNext, ct).ConfigureAwait(false);
@@ -129,15 +144,24 @@ public sealed class InMemoryJobQueue : IJobQueue
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
+        Dispose();
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// 同步释放：DI 容器用 <c>provider.Dispose()</c> 收尾时只会找 <see cref="IDisposable"/>，
+    /// 只实现 <see cref="IAsyncDisposable"/> 会让容器在「同步释放」路径上直接抛异常。
+    /// </summary>
+    public void Dispose()
+    {
         if (_disposed)
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
         _disposed = true;
         _wakeup.Dispose();
-
-        return ValueTask.CompletedTask;
     }
 
     private List<JobQueueItem> DequeueDue(int maxCount)

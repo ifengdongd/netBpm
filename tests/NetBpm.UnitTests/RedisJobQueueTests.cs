@@ -213,6 +213,33 @@ public class RedisJobQueueTests
     }
 
     [Fact]
+    public async Task Redis队列_释放共享连接的另一个实例不应摘掉本实例的唤醒订阅()
+    {
+        await RunWithRealRedisAsync(async (queue, options, db) =>
+        {
+            var peer = new RedisJobQueue(
+                queue.Connection,
+                Options.Create(options),
+                NullLogger<RedisJobQueue>.Instance);
+
+            var consumer = Task.Run(async () => await queue.TakeDueAsync(10, TimeSpan.FromSeconds(60)));
+
+            await Task.Delay(500);
+
+            // 共享连接上的「退订频道」会摘掉同一频道上的全部处理器，这里必须不碰它
+            await peer.DisposeAsync();
+
+            // 绕过队列，直接从 Redis 入队 + 广播（模拟第三个宿主）
+            await db.SortedSetAddAsync(options.DelayKey, "job-third", DateTime.UtcNow.Ticks);
+            await db.PublishAsync(RedisChannel.Literal(options.WakeChannel), "job-third");
+
+            var taken = await consumer.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal("job-third", Assert.Single(taken).JobId);
+        });
+    }
+
+    [Fact]
     public async Task Redis队列_共享连接不应被队列释放关闭()
     {
         await RunWithRealRedisAsync(async (queue, _, db) =>

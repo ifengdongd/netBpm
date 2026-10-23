@@ -56,22 +56,17 @@ public class JobQueueTests
     [Fact]
     public void Provider_未知_应响亮报错_而不是静默兜底()
     {
-        var services = BuildServices("Kafka");
+        // 配置了不存在的实现时在**注册期**立刻失败（宿主启动即崩），
+        // 而不是等到第一次取件才悄悄退化成扫库
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildServices("Kafka"));
 
-        // 配置了不存在的实现时立刻失败，避免「以为在用 Redis，其实在扫库」这类静默退化
-        Assert.Throws<InvalidOperationException>(
-            () => services.BuildServiceProvider().GetRequiredService<IJobQueue>());
+        Assert.Contains("Kafka", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Redis队列_取值未知_抛出的异常要说明可选值()
+    public void Provider_取值未知_抛出的异常要说明可选值()
     {
-        var services = BuildServices("RabbitMQ");
-
-        var provider = services.BuildServiceProvider();
-
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => provider.GetRequiredService<IJobQueue>());
+        var exception = Assert.Throws<InvalidOperationException>(() => BuildServices("RabbitMQ"));
 
         Assert.Contains(nameof(JobQueueProvider.Memory), exception.Message, StringComparison.Ordinal);
         Assert.Contains(nameof(JobQueueProvider.Redis), exception.Message, StringComparison.Ordinal);

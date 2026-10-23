@@ -40,7 +40,7 @@ namespace NetBpm.Runtime.Hosting.JobQueue;
 /// 执行器随即退化成定期扫库，作业不会丢。
 /// </para>
 /// </remarks>
-public sealed class RedisJobQueue : IJobQueue
+public sealed class RedisJobQueue : IJobQueue, IDisposable
 {
     /// <summary>
     /// 单轮拾取脚本（KEYS[1]=delay，KEYS[2]=inflight，KEYS[3]=ready）：
@@ -315,6 +315,56 @@ public sealed class RedisJobQueue : IJobQueue
         }
     }
 
+    /// <summary>
+    /// 同步释放：DI 容器用 <c>provider.Dispose()</c> 收尾时只找 <see cref="IDisposable"/>，
+    /// 缺少它会让宿主停机时抛「type only implements IAsyncDisposable」。
+    /// </summary>
+    /// <remarks>与 <see cref="DisposeAsync"/> 语义一致，只是不等异步命令完成。</remarks>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        try
+        {
+            if (_connection.IsValueCreated)
+            {
+                var connection = _connection.Value;
+
+                connection.ConnectionFailed -= OnConnectionFailed;
+
+                // 只有自己建的连接才退订：共享连接上「退订频道」会把别人的订阅一起摘掉，
+                // 而残留的处理器已经带了 _disposed 检查，留着只是空转，不会出错。
+                if (_ownsConnection)
+                {
+                    try
+                    {
+                        connection.GetSubscriber().Unsubscribe(_wakeChannel);
+                    }
+                    catch (RedisException exception)
+                    {
+                        _logger?.LogDebug(exception, "退订 Redis 唤醒频道失败（忽略）。");
+                    }
+
+                    connection.Close(allowCommandsToComplete: false);
+                    connection.Dispose();
+                }
+            }
+        }
+        catch (RedisException exception)
+        {
+            _logger?.LogWarning(exception, "关闭 Redis 连接时出错。");
+        }
+        finally
+        {
+            _wakeup.Dispose();
+        }
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
@@ -333,18 +383,19 @@ public sealed class RedisJobQueue : IJobQueue
 
                 connection.ConnectionFailed -= OnConnectionFailed;
 
-                try
-                {
-                    // 只退订本实例关心的频道；共享连接时不会影响别人的键空间
-                    await connection.GetSubscriber().UnsubscribeAsync(_wakeChannel).ConfigureAwait(false);
-                }
-                catch (RedisException exception)
-                {
-                    _logger?.LogDebug(exception, "退订 Redis 唤醒频道失败（忽略）。");
-                }
-
+                // 只有自己建的连接才退订：共享连接上「退订频道」会把别人的订阅一起摘掉，
+                // 而残留的处理器已经带了 _disposed 检查，留着只是空转，不会出错。
                 if (_ownsConnection)
                 {
+                    try
+                    {
+                        await connection.GetSubscriber().UnsubscribeAsync(_wakeChannel).ConfigureAwait(false);
+                    }
+                    catch (RedisException exception)
+                    {
+                        _logger?.LogDebug(exception, "退订 Redis 唤醒频道失败（忽略）。");
+                    }
+
                     await connection.CloseAsync().ConfigureAwait(false);
                     connection.Dispose();
                 }
