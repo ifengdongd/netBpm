@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetBpm.Engine.Jobs;
@@ -38,6 +39,8 @@ namespace NetBpm.Runtime.Hosting.JobQueue;
 /// <b>断连降级</b>：<see cref="AbortOnConnectFail"/> = <see langword="false"/>，
 /// 启动时不因 Redis 不可用而失败；所有 Redis 异常在此吞掉并记警告，
 /// 执行器随即退化成定期扫库，作业不会丢。
+/// 正因为降级是静默的，<see cref="RedisJobQueueStartupProbe"/> 会在启动时主动探一次，
+/// 连不上直接打 Error —— 否则「配了 Redis 却一直没连上」只有翻 Warning 才能发现。
 /// </para>
 /// </remarks>
 public sealed class RedisJobQueue : IJobQueue, IDisposable
@@ -169,6 +172,26 @@ public sealed class RedisJobQueue : IJobQueue, IDisposable
         _database ??= string.IsNullOrWhiteSpace(_options.ConnectionString)
             ? Connection.GetDatabase(_options.Database)
             : Connection.GetDatabase();
+
+    /// <summary>
+    /// 探测 Redis 是否可达（启动自检用）：成功返回「实际命中的逻辑库 + PING 往返时延」；
+    /// 不可达时抛 <see cref="RedisException"/>（等待超时则抛 <see cref="OperationCanceledException"/>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>复用 <see cref="Database"/> 的惰性连接：若此前没有下发过命令，这里会先建连。</para>
+    /// <para>只有一条 <c>PING</c>，<b>不创建任何键</b>，在空闲库上调用不会留下痕迹。</para>
+    /// </remarks>
+    public async ValueTask<(int Database, TimeSpan Latency)> PingAsync(CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var database = Database;
+        var startedAt = Stopwatch.GetTimestamp();
+
+        await database.PingAsync().WaitAsync(ct).ConfigureAwait(false);
+
+        return (database.Database, Stopwatch.GetElapsedTime(startedAt));
+    }
 
     /// <inheritdoc />
     public async ValueTask EnqueueAsync(JobQueueItem item, CancellationToken ct = default)

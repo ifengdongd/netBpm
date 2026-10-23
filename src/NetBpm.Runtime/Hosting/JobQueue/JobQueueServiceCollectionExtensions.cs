@@ -55,6 +55,10 @@ public static class JobQueueServiceCollectionExtensions
                 sp.GetRequiredService<IOptions<RedisJobQueueOptions>>(),
                 sp.GetService<ILogger<RedisJobQueue>>()));
 
+            // 启动自检：连通性失败要打 Error，否则「配了 Redis 却一直没连上」是静默的
+            // （作业靠扫库照常执行，只在日志里留 Warning）。BackgroundService 不阻塞宿主启动。
+            services.AddHostedService<RedisJobQueueStartupProbe>();
+
             return services;
         }
 
