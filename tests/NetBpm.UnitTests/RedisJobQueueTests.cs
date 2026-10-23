@@ -242,12 +242,12 @@ public class RedisJobQueueTests
     [Fact]
     public async Task Redis队列_共享连接不应被队列释放关闭()
     {
-        await RunWithRealRedisAsync(async (queue, _, db) =>
+        await RunWithRealRedisAsync(async (queue, options, db) =>
         {
             var shared = queue.Connection;
 
-            var options = BuildOptions();
-
+            // 必须复用外层 options：再调一次 BuildOptions() 会拿到另一个随机前缀，
+            // peer 写进去的键就落在清理范围之外，每跑一次留一个孤儿键。
             await using (var peer = new RedisJobQueue(
                 shared,
                 Options.Create(options),
