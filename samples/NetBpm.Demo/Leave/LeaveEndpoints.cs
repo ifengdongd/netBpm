@@ -41,6 +41,10 @@ public static class LeaveEndpoints
             DecorateInstanceSummary = (sp, summary) => ToInstanceSummaryAsync(sp, sp.GetRequiredService<IOrgDirectory>(), summary),
 
             ErrorResponseFactory = (message, errors) => new ErrorResponse(message, errors),
+
+            // ⚠️ 演示宿主没有鉴权，显式放开转办 / 跳转（默认为 null = 一律 403）。
+            // 生产宿主必须在这里校验管理 scope（如 netbpm.admin.task.moderate / instance.jump）。
+            AuthorizeAdminAction = (_, _, _) => ValueTask.FromResult(true),
         });
 
         // 业务数据核对入口（请假业务自有，与流程引擎无关）：

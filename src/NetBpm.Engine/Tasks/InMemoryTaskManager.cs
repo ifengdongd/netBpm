@@ -16,17 +16,22 @@ public sealed class InMemoryTaskManager : ITaskManager
 {
     private readonly IIdGenerator _idGenerator;
     private readonly IHistoryManager _historyManager;
+    private readonly IClock _clock;
     private readonly Dictionary<string, TaskEntity> _tasks = new(StringComparer.Ordinal);
     private readonly List<IdentityLinkRecord> _identityLinks = [];
     private readonly Lock _syncRoot = new();
 
-    public InMemoryTaskManager(IIdGenerator idGenerator, IHistoryManager historyManager)
+    public InMemoryTaskManager(
+        IIdGenerator idGenerator,
+        IHistoryManager historyManager,
+        IClock? clock = null)
     {
         ArgumentNullException.ThrowIfNull(idGenerator);
         ArgumentNullException.ThrowIfNull(historyManager);
 
         _idGenerator = idGenerator;
         _historyManager = historyManager;
+        _clock = clock ?? SystemClock.Instance;
     }
 
     /// <summary>当前任务数（诊断用）。</summary>
@@ -69,7 +74,7 @@ public sealed class InMemoryTaskManager : ITaskManager
     public TaskEntity CreateTask() => new()
     {
         // 对应 TaskEntityManagerImpl.create()：创建即打上创建时间
-        CreateTime = DateTime.UtcNow,
+        CreateTime = _clock.UtcNow,
         Priority = TaskEntity.DefaultPriority,
         SuspensionState = TaskEntity.ActiveSuspensionState,
     };

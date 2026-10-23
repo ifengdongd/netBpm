@@ -118,6 +118,77 @@ public sealed class OutboxTests
         Assert.Contains("boom", first.LastError, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Claim_ShouldBeExclusive_AndExpireWithLease()
+    {
+        var host = TestEngine.Create();
+        await host.StartProcessAsync(TestEngine.SequentialProcess("svc"), ct: Ct);
+
+        var pending = await host.Outbox.FindPendingAsync(DateTime.UtcNow.AddMinutes(1), 1, Ct);
+        var target = pending[0];
+        var now = DateTime.UtcNow;
+
+        Assert.True(await host.Outbox.TryClaimAsync(target.Id, now, now.AddMinutes(5), Ct));
+
+        // 同一时刻另一个宿主再抢：必须失败 —— 否则两个宿主会各投递一次
+        Assert.False(await host.Outbox.TryClaimAsync(target.Id, now, now.AddMinutes(5), Ct));
+
+        // 租约期内不可见（不会出现在待发布集合里）
+        Assert.DoesNotContain(
+            await host.Outbox.FindPendingAsync(now.AddMinutes(1), 200, Ct),
+            item => item.Id == target.Id);
+
+        // 租约到期后重新可见，并且能被再次认领（进程崩溃后的恢复路径）
+        var afterLease = now.AddMinutes(6);
+        Assert.Contains(
+            await host.Outbox.FindPendingAsync(afterLease, 200, Ct),
+            item => item.Id == target.Id);
+        Assert.True(await host.Outbox.TryClaimAsync(target.Id, afterLease, afterLease.AddMinutes(5), Ct));
+    }
+
+    [Fact]
+    public async Task TwoPublishers_ShouldNotDeliverTheSameEventTwice()
+    {
+        var host = TestEngine.Create();
+        await host.StartProcessAsync(TestEngine.SequentialProcess("svc"), ct: Ct);
+
+        var total = (await host.Outbox.FindAsync(new OutboxQuery(MaxResults: 500), Ct)).Count;
+        Assert.True(total > 0);
+
+        var handler = new CollectingHandler();
+
+        OutboxPublisherService NewPublisher() => new(
+            host.Outbox,
+            [handler],
+            Options.Create(new OutboxPublisherOptions
+            {
+                StartupDelay = TimeSpan.Zero,
+                PollInterval = TimeSpan.FromMilliseconds(5),
+                BatchSize = 50,
+            }),
+            NullLogger<OutboxPublisherService>.Instance);
+
+        var first = NewPublisher();
+        var second = NewPublisher();
+
+        await first.StartAsync(Ct);
+        await second.StartAsync(Ct);
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+
+        while (handler.Events.Count < total && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20, Ct);
+        }
+
+        await first.StopAsync(Ct);
+        await second.StopAsync(Ct);
+
+        // 两个发布器抢同一批事件：租约保证每条只投递一次（重复会在这里以「id 重复」暴露）
+        Assert.Equal(handler.Events.Count, handler.Events.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(total, handler.Events.Count);
+    }
+
     private sealed class CollectingHandler : IOutboxEventHandler
     {
         public List<OutboxEvent> Events { get; } = [];

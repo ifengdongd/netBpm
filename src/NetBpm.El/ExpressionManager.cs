@@ -18,14 +18,61 @@ namespace NetBpm.El;
 /// </summary>
 public sealed class ExpressionManager : IExpressionManager
 {
+    /// <summary>缓存条目上限（默认 2048）。</summary>
+    /// <remarks>
+    /// 表达式来自流程定义，正常模型只有几十条；上限存在只为兜底「生成式模型 / 恶意上传
+    /// 让缓存无限增长」这一类内存泄漏。淘汰按插入顺序（FIFO）：BPMN 的表达式集合稳定，
+    /// 不需要精确 LRU 的代价。
+    /// </remarks>
+    public const int DefaultMaxCacheSize = 2048;
+
     private readonly ConcurrentDictionary<string, IExpression> _cache = new(StringComparer.Ordinal);
+    private readonly ConcurrentQueue<string> _insertionOrder = new();
+    private readonly int _maxCacheSize;
+
+    /// <param name="maxCacheSize">缓存条目上限，见 <see cref="DefaultMaxCacheSize"/>。</param>
+    public ExpressionManager(int maxCacheSize = DefaultMaxCacheSize)
+    {
+        if (maxCacheSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maxCacheSize),
+                maxCacheSize,
+                "表达式缓存上限必须为正整数。");
+        }
+
+        _maxCacheSize = maxCacheSize;
+    }
+
+    /// <summary>当前缓存的表达式数量（诊断 / 测试用）。</summary>
+    public int CacheCount => _cache.Count;
 
     /// <inheritdoc />
     public IExpression CreateExpression(string expression)
     {
         ArgumentException.ThrowIfNullOrEmpty(expression);
 
-        return _cache.GetOrAdd(expression, static text => new ValueExpression(text, ElParser.Parse(text.Trim())));
+        // key 必须与解析口径一致：解析前 trim，缓存 key 若用原文，
+        // "${a}" 与 " ${a}" 会各存一份 AST，且带空白的 key 永远命中不了下一次相同的写法。
+        var text = expression.Trim();
+
+        if (_cache.TryGetValue(text, out var cached))
+        {
+            return cached;
+        }
+
+        var created = new ValueExpression(text, ElParser.Parse(text));
+
+        if (!_cache.TryAdd(text, created))
+        {
+            // 并发下别的线程先写入：用既有的，保证「同一文本 ⇒ 同一个实例」
+            return _cache.TryGetValue(text, out var existing) ? existing : created;
+        }
+
+        _insertionOrder.Enqueue(text);
+        TrimToCapacity();
+
+        return created;
     }
 
     /// <summary>
@@ -35,6 +82,16 @@ public sealed class ExpressionManager : IExpressionManager
     public bool IsExpression(string? expression) =>
         !string.IsNullOrEmpty(expression)
         && (expression.Contains("${", StringComparison.Ordinal) || expression.Contains("#{", StringComparison.Ordinal));
+
+    /// <summary>超限时按插入顺序淘汰，直到回到上限内。</summary>
+    private void TrimToCapacity()
+    {
+        // 并发下多个线程可能同时进入：多淘汰几条只会丢缓存（下次重新解析），不会丢正确性。
+        while (_cache.Count > _maxCacheSize && _insertionOrder.TryDequeue(out var oldest))
+        {
+            _cache.TryRemove(oldest, out _);
+        }
+    }
 
     /// <summary>
     /// 表达式实例。对应 JUEL 的 <c>TreeValueExpression</c>：解析结果（AST）在创建时就固定下来，

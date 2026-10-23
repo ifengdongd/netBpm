@@ -17,11 +17,29 @@ namespace NetBpm.Bpmn.Validation;
 /// </summary>
 public sealed class ExpressionParseRule : IProcessValidationRule
 {
+    /// <summary>未注入解析器时的兜底实例（独立 new 校验器的场景）。</summary>
+    private static readonly ExpressionManager FallbackExpressions = new();
+
+    private readonly IExpressionManager _expressions;
+
+    /// <summary>使用进程级兜底解析器（缓存不共享给运行期，仅供独立使用）。</summary>
+    public ExpressionParseRule()
+        : this(FallbackExpressions)
+    {
+    }
+
+    /// <param name="expressions">
+    /// 运行期的同一个解析器实例：部署期解析出的 AST 直接进运行期缓存，
+    /// 避免「校验一份缓存、执行另一份缓存」这种两份缓存各自膨胀的旧问题。
+    /// </param>
+    public ExpressionParseRule(IExpressionManager expressions)
+    {
+        ArgumentNullException.ThrowIfNull(expressions);
+        _expressions = expressions;
+    }
+
     /// <inheritdoc />
     public string Name => "expression-parseable";
-
-    /// <summary>与运行期同一个解析器（内部按原文缓存 AST，部署期解析结果可被运行期复用）。</summary>
-    private static readonly ExpressionManager Expressions = new();
 
     /// <inheritdoc />
     public IEnumerable<ValidationError> Validate(Process process)
@@ -103,7 +121,7 @@ public sealed class ExpressionParseRule : IProcessValidationRule
         return errors;
     }
 
-    private static void CheckLoopCharacteristics(List<ValidationError> errors, UserTask task)
+    private void CheckLoopCharacteristics(List<ValidationError> errors, UserTask task)
     {
         var mi = task.LoopCharacteristics;
 
@@ -117,7 +135,7 @@ public sealed class ExpressionParseRule : IProcessValidationRule
         Check(errors, task.Id, nameof(UserTask), mi.CompletionCondition, "多实例完成条件（completionCondition）表达式");
     }
 
-    private static void CheckListener(
+    private void CheckListener(
         List<ValidationError> errors,
         string? elementId,
         ExecutionListener listener)
@@ -126,7 +144,7 @@ public sealed class ExpressionParseRule : IProcessValidationRule
         Check(errors, elementId, nameof(ExecutionListener), listener.DelegateExpression, "监听器委托表达式");
     }
 
-    private static void Check(
+    private void Check(
         List<ValidationError> errors,
         string? elementId,
         string elementType,
@@ -141,7 +159,7 @@ public sealed class ExpressionParseRule : IProcessValidationRule
         try
         {
             // 纯文本也合法：解析结果是「字面量」，与运行期语义一致（不在这里判空/判变量）
-            Expressions.CreateExpression(expression);
+            _expressions.CreateExpression(expression);
         }
         catch (ElException exception)
         {

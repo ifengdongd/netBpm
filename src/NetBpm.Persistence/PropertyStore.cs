@@ -69,7 +69,7 @@ public sealed class DapperPropertyStore : IPropertyStore
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
-        var sql = forUpdate ? LockingSelectSql(session.DatabaseType) : PlainSelectSql;
+        var sql = PropertySql.ForSelect(forUpdate, session.DatabaseType);
         return session.Connection.QuerySingleOrDefault<PropertyEntity>(
             sql,
             new { name },
@@ -86,7 +86,7 @@ public sealed class DapperPropertyStore : IPropertyStore
         var session = lease.Session;
 
         var affected = session.Connection.Execute(
-            UpdateSql,
+            PropertySql.Update,
             new { name, revision = expectedRevision, value },
             session.Transaction);
 
@@ -102,15 +102,35 @@ public sealed class DapperPropertyStore : IPropertyStore
         var session = lease.Session;
 
         session.Connection.Execute(
-            InsertSql,
+            PropertySql.Insert,
             new { name, value, revision },
             session.Transaction);
     }
+}
 
-    private const string PlainSelectSql =
+/// <summary>
+/// <c>ACT_GE_PROPERTY</c> 的 SQL 常量。
+/// <para>
+/// 抽出来是因为<b>两条路径都要用</b>：命令会话里的读（<see cref="DapperPropertyStore"/>）
+/// 与独立短事务里的 ID 区块分配（<see cref="DapperIdBlockAllocator"/>）。
+/// 复制一份 SQL 下去，方言差异就会在某次修改后悄悄分叉。
+/// </para>
+/// </summary>
+internal static class PropertySql
+{
+    public const string Select =
         "select NAME_ as Name, VALUE_ as Value, REV_ as Revision from ACT_GE_PROPERTY where NAME_ = @name";
 
-    private static string LockingSelectSql(DatabaseType databaseType) => databaseType switch
+    public const string Update =
+        "update ACT_GE_PROPERTY set VALUE_ = @value, REV_ = @revision + 1 where NAME_ = @name and REV_ = @revision";
+
+    public const string Insert =
+        "insert into ACT_GE_PROPERTY (NAME_, VALUE_, REV_) values (@name, @value, @revision)";
+
+    public static string ForSelect(bool forUpdate, DatabaseType databaseType) =>
+        forUpdate ? LockingSelect(databaseType) : Select;
+
+    private static string LockingSelect(DatabaseType databaseType) => databaseType switch
     {
         // MySQL：FOR UPDATE 在 REPEATABLE READ 下也读最新已提交行，并持有排他行锁
         DatabaseType.MySql =>
@@ -122,10 +142,4 @@ public sealed class DapperPropertyStore : IPropertyStore
 
         _ => throw new NotSupportedException($"不支持的数据库方言：{databaseType}"),
     };
-
-    private const string UpdateSql =
-        "update ACT_GE_PROPERTY set VALUE_ = @value, REV_ = @revision + 1 where NAME_ = @name and REV_ = @revision";
-
-    private const string InsertSql =
-        "insert into ACT_GE_PROPERTY (NAME_, VALUE_, REV_) values (@name, @value, @revision)";
 }

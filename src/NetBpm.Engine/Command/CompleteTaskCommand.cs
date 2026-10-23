@@ -74,8 +74,8 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
                         dedupKey,
                         nameof(CompleteTaskCommand),
                         ResultPayload: string.Empty,
-                        CreatedAt: DateTime.UtcNow,
-                        ExpiresAt: DateTime.UtcNow + DefaultCommandRetention),
+                        CreatedAt: services.Clock.UtcNow,
+                        ExpiresAt: services.Clock.UtcNow + DefaultCommandRetention),
                     ct)
                 .ConfigureAwait(false);
 

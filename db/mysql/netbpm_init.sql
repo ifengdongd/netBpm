@@ -1272,6 +1272,42 @@ deallocate prepare stmt;
 
 
 set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_HI_PRO_INST_START on ACT_HI_PROCINST (START_TIME_, ID_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_HI_PROCINST' and index_name = 'ACT_IDX_HI_PRO_INST_START');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_HI_TASK_ASSIGNEE_START on ACT_HI_TASKINST (ASSIGNEE_, START_TIME_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_HI_TASKINST' and index_name = 'ACT_IDX_HI_TASK_ASSIGNEE_START');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_IDENT_LNK_PROCINST_USER on ACT_RU_IDENTITYLINK (PROC_INST_ID_, USER_ID_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_RU_IDENTITYLINK' and index_name = 'ACT_IDX_IDENT_LNK_PROCINST_USER');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_OUTBOX_CLAIM on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, NEXT_ATTEMPT_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_EVT_OUTBOX' and index_name = 'ACT_IDX_OUTBOX_CLAIM');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+
+set @ddl = (select if(count(*) = 0,
         'create index ACT_IDX_BYTEARRAY_DEPLOYMENT on ACT_GE_BYTEARRAY (DEPLOYMENT_ID_)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'ACT_GE_BYTEARRAY' and index_name = 'ACT_IDX_BYTEARRAY_DEPLOYMENT');
@@ -1817,6 +1853,11 @@ execute stmt;
 deallocate prepare stmt;
 
 
+
+-- 0013 租户 NULL 归一：租户过滤改为等值比较前的兼容回填（可重复执行）
+update ACT_RU_EXECUTION set TENANT_ID_ = '' where TENANT_ID_ is null;
+update ACT_HI_PROCINST set TENANT_ID_ = '' where TENANT_ID_ is null;
+update ACT_HI_TASKINST set TENANT_ID_ = '' where TENANT_ID_ is null;
 
 set @ddl = (select if(count(*) = 0,
         'alter table ACT_RU_JOB add column LOCK_OWNER_ varchar(64)',

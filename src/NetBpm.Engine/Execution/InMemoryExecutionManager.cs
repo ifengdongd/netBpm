@@ -1,4 +1,5 @@
 using NetBpm.Bpmn.Model;
+using NetBpm.Engine.Command;
 using NetBpm.Engine.History;
 using NetBpm.Engine.Tasks;
 
@@ -30,15 +31,30 @@ public sealed class InMemoryExecutionManager : IExecutionManager
     private readonly IHistoryManager _historyManager;
     private readonly Jobs.ITimerJobManager? _timerJobs;
     private readonly Jobs.IAsyncJobManager? _asyncJobs;
+    private readonly IClock _clock;
     private readonly Dictionary<string, IExecutionEntity> _executions = new(StringComparer.Ordinal);
     private readonly Lock _syncRoot = new();
+
+    /// <summary>
+    /// 执行树入口。所有访问都走这里：第一个访问者顺手把「命令开始时的快照」
+    /// 挂到 <see cref="CommandContext"/> 上，命令失败时用它回滚。
+    /// </summary>
+    private Dictionary<string, IExecutionEntity> Store
+    {
+        get
+        {
+            EnsureCommandSnapshot();
+            return _executions;
+        }
+    }
 
     public InMemoryExecutionManager(
         IIdGenerator idGenerator,
         ITaskManager taskManager,
         IHistoryManager historyManager,
         Jobs.ITimerJobManager? timerJobs = null,
-        Jobs.IAsyncJobManager? asyncJobs = null)
+        Jobs.IAsyncJobManager? asyncJobs = null,
+        IClock? clock = null)
     {
         ArgumentNullException.ThrowIfNull(idGenerator);
         ArgumentNullException.ThrowIfNull(taskManager);
@@ -49,6 +65,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         _historyManager = historyManager;
         _timerJobs = timerJobs;
         _asyncJobs = asyncJobs;
+        _clock = clock ?? SystemClock.Instance;
     }
 
     /// <summary>当前执行数（诊断用）。</summary>
@@ -58,7 +75,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         {
             lock (_syncRoot)
             {
-                return _executions.Count;
+                return Store.Count;
             }
         }
     }
@@ -70,7 +87,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         {
             lock (_syncRoot)
             {
-                return _executions.Values.ToList();
+                return Store.Values.ToList();
             }
         }
     }
@@ -93,7 +110,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
             BusinessKey = businessKey,
             StartUserId = startUserId,
             TenantId = tenantId,
-            StartTime = DateTime.UtcNow,
+            StartTime = _clock.UtcNow,
             // Activiti：process instance is always a scope for all child executions
             IsScope = true,
             IsActive = true,
@@ -120,7 +137,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
             RootProcessInstanceId = parent.RootProcessInstanceId ?? parent.ProcessInstanceId ?? parent.Id,
             ProcessDefinitionId = parent.ProcessDefinitionId,
             TenantId = parent.TenantId,
-            StartTime = DateTime.UtcNow,
+            StartTime = _clock.UtcNow,
             IsScope = false,
             IsActive = true,
             // 见类注释：Activiti 9 不设置 IS_CONCURRENT_
@@ -138,7 +155,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            _executions[execution.Id] = execution;
+            Store[execution.Id] = execution;
         }
 
         return ValueTask.CompletedTask;
@@ -151,9 +168,9 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            if (_executions.TryGetValue(execution.Id, out var existing) && !ReferenceEquals(existing, execution))
+            if (Store.TryGetValue(execution.Id, out var existing) && !ReferenceEquals(existing, execution))
             {
-                _executions[execution.Id] = execution;
+                Store[execution.Id] = execution;
             }
 
             execution.Revision++;
@@ -169,7 +186,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            return ValueTask.FromResult(_executions.GetValueOrDefault(executionId));
+            return ValueTask.FromResult(Store.GetValueOrDefault(executionId));
         }
     }
 
@@ -184,7 +201,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         {
             IReadOnlyList<IExecutionEntity> result =
             [
-                .. _executions.Values
+                .. Store.Values
                     .Where(execution => string.Equals(
                         execution.ProcessInstanceId ?? execution.Id,
                         processInstanceId,
@@ -207,7 +224,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            var result = _executions.Values
+            var result = Store.Values
                 .Where(execution => !execution.IsActive
                     && string.Equals(execution.CurrentActivityId, activityId, StringComparison.Ordinal)
                     && string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
@@ -226,7 +243,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            var count = _executions.Values.Count(execution =>
+            var count = Store.Values.Count(execution =>
                 execution.IsActive
                 && !string.Equals(processInstanceId, execution.Id, StringComparison.Ordinal)
                 && string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal));
@@ -244,7 +261,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            var result = _executions.Values
+            var result = Store.Values
                 .Where(execution => execution.IsActive
                     && !string.Equals(execution.Id, processInstanceId, StringComparison.Ordinal)
                     && string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
@@ -263,7 +280,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            var count = _executions.Values.Count(execution =>
+            var count = Store.Values.Count(execution =>
                 string.Equals(execution.ParentId, parentExecutionId, StringComparison.Ordinal));
 
             return ValueTask.FromResult(count);
@@ -343,18 +360,24 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            toDelete = _executions.Values
+            toDelete = Store.Values
                 .Where(execution => string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
                 .ToList();
 
+            // ⚠️ 必须与 DeleteRecursive 保持同一不变量：删除 = 摘除 + 置 IsEnded。
+            // 议程里可能还排着这条分支上的操作（终止结束事件就是这种场景），它们靠 IsEnded
+            // 变成空操作；只从字典移除会让那些操作继续在已删除的执行上推进。
             foreach (var execution in toDelete)
             {
-                _executions.Remove(execution.Id);
+                execution.Children.Clear();
+                execution.IsEnded = true;
+                Store.Remove(execution.Id);
             }
 
-            if (_executions.Remove(processInstanceId, out var root))
+            if (Store.Remove(processInstanceId, out var root))
             {
                 root.Children.Clear();
+                root.IsEnded = true;
             }
         }
 
@@ -381,7 +404,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         lock (_syncRoot)
         {
-            var executions = _executions.Values
+            var executions = Store.Values
                 .Where(execution => string.Equals(execution.ProcessInstanceId, processInstanceId, StringComparison.Ordinal))
                 .ToList();
 
@@ -395,7 +418,9 @@ public sealed class InMemoryExecutionManager : IExecutionManager
                 execution.SuspensionState = state;
             }
 
-            return ValueTask.FromResult(1);
+            // 返回真实影响行数（与 Dapper 实现的 affected rows 同口径），
+            // 恒返回 1 会让调用方把「没有执行」误判成「改了一行」。
+            return ValueTask.FromResult(executions.Count);
         }
     }
 
@@ -413,14 +438,14 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         {
             // 根执行用来定位实例，但库里 SUSPENSION_STATE_ 是逐行存的，
             // 因此子执行也要一起改（否则重新加载子执行时会读到「激活」）
-            var roots = _executions.Values
+            var roots = Store.Values
                 .Where(execution => execution.ParentId is null
                     && string.Equals(execution.ProcessDefinitionId, processDefinitionId, StringComparison.Ordinal))
                 .ToList();
 
             foreach (var root in roots)
             {
-                foreach (var execution in _executions.Values
+                foreach (var execution in Store.Values
                     .Where(execution => string.Equals(execution.ProcessInstanceId, root.Id, StringComparison.Ordinal)))
                 {
                     execution.SuspensionState = state;
@@ -442,7 +467,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         {
             IReadOnlyList<string> ids =
             [
-                .. _executions.Values
+                .. Store.Values
                     .Where(execution => execution.ParentId is null
                         && string.Equals(execution.ProcessDefinitionId, processDefinitionId, StringComparison.Ordinal))
                     .Select(execution => execution.Id),
@@ -459,7 +484,7 @@ public sealed class InMemoryExecutionManager : IExecutionManager
         {
             IReadOnlyList<IExecutionEntity> result =
             [
-                .. _executions.Values.Where(execution => execution.ParentId is null),
+                .. Store.Values.Where(execution => execution.ParentId is null),
             ];
 
             return ValueTask.FromResult(result);
@@ -481,19 +506,99 @@ public sealed class InMemoryExecutionManager : IExecutionManager
 
         execution.Children.Clear();
         execution.IsEnded = true;
-        _executions.Remove(execution.Id);
+        Store.Remove(execution.Id);
 
         if (execution.Parent is not null)
         {
             execution.Parent.Children.Remove(execution);
         }
         else if (execution.ParentId is not null
-            && _executions.TryGetValue(execution.ParentId, out var parent))
+            && Store.TryGetValue(execution.ParentId, out var parent))
         {
             var match = parent.Children.FirstOrDefault(child => string.Equals(child.Id, execution.Id, StringComparison.Ordinal));
             if (match is not null)
             {
                 parent.Children.Remove(match);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 捕获命令开始时的执行树快照，并注册「命令失败时恢复」。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 内存宿主没有数据库事务：命令改的就是共享对象本身，一旦抛异常，库里没有可回滚的东西，
+    /// 内存里却已经是一棵「执行到一半」的树 —— 这正是「单例共享可变图」的真实危害。
+    /// </para>
+    /// <para>
+    /// 这里用命令级快照补上这一环：命令内第一次碰到执行树时抓一份，失败时整体恢复。
+    /// 命令外（无 <see cref="CommandContext"/>）不抓 —— 那种调用没有回滚语义可言。
+    /// </para>
+    /// </remarks>
+    private void EnsureCommandSnapshot()
+    {
+        if (CommandContext.Current is not { } context)
+        {
+            return;
+        }
+
+        context.GetOrCreateState(() =>
+        {
+            var snapshot = CaptureSnapshot();
+            context.OnAborted(snapshot.Restore);
+
+            return snapshot;
+        });
+    }
+
+    private CommandSnapshot CaptureSnapshot()
+    {
+        lock (_syncRoot)
+        {
+            var executions = new Dictionary<string, IExecutionEntity>(_executions, StringComparer.Ordinal);
+            var states = executions.Values
+                .OfType<ExecutionEntity>()
+                .Select(entity => (Entity: entity, State: entity.CaptureState()))
+                .ToList();
+
+            return new CommandSnapshot(this, executions, states);
+        }
+    }
+
+    /// <summary>命令级执行树快照。</summary>
+    private sealed class CommandSnapshot
+    {
+        private readonly InMemoryExecutionManager _owner;
+        private readonly Dictionary<string, IExecutionEntity> _executions;
+        private readonly List<(ExecutionEntity Entity, ExecutionEntitySnapshot State)> _states;
+
+        public CommandSnapshot(
+            InMemoryExecutionManager owner,
+            Dictionary<string, IExecutionEntity> executions,
+            List<(ExecutionEntity Entity, ExecutionEntitySnapshot State)> states)
+        {
+            _owner = owner;
+            _executions = executions;
+            _states = states;
+        }
+
+        /// <summary>恢复到命令开始前（幂等：恢复过程本身也加锁）。</summary>
+        public void Restore()
+        {
+            lock (_owner._syncRoot)
+            {
+                _owner._executions.Clear();
+
+                foreach (var (id, execution) in _executions)
+                {
+                    _owner._executions[id] = execution;
+                }
+
+                foreach (var (entity, state) in _states)
+                {
+                    entity.RestoreState(state);
+                }
             }
         }
     }

@@ -32,7 +32,7 @@ internal static class AsyncJobScheduler
                 $"活动 '{activity.Id}' 配置了 {(phase == AsyncJobPhase.Before ? "asyncBefore" : "asyncAfter")}，" +
                 "但宿主未注册 IAsyncJobManager（见 AddNetBpmAsyncJobExecutor）。");
 
-        var now = DateTime.UtcNow;
+        var now = services.Clock.UtcNow;
         var jobId = services.IdGenerator.NextId();
 
         await manager.InsertAsync(

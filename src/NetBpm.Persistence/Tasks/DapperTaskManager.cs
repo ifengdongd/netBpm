@@ -6,6 +6,7 @@ using NetBpm.Engine.History;
 using NetBpm.Engine.Tasks;
 using NetBpm.Identity;
 using NetBpm.Persistence.Database;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Tasks;
 
@@ -471,6 +472,10 @@ public sealed class DapperTaskManager : ITaskManager
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
+        // 命令外没有拦截器兜底：身份关系 / 变量 / 字节行 / 任务行这 5 条语句必须同生共死，
+        // 否则中途失败会留下「任务还在、变量没了」的半删状态。命令内这里退化为 no-op。
+        await using var unitOfWork = lease.BeginUnitOfWork();
+
         // 先摘关联数据（ACT_FK_TSKASS_TASK 要求身份关系先删）
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
@@ -479,30 +484,8 @@ public sealed class DapperTaskManager : ITaskManager
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
 
-        // 任务局部变量：先取字节行 id → 删变量行 → 按 id 删字节行（RESTRICT 外键）
-        var byteArrayIds = (await session.Connection.QueryAsync<string>(
-            new CommandDefinition(
-                "select BYTEARRAY_ID_ from ACT_RU_VARIABLE where TASK_ID_ = @taskId and BYTEARRAY_ID_ is not null",
-                new { taskId = task.Id },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false)).ToList();
-
-        await session.Connection.ExecuteAsync(
-            new CommandDefinition(
-                "delete from ACT_RU_VARIABLE where TASK_ID_ = @taskId",
-                new { taskId = task.Id },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false);
-
-        if (byteArrayIds.Count > 0)
-        {
-            await session.Connection.ExecuteAsync(
-                new CommandDefinition(
-                    "delete from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null and ID_ in @ids",
-                    new { ids = byteArrayIds },
-                    session.Transaction,
-                    cancellationToken: ct)).ConfigureAwait(false);
-        }
+        // 任务局部变量 + longString 字节行（RESTRICT 外键：捕获 id → 删变量 → 删字节）
+        await VariableCleanup.DeleteByTaskIdAsync(session, task.Id, ct).ConfigureAwait(false);
 
         // 对应 deleteTask：历史任务行收口（END_TIME_ / DURATION_ / DELETE_REASON_）
         // 注意历史身份关系行**不删**（Activiti 的 deleteIdentityLinksByTaskId 传 cascadeHistory=false）
@@ -524,6 +507,8 @@ public sealed class DapperTaskManager : ITaskManager
                     "该行可能已被其它命令修改或删除。");
             }
         }
+
+        await unitOfWork.CommitAsync(ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -559,32 +544,10 @@ public sealed class DapperTaskManager : ITaskManager
                 session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
 
-        // 任务局部变量（按实例批量）：先取字节行 id → 删变量行 → 按 id 删字节行（RESTRICT 外键）
-        var byteArrayIds = (await session.Connection.QueryAsync<string>(
-            new CommandDefinition(
-                "select V.BYTEARRAY_ID_ from ACT_RU_VARIABLE V "
-                + "inner join ACT_RU_TASK T on T.ID_ = V.TASK_ID_ "
-                + "where T.PROC_INST_ID_ = @processInstanceId and V.BYTEARRAY_ID_ is not null",
-                new { processInstanceId },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false)).ToList();
-
-        await session.Connection.ExecuteAsync(
-            new CommandDefinition(
-                "delete from ACT_RU_VARIABLE where TASK_ID_ in (select ID_ from ACT_RU_TASK where PROC_INST_ID_ = @processInstanceId)",
-                new { processInstanceId },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false);
-
-        if (byteArrayIds.Count > 0)
-        {
-            await session.Connection.ExecuteAsync(
-                new CommandDefinition(
-                    "delete from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null and ID_ in @ids",
-                    new { ids = byteArrayIds },
-                    session.Transaction,
-                    cancellationToken: ct)).ConfigureAwait(false);
-        }
+        // 任务局部变量（按实例批量）+ 字节行
+        await VariableCleanup
+            .DeleteTaskVariablesByProcessInstanceAsync(session, processInstanceId, ct)
+            .ConfigureAwait(false);
 
         await session.Connection.ExecuteAsync(
             new CommandDefinition(
@@ -905,9 +868,9 @@ public sealed class DapperTaskManager : ITaskManager
 
         var states = new List<TaskState>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
-            states.Add(TaskColumns.Read(ToNullable(row)));
+            states.Add(TaskColumns.Read(row));
         }
 
         return states;
@@ -925,39 +888,22 @@ public sealed class DapperTaskManager : ITaskManager
 
         var links = new List<IdentityLinkRecord>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
-            var values = ToNullable(row);
-
             links.Add(new IdentityLinkRecord
             {
-                Id = Text(values, "ID_") ?? string.Empty,
-                Type = Text(values, "TYPE_") ?? string.Empty,
-                UserId = Text(values, "USER_ID_"),
-                GroupId = Text(values, "GROUP_ID_"),
-                TaskId = Text(values, "TASK_ID_"),
-                ProcessInstanceId = Text(values, "PROC_INST_ID_"),
-                ProcessDefinitionId = Text(values, "PROC_DEF_ID_"),
+                Id = Text(row, "ID_") ?? string.Empty,
+                Type = Text(row, "TYPE_") ?? string.Empty,
+                UserId = Text(row, "USER_ID_"),
+                GroupId = Text(row, "GROUP_ID_"),
+                TaskId = Text(row, "TASK_ID_"),
+                ProcessInstanceId = Text(row, "PROC_INST_ID_"),
+                ProcessDefinitionId = Text(row, "PROC_DEF_ID_"),
             });
         }
 
         return links;
     }
-
-    private static Dictionary<string, object?> ToNullable(IDictionary<string, object> row)
-    {
-        var values = new Dictionary<string, object?>(StringComparer.Ordinal);
-
-        foreach (var pair in row)
-        {
-            values[pair.Key] = pair.Value;
-        }
-
-        return values;
-    }
-
-    private static string? Text(Dictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value as string : null;
 
     private static DynamicParameters BuildTaskParameters(
         TaskEntity task,

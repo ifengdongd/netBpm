@@ -1,5 +1,5 @@
-using System.Globalization;
 using NetBpm.Engine.Execution;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Execution;
 
@@ -103,7 +103,7 @@ internal static class ExecutionColumns
 
         return new ExecutionState(
             Id: Text(row, "ID_") ?? throw new Engine.EngineException("ACT_RU_EXECUTION 行缺少 ID_。"),
-            Revision: Number(row, "REV_"),
+            Revision: Number(row, "REV_") ?? 0,
             ProcessInstanceId: Text(row, "PROC_INST_ID_"),
             BusinessKey: Text(row, "BUSINESS_KEY_"),
             ProcessDefinitionId: Text(row, "PROC_DEF_ID_"),
@@ -112,38 +112,13 @@ internal static class ExecutionColumns
             IsConcurrent: Flag(row, "IS_CONCURRENT_"),
             IsScope: Flag(row, "IS_SCOPE_"),
             IsEventScope: Flag(row, "IS_EVENT_SCOPE_"),
-            SuspensionState: Number(row, "SUSPENSION_STATE_"),
+            SuspensionState: Number(row, "SUSPENSION_STATE_") ?? 0,
             ParentId: Text(row, "PARENT_ID_"),
             SuperExecutionId: Text(row, "SUPER_EXEC_"),
             RootProcessInstanceId: Text(row, "ROOT_PROC_INST_ID_"),
             Name: Text(row, "NAME_"),
-            StartTime: Time(row, "START_TIME_"),
+            StartTime: NullableDate(row, "START_TIME_"),
             StartUserId: Text(row, "START_USER_ID_"),
             TenantId: Text(row, "TENANT_ID_"));
     }
-
-    private static object? Raw(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value : null;
-
-    private static string? Text(IDictionary<string, object?> row, string column) =>
-        Raw(row, column) as string;
-
-    private static int Number(IDictionary<string, object?> row, string column)
-    {
-        var value = Raw(row, column);
-        return value is null ? 0 : Convert.ToInt32(value, CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>
-    /// 读取 TINYINT 标志位。
-    /// <para>
-    /// 显式走数值转换而不是让 Dapper 直接映射 <c>bool</c>：SQL Server 的 <c>bit</c>、
-    /// MySQL 的 <c>TINYINT</c> 被驱动返回的类型在两种方言下不同（<c>bool</c> / <c>sbyte</c> / <c>byte</c>），
-    /// 统一转成数值再判非零最稳。
-    /// </para>
-    /// </summary>
-    private static bool Flag(IDictionary<string, object?> row, string column) => Number(row, column) != 0;
-
-    private static DateTime? Time(IDictionary<string, object?> row, string column) =>
-        Raw(row, column) as DateTime?;
 }

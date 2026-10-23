@@ -1,6 +1,7 @@
 using Dapper;
 using NetBpm.Engine.Events;
 using NetBpm.Persistence.Database;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Events;
 
@@ -99,6 +100,29 @@ public sealed class DapperEventOutbox : IEventOutboxStore
     }
 
     /// <inheritdoc />
+    public async ValueTask<bool> TryClaimAsync(
+        string eventId,
+        DateTime utcNow,
+        DateTime leaseUntilUtc,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventId);
+
+        using var lease = _sessions.Acquire();
+
+        // 单语句条件更新：读-判断-写在数据库侧原子完成。
+        // NEXT_ATTEMPT_ 兼作租约到期时间（FindPendingAsync 已经按它过滤），因此不需要新列，
+        // 也不会出现「认领成功但没写租约」的中间态。
+        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
+            ClaimSql,
+            new { id = eventId, now = utcNow, leaseUntil = leaseUntilUtc },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows == 1;
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IReadOnlyList<OutboxEvent>> FindAsync(
         OutboxQuery query,
         CancellationToken ct = default)
@@ -109,17 +133,8 @@ public sealed class DapperEventOutbox : IEventOutboxStore
         var session = lease.Session;
         var (where, parameters) = BuildWhere(query);
 
-        parameters.Add("skip", Math.Max(0, query.FirstResult));
-        parameters.Add("take", Math.Max(1, query.MaxResults));
-
-        var sql = session.DatabaseType switch
-        {
-            DatabaseType.MySql =>
-                $"select {Columns} from ACT_EVT_OUTBOX{where} order by CREATE_TIME_, ID_ limit @take offset @skip",
-            DatabaseType.SqlServer =>
-                $"select {Columns} from ACT_EVT_OUTBOX{where} order by CREATE_TIME_, ID_ offset @skip rows fetch next @take rows only",
-            _ => throw new NotSupportedException($"不支持的数据库方言：{session.DatabaseType}"),
-        };
+        var paging = SqlPaging.Build(session.DatabaseType, query.FirstResult, query.MaxResults, parameters);
+        var sql = $"select {Columns} from ACT_EVT_OUTBOX{where} order by CREATE_TIME_, ID_{paging}";
 
         var rows = await session.Connection.QueryAsync(new CommandDefinition(
             sql,
@@ -288,28 +303,6 @@ public sealed class DapperEventOutbox : IEventOutboxStore
             PublishedTime = NullableDate(row, "PUBLISHED_TIME_"),
         };
 
-    private static string? Text(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value as string : null;
-
-    private static int? Number(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull and not null
-            ? Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)
-            : null;
-
-    private static DateTime Date(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull and not null
-            ? DateTime.SpecifyKind(
-                Convert.ToDateTime(value, System.Globalization.CultureInfo.InvariantCulture),
-                DateTimeKind.Utc)
-            : DateTime.MinValue;
-
-    private static DateTime? NullableDate(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull and not null
-            ? DateTime.SpecifyKind(
-                Convert.ToDateTime(value, System.Globalization.CultureInfo.InvariantCulture),
-                DateTimeKind.Utc)
-            : null;
-
     private const string Columns = """
         ID_, EVENT_TYPE_, ENTITY_ID_, PROCESS_INSTANCE_ID_, PROC_DEF_ID_, EXECUTION_ID_, ACTIVITY_ID_,
         TENANT_ID_, PAYLOAD_, CREATE_TIME_, PUBLISHED_, PUBLISH_ATTEMPTS_, DEAD_LETTER_, LAST_ERROR_,
@@ -331,6 +324,15 @@ public sealed class DapperEventOutbox : IEventOutboxStore
         select @id, @eventType, @entityId, @processInstanceId, @processDefinitionId, @executionId, @activityId,
                @tenantId, @payload, @createTime, 0, 0, 0
         where not exists (select 1 from ACT_EVT_OUTBOX where ID_ = @id)
+        """;
+
+    private const string ClaimSql = """
+        update ACT_EVT_OUTBOX
+        set NEXT_ATTEMPT_ = @leaseUntil
+        where ID_ = @id
+          and PUBLISHED_ = 0
+          and DEAD_LETTER_ = 0
+          and (NEXT_ATTEMPT_ is null or NEXT_ATTEMPT_ <= @now)
         """;
 
     private const string MarkPublishedSql = """

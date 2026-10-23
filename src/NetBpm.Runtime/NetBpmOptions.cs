@@ -32,6 +32,16 @@ public sealed class NetBpmOptions
     public bool EnableOutbox { get; set; }
 
     /// <summary>
+    /// 单个命令内允许推进的最大步数（议程操作数），默认 1 万。
+    /// <para>
+    /// 这是<b>死循环护栏</b>：BPMN 允许环路，坏模型（回退边、恒真条件网关）会让
+    /// 「规划 → 排空」在单个命令里无限运行。超限时命令以 <c>EngineException</c> 失败，
+    /// 事务回滚 —— 比 OOM / 请求挂死更容易定位。
+    /// </para>
+    /// </summary>
+    public int MaxOperationsPerCommand { get; set; } = NetBpm.Engine.Agenda.EngineAgenda.DefaultMaxOperationsPerCommand;
+
+    /// <summary>
     /// 使用内存执行树（无数据库宿主）。
     /// <para>
     /// <see langword="false"/> 时进入数据库模式：执行树 / 流程定义走 Dapper 仓储，

@@ -103,7 +103,7 @@ public static class EngineEventDispatcher
         string? entityId,
         CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
+        var now = services.Clock.UtcNow;
         var tenantId = (execution as IExecutionEntity)?.TenantId;
         var activityId = execution.CurrentActivityId;
 

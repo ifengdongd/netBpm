@@ -9,8 +9,10 @@ namespace NetBpm.Runtime.Hosting;
 /// <summary>
 /// 异步作业执行器：后台轮询 <c>ACT_RU_JOB</c>，逐条在自己的命令/事务里推进流程。
 /// <para>
-/// 多宿主可以同时运行：每条作业通过「条件删除 + 影响行数」抢占，只有一个实例能执行。
-/// 单条失败只影响该条（按退避重试，超过上限进死信），不会中断整批。
+/// 多宿主可以同时运行：每条作业先按<b>租约</b>抢占（只标记归属，成功后才删除行），
+/// 执行期间由 <see cref="IProcessEngine"/> 按租约时长的 1/3 心跳续约 —— 因此正常执行不会因为
+/// 「跑得比租约久」被另一台宿主接管并重复执行。单条失败只影响该条（按退避重试，
+/// 超过上限进死信），不会中断整批。
 /// </para>
 /// </summary>
 public sealed class AsyncJobExecutorService : BackgroundService

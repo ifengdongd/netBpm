@@ -34,17 +34,21 @@ public sealed class CommandContext : ICommandContext
     /// 幂等键。同一个键重复执行同一条命令时，仓储应当返回「首次执行」的结果快照而非再次生效。
     /// 典型的键来源：HTTP <c>Idempotency-Key</c>、消息 id、outbox 事件 id。
     /// </param>
+    /// <param name="maxOperationsPerCommand">
+    /// 本命令的议程操作预算（死循环护栏），默认 <see cref="EngineAgenda.DefaultMaxOperationsPerCommand"/>。
+    /// </param>
     public CommandContext(
         IEngineServices services,
         ICommandTransaction? transaction = null,
         Func<ICommandTransaction?>? transactionFactory = null,
-        string? commandId = null)
+        string? commandId = null,
+        int maxOperationsPerCommand = EngineAgenda.DefaultMaxOperationsPerCommand)
     {
         ArgumentNullException.ThrowIfNull(services);
 
         Services = services;
         Transaction = transactionFactory is not null ? transactionFactory() : transaction;
-        Agenda = new EngineAgenda(() => services);
+        Agenda = new EngineAgenda(() => services, maxOperations: maxOperationsPerCommand);
         CommandId = commandId;
         _transactionFactory = transactionFactory;
     }
@@ -71,6 +75,84 @@ public sealed class CommandContext : ICommandContext
 
     /// <summary>当前命令上下文；不在命令中时为 <see langword="null"/>。</summary>
     public static CommandContext? Current => CurrentHolder.Value;
+
+    /// <summary>命令级状态（按类型一份）。没有事务的宿主用它挂「命令快照」等回滚材料。</summary>
+    private readonly Dictionary<Type, object> _state = [];
+
+    /// <summary>命令失败（事务回滚）时执行的动作。</summary>
+    private readonly List<Action> _abortHooks = [];
+
+    /// <summary>
+    /// 取命令级状态，不存在则创建。
+    /// </summary>
+    /// <remarks>
+    /// 与持久化层的 <c>SessionState</c> 同构：一个命令一份，命令结束即丢弃。
+    /// 内存宿主（无事务）靠它持有执行树快照，命令失败时恢复。
+    /// </remarks>
+    public T GetOrCreateState<T>(Func<T> factory)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        lock (_state)
+        {
+            if (_state.TryGetValue(typeof(T), out var existing))
+            {
+                return (T)existing;
+            }
+
+            var created = factory();
+            _state[typeof(T)] = created;
+
+            return created;
+        }
+    }
+
+    /// <summary>
+    /// 注册「命令失败时」执行的回滚动作（与事务回滚对齐）。
+    /// </summary>
+    /// <remarks>
+    /// 只在命令抛异常时执行；成功的命令什么都不做 —— 回滚材料随上下文一起丢弃。
+    /// </remarks>
+    public void OnAborted(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        lock (_abortHooks)
+        {
+            _abortHooks.Add(action);
+        }
+    }
+
+    /// <summary>执行并清空回滚钩子（由 <see cref="CommandExecutor"/> 在命令失败时调用）。</summary>
+    /// <remarks>单个钩子抛异常不影响其它钩子：回滚尽力而为，原始异常更重要。</remarks>
+    internal void RunAbortedHooks()
+    {
+        Action[] hooks;
+
+        lock (_abortHooks)
+        {
+            if (_abortHooks.Count == 0)
+            {
+                return;
+            }
+
+            hooks = _abortHooks.ToArray();
+            _abortHooks.Clear();
+        }
+
+        foreach (var hook in hooks)
+        {
+            try
+            {
+                hook();
+            }
+            catch
+            {
+                // 回滚过程中的异常不得掩盖命令自身的失败原因
+            }
+        }
+    }
 
     /// <summary>事务提交后的回调（事务上下文里按注册顺序执行）。</summary>
     private readonly List<Func<ValueTask>> _committedHooks = [];

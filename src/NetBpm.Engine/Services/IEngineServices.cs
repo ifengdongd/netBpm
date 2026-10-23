@@ -22,6 +22,9 @@ public interface IEngineServices
 
     IIdGenerator IdGenerator { get; }
 
+    /// <summary>业务时钟（定时器到期、作业退避、任务时间戳都走它）。</summary>
+    IClock Clock { get; }
+
     IActivityBehaviorFactory ActivityBehaviorFactory { get; }
 
     /// <summary>服务任务实现解析器（<c>activiti:class</c> / <c>delegateExpression</c>）。</summary>

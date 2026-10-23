@@ -1,7 +1,9 @@
+using System.Data.Common;
 using Microsoft.AspNetCore.Diagnostics;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
 using NetBpm.Engine;
+using NetBpm.Persistence;
 using NetBpm.Rest.Security;
 
 namespace NetBpm.Rest;
@@ -13,8 +15,9 @@ namespace NetBpm.Rest;
 ///   <item><description>400：请求本身有问题（校验失败 / 参数非法 / 引擎业务规则拒绝）；</description></item>
 ///   <item><description>403：已认证，但身份或租户与令牌不一致；</description></item>
 ///   <item><description>404：目标对象不存在（含跨租户访问，避免存在性泄露）；</description></item>
-///   <item><description>409：状态冲突（已认领 / 仍有运行实例 / 挂起 / 乐观锁失败）；</description></item>
+///   <item><description>409：状态冲突（已认领 / 仍有运行实例 / 挂起 / 乐观锁失败 / 唯一约束冲突）；</description></item>
 ///   <item><description>501：明确未实现的能力；</description></item>
+///   <item><description>503：数据库暂时不可用（可重试，不回传连接串与 SQL）；</description></item>
 ///   <item><description>500：未预期异常，<b>不回传异常原文</b>，只给 traceId。</description></item>
 /// </list>
 /// </summary>
@@ -52,30 +55,75 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
         exception switch
         {
             // 部署校验：带明细，前端可逐条定位
-            ProcessValidationException ex => (StatusCodes.Status400BadRequest, ex.Message, ex.Errors, "validation_error"),
+            ProcessValidationException ex => (
+                StatusCodes.Status400BadRequest,
+                ex.Message,
+                ex.Errors,
+                EngineErrorCode.ValidationError),
 
-            BpmnXmlParseException ex => (StatusCodes.Status400BadRequest, ex.Message, null, "bpmn_xml_parse_error"),
+            BpmnXmlParseException ex => (
+                StatusCodes.Status400BadRequest,
+                ex.Message,
+                null,
+                EngineErrorCode.BpmnXmlParseError),
 
-            ForbiddenException ex => (StatusCodes.Status403Forbidden, ex.Message, null, "forbidden"),
+            ForbiddenException ex => (StatusCodes.Status403Forbidden, ex.Message, null, EngineErrorCode.Forbidden),
 
-            EngineObjectNotFoundException ex => (StatusCodes.Status404NotFound, ex.Message, null, "not_found"),
+            // 带业务码的 404（例如「实例不在运行中」→ 调用方应改查历史）
+            ResourceNotFoundException ex => (StatusCodes.Status404NotFound, ex.Message, null, ex.Code),
 
-            OptimisticLockingException ex => (StatusCodes.Status409Conflict, ex.Message, null, "optimistic_lock_conflict"),
+            EngineObjectNotFoundException ex => (
+                StatusCodes.Status404NotFound,
+                ex.Message,
+                null,
+                EngineErrorCode.NotFound),
 
-            EngineConflictException ex => (StatusCodes.Status409Conflict, ex.Message, null, "conflict"),
+            OptimisticLockingException ex => (
+                StatusCodes.Status409Conflict,
+                ex.Message,
+                null,
+                EngineErrorCode.OptimisticLockConflict),
 
-            EngineNotImplementedException ex => (StatusCodes.Status501NotImplemented, ex.Message, null, "not_implemented"),
+            EngineConflictException ex => (StatusCodes.Status409Conflict, ex.Message, null, EngineErrorCode.Conflict),
+
+            EngineNotImplementedException ex => (
+                StatusCodes.Status501NotImplemented,
+                ex.Message,
+                null,
+                EngineErrorCode.NotImplemented),
 
             // 其余引擎业务错误 = 请求不被接受
-            EngineException ex => (StatusCodes.Status400BadRequest, ex.Message, null, "engine_rule_violation"),
+            EngineException ex => (
+                StatusCodes.Status400BadRequest,
+                ex.Message,
+                null,
+                EngineErrorCode.EngineRuleViolation),
 
-            OperationCanceledException => (StatusCodes.Status499ClientClosedRequest, "请求已取消。", null, "request_cancelled"),
+            // 数据库层：唯一约束冲突 = 与并发写入撞车（重读后重试即可，不该是 500）；
+            // 其余数据库异常不泄露 SQL / 连接串 / 账号，按「暂时不可用」让客户端重试。
+            DbException ex when DatabaseErrors.IsUniqueViolation(ex) => (
+                StatusCodes.Status409Conflict,
+                "记录已存在或已被并发修改，请刷新后重试。",
+                null,
+                EngineErrorCode.UniqueViolation),
+
+            DbException => (
+                StatusCodes.Status503ServiceUnavailable,
+                "数据库暂时不可用，请稍后重试；如持续出现请提供 traceId 给运维。",
+                null,
+                EngineErrorCode.DatabaseUnavailable),
+
+            OperationCanceledException => (
+                StatusCodes.Status499ClientClosedRequest,
+                "请求已取消。",
+                null,
+                EngineErrorCode.RequestCancelled),
 
             // 兜底：不泄露 SQL / 连接串 / 堆栈；细节只进日志
             _ => (
                 StatusCodes.Status500InternalServerError,
                 "服务器内部错误，请稍后重试；如持续出现请提供 traceId 给运维。",
                 null,
-                "internal_error"),
+                EngineErrorCode.InternalError),
         };
 }

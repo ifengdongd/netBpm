@@ -3,6 +3,7 @@ using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Model;
 using NetBpm.El;
 using NetBpm.Engine;
+using NetBpm.Engine.Agenda;
 using NetBpm.Engine.Behavior;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Command.Interceptors;
@@ -69,7 +70,8 @@ internal sealed class TestEngine
 
     public static TestEngine Create(
         IHistoryManager? historyManager = null,
-        CommandRetryPolicy? retryPolicy = null)
+        CommandRetryPolicy? retryPolicy = null,
+        int maxOperationsPerCommand = EngineAgenda.DefaultMaxOperationsPerCommand)
     {
         IEngineServices? holder = null;
         var history = historyManager ?? new NullHistoryManager();
@@ -108,7 +110,7 @@ internal sealed class TestEngine
                 new TransactionInterceptor(),
                 new CommandContextInterceptor(),
             ],
-            () => new CommandContext(services));
+            () => new CommandContext(services, maxOperationsPerCommand: maxOperationsPerCommand));
 
         return new TestEngine(
             executor,

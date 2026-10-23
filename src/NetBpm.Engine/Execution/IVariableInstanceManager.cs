@@ -61,7 +61,7 @@ public interface IVariableInstanceManager
         CancellationToken ct = default);
 
     /// <summary>
-    /// 按租户查该租户下的全部运行态变量行（<c>where coalesce(TENANT_ID_,'') = @tenantId</c>）。
+    /// 按租户查该租户下的全部运行态变量行（<c>where TENANT_ID_ = @tenantId</c>）。
     /// <para>
     /// 这是「跨租户变量不可见」在存储层的断言入口：没有 <c>TENANT_ID_</c> 列时
     /// 这个查询根本无法表达（只能全表返回 ⇒ 泄漏）。

@@ -1009,6 +1009,22 @@ if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_PROC_TENANT_EN
 create index ACT_IDX_HI_PROC_TENANT_END on ACT_HI_PROCINST (TENANT_ID_, END_TIME_);
 go
 
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_PRO_INST_START' and object_id = object_id('ACT_HI_PROCINST'))
+create index ACT_IDX_HI_PRO_INST_START on ACT_HI_PROCINST (START_TIME_, ID_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_TASK_ASSIGNEE_START' and object_id = object_id('ACT_HI_TASKINST'))
+create index ACT_IDX_HI_TASK_ASSIGNEE_START on ACT_HI_TASKINST (ASSIGNEE_, START_TIME_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_IDENT_LNK_PROCINST_USER' and object_id = object_id('ACT_RU_IDENTITYLINK'))
+create index ACT_IDX_IDENT_LNK_PROCINST_USER on ACT_RU_IDENTITYLINK (PROC_INST_ID_, USER_ID_);
+go
+
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_OUTBOX_CLAIM' and object_id = object_id('ACT_EVT_OUTBOX'))
+create index ACT_IDX_OUTBOX_CLAIM on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, NEXT_ATTEMPT_);
+go
+
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_BYTEARRAY_DEPLOYMENT' and object_id = object_id('ACT_GE_BYTEARRAY'))
 create index ACT_IDX_BYTEARRAY_DEPLOYMENT on ACT_GE_BYTEARRAY (DEPLOYMENT_ID_);
 go
@@ -1345,6 +1361,11 @@ if not exists (select 1 from sys.indexes where name = 'ACT_IDX_HI_VARINST_TENANT
 create index ACT_IDX_HI_VARINST_TENANT on ACT_HI_VARINST (TENANT_ID_);
 go
 
+
+-- 0013 租户 NULL 归一：租户过滤改为等值比较前的兼容回填（可重复执行）
+update ACT_RU_EXECUTION set TENANT_ID_ = N'' where TENANT_ID_ is null;
+update ACT_HI_PROCINST set TENANT_ID_ = N'' where TENANT_ID_ is null;
+update ACT_HI_TASKINST set TENANT_ID_ = N'' where TENANT_ID_ is null;
 
 if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_JOB') and name = 'LOCK_OWNER_')
     alter table ACT_RU_JOB add LOCK_OWNER_ nvarchar(64);

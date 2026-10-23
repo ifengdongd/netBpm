@@ -72,6 +72,12 @@ public sealed class TerminateEndEventActivityBehavior : FlowNodeActivityBehavior
                 cancel: true,
                 ct)
             .ConfigureAwait(false);
+
+        // 终止是「立即终止」：议程里还排着其它分支的操作（并行 / 会签剩余实例），
+        // 它们已经没有可推进的执行树了，必须整体丢弃。
+        // 仓储层也会把被删执行置 IsEnded（操作自身还有一层守卫），这里清队列是第二道防线：
+        // 少一层就可能在「删除路径漏置标记」时静默执行已删除分支上的业务委托。
+        Services.Agenda.Clear();
     }
 }
 

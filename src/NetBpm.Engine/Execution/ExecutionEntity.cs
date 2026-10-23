@@ -444,4 +444,101 @@ public class ExecutionEntity : IExecutionEntity
 
     public override string ToString() =>
         $"{Id} (activityId={CurrentActivityId}, active={IsActive}, concurrent={IsConcurrent}, scope={IsScope})";
+
+    /// <summary>
+    /// 捕获可变状态（内存宿主的命令级回滚材料）。
+    /// </summary>
+    /// <remarks>
+    /// 只抓「命令会改的东西」：标量字段、父子结构、变量字典。缓存的对象引用（如
+    /// <see cref="ParentLoader"/>）不参与 —— 它们不随命令变化。
+    /// </remarks>
+    internal ExecutionEntitySnapshot CaptureState() => new(
+        Revision,
+        _currentFlowElement,
+        IsActive,
+        IsConcurrent,
+        IsScope,
+        IsEventScope,
+        IsEnded,
+        SuspensionState,
+        StartTime,
+        StartUserId,
+        Name,
+        BusinessKey,
+        TenantId,
+        ProcessInstanceId,
+        ProcessDefinitionId,
+        ParentId,
+        Parent,
+        [.. Children],
+        _variables.ToDictionary(
+            pair => pair.Key,
+            pair => (pair.Value, pair.Value.Value),
+            StringComparer.Ordinal),
+        _variablesLoaded);
+
+    /// <summary>把状态恢复成快照（命令失败时由内存宿主调用）。</summary>
+    internal void RestoreState(ExecutionEntitySnapshot snapshot)
+    {
+        Revision = snapshot.Revision;
+        CurrentFlowElement = snapshot.CurrentFlowElement;
+        IsActive = snapshot.IsActive;
+        IsConcurrent = snapshot.IsConcurrent;
+        IsScope = snapshot.IsScope;
+        IsEventScope = snapshot.IsEventScope;
+        IsEnded = snapshot.IsEnded;
+        SuspensionState = snapshot.SuspensionState;
+        StartTime = snapshot.StartTime;
+        StartUserId = snapshot.StartUserId;
+        Name = snapshot.Name;
+        BusinessKey = snapshot.BusinessKey;
+        TenantId = snapshot.TenantId;
+        ProcessInstanceId = snapshot.ProcessInstanceId;
+        ProcessDefinitionId = snapshot.ProcessDefinitionId;
+        ParentId = snapshot.ParentId;
+        Parent = snapshot.Parent;
+
+        Children.Clear();
+
+        foreach (var child in snapshot.Children)
+        {
+            Children.Add(child);
+        }
+
+        _variables.Clear();
+
+        foreach (var (name, entry) in snapshot.Variables)
+        {
+            // 变量实例对象本身是「真身」（内存宿主没有变量管理器），值必须写回同一实例
+            entry.Instance.Value = entry.Value;
+            _variables[name] = entry.Instance;
+        }
+
+        _variablesLoaded = snapshot.VariablesLoaded;
+    }
 }
+
+/// <summary>
+/// <see cref="ExecutionEntity"/> 的可变状态快照（内存宿主命令级回滚用）。
+/// </summary>
+internal sealed record ExecutionEntitySnapshot(
+    int Revision,
+    IFlowElement? CurrentFlowElement,
+    bool IsActive,
+    bool IsConcurrent,
+    bool IsScope,
+    bool IsEventScope,
+    bool IsEnded,
+    int SuspensionState,
+    DateTime? StartTime,
+    string? StartUserId,
+    string? Name,
+    string? BusinessKey,
+    string? TenantId,
+    string? ProcessInstanceId,
+    string? ProcessDefinitionId,
+    string? ParentId,
+    IExecutionEntity? Parent,
+    IExecutionEntity[] Children,
+    Dictionary<string, (VariableInstance Instance, object? Value)> Variables,
+    bool VariablesLoaded);

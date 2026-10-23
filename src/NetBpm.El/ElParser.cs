@@ -83,15 +83,53 @@ internal static class ElParser
     /// </summary>
     private sealed class ParserState
     {
+        /// <summary>
+        /// 表达式嵌套层数上限。
+        /// <para>
+        /// 🔑 递归下降解析器必须自己设上限：<c>${{{{{{…</c> 这类输入在没有上限时会一直递归，
+        /// 最终 <see cref="StackOverflowException"/> —— 该异常<b>不可捕获</b>，进程直接退出。
+        /// 而部署期校验就会解析表达式，等于「能提交 BPMN 的人可以打崩引擎进程」。
+        /// </para>
+        /// <para>100 层足够覆盖任何人工可读的条件表达式（每层嵌套实际消耗 2~3 个单位）。</para>
+        /// </summary>
+        private const int MaxExpressionDepth = 100;
+
         private readonly Scanner _scanner;
         private readonly string _expression;
         private readonly List<ElToken> _tokens = [];
         private int _index;
+        private int _depth;
 
         public ParserState(Scanner scanner, string expression)
         {
             _scanner = scanner;
             _expression = expression;
+        }
+
+        /// <summary>
+        /// 进入一层递归。配合 <c>using var</c> 使用：作用域结束自动回退，
+        /// 成功路径与异常路径都不会让计数漂移。
+        /// </summary>
+        private DepthScope EnterDepth()
+        {
+            if (++_depth > MaxExpressionDepth)
+            {
+                throw new ElSyntaxException(
+                    $"表达式嵌套层数超过上限 {MaxExpressionDepth}（'{_expression}'）；" +
+                    "请简化条件表达式，过深的嵌套会耗尽解析栈。");
+            }
+
+            return new DepthScope(this);
+        }
+
+        /// <summary>递归深度的作用域（结构体，不产生装箱）。</summary>
+        private readonly struct DepthScope : IDisposable
+        {
+            private readonly ParserState _state;
+
+            internal DepthScope(ParserState state) => _state = state;
+
+            public void Dispose() => _state._depth--;
         }
 
         public ElToken Current => At(0);
@@ -120,6 +158,8 @@ internal static class ElParser
 
         public ElNode Expression()
         {
+            using var depth = EnterDepth();
+
             var condition = Or();
 
             if (Current.Symbol != ElSymbol.Question)
@@ -173,6 +213,9 @@ internal static class ElParser
 
         private ElNode Unary()
         {
+            // 一元的链式写法（!!!!x）是纯递归、不消耗记号的，必须计入深度
+            using var depth = EnterDepth();
+
             switch (Current.Symbol)
             {
                 case ElSymbol.Minus:
@@ -241,6 +284,9 @@ internal static class ElParser
 
         private ElNode Primary()
         {
+            // '(' → Expression → ... → Primary 是嵌套括号的递归路径
+            using var depth = EnterDepth();
+
             switch (Current.Symbol)
             {
                 case ElSymbol.Integer:

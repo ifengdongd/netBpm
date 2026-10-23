@@ -356,7 +356,7 @@ internal static class SchemaCatalog
         F("ACT_FK_VAR_BYTEARRAY", "ACT_RU_VARIABLE", "BYTEARRAY_ID_", "ACT_GE_BYTEARRAY", "ID_"),
     ];
 
-    // 0009 运行期查询索引（性能增强；对齐后为两方言并集，16 个）
+    // 0009 运行期查询索引（性能增强；对齐后为两方言并集，20 个）
     internal static readonly IReadOnlyList<TableIndexDef> PerfIndexes =
     [
         TI("ACT_IDX_EXEC_PROC_INST_PARENT", "ACT_RU_EXECUTION", ["PROC_INST_ID_", "PARENT_ID_"]),
@@ -384,6 +384,13 @@ internal static class SchemaCatalog
         TI("ACT_IDX_HI_TASK_PROCINST_END", "ACT_HI_TASKINST", ["PROC_INST_ID_", "END_TIME_"]),
         TI("ACT_IDX_HI_TASK_DEFKEY", "ACT_HI_TASKINST", ["TASK_DEF_KEY_"]),
         TI("ACT_IDX_HI_PROC_TENANT_END", "ACT_HI_PROCINST", ["TENANT_ID_", "END_TIME_"]),
+        // 历史 / 已办列表默认按 START_TIME_ 倒序分页（原索引只覆盖 END_TIME_，排序要吃 filesort）
+        TI("ACT_IDX_HI_PRO_INST_START", "ACT_HI_PROCINST", ["START_TIME_", "ID_"]),
+        TI("ACT_IDX_HI_TASK_ASSIGNEE_START", "ACT_HI_TASKINST", ["ASSIGNEE_", "START_TIME_"]),
+        // 办人变更时按「实例 + 用户」count 候选人 / 办理人，原索引只有 PROC_INST_ID_ 前缀
+        TI("ACT_IDX_IDENT_LNK_PROCINST_USER", "ACT_RU_IDENTITYLINK", ["PROC_INST_ID_", "USER_ID_"]),
+        // outbox 待发布扫描：过滤 PUBLISHED_ / DEAD_LETTER_ / NEXT_ATTEMPT_（NEXT_ATTEMPT_ 兼作发布租约）
+        TI("ACT_IDX_OUTBOX_CLAIM", "ACT_EVT_OUTBOX", ["PUBLISHED_", "DEAD_LETTER_", "NEXT_ATTEMPT_"]),
         // 注意：ACT_HI_MIGRATION 由 0007 建表，索引必须跟着表的脚本走，
         // 否则新库按 0004 → 0007 顺序执行时会在不存在的表上建索引而失败。
         TI("ACT_IDX_BYTEARRAY_DEPLOYMENT", "ACT_GE_BYTEARRAY", ["DEPLOYMENT_ID_"]),

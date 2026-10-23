@@ -287,6 +287,9 @@ internal static class SqlGenerator
         lines.AddRange(RenderAddColumn(dialect, "ACT_HI_VARINST", "TENANT_ID_", "varchar(255) default ''", "nvarchar(255) default ''"));
         lines.AddRange(RenderBackfillVariableTenant(dialect));
 
+        // 0013：租户过滤去掉 coalesce 之后的兼容回填（老库里可能仍有 NULL 行）
+        lines.AddRange(RenderNormalizeTenantNulls(dialect));
+
         // 0012：作业表补租约列（新库上面已建成最终形态，这里只服务老库）
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_JOB", "LOCK_OWNER_", "varchar(64)", "nvarchar(64)"));
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_JOB", "LOCK_EXP_TIME_", "datetime(3)", "datetime"));
@@ -379,6 +382,36 @@ internal static class SqlGenerator
         }
 
         lines.Add(string.Empty);
+        return lines;
+    }
+
+    /// <summary>
+    /// 0013 回填：把历史遗留的 <c>NULL</c> 租户归一到 <c>''</c>。
+    /// <para>
+    /// 查询侧已把 <c>coalesce(TENANT_ID_, '') = @t</c> 改成 <c>TENANT_ID_ = @t</c>
+    /// （函数包裹会让 <c>TENANT_ID_</c> 上的索引完全失效）。但等值比较下 <c>NULL</c> 不匹配任何租户，
+    /// 老库里的 NULL 行会在升级后「凭空消失」—— 所以去函数的前提就是先把 NULL 归一。
+    /// </para>
+    /// <para>
+    /// 幂等性由 <c>where TENANT_ID_ is null</c> 保证：新库列带 <c>default ''</c>，整句是空操作。
+    /// </para>
+    /// </summary>
+    private static List<string> RenderNormalizeTenantNulls(Dialect dialect)
+    {
+        var empty = dialect == Dialect.MySql ? "''" : "N''";
+
+        var lines = new List<string>
+        {
+            "-- 0013 租户 NULL 归一：租户过滤改为等值比较前的兼容回填（可重复执行）",
+        };
+
+        foreach (var table in new[] { "ACT_RU_EXECUTION", "ACT_HI_PROCINST", "ACT_HI_TASKINST" })
+        {
+            lines.Add($"update {table} set TENANT_ID_ = {empty} where TENANT_ID_ is null;");
+        }
+
+        lines.Add(string.Empty);
+
         return lines;
     }
 

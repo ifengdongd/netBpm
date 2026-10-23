@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Runtime.CompilerServices;
 using Dapper;
 using NetBpm.Bpmn.Model;
@@ -8,6 +7,7 @@ using NetBpm.Engine.History;
 using NetBpm.Engine.Tasks;
 using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Execution;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.History;
 
@@ -503,7 +503,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         var result = new List<HistoricActivityInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             result.Add(new HistoricActivityInstance(
                 Text(row, "ID_")!,
@@ -514,8 +514,8 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
                 Text(row, "ACT_TYPE_"),
                 Text(row, "TASK_ID_"),
                 Text(row, "ASSIGNEE_"),
-                Date(row, "START_TIME_"),
-                Date(row, "END_TIME_")));
+                NullableDate(row, "START_TIME_"),
+                NullableDate(row, "END_TIME_")));
         }
 
         return result;
@@ -535,16 +535,16 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
             .QueryAsync(new CommandDefinition(SelectHistoricProcessInstanceSql, new { processInstanceId }, session.Transaction, cancellationToken: ct))
             .ConfigureAwait(false);
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             return new HistoricProcessInstance(
                 Text(row, "ID_")!,
                 Text(row, "PROC_INST_ID_")!,
                 Text(row, "BUSINESS_KEY_"),
                 Text(row, "PROC_DEF_ID_")!,
-                Date(row, "START_TIME_"),
-                Date(row, "END_TIME_"),
-                Number(row, "DURATION_"),
+                NullableDate(row, "START_TIME_"),
+                NullableDate(row, "END_TIME_"),
+                Long(row, "DURATION_"),
                 Text(row, "START_USER_ID_"),
                 Text(row, "START_ACT_ID_"),
                 Text(row, "END_ACT_ID_"),
@@ -571,7 +571,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         var result = new List<HistoricTaskInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             result.Add(MapTaskInstance(row));
         }
@@ -592,7 +592,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         var result = new List<HistoricProcessInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             result.Add(MapProcessInstance(row));
         }
@@ -613,7 +613,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         var result = new List<HistoricTaskInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             result.Add(MapTaskInstance(row));
         }
@@ -641,12 +641,12 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         var result = new List<HistoricVariableInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             var typeName = Text(row, "VAR_TYPE_");
             var value = VariableTypeMapper.FromColumns(
                 typeName,
-                Number(row, "LONG_"),
+                Long(row, "LONG_"),
                 Double(row, "DOUBLE_"),
                 Text(row, "TEXT_"),
                 Bytes(row, "BYTES_"));
@@ -659,8 +659,8 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
                 Text(row, "NAME_")!,
                 value,
                 typeName,
-                Date(row, "CREATE_TIME_"),
-                Date(row, "LAST_UPDATED_TIME_")));
+                NullableDate(row, "CREATE_TIME_"),
+                NullableDate(row, "LAST_UPDATED_TIME_")));
         }
 
         return result;
@@ -680,7 +680,9 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
         var parameters = new DynamicParameters();
         var where = BuildProcessInstanceWhere(filter, parameters);
         var direction = filter.Descending ? "desc" : "asc";
-        var paging = BuildPaging(session.DatabaseType, filter.FirstResult, filter.MaxResults, parameters);
+        var paging = filter.MaxResults is { } take
+            ? SqlPaging.Build(session.DatabaseType, filter.FirstResult, take, parameters)
+            : SqlPaging.BuildUnlimited(session.DatabaseType, filter.FirstResult, parameters);
 
         var sql = $"""
             select ID_, PROC_INST_ID_, BUSINESS_KEY_, PROC_DEF_ID_, START_TIME_, END_TIME_, DURATION_,
@@ -697,7 +699,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         var result = new List<HistoricProcessInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             result.Add(MapProcessInstance(row));
         }
@@ -736,7 +738,9 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
         var parameters = new DynamicParameters();
         var where = BuildHistoricTaskWhere(filter, parameters);
         var direction = filter.Descending ? "desc" : "asc";
-        var paging = BuildPaging(session.DatabaseType, filter.FirstResult, filter.MaxResults, parameters);
+        var paging = filter.MaxResults is { } take
+            ? SqlPaging.Build(session.DatabaseType, filter.FirstResult, take, parameters)
+            : SqlPaging.BuildUnlimited(session.DatabaseType, filter.FirstResult, parameters);
 
         var sql = $"""
             select ID_, PROC_DEF_ID_, TASK_DEF_KEY_, PROC_INST_ID_, EXECUTION_ID_, NAME_, ASSIGNEE_, OWNER_,
@@ -753,7 +757,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         var result = new List<HistoricTaskInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             result.Add(MapTaskInstance(row));
         }
@@ -818,7 +822,8 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         if (filter.TenantId is not null)
         {
-            conditions.Add("coalesce(TENANT_ID_, '') = @tenantId");
+            // 等值比较保证 TENANT_ID_ 索引可用；历史 NULL 由初始化脚本 0012 段归一
+            conditions.Add("TENANT_ID_ = @tenantId");
             parameters.Add("tenantId", filter.TenantId);
         }
 
@@ -870,7 +875,8 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
 
         if (filter.TenantId is not null)
         {
-            conditions.Add("coalesce(TENANT_ID_, '') = @tenantId");
+            // 等值比较保证 TENANT_ID_ 索引可用；历史 NULL 由初始化脚本 0012 段归一
+            conditions.Add("TENANT_ID_ = @tenantId");
             parameters.Add("tenantId", filter.TenantId);
         }
 
@@ -902,48 +908,19 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
         parameters.Add(parameterName, value);
     }
 
-    /// <summary>方言分页子句。空 <paramref name="take"/> 表示调用方显式要求不限条数。</summary>
-    private static string BuildPaging(
-        DatabaseType databaseType,
-        int firstResult,
-        int? take,
-        DynamicParameters parameters)
-    {
-        var skip = Math.Max(0, firstResult);
 
-        if (take is null)
-        {
-            if (skip == 0)
-            {
-                return string.Empty;
-            }
-
-            // 只跳过、不限制：用一个足够大的上限，避免重新退化成「全表进内存」
-            parameters.Add("skip", skip);
-            return databaseType == DatabaseType.MySql
-                ? " limit 100000 offset @skip"
-                : " offset @skip rows fetch next 100000 rows only";
-        }
-
-        parameters.Add("skip", skip);
-        parameters.Add("take", Math.Max(1, take.Value));
-
-        return databaseType == DatabaseType.MySql
-            ? " limit @take offset @skip"
-            : " offset @skip rows fetch next @take rows only";
-    }
 
     // ─────────────────────────── 行映射 ───────────────────────────
 
-    private static HistoricProcessInstance MapProcessInstance(IDictionary<string, object> row) =>
+    private static HistoricProcessInstance MapProcessInstance(IDictionary<string, object?> row) =>
         new(
             Text(row, "ID_")!,
             Text(row, "PROC_INST_ID_")!,
             Text(row, "BUSINESS_KEY_"),
             Text(row, "PROC_DEF_ID_")!,
-            Date(row, "START_TIME_"),
-            Date(row, "END_TIME_"),
-            Number(row, "DURATION_"),
+            NullableDate(row, "START_TIME_"),
+            NullableDate(row, "END_TIME_"),
+            Long(row, "DURATION_"),
             Text(row, "START_USER_ID_"),
             Text(row, "START_ACT_ID_"),
             Text(row, "END_ACT_ID_"),
@@ -951,7 +928,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
             Text(row, "NAME_"),
             TenantId: Text(row, "TENANT_ID_"));
 
-    private static HistoricTaskInstance MapTaskInstance(IDictionary<string, object> row) =>
+    private static HistoricTaskInstance MapTaskInstance(IDictionary<string, object?> row) =>
         new(
             Text(row, "ID_")!,
             Text(row, "PROC_DEF_ID_"),
@@ -961,11 +938,11 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
             Text(row, "NAME_"),
             Text(row, "ASSIGNEE_"),
             Text(row, "OWNER_"),
-            (int?)Number(row, "PRIORITY_"),
+            Number(row, "PRIORITY_"),
             Text(row, "FORM_KEY_"),
-            Date(row, "START_TIME_"),
-            Date(row, "END_TIME_"),
-            Number(row, "DURATION_"),
+            NullableDate(row, "START_TIME_"),
+            NullableDate(row, "END_TIME_"),
+            Long(row, "DURATION_"),
             Text(row, "DELETE_REASON_"),
             TenantId: Text(row, "TENANT_ID_"));
 
@@ -1022,25 +999,6 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
             { } element => element.Id,
             _ => execution.CurrentActivityId,
         };
-
-    private static string? Text(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value as string : null;
-
-    private static DateTime? Date(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is DateTime time ? time : null;
-
-    private static long? Number(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull && value is not null
-            ? Convert.ToInt64(value, CultureInfo.InvariantCulture)
-            : null;
-
-    private static double? Double(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull && value is not null
-            ? Convert.ToDouble(value, CultureInfo.InvariantCulture)
-            : null;
-
-    private static byte[]? Bytes(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value as byte[] : null;
 
     /// <summary>
     /// <c>ACT_TYPE_</c> = 元素类名首字母小写（对应 <c>DefaultHistoryManager.parseActivityType</c>）。

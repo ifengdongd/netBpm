@@ -1,5 +1,7 @@
 using Dapper;
+using NetBpm.Engine;
 using NetBpm.Persistence;
+using NetBpm.Persistence.Database;
 
 namespace NetBpm.Admin.Storage;
 
@@ -20,14 +22,20 @@ namespace NetBpm.Admin.Storage;
 public sealed class BpmnModelStore
 {
     private readonly IDbConnectionFactory _connections;
+    private readonly IDbSessionProvider _sessions;
     private readonly long _tenantId;
 
-    public BpmnModelStore(IDbConnectionFactory connections, IConfiguration configuration)
+    public BpmnModelStore(
+        IDbConnectionFactory connections,
+        IDbSessionProvider sessions,
+        IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(connections);
+        ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(configuration);
 
         _connections = connections;
+        _sessions = sessions;
         _tenantId = configuration.GetValue(AdminStorageDefaults.TenantConfigKey, AdminStorageDefaults.DefaultTenantId);
     }
 
@@ -171,6 +179,11 @@ public sealed class BpmnModelStore
     /// <param name="model">模型内容（调用方已完成部署期校验）。</param>
     /// <param name="operatorId">操作人（写入历史）。</param>
     /// <param name="action">动作：<c>save</c> / <c>rollback</c>。</param>
+    /// <param name="expectedRevision">
+    /// 调用方看到的版本号（HTTP <c>If-Match</c>）。给出时做<b>事务内条件写入</b>：
+    /// 当前版本不等于它即抛 <see cref="OptimisticLockingException"/>（映射为 409）。
+    /// 端点里的「先查后比」只是快速失败，权威判定必须在这里，否则两个请求同时通过检查后仍会互相覆盖。
+    /// </param>
     /// <param name="ct">取消令牌。</param>
     /// <returns>本次写入的版本号（同一模型内从 1 递增）。</returns>
     public async Task<int> SaveAsync(
@@ -178,6 +191,7 @@ public sealed class BpmnModelStore
         SaveBpmnModelRequest model,
         string? operatorId = null,
         string action = "save",
+        int? expectedRevision = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
@@ -189,11 +203,18 @@ public sealed class BpmnModelStore
         {
             try
             {
-                return await SaveOnceAsync(id, model, operatorId, action, ct).ConfigureAwait(false);
+                return await SaveOnceAsync(id, model, operatorId, action, expectedRevision, ct)
+                    .ConfigureAwait(false);
             }
-            catch (Exception exception) when (attempt < maxAttempts && DatabaseErrors.IsUniqueViolation(exception))
+            catch (Exception exception) when (DatabaseErrors.IsUniqueViolation(exception))
             {
-                // 撞唯一索引：另一个并发保存已抢先占用了版本号，重读 revision 再试
+                // 撞唯一索引：另一个并发保存已抢先占用了版本号，重读 revision 再试。
+                // 重试用尽仍然冲突 ⇒ 并发度超出预期，转成 409 而不是把 DbException 漏成 500。
+                if (attempt >= maxAttempts)
+                {
+                    throw new OptimisticLockingException(
+                        $"模型 '{id}' 的保存连续冲突 {maxAttempts} 次（并发写入过于频繁），请刷新后重试。");
+                }
             }
         }
     }
@@ -208,7 +229,7 @@ public sealed class BpmnModelStore
 
         var id = Guid.NewGuid().ToString("N");
 
-        await SaveAsync(id, model, operatorId, "save", ct).ConfigureAwait(false);
+        await SaveAsync(id, model, operatorId, "save", expectedRevision: null, ct: ct).ConfigureAwait(false);
 
         return await GetAsync(id, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"模型 '{id}' 创建后读取失败。");
@@ -220,17 +241,27 @@ public sealed class BpmnModelStore
         SaveBpmnModelRequest model,
         string? operatorId,
         string action,
+        int? expectedRevision,
         CancellationToken ct)
     {
-        await using var connection = _connections.CreateConnection();
-        using var transaction = connection.BeginTransaction();
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        await using var unitOfWork = lease.BeginUnitOfWork();
 
-        var revision = await NextRevisionAsync(connection, transaction, id, ct).ConfigureAwait(false);
+        var revision = await NextRevisionAsync(session, id, ct).ConfigureAwait(false);
 
-        await AppendRevisionAsync(connection, transaction, id, revision, model, operatorId, action, ct)
+        // 🔑 条件写入（compare-and-set）：版本校验与写入在同一事务、同一把锁内，
+        // 不存在「检查通过 → 别人提交 → 我覆盖」的窗口。
+        if (expectedRevision is { } expected && revision != expected + 1)
+        {
+            throw new OptimisticLockingException(
+                $"模型 '{id}' 已被其他人修改（服务端版本 {revision - 1}，本次提交基于版本 {expected}），请刷新后重试。");
+        }
+
+        await AppendRevisionAsync(session, id, revision, model, operatorId, action, ct)
             .ConfigureAwait(false);
 
-        transaction.Commit();
+        await unitOfWork.CommitAsync(ct).ConfigureAwait(false);
 
         return revision;
     }
@@ -410,10 +441,11 @@ public sealed class BpmnModelStore
         string? operatorId = null,
         CancellationToken ct = default)
     {
-        await using var connection = _connections.CreateConnection();
-        using var transaction = connection.BeginTransaction();
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        await using var unitOfWork = lease.BeginUnitOfWork();
 
-        var revision = await connection.QuerySingleOrDefaultAsync<BpmnModelRevisionDetail>(
+        var revision = await session.Connection.QuerySingleOrDefaultAsync<BpmnModelRevisionDetail>(
             new CommandDefinition(
                 $"""
                  select {RevisionDetailColumns}
@@ -421,7 +453,7 @@ public sealed class BpmnModelStore
                   where id = @RevisionId and model_id = @Id and tenant_id = @TenantId
                  """,
                 new { RevisionId = revisionId, Id = id, TenantId = _tenantId },
-                transaction,
+                session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);
 
         if (revision is null)
@@ -438,12 +470,12 @@ public sealed class BpmnModelStore
             Svg = revision.Svg,
         };
 
-        var nextRevision = await NextRevisionAsync(connection, transaction, id, ct).ConfigureAwait(false);
+        var nextRevision = await NextRevisionAsync(session, id, ct).ConfigureAwait(false);
 
-        await AppendRevisionAsync(connection, transaction, id, nextRevision, request, operatorId, "rollback", ct)
+        await AppendRevisionAsync(session, id, nextRevision, request, operatorId, "rollback", ct)
             .ConfigureAwait(false);
 
-        transaction.Commit();
+        await unitOfWork.CommitAsync(ct).ConfigureAwait(false);
 
         return await GetAsync(id, ct).ConfigureAwait(false);
     }
@@ -455,13 +487,14 @@ public sealed class BpmnModelStore
     /// <returns>删除的快照数；模型没有历史（或无需清理）返回 0。</returns>
     public async Task<int> PruneHistoryAsync(string id, int keepLatest, CancellationToken ct = default)
     {
-        await using var connection = _connections.CreateConnection();
-        using var transaction = connection.BeginTransaction();
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        await using var unitOfWork = lease.BeginUnitOfWork();
 
-        var maxRevision = await connection.ExecuteScalarAsync<int?>(new CommandDefinition(
+        var maxRevision = await session.Connection.ExecuteScalarAsync<int?>(new CommandDefinition(
             "select max(revision) from bpmn_model_history where model_id = @Id and tenant_id = @TenantId",
             new { Id = id, TenantId = _tenantId },
-            transaction,
+            session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
 
         if (maxRevision is null)
@@ -476,16 +509,16 @@ public sealed class BpmnModelStore
             return 0;
         }
 
-        var affected = await connection.ExecuteAsync(new CommandDefinition(
+        var affected = await session.Connection.ExecuteAsync(new CommandDefinition(
             """
             delete from bpmn_model_history
              where model_id = @Id and tenant_id = @TenantId and revision <= @Cutoff
             """,
             new { Id = id, TenantId = _tenantId, Cutoff = cutoff },
-            transaction,
+            session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
 
-        transaction.Commit();
+        await unitOfWork.CommitAsync(ct).ConfigureAwait(false);
 
         return affected;
     }
@@ -493,50 +526,68 @@ public sealed class BpmnModelStore
     /// <summary>按 id 删除（连同版本历史）；返回是否真的删掉了一行。</summary>
     public async Task<bool> DeleteAsync(string id, CancellationToken ct = default)
     {
-        await using var connection = _connections.CreateConnection();
-        using var transaction = connection.BeginTransaction();
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        await using var unitOfWork = lease.BeginUnitOfWork();
 
-        await connection.ExecuteAsync(new CommandDefinition(
+        await session.Connection.ExecuteAsync(new CommandDefinition(
             "delete from bpmn_model_history where model_id = @Id and tenant_id = @TenantId",
             new { Id = id, TenantId = _tenantId },
-            transaction,
+            session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
 
-        var affected = await connection.ExecuteAsync(new CommandDefinition(
+        var affected = await session.Connection.ExecuteAsync(new CommandDefinition(
             "delete from bpmn_model where id = @Id and tenant_id = @TenantId",
             new { Id = id, TenantId = _tenantId },
-            transaction,
+            session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
 
-        transaction.Commit();
+        await unitOfWork.CommitAsync(ct).ConfigureAwait(false);
 
         return affected > 0;
     }
 
-    /// <summary>计算下一个版本号（同一事务内调用；并发冲突由唯一索引 + 重试兜底）。</summary>
+    /// <summary>
+    /// 计算下一个版本号（同一事务内调用），并<b>对最新版本行加锁</b>。
+    /// <para>
+    /// 为什么不是 <c>select max(revision) + 1</c>：聚合查询无法加行锁，两个事务会读到同一个版本号，
+    /// 只能靠唯一索引把它们撞成「重试」。重试能保证不重号，却会掩盖 <c>If-Match</c> 语义
+    /// （条件判断读到的是旧值）。加锁读把「读版本 → 写新版本」变成串行临界区。
+    /// </para>
+    /// </summary>
     private async Task<int> NextRevisionAsync(
-        System.Data.IDbConnection connection,
-        System.Data.IDbTransaction transaction,
+        IDbSession session,
         string id,
         CancellationToken ct)
     {
-        var revision = await connection.ExecuteScalarAsync<int?>(new CommandDefinition(
-            """
-            select max(revision) + 1
-              from bpmn_model_history
-             where model_id = @Id and tenant_id = @TenantId
-            """,
+        var sql = _connections.DatabaseType == DatabaseType.SqlServer
+            ? """
+              select top 1 revision
+                from bpmn_model_history with (updlock, holdlock)
+               where model_id = @Id and tenant_id = @TenantId
+               order by revision desc
+              """
+            : """
+              select revision
+                from bpmn_model_history
+               where model_id = @Id and tenant_id = @TenantId
+               order by revision desc
+               limit 1
+               for update
+              """;
+
+        var current = await session.Connection.ExecuteScalarAsync<int?>(new CommandDefinition(
+            sql,
             new { Id = id, TenantId = _tenantId },
-            transaction,
+            session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
 
-        return revision ?? 1;
+        return (current ?? 0) + 1;
     }
 
     /// <summary>在同一事务内追加版本快照并 upsert 主表。</summary>
     private async Task AppendRevisionAsync(
-        System.Data.IDbConnection connection,
-        System.Data.IDbTransaction transaction,
+        IDbSession session,
         string id,
         int revision,
         SaveBpmnModelRequest model,
@@ -546,7 +597,7 @@ public sealed class BpmnModelStore
     {
         var now = DateTime.UtcNow;
 
-        await connection.ExecuteAsync(new CommandDefinition(
+        await session.Connection.ExecuteAsync(new CommandDefinition(
             """
             insert into bpmn_model_history
                 (id, tenant_id, model_id, revision, name, process_key, description,
@@ -570,10 +621,10 @@ public sealed class BpmnModelStore
                 Operator = Truncate(operatorId, 255),
                 CreatedAt = now,
             },
-            transaction,
+            session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
 
-        await connection.ExecuteAsync(new CommandDefinition(
+        await session.Connection.ExecuteAsync(new CommandDefinition(
             _connections.DatabaseType == DatabaseType.SqlServer ? SqlServerUpsert : MySqlUpsert,
             new
             {
@@ -586,7 +637,7 @@ public sealed class BpmnModelStore
                 model.Svg,
                 Now = now,
             },
-            transaction,
+            session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
     }
 

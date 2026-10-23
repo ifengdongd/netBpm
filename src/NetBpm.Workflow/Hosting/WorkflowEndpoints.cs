@@ -66,7 +66,9 @@ public static class WorkflowEndpoints
         group.MapPost("/tasks/{taskId}/assignee", (string taskId, ReassignTaskRequest? request, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
             ReassignTaskAsync(taskId, request, http, workflow, options, ct)).Produces<object>();
         group.MapPost("/instances/{processInstanceId}/jump", (string processInstanceId, JumpToNodeRequest? request, HttpContext http, IWorkflowService workflow, CancellationToken ct) =>
-            JumpToNodeAsync(processInstanceId, request, http, workflow, options, ct)).Produces<object>(); group.MapGet("/process-definition", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
+            JumpToNodeAsync(processInstanceId, request, http, workflow, options, ct)).Produces<object>();
+
+        group.MapGet("/process-definition", (HttpContext http, IProcessEngine engine, IWorkflowService workflow, CancellationToken ct) =>
             GetProcessDefinitionAsync(http, engine, workflow, options, ct));
 
         // 流程图图片：发布（部署）后的定义渲染成 SVG —— 浏览器直接当图片显示，可另存。
@@ -488,6 +490,12 @@ public static class WorkflowEndpoints
         WorkflowEndpointOptions options,
         CancellationToken ct)
     {
+        if (await ForbidUnlessAuthorizedAsync(http, options, WorkflowAdminAction.ReassignTask, ct)
+                .ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
         try
         {
             var view = await workflow.ReassignTaskAsync(
@@ -523,6 +531,12 @@ public static class WorkflowEndpoints
         WorkflowEndpointOptions options,
         CancellationToken ct)
     {
+        if (await ForbidUnlessAuthorizedAsync(http, options, WorkflowAdminAction.JumpToNode, ct)
+                .ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
         if (string.IsNullOrWhiteSpace(request?.TargetActivityId))
         {
             return Results.BadRequest(options.Error("targetActivityId 必填（目标节点 id，可填结束事件强制办结）。"));
@@ -565,6 +579,38 @@ public static class WorkflowEndpoints
     public sealed record JumpToNodeRequest(string? TargetActivityId, string? Reason);
 
     // ─────────────────────────── 工具 ───────────────────────────
+
+    /// <summary>
+    /// 管理动作授权：未配置钩子或钩子拒绝时返回 403，允许时返回 <see langword="null"/>。
+    /// </summary>
+    /// <remarks>
+    /// fail-closed 是刻意的：转办能「把别人待办改给自己再完成」，跳转能跳过审批环节，
+    /// 默认放行等于给每个宿主装一个未授权后门。宿主不配置就等于不开放这两个端点。
+    /// </remarks>
+    private static async ValueTask<IResult?> ForbidUnlessAuthorizedAsync(
+        HttpContext http,
+        WorkflowEndpointOptions options,
+        WorkflowAdminAction action,
+        CancellationToken ct)
+    {
+        if (options.AuthorizeAdminAction is null)
+        {
+            return Results.Json(
+                options.Error(
+                    "管理动作未授权：宿主未配置 WorkflowEndpointOptions.AuthorizeAdminAction，" +
+                    "引擎已默认拒绝该操作。"),
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!await options.AuthorizeAdminAction(http, action, ct).ConfigureAwait(false))
+        {
+            return Results.Json(
+                options.Error($"当前身份无权执行该管理动作（{action}）。"),
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        return null;
+    }
 
     /// <summary>解析查询参数的整数，非法或缺省回退到 <paramref name="fallback"/>。</summary>
     private static int ParseInt(string? value, int fallback) =>

@@ -1,4 +1,6 @@
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
+using NetBpm.Engine;
 using NetBpm.Engine.Behavior;
 
 namespace NetBpm.Runtime;
@@ -40,7 +42,25 @@ public sealed class ServiceProviderActivityDelegateResolver : IActivityDelegateR
         }
 
         var fromContainer = _serviceProvider.GetService(type);
-        return fromContainer ?? Activator.CreateInstance(type);
+        if (fromContainer is not null)
+        {
+            return fromContainer;
+        }
+
+        // 容器里没有：按 Activiti 的 activiti:class 语义反射创建。
+        // 🔑 失败必须翻译成 EngineException：裸的 MissingMethodException / TargetInvocationException
+        // 会被宿主当成「框架炸了」，而真实原因通常是「忘了注册到 DI」或「类型没有 public 无参构造」。
+        try
+        {
+            return Activator.CreateInstance(type);
+        }
+        catch (Exception exception) when (exception is MissingMethodException or MemberAccessException or TargetInvocationException)
+        {
+            throw new EngineException(
+                $"服务任务实现类型 '{type.FullName}' 既未注册到容器，也无法反射创建（需要 public 无参构造函数）。"
+                + "请把它注册到 DI（AddTransient / AddScoped，或用 [ServiceTaskName] + AddServiceTaskDelegates 扫描注册）。",
+                exception);
+        }
     }
 
     /// <inheritdoc />

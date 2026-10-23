@@ -99,4 +99,13 @@ public sealed class OutboxPublisherOptions
 
     /// <summary>启动后延迟多久开始发布。</summary>
     public TimeSpan StartupDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// 发布租约时长：抢到一条事件后在这段时间内独占，其它宿主不会重复投递。
+    /// <para>
+    /// 必须<b>明显大于</b>单条 handler 的最长耗时；进程崩溃时租约到期，事件自动回到待发布队列
+    /// （仍是至少一次语义，订阅方按事件 id 幂等）。
+    /// </para>
+    /// </summary>
+    public TimeSpan LeaseDuration { get; set; } = TimeSpan.FromMinutes(5);
 }

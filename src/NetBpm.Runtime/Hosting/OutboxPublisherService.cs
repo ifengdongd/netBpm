@@ -10,7 +10,12 @@ namespace NetBpm.Runtime.Hosting;
 /// outbox 发布器：把 <c>ACT_EVT_OUTBOX</c> 里待发布的事件投递给宿主注册的
 /// <see cref="IOutboxEventHandler"/>，成功后打标，失败按退避重试，超过上限进死信。
 /// <para>
-/// <b>至少一次</b>：数据库提交成功但进程在打标前崩溃，事件会再次投递；
+/// <b>多宿主互斥</b>：每条事件先 <see cref="IEventOutboxStore.TryClaimAsync"/> 抢租约，
+/// 抢不到就说明别的宿主正在投递，本轮跳过。没有这一步，两个宿主会同时读到同一批行、
+/// 各自投递一次 —— 那是「必然重复」，不是「至少一次」。
+/// </para>
+/// <para>
+/// <b>至少一次</b>：数据库提交成功但进程在打标前崩溃，租约到期后事件会再次投递；
 /// 订阅方必须以 <see cref="OutboxEvent.Id"/> 做幂等。
 /// </para>
 /// </summary>
@@ -113,6 +118,16 @@ public sealed class OutboxPublisherService : BackgroundService
     {
         try
         {
+            var leaseFrom = DateTime.UtcNow;
+
+            if (!await _store
+                    .TryClaimAsync(outboxEvent.Id, leaseFrom, leaseFrom + _options.LeaseDuration, ct)
+                    .ConfigureAwait(false))
+            {
+                // 已被其它宿主认领（或刚好被改期）：本轮不处理，避免重复投递
+                return false;
+            }
+
             foreach (var handler in _handlers)
             {
                 await handler.HandleAsync(outboxEvent, ct).ConfigureAwait(false);

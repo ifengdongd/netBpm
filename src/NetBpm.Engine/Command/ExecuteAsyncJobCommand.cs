@@ -25,6 +25,7 @@ public sealed class ExecuteAsyncJobCommand : ICommand<bool>
 
     private readonly string _jobId;
     private readonly string? _owner;
+    private readonly bool _leaseAlreadyHeld;
 
     /// <param name="jobId">作业 id。</param>
     /// <param name="owner">
@@ -32,12 +33,18 @@ public sealed class ExecuteAsyncJobCommand : ICommand<bool>
     /// 执行成功后删除作业行 —— 宿主崩溃后作业会在租约到期时自动回收，不会永久丢失。
     /// 为 <see langword="null"/> 时退化为旧的「条件删除抢占」（不推荐）。
     /// </param>
-    public ExecuteAsyncJobCommand(string jobId, string? owner = null)
+    /// <param name="leaseAlreadyHeld">
+    /// 调用方<b>已经</b>用同一个 <paramref name="owner"/> 抢到租约（例如轮询器先批量抢占、
+    /// 再逐条交给命令）。为 <see langword="true"/> 时命令内不再重复抢占 ——
+    /// 那条 <c>update ... where LOCK_OWNER_ = @owner</c> 除了多一次往返什么也不做。
+    /// </param>
+    public ExecuteAsyncJobCommand(string jobId, string? owner = null, bool leaseAlreadyHeld = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
         _jobId = jobId;
         _owner = owner;
+        _leaseAlreadyHeld = leaseAlreadyHeld;
     }
 
     /// <inheritdoc />
@@ -51,8 +58,10 @@ public sealed class ExecuteAsyncJobCommand : ICommand<bool>
 
         // 租约式抢占：执行前只标记归属，成功后才删除。
         // 与旧的「先删后执行」相比，宿主崩溃不会丢作业。
-        if (!string.IsNullOrWhiteSpace(_owner)
-            && !await jobs.TryAcquireAsync(_jobId, _owner!, DateTime.UtcNow, JobLease, ct).ConfigureAwait(false))
+        // 调用方已持有同一 owner 的租约时跳过（抢占只做一次，见 leaseAlreadyHeld）。
+        if (!_leaseAlreadyHeld
+            && !string.IsNullOrWhiteSpace(_owner)
+            && !await jobs.TryAcquireAsync(_jobId, _owner!, services.Clock.UtcNow, JobLease, ct).ConfigureAwait(false))
         {
             return false;
         }
@@ -78,7 +87,7 @@ public sealed class ExecuteAsyncJobCommand : ICommand<bool>
         if (execution.SuspensionState != 1)
         {
             // 挂起不是删除：顺延一分钟，避免占满批次头部
-            await jobs.RescheduleAsync(_jobId, DateTime.UtcNow.AddMinutes(1), ct).ConfigureAwait(false);
+            await jobs.RescheduleAsync(_jobId, services.Clock.UtcNow.AddMinutes(1), ct).ConfigureAwait(false);
             return false;
         }
 

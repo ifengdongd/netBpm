@@ -1,4 +1,28 @@
+using Microsoft.AspNetCore.Http;
+
 namespace NetBpm.Workflow;
+
+/// <summary>通用流程端点里的「管理动作」（会改变办理人或流程走向）。</summary>
+public enum WorkflowAdminAction
+{
+    /// <summary>转办：把待办改派给另一个人。</summary>
+    ReassignTask,
+
+    /// <summary>跳转：把运行中的实例搬到指定节点。</summary>
+    JumpToNode,
+}
+
+/// <summary>
+/// 管理动作授权钩子。
+/// <para>
+/// 返回 <see langword="false"/> 表示拒绝（端点返回 403）。宿主应在此校验管理 scope
+/// （例如 <c>netbpm.admin.task.moderate</c> / <c>netbpm.admin.instance.jump</c>）。
+/// </para>
+/// </summary>
+public delegate ValueTask<bool> WorkflowAdminActionAuthorizer(
+    HttpContext context,
+    WorkflowAdminAction action,
+    CancellationToken ct);
 
 /// <summary>
 /// <see cref="WorkflowEndpoints"/> 的定制点：流程 key 来源、请求/视图的业务化加工、错误响应形状。
@@ -29,6 +53,20 @@ public sealed class WorkflowEndpointOptions
 
     /// <summary>实例摘要（列表行）的业务化加工（可选）：返回值直接作为响应体。</summary>
     public Func<IServiceProvider, WorkflowInstanceSummary, ValueTask<object?>>? DecorateInstanceSummary { get; init; }
+
+    /// <summary>
+    /// 管理动作（转办 <c>POST /tasks/{id}/assignee</c>、跳转 <c>POST /instances/{id}/jump</c>）的授权钩子。
+    /// <para>
+    /// 🔑 <b>为 <see langword="null"/> 时端点一律 403（fail-closed）</b>：这两个动作能改变办理人、
+    /// 把别人待办改给自己后再以办理人身份完成，属于高危操作。默认放行等于「任何宿主一行接入
+    /// 就得到一个未授权后门」，因此必须由宿主<b>显式</b>选择策略。
+    /// </para>
+    /// <para>
+    /// 无鉴权的演示宿主可以显式写 <c>(_, _, _) =&gt; ValueTask.FromResult(true)</c>，
+    /// 生产宿主请校验管理 scope。
+    /// </para>
+    /// </summary>
+    public WorkflowAdminActionAuthorizer? AuthorizeAdminAction { get; init; }
 
     /// <summary>
     /// 错误响应工厂：默认形状 <c>{ message, errors? }</c>。宿主可换成自己的错误 DTO。

@@ -534,6 +534,7 @@ dotnet run --project src/NetBpm.Rest
     "DatabaseType": "MySql",
     "ConnectionString": "",
     "IdBlockSize": 2500,
+    "MaxOperationsPerCommand": 10000,
     "EnableHistory": false,
     "UseInMemoryExecutionTree": true,
     "AutoMigrate": false,
@@ -573,6 +574,16 @@ SQL Server 由 SqlClient 负责（4.0 起已移除 TLS 1.0/1.1 支持），请�
   JWT 模式下忽略 `X-User-Id` / `X-Tenant-Id`，身份只来自签名令牌。
 - 账号密码（控制台登录）：`POST /api/auth/login` 用 `admin_user` 表里的账号换一个 JWT，
   见下面「控制台账号密码登录」。它是**新增的第三种凭据来源**，上面两种方式照旧可用。
+
+**宿主安全基线（REST / 管理端一致）**：两个宿主共用同一套组合根
+（`src/NetBpm.Rest/Hosting/NetBpmHost.cs`），因此下列保护一次配置、两处生效：
+
+- **限流**（`NetBpm:RateLimit`，按客户端 IP 固定窗口）：登录 `LoginPerMinute`（默认 10）/
+  凭据探针 `ProbePerMinute`（30）/ 其余 `/api` `ApiPerMinute`（600）；`/health` 与静态资源不限流。
+  管理端旧配置节 `NetBpm:Admin:RateLimit:*` 仍然兼容（新节存在时以新节为准）。
+- **请求体上限**（`NetBpm:MaxRequestBodySizeBytes`，默认 10 MB）：BPMN XML 与变量字典都走请求体，
+  没有上限等于允许单请求把进程内存打满。
+- **异常映射**：唯一约束冲突 → **409**；其余数据库异常 → **503**（不带 SQL / 连接串，细节只进日志）。
 
 **JWT 下的租户与身份边界**：请求体 / 查询参数里的 `startUserId`、`tenantId` 与令牌不一致一律 **403**
 （不允许用请求参数冒充他人或跨租户读写）；按 id 访问实例、任务、历史、部署时按令牌租户校验，
@@ -794,6 +805,11 @@ app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions // ⑤ 通
     ProcessKey = _ => "my_process",
     // TransformStartRequest / DecorateInstanceView / DecorateInstanceSummary / ErrorResponseFactory
     // 是业务定制点：单号生成、DTO 摊平、错误响应形状
+
+    // ⚠️ 必配：转办 / 跳转属于管理动作，未配置时一律 403（fail-closed）。
+    // 生产宿主请在这里校验管理 scope，无鉴权的演示宿主可显式放开。
+    AuthorizeAdminAction = (http, action, ct) =>
+        ValueTask.FromResult(http.User.HasClaim("scope", "netbpm.admin")),
 });
 
 await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOptions // ⑥ 启动即部署

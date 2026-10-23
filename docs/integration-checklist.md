@@ -36,7 +36,13 @@ builder.Services.AddNetBpmTimerScheduler(builder.Configuration);    // ⑤ 边�
 builder.Services.AddNetBpmAsyncJobExecutor(builder.Configuration);  // ⑥ async 作业执行器（用到才需要）
 
 // 端点：②③④ 之外，通用流程 HTTP 面与业务定制点
-app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions { ProcessKey = _ => "my_process" });
+// ⚠️ AuthorizeAdminAction 不配 ⇒ 转办 / 跳转一律 403（fail-closed）。
+// 无鉴权的演示宿主可写 (_, _, _) => ValueTask.FromResult(true)；生产请校验管理 scope。
+app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions
+{
+    ProcessKey = _ => "my_process",
+    AuthorizeAdminAction = (http, action, ct) => ValueTask.FromResult(IsAdmin(http)),
+});
 
 // 启动即部署（自定义守卫走 VerifyAsync）
 await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOptions

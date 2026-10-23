@@ -1,9 +1,9 @@
-using System.Globalization;
 using Dapper;
 using NetBpm.Engine;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
 using NetBpm.Persistence.Database;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Execution;
 
@@ -123,6 +123,10 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
+        // 命令外没有拦截器兜底：新字节行 / 变量行 / 旧字节行三条语句必须同生共死，
+        // 否则中途失败会留下孤儿 bytearray。命令内这里退化为 no-op。
+        await using var unitOfWork = lease.BeginUnitOfWork();
+
         // 类型变化时（string ↔ longString 或换新内容）：先建新字节行 → 更新变量行引用 →
         // 最后删旧字节行（ACT_FK_VAR_BYTEARRAY 无级联，顺序不能颠倒）
         var oldByteArrayId = variable.ByteArrayId;
@@ -169,6 +173,8 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
         variable.Revision = revision + 1;
 
         await _historyManager.RecordVariableUpdateAsync(variable, ct).ConfigureAwait(false);
+
+        await unitOfWork.CommitAsync(ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -187,7 +193,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
 
         var variables = new List<VariableInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             variables.Add(Read(row));
         }
@@ -213,7 +219,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
             .QueryAsync(new CommandDefinition(SelectByExecutionAndNameSql, new { executionId, name }, session.Transaction, cancellationToken: ct))
             .ConfigureAwait(false);
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             var variable = Read(row);
             await DecodeLongStringsAsync(session, [variable], ct).ConfigureAwait(false);
@@ -233,22 +239,9 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
 
         // 先删变量行、再删字节行（ACT_FK_VAR_BYTEARRAY 为 RESTRICT，顺序不能反）；
         // 历史行保留（见接口注释的历史语义）
-        await session.Connection.ExecuteAsync(
-            new CommandDefinition(
-                DeleteVariableSql,
-                new { id = variable.Id },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false);
-
-        if (variable.ByteArrayId is { } byteArrayId)
-        {
-            await session.Connection.ExecuteAsync(
-                new CommandDefinition(
-                    DeleteByteArraySql,
-                    new { id = byteArrayId },
-                    session.Transaction,
-                    cancellationToken: ct)).ConfigureAwait(false);
-        }
+        await VariableCleanup
+            .DeleteOneAsync(session, variable.Id, variable.ByteArrayId, ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -267,7 +260,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
 
         var variables = new List<VariableInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             variables.Add(Read(row));
         }
@@ -309,7 +302,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
 
         var variables = new List<VariableInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             variables.Add(Read(row));
         }
@@ -337,7 +330,7 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
 
         var variables = new List<VariableInstance>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             variables.Add(Read(row));
         }
@@ -355,41 +348,19 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
-        // 先取字节行 id → 删变量行 → 按 id 删字节行（ACT_FK_VAR_BYTEARRAY 为 RESTRICT）；
+        // 捕获字节行 id → 删变量行 → 删字节行（ACT_FK_VAR_BYTEARRAY 为 RESTRICT）；
         // 历史行保留（见接口注释的历史语义）
-        var byteArrayIds = (await session.Connection.QueryAsync<string>(
-            new CommandDefinition(
-                SelectByteArrayIdsByTaskIdSql,
-                new { taskId },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false)).ToList();
-
-        await session.Connection.ExecuteAsync(
-            new CommandDefinition(
-                DeleteVariablesByTaskIdSql,
-                new { taskId },
-                session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false);
-
-        if (byteArrayIds.Count > 0)
-        {
-            await session.Connection.ExecuteAsync(
-                new CommandDefinition(
-                    DeleteByteArraysByIdsSql,
-                    new { ids = byteArrayIds },
-                    session.Transaction,
-                    cancellationToken: ct)).ConfigureAwait(false);
-        }
+        await VariableCleanup.DeleteByTaskIdAsync(session, taskId, ct).ConfigureAwait(false);
     }
 
-    private static VariableInstance Read(IDictionary<string, object> row)
+    private static VariableInstance Read(IDictionary<string, object?> row)
     {
         var typeName = Text(row, "TYPE_");
 
         return new VariableInstance
         {
             Id = Text(row, "ID_") ?? string.Empty,
-            Revision = Number(row, "REV_"),
+            Revision = Number(row, "REV_") ?? 0,
             Name = Text(row, "NAME_") ?? string.Empty,
             TypeName = typeName,
             Value = VariableTypeMapper.FromColumns(
@@ -476,20 +447,6 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
         return byteArrayId;
     }
 
-    private static object? Raw(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value : null;
-
-    private static string? Text(IDictionary<string, object> row, string column) => Raw(row, column) as string;
-
-    private static int Number(IDictionary<string, object> row, string column) =>
-        Raw(row, column) is { } value ? Convert.ToInt32(value, CultureInfo.InvariantCulture) : 0;
-
-    private static long? Long(IDictionary<string, object> row, string column) =>
-        Raw(row, column) is { } value ? Convert.ToInt64(value, CultureInfo.InvariantCulture) : null;
-
-    private static double? Double(IDictionary<string, object> row, string column) =>
-        Raw(row, column) is { } value ? Convert.ToDouble(value, CultureInfo.InvariantCulture) : null;
-
     // ─────────────────────────── SQL（对应 VariableInstance.xml）───────────────────────────
 
     private const string Columns =
@@ -532,18 +489,6 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
     private const string SelectByTaskIdSql =
         "select " + Columns + " from ACT_RU_VARIABLE where TASK_ID_ = @taskId";
 
-    private const string DeleteVariableSql =
-        "delete from ACT_RU_VARIABLE where ID_ = @id";
-
-    private const string DeleteVariablesByTaskIdSql =
-        "delete from ACT_RU_VARIABLE where TASK_ID_ = @taskId";
-
-    private const string SelectByteArrayIdsByTaskIdSql =
-        "select BYTEARRAY_ID_ from ACT_RU_VARIABLE where TASK_ID_ = @taskId and BYTEARRAY_ID_ is not null";
-
-    private const string DeleteByteArraysByIdsSql =
-        "delete from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null and ID_ in @ids";
-
     private const string SelectByExecutionIdSql =
         "select " + Columns + " from ACT_RU_VARIABLE where EXECUTION_ID_ = @executionId and TASK_ID_ is null";
 
@@ -558,8 +503,12 @@ public sealed class DapperVariableInstanceManager : IVariableInstanceManager
         "select " + Columns + " from ACT_RU_VARIABLE where EXECUTION_ID_ in @ids and TASK_ID_ is null";
 
     /// <summary>按租户扫描运行态变量（隔离回归用；走 ACT_IDX_VARIABLE_TENANT_EXEC 索引前缀）。</summary>
+    /// <remarks>
+    /// 等值比较而不是 <c>coalesce(TENANT_ID_, '')</c>：函数包裹会让索引失效，而这张表正是
+    /// 「跨租户不可见」的断言入口，扫描每多一次全表就多一次泄漏面。
+    /// </remarks>
     private const string SelectByTenantIdSql =
-        "select " + Columns + " from ACT_RU_VARIABLE where coalesce(TENANT_ID_, '') = @tenantId";
+        "select " + Columns + " from ACT_RU_VARIABLE where TENANT_ID_ = @tenantId";
 
     private const string SelectByExecutionAndNameSql =
         "select " + Columns

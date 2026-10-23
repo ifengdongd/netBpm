@@ -240,11 +240,11 @@ public sealed class DapperHistoryArchiveStore : IHistoryArchiveStore
             return new HistoryArchivePage([], 0);
         }
 
-        parameters.Add("skip", Math.Max(0, query.FirstResult));
-        parameters.Add("take", Math.Max(1, query.MaxResults));
+        var paging = SqlPaging.Build(_connections.DatabaseType, query.FirstResult, query.MaxResults, parameters);
+        var sql = $"select {Columns} from admin_history_archive{where} order by archived_at desc, id desc{paging}";
 
         var rows = await connection.QueryAsync<ArchiveRow>(new CommandDefinition(
-            SelectSql(where, _connections.DatabaseType),
+            sql,
             parameters,
             cancellationToken: ct)).ConfigureAwait(false);
 
@@ -493,18 +493,6 @@ public sealed class DapperHistoryArchiveStore : IHistoryArchiveStore
 
         return result;
     }
-
-    private static string SelectSql(string where, DatabaseType databaseType) => databaseType switch
-    {
-        DatabaseType.MySql =>
-            $"select {Columns} from admin_history_archive{where} order by archived_at desc, id desc limit @take offset @skip",
-
-        DatabaseType.SqlServer =>
-            $"select {Columns} from admin_history_archive{where} order by archived_at desc, id desc " +
-            "offset @skip rows fetch next @take rows only",
-
-        _ => throw new NotSupportedException($"不支持的数据库方言：{databaseType}"),
-    };
 
     private static (string Where, DynamicParameters Parameters) BuildWhere(HistoryArchiveQuery query)
     {

@@ -86,9 +86,13 @@ public static class ServiceTaskDelegateGuard
                         continue;
                     }
 
-                    var target = listener.ClassName is not null
-                        ? resolver.ResolveByClassName(name)
-                        : resolver.ResolveByExpressionName(name);
+                    if (!TryResolve(
+                            listener.ClassName is not null ? resolver.ResolveByClassName : resolver.ResolveByExpressionName,
+                            name,
+                            out var target))
+                    {
+                        continue;
+                    }
 
                     RecordListenerResult(element.Id ?? "?", "执行监听器", name, target, typeof(IExecutionListener));
                 }
@@ -105,9 +109,13 @@ public static class ServiceTaskDelegateGuard
                         continue;
                     }
 
-                    var target = listener.ClassName is not null
-                        ? resolver.ResolveByClassName(name)
-                        : resolver.ResolveByExpressionName(name);
+                    if (!TryResolve(
+                            listener.ClassName is not null ? resolver.ResolveByClassName : resolver.ResolveByExpressionName,
+                            name,
+                            out var target))
+                    {
+                        continue;
+                    }
 
                     RecordListenerResult(userTask.Id ?? "?", "任务监听器", name, target, typeof(ITaskListener));
                 }
@@ -122,9 +130,13 @@ public static class ServiceTaskDelegateGuard
                     continue;
                 }
 
-                var target = listener.ClassName is not null
-                    ? resolver.ResolveByClassName(name)
-                    : resolver.ResolveByExpressionName(name);
+                if (!TryResolve(
+                        listener.ClassName is not null ? resolver.ResolveByClassName : resolver.ResolveByExpressionName,
+                        name,
+                        out var target))
+                {
+                    continue;
+                }
 
                 RecordListenerResult(process.Id ?? "?", "事件监听器", name, target, typeof(IEngineEventListener));
             }
@@ -143,6 +155,23 @@ public static class ServiceTaskDelegateGuard
             resolvable.Count,
             string.Join(" / ", resolvable));
 
+        // 解析器在「容器里没有 + 反射创建失败」时会抛 EngineException。自检的职责是把它归入
+        // unresolved 一次性报全，而不是让部署炸在半路、只看到第一个坏名字。
+        bool TryResolve(Func<string, object?> resolve, string name, out object? target)
+        {
+            try
+            {
+                target = resolve(name);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                target = null;
+                unresolved.Add($"\"{name}\" 解析时抛出 {exception.GetType().Name}：{exception.Message}");
+                return false;
+            }
+        }
+
         void Check(ServiceTask task, string attribute, string? name, Func<string, object?> resolve)
         {
             if (string.IsNullOrWhiteSpace(name))
@@ -151,7 +180,10 @@ public static class ServiceTaskDelegateGuard
                 return;
             }
 
-            var target = resolve(name);
+            if (!TryResolve(resolve, name, out var target))
+            {
+                return;
+            }
 
             if (target is IServiceTaskDelegate)
             {

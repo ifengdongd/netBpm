@@ -1,6 +1,7 @@
 using Dapper;
 using NetBpm.Engine.Jobs;
 using NetBpm.Persistence.Database;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Jobs;
 
@@ -12,16 +13,18 @@ namespace NetBpm.Persistence.Jobs;
 /// 取前 N 条在内存完成（到期作业通常只有几条）。
 /// </para>
 /// </summary>
-public sealed class DapperTimerJobManager : ITimerJobManager
+public sealed class DapperTimerJobManager : DapperJobStoreBase, ITimerJobManager
 {
-    private readonly IDbSessionProvider _sessions;
-
     public DapperTimerJobManager(IDbSessionProvider sessions)
+        : base(sessions)
     {
-        ArgumentNullException.ThrowIfNull(sessions);
-
-        _sessions = sessions;
     }
+
+    /// <inheritdoc />
+    protected override string Table => "ACT_RU_TIMER_JOB";
+
+    /// <inheritdoc />
+    protected override int DefaultMaxRetries => TimerJobRetry.DefaultMaxRetries;
 
     /// <inheritdoc />
     public async ValueTask InsertAsync(TimerJobEntity job, CancellationToken ct = default)
@@ -29,7 +32,7 @@ public sealed class DapperTimerJobManager : ITimerJobManager
         ArgumentNullException.ThrowIfNull(job);
         ArgumentException.ThrowIfNullOrWhiteSpace(job.Id);
 
-        using var lease = _sessions.Acquire();
+        using var lease = Sessions.Acquire();
 
         await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
             InsertSql,
@@ -56,7 +59,7 @@ public sealed class DapperTimerJobManager : ITimerJobManager
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        using var lease = _sessions.Acquire();
+        using var lease = Sessions.Acquire();
 
         var rows = await lease.Session.Connection
             .QueryAsync(new CommandDefinition(
@@ -80,7 +83,7 @@ public sealed class DapperTimerJobManager : ITimerJobManager
         int maxCount,
         CancellationToken ct = default)
     {
-        using var lease = _sessions.Acquire();
+        using var lease = Sessions.Acquire();
         var session = lease.Session;
         var take = Math.Max(1, maxCount);
 
@@ -131,173 +134,63 @@ public sealed class DapperTimerJobManager : ITimerJobManager
     }
 
     /// <inheritdoc />
-    public async ValueTask<bool> TryDeleteAsync(string jobId, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-
-        using var lease = _sessions.Acquire();
-
-        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            DeleteByIdSql,
-            new { id = jobId },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-
-        return rows == 1;
-    }
+    public ValueTask<bool> TryDeleteAsync(string jobId, CancellationToken ct = default) =>
+        TryDeleteCoreAsync(jobId, ct);
 
     /// <inheritdoc />
-    public async ValueTask<int> DeleteByExecutionAsync(string executionId, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(executionId);
-
-        using var lease = _sessions.Acquire();
-
-        return await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            DeleteByExecutionSql,
-            new { executionId },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-    }
+    public ValueTask<int> DeleteByExecutionAsync(string executionId, CancellationToken ct = default) =>
+        DeleteByExecutionCoreAsync(executionId, ct);
 
     /// <inheritdoc />
-    public async ValueTask<bool> TryAcquireAsync(
+    public ValueTask<bool> TryAcquireAsync(
         string jobId,
         string owner,
         DateTime nowUtc,
         TimeSpan leaseDuration,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-
-        if (leaseDuration <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(leaseDuration), "租约时长必须为正。");
-        }
-
-        using var lease = _sessions.Acquire();
-
-        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            AcquireLeaseSql,
-            new { id = jobId, owner, now = nowUtc, leaseUntil = nowUtc + leaseDuration },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-
-        return rows == 1;
-    }
+        CancellationToken ct = default) =>
+        TryAcquireCoreAsync(jobId, owner, nowUtc, leaseDuration, ct);
 
     /// <inheritdoc />
-    public async ValueTask<bool> RenewAsync(
+    public ValueTask<bool> RenewAsync(
         string jobId,
         string owner,
         DateTime nowUtc,
         TimeSpan leaseDuration,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-
-        using var lease = _sessions.Acquire();
-
-        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            RenewLeaseSql,
-            new { id = jobId, owner, leaseUntil = nowUtc + leaseDuration },
-        lease.Session.Transaction,
-        cancellationToken: ct)).ConfigureAwait(false);
-
-        return rows == 1;
-    }
+        CancellationToken ct = default) =>
+        RenewCoreAsync(jobId, owner, nowUtc, leaseDuration, ct);
 
     /// <inheritdoc />
-    public async ValueTask<bool> ReleaseAsync(string jobId, string owner, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-
-        using var lease = _sessions.Acquire();
-
-        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            ReleaseLeaseSql,
-            new { id = jobId, owner },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-
-        return rows == 1;
-    }
+    public ValueTask<bool> ReleaseAsync(string jobId, string owner, CancellationToken ct = default) =>
+        ReleaseCoreAsync(jobId, owner, ct);
 
     /// <inheritdoc />
-    public async ValueTask<int> DeleteByProcessInstanceAsync(
+    public ValueTask<int> DeleteByProcessInstanceAsync(
         string processInstanceId,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(processInstanceId);
-
-        using var lease = _sessions.Acquire();
-
-        return await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            DeleteByProcessInstanceSql,
-            new { processInstanceId },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-    }
+        CancellationToken ct = default) =>
+        DeleteByProcessInstanceCoreAsync(processInstanceId, ct);
 
     /// <inheritdoc />
-    public async ValueTask<int> CountAsync(CancellationToken ct = default)
-    {
-        using var lease = _sessions.Acquire();
-
-        return await lease.Session.Connection.ExecuteScalarAsync<int>(new CommandDefinition(
-            CountSql,
-            transaction: lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-    }
+    public ValueTask<int> CountAsync(CancellationToken ct = default) => CountCoreAsync(ct);
 
     /// <inheritdoc />
-    public async ValueTask RescheduleAsync(string jobId, DateTime dueDate, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-
-        using var lease = _sessions.Acquire();
-
-        await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            UpdateDueDateSql,
-            new { id = jobId, dueDate },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-    }
+    public ValueTask RescheduleAsync(string jobId, DateTime dueDate, CancellationToken ct = default) =>
+        RescheduleCoreAsync(jobId, dueDate, ct);
 
     /// <inheritdoc />
-    public async ValueTask MarkFailureAsync(
+    public ValueTask MarkFailureAsync(
         string jobId,
         string reason,
         DateTime nowUtc,
         DateTime nextDueUtc,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-
-        using var lease = _sessions.Acquire();
-
-        // 单条 UPDATE 完成「递减 + 死信判定」：先按当前重试次数算出新值，避免依赖列赋值顺序。
-        await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            UpdateFailureSql,
-            new
-            {
-                id = jobId,
-                error = reason.Length > 1000 ? reason[..1000] : reason,
-                now = nowUtc,
-                nextDue = nextDueUtc,
-            },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-    }
+        CancellationToken ct = default) =>
+        MarkFailureCoreAsync(jobId, reason, nowUtc, nextDueUtc, ct);
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyList<TimerJobEntity>> FindDeadLettersAsync(
         int maxCount,
         CancellationToken ct = default)
     {
-        using var lease = _sessions.Acquire();
+        using var lease = Sessions.Acquire();
         var session = lease.Session;
         var take = Math.Max(1, maxCount);
 
@@ -338,36 +231,15 @@ public sealed class DapperTimerJobManager : ITimerJobManager
     }
 
     /// <inheritdoc />
-    public async ValueTask<bool> RetryDeadLetterAsync(string jobId, DateTime nowUtc, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-
-        using var lease = _sessions.Acquire();
-
-        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            RetryDeadLetterSql,
-            new { id = jobId, now = nowUtc, retries = TimerJobRetry.DefaultMaxRetries },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-
-        return rows == 1;
-    }
+    public ValueTask<bool> RetryDeadLetterAsync(
+        string jobId,
+        DateTime nowUtc,
+        CancellationToken ct = default) =>
+        RetryDeadLetterCoreAsync(jobId, nowUtc, ct);
 
     /// <inheritdoc />
-    public async ValueTask<bool> DeleteDeadLetterAsync(string jobId, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
-
-        using var lease = _sessions.Acquire();
-
-        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
-            DeleteDeadLetterSql,
-            new { id = jobId },
-            lease.Session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
-
-        return rows == 1;
-    }
+    public ValueTask<bool> DeleteDeadLetterAsync(string jobId, CancellationToken ct = default) =>
+        DeleteDeadLetterCoreAsync(jobId, ct);
 
     private static TimerJobEntity Map(IDictionary<string, object?> row) =>
         new()
@@ -389,56 +261,11 @@ public sealed class DapperTimerJobManager : ITimerJobManager
             LastFailureTime = NullableDate(row, "LAST_FAILURE_"),
         };
 
-    private static string? Text(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value as string : null;
-
-    private static int? Number(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull and not null
-            ? Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)
-            : null;
-
-    private static DateTime Date(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull and not null
-            ? DateTime.SpecifyKind(
-                Convert.ToDateTime(value, System.Globalization.CultureInfo.InvariantCulture),
-                DateTimeKind.Utc)
-            : DateTime.MinValue;
-
-    private static DateTime? NullableDate(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull and not null
-            ? DateTime.SpecifyKind(
-                Convert.ToDateTime(value, System.Globalization.CultureInfo.InvariantCulture),
-                DateTimeKind.Utc)
-            : null;
-
     private const string Columns = """
         ID_, REV_, TYPE_, EXECUTION_ID_, PROCESS_INSTANCE_ID_, PROC_DEF_ID_,
         ACTIVITY_ID_, BOUNDARY_EVENT_ID_, DUEDATE_, TENANT_ID_, CREATE_TIME_,
         RETRIES_, DEAD_LETTER_, EXCEPTION_MSG_, LAST_FAILURE_,
         LOCK_OWNER_, LOCK_EXP_TIME_
-        """;
-
-    /// <summary>
-    /// 抢占租约：<c>无人持有</c> 或 <c>租约已过期</c> 或 <c>本来就是自己持有</c> 才成功。
-    /// 最后一项保证嵌套调用（外层轮询抢占 → 内层命令再抢一次）不会自我否决。
-    /// </summary>
-    private const string AcquireLeaseSql = """
-        update ACT_RU_TIMER_JOB
-        set LOCK_OWNER_ = @owner, LOCK_EXP_TIME_ = @leaseUntil
-        where ID_ = @id and DEAD_LETTER_ = 0
-          and (LOCK_EXP_TIME_ is null or LOCK_EXP_TIME_ <= @now or LOCK_OWNER_ = @owner)
-        """;
-
-    private const string RenewLeaseSql = """
-        update ACT_RU_TIMER_JOB
-        set LOCK_EXP_TIME_ = @leaseUntil
-        where ID_ = @id and LOCK_OWNER_ = @owner
-        """;
-
-    private const string ReleaseLeaseSql = """
-        update ACT_RU_TIMER_JOB
-        set LOCK_OWNER_ = null, LOCK_EXP_TIME_ = null
-        where ID_ = @id and LOCK_OWNER_ = @owner
         """;
 
     private const string SelectByIdSql = $"""
@@ -455,34 +282,4 @@ public sealed class DapperTimerJobManager : ITimerJobManager
                 @activityId, @boundaryEventId, @dueDate, @tenantId, @createTime)
         """;
 
-    private const string UpdateDueDateSql =
-        "update ACT_RU_TIMER_JOB set DUEDATE_ = @dueDate where ID_ = @id";
-
-    private const string UpdateFailureSql = """
-        update ACT_RU_TIMER_JOB
-        set RETRIES_ = case when coalesce(RETRIES_, 3) > 0 then coalesce(RETRIES_, 3) - 1 else 0 end,
-            DEAD_LETTER_ = case when coalesce(RETRIES_, 3) > 1 then 0 else 1 end,
-            EXCEPTION_MSG_ = @error,
-            LAST_FAILURE_ = @now,
-            DUEDATE_ = @nextDue
-        where ID_ = @id
-        """;
-
-    private const string RetryDeadLetterSql = """
-        update ACT_RU_TIMER_JOB
-        set RETRIES_ = @retries, DEAD_LETTER_ = 0, EXCEPTION_MSG_ = null, DUEDATE_ = @now
-        where ID_ = @id and DEAD_LETTER_ = 1
-        """;
-
-    private const string DeleteDeadLetterSql =
-        "delete from ACT_RU_TIMER_JOB where ID_ = @id and DEAD_LETTER_ = 1";
-
-    private const string DeleteByIdSql = "delete from ACT_RU_TIMER_JOB where ID_ = @id";
-
-    private const string DeleteByExecutionSql = "delete from ACT_RU_TIMER_JOB where EXECUTION_ID_ = @executionId";
-
-    private const string DeleteByProcessInstanceSql =
-        "delete from ACT_RU_TIMER_JOB where PROCESS_INSTANCE_ID_ = @processInstanceId";
-
-    private const string CountSql = "select count(*) from ACT_RU_TIMER_JOB";
 }

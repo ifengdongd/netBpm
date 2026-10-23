@@ -118,6 +118,24 @@ public interface IEventOutboxStore : IEventOutbox
         int maxCount,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// 抢占一条待发布事件（多宿主互斥）。
+    /// <para>
+    /// 成功返回 <see langword="true"/>：调用方获得租约，必须在 <paramref name="leaseUntilUtc"/> 之前完成投递；
+    /// 进程崩溃则租约到期后事件重新可见（仍然至少一次）。
+    /// </para>
+    /// <para>
+    /// 🔑 没有这一步，多宿主部署下同一事件会被<b>每个</b>宿主各投递一次：
+    /// <see cref="FindPendingAsync"/> 是纯读，两个宿主会拿到同一批行，然后各自调用 handler。
+    /// 抢占必须是<b>单语句条件更新</b>（读-判断-写在数据库侧原子完成），CAS 失败即表示别人已认领。
+    /// </para>
+    /// </summary>
+    ValueTask<bool> TryClaimAsync(
+        string eventId,
+        DateTime utcNow,
+        DateTime leaseUntilUtc,
+        CancellationToken ct = default);
+
     /// <summary>按条件分页查事件。</summary>
     ValueTask<IReadOnlyList<OutboxEvent>> FindAsync(OutboxQuery query, CancellationToken ct = default);
 
@@ -174,6 +192,37 @@ public sealed class InMemoryEventOutbox : IEventOutboxStore
             .ToList();
 
         return ValueTask.FromResult(pending);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> TryClaimAsync(
+        string eventId,
+        DateTime utcNow,
+        DateTime leaseUntilUtc,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventId);
+
+        if (!_events.TryGetValue(eventId, out var item))
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (item)
+        {
+            if (item.Published
+                || item.DeadLetter
+                || (item.NextAttemptTime is not null && item.NextAttemptTime > utcNow))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            // 用「下次可尝试时间」兼作租约到期时间：语义一致（到期前不要再尝试），
+            // 也让内存实现与 SQL 实现保持完全相同的判定条件。
+            item.NextAttemptTime = leaseUntilUtc;
+
+            return ValueTask.FromResult(true);
+        }
     }
 
     /// <inheritdoc />

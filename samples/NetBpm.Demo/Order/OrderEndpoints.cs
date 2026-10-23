@@ -37,6 +37,10 @@ public static class OrderEndpoints
         {
             ProcessKey = _ => ConstField.OrderProcessKey,
             ErrorResponseFactory = (message, errors) => new ErrorResponse(message, errors),
+
+            // ⚠️ 演示宿主没有鉴权，显式放开转办 / 跳转（默认为 null = 一律 403）。
+            // 生产宿主必须在这里校验管理 scope。
+            AuthorizeAdminAction = (_, _, _) => ValueTask.FromResult(true),
         });
 
         // ─── 订单业务（与流程引擎无关的 CRUD 视角） ───

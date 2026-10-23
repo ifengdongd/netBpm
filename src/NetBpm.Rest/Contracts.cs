@@ -839,6 +839,63 @@ public sealed record TaskStatsResponse(
     int DueToday,
     IReadOnlyDictionary<string, int> ByDefinition);
 
+/// <summary>任务 DTO。</summary>
+/// <param name="Id">任务 id。</param>
+/// <param name="Name">任务名。</param>
+/// <param name="TaskDefinitionKey">BPMN 中 userTask 的 id。</param>
+/// <param name="Assignee">办理人。</param>
+/// <param name="Owner">所有者。</param>
+/// <param name="ProcessInstanceId">流程实例 id。</param>
+/// <param name="ProcessDefinitionKey">从定义 id 解析出的流程 key。</param>
+/// <param name="ExecutionId">执行 id。</param>
+/// <param name="FormKey">表单 Key（只透传，见 §1.3 第 10 条）。</param>
+/// <param name="Priority">优先级。</param>
+/// <param name="Revision">乐观锁版本（完成 / 认领时可回传 <c>expectedRevision</c>）。</param>
+/// <param name="CreateTime">创建时间。</param>
+/// <param name="DueDate">到期时间。</param>
+/// <param name="ClaimTime">认领时间。</param>
+/// <param name="TenantId">租户（B2.3）。</param>
+public sealed record TaskResponse(
+    string Id,
+    string? Name,
+    string? TaskDefinitionKey,
+    string? Assignee,
+    string? Owner,
+    string? ProcessInstanceId,
+    string? ProcessDefinitionKey,
+    string? ExecutionId,
+    string? FormKey,
+    int Priority,
+    int Revision,
+    DateTime? CreateTime,
+    DateTime? DueDate,
+    DateTime? ClaimTime,
+    string? TenantId = null)
+{
+    /// <summary>从任务实体映射。</summary>
+    public static TaskResponse From(TaskEntity task)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+
+        return new TaskResponse(
+            task.Id,
+            task.Name,
+            task.TaskDefinitionKey,
+            task.Assignee,
+            task.Owner,
+            task.ProcessInstanceId,
+            DefinitionIdParser.Key(task.ProcessDefinitionId),
+            task.ExecutionId,
+            task.FormKey,
+            task.Priority,
+            task.Revision,
+            task.CreateTime,
+            task.DueDate,
+            task.ClaimTime,
+            task.TenantId);
+    }
+}
+
 /// <summary>组信息（身份模块只读视图）。</summary>
 /// <param name="Id">组 id。</param>
 /// <param name="Name">组名。</param>

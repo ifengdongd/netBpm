@@ -33,6 +33,7 @@ public sealed class ProcessEngine : IProcessEngine
     private readonly IMigrationLog? _migrationLog;
     private readonly ILogger<ProcessEngine>? _logger;
     private readonly NetBpmEngineOptions _engineOptions;
+    private readonly IClock _clock;
     private readonly string _jobOwner;
     private readonly IJobQueue _queue;
 
@@ -50,7 +51,8 @@ public sealed class ProcessEngine : IProcessEngine
         ILogger<ProcessEngine>? logger = null,
         IAsyncJobManager? asyncJobs = null,
         NetBpmEngineOptions? engineOptions = null,
-        IJobQueue? jobQueue = null)
+        IJobQueue? jobQueue = null,
+        IClock? clock = null)
     {
         ArgumentNullException.ThrowIfNull(commandExecutor);
         ArgumentNullException.ThrowIfNull(xmlConverter);
@@ -74,6 +76,7 @@ public sealed class ProcessEngine : IProcessEngine
         _migrationLog = migrationLog;
         _logger = logger;
         _engineOptions = engineOptions ?? new NetBpmEngineOptions();
+        _clock = clock ?? SystemClock.Instance;
         _queue = jobQueue ?? new InMemoryJobQueue();
 
         // 宿主实例标识：多实例部署时用于作业租约抢占。
@@ -207,26 +210,172 @@ public sealed class ProcessEngine : IProcessEngine
         {
             ct.ThrowIfCancellationRequested();
 
-            if (await _commandExecutor
-                    .ExecuteAsync(new ExecuteAsyncJobCommand(jobId, _jobOwner), ct)
-                    .ConfigureAwait(false))
-            {
-                executed++;
-                await _queue.CompleteAsync(jobId, ct).ConfigureAwait(false);
-                continue;
-            }
+            AsyncJobEntity? job = null;
 
-            // 没执行成功：可能是被别的宿主持有、作业不存在、或已经执行过。
-            // 这都属于「提示已消费掉」，直接确认掉，不要把提示留在在途集合里等超时。
-            await _queue.CompleteAsync(jobId, ct).ConfigureAwait(false);
+            try
+            {
+                // 先取快照：失败时要按退避改期，需要知道它当前的重试余量。
+                // 取快照也放进 try —— 数据库抖动同样只应影响这一条，而不是整批。
+                job = await _asyncJobs.FindByIdAsync(jobId, ct).ConfigureAwait(false);
+
+                // 该入口没有外层抢占：由命令自己做租约抢占
+                if (await ExecuteJobWithLeaseHeartbeatAsync(jobId, leaseAlreadyHeld: false, ct).ConfigureAwait(false))
+                {
+                    executed++;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                // 一条作业失败不能中断整批（与 ExecuteDueAsyncJobsAsync 同口径）：
+                // 外部系统抖动 / 数据损坏只影响这一条，其余照常推进。
+                failed++;
+
+                if (job is not null)
+                {
+                    await RecordAsyncJobFailureAsync(job, exception, utcNow).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger?.LogWarning(
+                        exception,
+                        "异步作业 {JobId} 执行失败（作业行已不存在，未记录失败状态）。",
+                        jobId);
+                }
+            }
+            finally
+            {
+                // 队列提示只是「可能有活」：无论成败都要消费掉。
+                // 失败已按退避改期（数据库是唯一权威），把提示留在在途集合里只会白等超时。
+                await CompleteQueueHintAsync(jobId).ConfigureAwait(false);
+            }
         }
 
         if (failed > 0)
         {
-            _logger?.LogWarning("本轮 {Failed} 条异步作业未能执行（已被处理或已失效）。", failed);
+            _logger?.LogWarning(
+                "本轮 {Failed} 条异步作业执行失败（已按退避重试，超过上限进入死信）。",
+                failed);
         }
 
         return executed;
+    }
+
+    /// <summary>消费作业队列里的一条提示（失败只告警，不影响主流程）。</summary>
+    private async ValueTask CompleteQueueHintAsync(string jobId)
+    {
+        try
+        {
+            await _queue.CompleteAsync(jobId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(
+                exception,
+                "确认作业队列提示 {JobId} 失败（提示会在在途超时后重投，不影响作业正确性）。",
+                jobId);
+        }
+    }
+
+    /// <summary>
+    /// 执行一条异步作业，并在执行期间<b>心跳续租</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 租约式抢占（<c>TryAcquireAsync</c>）只在开始时标记归属；如果执行时间超过租约时长
+    /// （外部系统卡顿、大并行分支、GC 停顿），另一台宿主会判定持有者已崩溃并接管 ——
+    /// 同一作业就被执行了两次，业务副作用重复。续租把这个窗口关掉：
+    /// 只要进程还活着，租约就一直有效。
+    /// </para>
+    /// <para>
+    /// 🔑 心跳任务<b>必须抑制执行上下文流转</b>：<c>CommandContext</c> 用 <c>AsyncLocal</c> 传当前命令，
+    /// 若心跳继承它，<c>IDbSessionProvider.Acquire()</c> 会把<b>命令正在用的连接/事务</b>交给心跳线程，
+    /// 造成同一连接跨线程并发使用（驱动层会报错，或更糟：事务状态错乱）。
+    /// </para>
+    /// </remarks>
+    private async ValueTask<bool> ExecuteJobWithLeaseHeartbeatAsync(
+        string jobId,
+        bool leaseAlreadyHeld,
+        CancellationToken ct)
+    {
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        // 显式写全名：本文件同时引入了 NetBpm.Bpmn.Model，那里的 Task 是 BPMN 用户任务模型
+        System.Threading.Tasks.Task? heartbeat = null;
+
+        if (_asyncJobs is not null)
+        {
+            using (ExecutionContext.SuppressFlow())
+            {
+                heartbeat = System.Threading.Tasks.Task.Run(
+                    () => RenewLeaseLoopAsync(jobId, heartbeatCts.Token),
+                    CancellationToken.None);
+            }
+        }
+
+        try
+        {
+            return await _commandExecutor
+                .ExecuteAsync(new ExecuteAsyncJobCommand(jobId, _jobOwner, leaseAlreadyHeld), ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            if (heartbeat is not null)
+            {
+                await heartbeatCts.CancelAsync().ConfigureAwait(false);
+
+                try
+                {
+                    await heartbeat.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 正常收尾（心跳以取消结束）
+                }
+            }
+        }
+    }
+
+    /// <summary>按租约时长的 1/3 周期续租，直到被取消或租约已被别人接管。</summary>
+    private async System.Threading.Tasks.Task RenewLeaseLoopAsync(string jobId, CancellationToken ct)
+    {
+        var lease = _engineOptions.JobLease;
+        var interval = TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(1).Ticks, lease.Ticks / 3));
+
+        try
+        {
+            while (true)
+            {
+                await System.Threading.Tasks.Task.Delay(interval, ct).ConfigureAwait(false);
+
+                if (!await _asyncJobs!
+                        .RenewAsync(jobId, _jobOwner, _clock.UtcNow, lease, CancellationToken.None)
+                        .ConfigureAwait(false))
+                {
+                    // 租约已被接管（本进程可能停顿过久）。无法回滚已发生的业务动作，
+                    // 但继续续租会掩盖问题 —— 停止心跳并让日志说清楚。
+                    _logger?.LogWarning(
+                        "异步作业 {JobId} 的租约已被其它宿主接管，停止续租（本次执行可能重复，需依赖幂等）。",
+                        jobId);
+
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 作业执行结束，正常退出
+        }
+        catch (Exception exception)
+        {
+            // 续租失败（数据库抖动）不能影响作业本身：最坏情况退化成「无续租」，
+            // 与修复前一致；下一次心跳还会重试。
+            _logger?.LogWarning(exception, "异步作业 {JobId} 续租失败（下次心跳重试）。", jobId);
+        }
     }
 
     /// <inheritdoc />
@@ -260,13 +409,12 @@ public sealed class ProcessEngine : IProcessEngine
 
             try
             {
-                // 每条作业一个独立事务：某一条失败（外部系统抖动 / 数据损坏）不影响其它作业
-                if (await _commandExecutor
-                        .ExecuteAsync(new ExecuteAsyncJobCommand(job.Id, _jobOwner), ct)
-                        .ConfigureAwait(false))
-                        {
-                        executed++;
-                        }
+                // 每条作业一个独立事务：某一条失败（外部系统抖动 / 数据损坏）不影响其它作业。
+                // 上面已按租约抢占，命令内不再重复抢占。
+                if (await ExecuteJobWithLeaseHeartbeatAsync(job.Id, leaseAlreadyHeld: true, ct).ConfigureAwait(false))
+                {
+                    executed++;
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -374,7 +522,7 @@ public sealed class ProcessEngine : IProcessEngine
     /// <inheritdoc />
     public async ValueTask<bool> RetryAsyncJobAsync(string jobId, CancellationToken ct = default) =>
         _asyncJobs is not null
-        && await _asyncJobs.RetryDeadLetterAsync(jobId, DateTime.UtcNow, ct).ConfigureAwait(false);
+        && await _asyncJobs.RetryDeadLetterAsync(jobId, _clock.UtcNow, ct).ConfigureAwait(false);
 
     /// <inheritdoc />
     public async ValueTask<bool> DeleteAsyncJobAsync(string jobId, CancellationToken ct = default) =>

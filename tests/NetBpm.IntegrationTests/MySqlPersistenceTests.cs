@@ -174,6 +174,32 @@ public sealed class MySqlPersistenceTests
             after);
     }
 
+    [Fact]
+    public void IdBlockAllocator_ShouldAdvanceCursorInAutonomousTransaction()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var harness = new DatabaseEngineHarness();
+        harness.Reset();
+
+        var before = ReadNextDbId(harness);
+
+        // 🔑 生产装配路径：分配器自建连接 + 自建短事务（不参与任何命令事务）
+        var allocator = new DapperIdBlockAllocator(
+            new DbConnectionFactory(DatabaseType.MySql, MySqlTestDatabase.ConnectionString));
+
+        var first = allocator.Allocate(DbIdGenerator.NextDbIdPropertyName, 100);
+        var second = allocator.Allocate(DbIdGenerator.NextDbIdPropertyName, 100);
+
+        Assert.Equal(before + 1, first.FirstId);
+        Assert.Equal(before + 100, first.LastId);
+        Assert.Equal(first.LastId + 1, second.FirstId);
+        Assert.Equal(before + 200, second.LastId);
+
+        // 每次分配都已提交：换一条连接读到的游标必须同步前进
+        Assert.Equal(before + 200, ReadNextDbId(harness));
+    }
+
     private static long ReadNextDbId(DatabaseEngineHarness harness)
     {
         using var session = harness.SessionFactory.Create();

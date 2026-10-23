@@ -66,7 +66,7 @@ public sealed class ClaimTaskCommand : ICommand<Unit>
         }
         else
         {
-            task.ClaimTime = DateTime.UtcNow;
+            task.ClaimTime = services.Clock.UtcNow;
 
             if (previousAssignee is not null && !string.Equals(previousAssignee, _userId, StringComparison.Ordinal))
             {

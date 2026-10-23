@@ -35,7 +35,8 @@ public sealed class EngineServices : IEngineServices
         Events.IEventOutbox? eventOutbox = null,
         Command.ICommandIdempotencyStore? commandIdempotency = null,
         Tasks.IApproverResolver? approverResolver = null,
-        Jobs.IJobQueue? jobQueue = null)
+        Jobs.IJobQueue? jobQueue = null,
+        IClock? clock = null)
     {
         ExecutionManager = executionManager ?? throw new ArgumentNullException(nameof(executionManager));
         HistoryManager = historyManager ?? throw new ArgumentNullException(nameof(historyManager));
@@ -49,6 +50,7 @@ public sealed class EngineServices : IEngineServices
         CommandIdempotency = commandIdempotency;
         ApproverResolver = approverResolver;
         JobQueue = jobQueue;
+        Clock = clock ?? SystemClock.Instance;
         TimerJobManager = timerJobManager;
         AsyncJobManager = asyncJobManager;
         EventOutbox = eventOutbox;
@@ -70,6 +72,9 @@ public sealed class EngineServices : IEngineServices
     public IExpressionManager ExpressionManager { get; }
 
     public IIdGenerator IdGenerator { get; }
+
+    /// <inheritdoc />
+    public IClock Clock { get; }
 
     public IActivityBehaviorFactory ActivityBehaviorFactory { get; }
 
@@ -112,7 +117,8 @@ public sealed class EngineServices : IEngineServices
         Events.IEventOutbox? eventOutbox = null,
         Command.ICommandIdempotencyStore? commandIdempotency = null,
         Tasks.IApproverResolver? approverResolver = null,
-        Jobs.IJobQueue? jobQueue = null) =>
+        Jobs.IJobQueue? jobQueue = null,
+        IClock? clock = null) =>
         new(
             executionManager,
             historyManager,
@@ -128,6 +134,7 @@ public sealed class EngineServices : IEngineServices
             eventOutbox,
             commandIdempotency,
             approverResolver,
-            jobQueue);
+            jobQueue,
+            clock);
 }
 

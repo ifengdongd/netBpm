@@ -31,6 +31,8 @@ public sealed class RestEngineFactory : WebApplicationFactory<Program>
         builder.UseSetting("NetBpm:EnableHistory", "true");
         builder.UseSetting("NetBpm:ValidateSchemaOnStartup", "false");
         builder.UseSetting("NetBpm:AutoMigrate", "false");
-        builder.UseSetting("NetBpm:Admin:RateLimit:Enabled", "false");
+        // 限流按 IP 分区、固定窗口 1 分钟：整套测试共享同一个「匿名」分区，
+        // 开着限流会随测试总量随机 429，因此测试宿主显式关闭（生产默认开启）。
+        builder.UseSetting("NetBpm:RateLimit:Enabled", "false");
     }
 }

@@ -103,6 +103,10 @@ public sealed class CommandExecutor : ICommandExecutor
             // 否则残留操作会被后续命令（同一上下文）误执行。
             _logger.LogWarning(ex, "命令 {Command} 执行失败，清空议程队列。", commandName);
             context.Agenda.Clear();
+
+            // 没有事务的宿主（内存执行管理器）没有「回滚」这回事，
+            // 只能靠命令级快照把内存状态恢复成命令开始前的样子。
+            context.RunAbortedHooks();
             throw;
         }
         finally

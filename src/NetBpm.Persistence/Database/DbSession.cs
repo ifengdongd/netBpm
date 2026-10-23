@@ -50,6 +50,9 @@ public sealed class DbSession : IDbSession
     public DbTransaction? Transaction => _transaction;
 
     /// <inheritdoc />
+    public SessionState State { get; } = new();
+
+    /// <inheritdoc />
     public bool IsActive => _transaction is not null;
 
     /// <inheritdoc />
@@ -103,11 +106,13 @@ public sealed class DbSession : IDbSession
         _transaction = null;
         try
         {
-            transaction.Commit();
+            // 必须走异步提交：同步 Commit 会阻塞调用线程等网络往返，
+            // 与「全链路 ConfigureAwait(false) + CancellationToken」的纪律不一致。
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
         finally
         {
-            transaction.Dispose();
+            await transaction.DisposeAsync().ConfigureAwait(false);
         }
     }
 

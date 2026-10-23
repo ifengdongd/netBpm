@@ -36,7 +36,7 @@ internal static class Paging
         {
             error = Results.BadRequest(new ErrorResponse(
                 "firstResult 不能为负数。",
-                Code: "validation_error"));
+                Code: EngineErrorCode.ValidationError));
             return false;
         }
 
@@ -44,7 +44,7 @@ internal static class Paging
         {
             error = Results.BadRequest(new ErrorResponse(
                 "maxResults 必须大于 0（不传则默认 20）。",
-                Code: "validation_error"));
+                Code: EngineErrorCode.ValidationError));
             return false;
         }
 

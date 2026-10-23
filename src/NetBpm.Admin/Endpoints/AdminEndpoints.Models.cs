@@ -5,6 +5,7 @@ using NetBpm.Admin.Storage;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
 using NetBpm.Engine;
+using NetBpm.Engine.Command;
 using NetBpm.Persistence.Admin;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Rest;
@@ -91,6 +92,8 @@ public static partial class AdminEndpoints
             return Results.BadRequest(new ErrorResponse("bpmnXml 不能为空。"));
         }
 
+        var expectedRevision = TryGetExpectedRevision(httpRequest, out var expected) ? expected : (int?)null;
+
         var conflict = await CheckRevisionAsync(httpRequest, id, store, ct).ConfigureAwait(false);
 
         if (conflict is not null)
@@ -120,9 +123,20 @@ public static partial class AdminEndpoints
         var warnings = issues.Where(issue => !issue.IsError).ToArray();
 
         // 草稿语义：校验结果如实返回，但不阻止保存半成品；发布/部署时再强制拦截。
-        var revision = await store
-            .SaveAsync(id, request, requestContext.UserId, "save", ct)
-            .ConfigureAwait(false);
+        int revision;
+
+        try
+        {
+            revision = await store
+                .SaveAsync(id, request, requestContext.UserId, "save", expectedRevision, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OptimisticLockingException)
+        {
+            // 上面那次检查只是快速失败：真正挡住并发覆盖的是存储层的条件写入，
+            // 走到这里说明有请求在「检查 → 写入」的窗口里抢先提交了。
+            return await RevisionConflictAsync(id, store, expectedRevision, ct).ConfigureAwait(false);
+        }
 
         return Results.Ok(new SaveBpmnModelResponse(id, revision, errors, warnings));
     }
@@ -149,6 +163,8 @@ public static partial class AdminEndpoints
         {
             return Results.NotFound(new ErrorResponse($"流程模型 '{id}' 不存在。"));
         }
+
+        var expectedRevision = TryGetExpectedRevision(httpRequest, out var expected) ? expected : (int?)null;
 
         var conflict = await CheckRevisionAsync(httpRequest, id, store, ct).ConfigureAwait(false);
 
@@ -201,9 +217,18 @@ public static partial class AdminEndpoints
             }
         }
 
-        var revision = await store
-            .SaveAsync(id, merged, requestContext.UserId, "save", ct)
-            .ConfigureAwait(false);
+        int revision;
+
+        try
+        {
+            revision = await store
+                .SaveAsync(id, merged, requestContext.UserId, "save", expectedRevision, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OptimisticLockingException)
+        {
+            return await RevisionConflictAsync(id, store, expectedRevision, ct).ConfigureAwait(false);
+        }
 
         return Results.Ok(new SaveBpmnModelResponse(
             id,
@@ -722,6 +747,27 @@ public static partial class AdminEndpoints
     }
 
     /// <summary>
+    /// 存储层条件写入失败后的 409：形状与 <see cref="CheckRevisionAsync"/> 完全一致，
+    /// 前端不需要区分「预检失败」与「提交瞬间被别人抢先」。
+    /// </summary>
+    private static async Task<IResult> RevisionConflictAsync(
+        string id,
+        BpmnModelStore store,
+        int? expectedRevision,
+        CancellationToken ct)
+    {
+        var current = await store.GetLatestRevisionAsync(id, ct).ConfigureAwait(false);
+
+        var serverRevision = current?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "未知";
+        var basedOnRevision = expectedRevision?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ?? "未知";
+
+        return Results.Conflict(new RevisionConflictResponse(
+            $"模型已被其他人修改（服务端版本 {serverRevision}，本次提交基于版本 {basedOnRevision}），请刷新后重试。",
+            current ?? 0));
+    }
+
+    /// <summary>
     /// 清理模型历史：只保留最近 <c>keepLatest</c> 个版本快照（默认 10，最新版本永远保留）。
     /// <para>清理本身也是管理动作（<c>model.history_prune</c>），成功 / 失败都写审计。</para>
     /// </summary>
@@ -770,6 +816,7 @@ public static partial class AdminEndpoints
         RequestContext requestContext,
         BpmnModelStore store,
         IProcessEngine engine,
+        ICommandExecutor commands,
         AdminActionAuditor auditor,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
@@ -842,38 +889,29 @@ public static partial class AdminEndpoints
             },
             operation: async token =>
             {
-                using var stream = new MemoryStream(Encoding.UTF8.GetBytes(model.BpmnXml));
+                var publish = new PublishModelCommand(
+                    engine,
+                    store,
+                    id,
+                    Encoding.UTF8.GetBytes(model.BpmnXml),
+                    new SaveBpmnModelRequest
+                    {
+                        Name = model.Name,
+                        ProcessKey = model.ProcessKey,
+                        Description = model.Description,
+                        BpmnXml = model.BpmnXml,
+                        // 没有新 SVG 时沿用主表现有预览，避免把已有图清空
+                        Svg = string.IsNullOrWhiteSpace(request?.Svg) ? model.Svg : request.Svg,
+                    },
+                    requestContext.UserId);
 
-                var result = await engine
-                    .DeployWithValidationAsync(
-                        stream,
-                        $"{model.Id}.bpmn20.xml",
-                        $"模型发布：{model.Name}",
-                        ct: token)
-                    .ConfigureAwait(false);
+                // 部署 + publish 快照在同一个命令（同一个事务）里完成：
+                // 任一步失败整体回滚，不会出现「部署了但发布历史里没有」。
+                var deployed = await commands.ExecuteAsync(publish, token).ConfigureAwait(false);
 
-                deployWarnings = result.Warnings;
+                deployWarnings = publish.Warnings;
 
-                // 部署成功后总是落一条 publish 版本快照：
-                // 「是否已发布 / 发布历史」依赖它（只有看图的旧逻辑会漏记没有 SVG 的发布）。
-                // 没有新 SVG 时沿用主表现有预览，避免把已有图清空；快照失败不影响部署结果本身。
-                await store
-                    .SaveAsync(
-                        id,
-                        new SaveBpmnModelRequest
-                        {
-                            Name = model.Name,
-                            ProcessKey = model.ProcessKey,
-                            Description = model.Description,
-                            BpmnXml = model.BpmnXml,
-                            Svg = string.IsNullOrWhiteSpace(request?.Svg) ? model.Svg : request.Svg,
-                        },
-                        requestContext.UserId,
-                        "publish",
-                        token)
-                    .ConfigureAwait(false);
-
-                return result.ProcessDefinition;
+                return deployed;
             },
             ct).ConfigureAwait(false);
 

@@ -1,5 +1,5 @@
-using System.Globalization;
 using NetBpm.Engine.Tasks;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Tasks;
 
@@ -103,13 +103,13 @@ internal static class TaskColumns
 
         return new TaskState(
             Id: Text(row, "ID_") ?? throw new Engine.EngineException("ACT_RU_TASK 行缺少 ID_。"),
-            Revision: Number(row, "REV_"),
+            Revision: Number(row, "REV_") ?? 0,
             Name: Text(row, "NAME_"),
             BusinessKey: Text(row, "BUSINESS_KEY_"),
             ParentTaskId: Text(row, "PARENT_TASK_ID_"),
             Description: Text(row, "DESCRIPTION_"),
-            Priority: Number(row, "PRIORITY_"),
-            CreateTime: Time(row, "CREATE_TIME_"),
+            Priority: Number(row, "PRIORITY_") ?? 0,
+            CreateTime: NullableDate(row, "CREATE_TIME_"),
             Owner: Text(row, "OWNER_"),
             Assignee: Text(row, "ASSIGNEE_"),
             Delegation: Text(row, "DELEGATION_"),
@@ -117,22 +117,11 @@ internal static class TaskColumns
             ProcessInstanceId: Text(row, "PROC_INST_ID_"),
             ProcessDefinitionId: Text(row, "PROC_DEF_ID_"),
             TaskDefinitionKey: Text(row, "TASK_DEF_KEY_"),
-            DueDate: Time(row, "DUE_DATE_"),
+            DueDate: NullableDate(row, "DUE_DATE_"),
             Category: Text(row, "CATEGORY_"),
-            SuspensionState: Number(row, "SUSPENSION_STATE_"),
+            SuspensionState: Number(row, "SUSPENSION_STATE_") ?? 0,
             TenantId: Text(row, "TENANT_ID_"),
             FormKey: Text(row, "FORM_KEY_"),
-            ClaimTime: Time(row, "CLAIM_TIME_"));
+            ClaimTime: NullableDate(row, "CLAIM_TIME_"));
     }
-
-    private static object? Raw(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value : null;
-
-    private static string? Text(IDictionary<string, object?> row, string column) => Raw(row, column) as string;
-
-    private static int Number(IDictionary<string, object?> row, string column) =>
-        Raw(row, column) is { } value ? Convert.ToInt32(value, CultureInfo.InvariantCulture) : 0;
-
-    private static DateTime? Time(IDictionary<string, object?> row, string column) =>
-        Raw(row, column) as DateTime?;
 }

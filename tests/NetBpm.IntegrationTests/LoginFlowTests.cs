@@ -206,6 +206,9 @@ public sealed class LoginFlowTests
             builder.UseSetting("NetBpm:Timer:Enabled", "false");
             builder.UseSetting("NetBpm:Jobs:Enabled", "false");
 
+            // 限流关闭：整类测试共享同一 IP 分区，开着会随机 429（登录阈值本来就只有 10/分钟）
+            builder.UseSetting("NetBpm:RateLimit:Enabled", "false");
+
             // 口令连续失败阈值调小，锁定用例才不用刷十几次
             builder.UseSetting(
                 "NetBpm:Security:Login:MaxFailedAttempts",

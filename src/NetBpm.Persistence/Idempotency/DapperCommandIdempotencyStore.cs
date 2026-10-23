@@ -2,6 +2,7 @@ using Dapper;
 using NetBpm.Engine;
 using NetBpm.Engine.Command;
 using NetBpm.Persistence.Database;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Idempotency;
 
@@ -122,16 +123,6 @@ public sealed class DapperCommandIdempotencyStore : ICommandIdempotencyStore
             Text(row, "RESULT_PAYLOAD_") ?? string.Empty,
             Date(row, "CREATED_AT_"),
             Date(row, "EXPIRES_AT_"));
-
-    private static string? Text(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value as string : null;
-
-    private static DateTime Date(IDictionary<string, object?> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull and not null
-            ? DateTime.SpecifyKind(
-                Convert.ToDateTime(value, System.Globalization.CultureInfo.InvariantCulture),
-                DateTimeKind.Utc)
-            : DateTime.MinValue;
 
     /// <summary>SQLSTATE 23000 = 完整性约束冲突（MySQL 1062 / SQL Server 2627、2601 均映射到它）。</summary>
     private static bool IsUniqueViolation(Exception exception)

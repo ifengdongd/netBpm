@@ -304,6 +304,26 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
+        // 跨租户的管理动作同样 404：授权过滤器的固定顺序是「先存在性 / 租户，后 scope」，
+        // 否则无 scope 的越权者会拿到 403，等于被告知该对象确实存在。
+        using (var delete = new HttpRequestMessage(
+            HttpMethod.Delete, new Uri($"/api/runtime/process-instances/{instanceId}", UriKind.Relative)))
+        {
+            delete.Headers.Authorization = new AuthenticationHeaderValue("Bearer", intruder);
+
+            using var response = await client.SendAsync(delete, Ct);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        using (var suspend = new HttpRequestMessage(
+            HttpMethod.Post, new Uri($"/api/runtime/process-instances/{instanceId}/suspend", UriKind.Relative)))
+        {
+            suspend.Headers.Authorization = new AuthenticationHeaderValue("Bearer", intruder);
+
+            using var response = await client.SendAsync(suspend, Ct);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
         // 历史任务列表走查询条件过滤：跨租户返回空集合而不是 404（不泄露是否存在）
         using (var foreignTasks = await SendWithTokenAsync(
             client, intruder, $"/api/runtime/history/process-instances/{instanceId}/tasks"))

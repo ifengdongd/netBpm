@@ -12,7 +12,6 @@ using NetBpm.Engine.Command.Interceptors;
 using NetBpm.Engine.Events;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
-using NetBpm.Runtime.Hosting.JobQueue;
 using NetBpm.Engine.Jobs;
 using NetBpm.Engine.Migration;
 using NetBpm.Engine.Services;
@@ -29,6 +28,7 @@ using NetBpm.Persistence.Idempotency;
 using NetBpm.Persistence.Jobs;
 using NetBpm.Persistence.Migration;
 using NetBpm.Persistence.Tasks;
+using NetBpm.Runtime.Hosting.JobQueue;
 
 namespace NetBpm.Runtime;
 
@@ -204,6 +204,13 @@ public static class NetBpmServiceCollectionExtensions
             {
                 options.PollInterval = TimeSpan.FromSeconds(pollSeconds);
             }
+
+            // 发布租约（多宿主互斥）：下限 30 秒。配置得过短会让另一台宿主误判持有者已死，
+            // 在 handler 还没跑完时就抢走事件 —— 那正是「必然重复投递」的来源。
+            if (int.TryParse(section["LeaseSeconds"], out var leaseSeconds) && leaseSeconds > 0)
+            {
+                options.LeaseDuration = TimeSpan.FromSeconds(Math.Max(30, leaseSeconds));
+            }
         });
     }
 
@@ -221,6 +228,9 @@ public static class NetBpmServiceCollectionExtensions
         configure?.Invoke(options);
         services.AddSingleton(options);
 
+        // 业务时钟：TryAdd 让「宿主 / 测试先注册」优先（例如推进到固定时刻的假时钟）。
+        services.TryAddSingleton<IClock>(SystemClock.Instance);
+
         if (options.UsesDatabase && string.IsNullOrWhiteSpace(options.ConnectionString))
         {
             throw new EngineException(
@@ -237,7 +247,10 @@ public static class NetBpmServiceCollectionExtensions
 
         // ── P2/P4：转换、校验 ─────────────────────────────────────────
         services.AddSingleton<IBpmnXmlConverter, BpmnXmlConverter>();
-        services.AddSingleton<IProcessValidator, ProcessValidator>();
+        // 校验器与运行期共用同一个表达式解析器：部署期解析出的 AST 直接进运行期缓存，
+        // 不再出现「校验一份缓存、执行另一份」两份各自膨胀的情况。
+        services.AddSingleton<IProcessValidator>(provider =>
+            new ProcessValidator(provider.GetRequiredService<IExpressionManager>()));
 
         // ── P3：表达式语言（当前为过渡实现，见 ExpressionManager 的说明）──
         services.AddSingleton<IExpressionManager, ExpressionManager>();
@@ -327,7 +340,9 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetRequiredService<IAsyncJobManager>(),
             provider.GetService<IEventOutbox>(),
             provider.GetService<ICommandIdempotencyStore>(),
-            provider.GetService<IApproverResolver>()));
+            provider.GetService<IApproverResolver>(),
+            provider.GetService<IJobQueue>(),
+            provider.GetRequiredService<IClock>()));
 
         // ── 命令与拦截器 ────────────────────────────────────────────
         // 链序：Log → Retry → Transaction → CommandContext
@@ -390,6 +405,11 @@ public static class NetBpmServiceCollectionExtensions
                 options.IdBlockSize = blockSize;
             }
 
+            if (int.TryParse(section["MaxOperationsPerCommand"], out var maxOperations) && maxOperations > 0)
+            {
+                options.MaxOperationsPerCommand = maxOperations;
+            }
+
             if (bool.TryParse(section["EnableHistory"], out var enableHistory))
             {
                 options.EnableHistory = enableHistory;
@@ -425,13 +445,24 @@ public static class NetBpmServiceCollectionExtensions
             services.AddSingleton<IIdGenerator, InMemoryIdGenerator>();
             services.AddSingleton<ITimerJobManager, InMemoryTimerJobManager>();
             services.AddSingleton<IMigrationLog, InMemoryMigrationLog>();
-            services.AddSingleton<IExecutionManager, InMemoryExecutionManager>();
+            services.AddSingleton<IExecutionManager>(provider => new InMemoryExecutionManager(
+                provider.GetRequiredService<IIdGenerator>(),
+                provider.GetRequiredService<ITaskManager>(),
+                provider.GetRequiredService<IHistoryManager>(),
+                provider.GetService<ITimerJobManager>(),
+                provider.GetService<IAsyncJobManager>(),
+                provider.GetRequiredService<IClock>()));
             services.AddSingleton<IProcessDefinitionStore, InMemoryProcessDefinitionStore>();
-            services.AddSingleton<ITaskManager, InMemoryTaskManager>();
+            services.AddSingleton<ITaskManager>(provider => new InMemoryTaskManager(
+                provider.GetRequiredService<IIdGenerator>(),
+                provider.GetRequiredService<IHistoryManager>(),
+                provider.GetRequiredService<IClock>()));
 
             // 每个命令一个上下文；内存宿主没有事务边界
             services.AddSingleton<Func<CommandContext>>(
-                provider => () => new CommandContext(provider.GetRequiredService<IEngineServices>()));
+                provider => () => new CommandContext(
+                    provider.GetRequiredService<IEngineServices>(),
+                    maxOperationsPerCommand: options.MaxOperationsPerCommand));
 
             RegisterDefinitionResolver(services);
             RegisterHistory(services, options);
@@ -450,9 +481,13 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetRequiredService<IDbSessionFactory>(),
             DatabaseScripts.ResolveDirectory(options.DatabaseType)));
 
-        // ID 生成器：区块分配 + next.dbid 乐观锁（§7.3）
+        // ID 生成器：区块分配 + next.dbid 乐观锁（§7.3）。
+        // 🔑 占块走独立短事务（DapperIdBlockAllocator）：不再把 ACT_GE_PROPERTY 的行锁
+        // 带进业务命令，也不依赖「命令内才有事务」来串行化分配。
+        services.AddSingleton<IIdBlockAllocator>(
+            provider => new DapperIdBlockAllocator(provider.GetRequiredService<IDbConnectionFactory>()));
         services.AddSingleton<IIdGenerator>(
-            provider => new DbIdGenerator(provider.GetRequiredService<IPropertyStore>(), options.IdBlockSize));
+            provider => new DbIdGenerator(provider.GetRequiredService<IIdBlockAllocator>(), options.IdBlockSize));
 
         services.AddSingleton<IVariableInstanceManager, DapperVariableInstanceManager>();
         services.AddSingleton<ITimerJobManager, DapperTimerJobManager>();
@@ -470,7 +505,8 @@ public static class NetBpmServiceCollectionExtensions
 
             return new CommandContext(
                 engineServices,
-                transactionFactory: () => sessionFactory.Create());
+                transactionFactory: () => sessionFactory.Create(),
+                maxOperationsPerCommand: options.MaxOperationsPerCommand);
         });
 
         RegisterDefinitionResolver(services);

@@ -1,17 +1,11 @@
-using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 using NetBpm.Admin.Endpoints;
 using NetBpm.Admin.Storage;
 using NetBpm.Admin.Workflow;
-using NetBpm.Persistence;
-using NetBpm.Rest;
-using NetBpm.Rest.Auditing;
-using NetBpm.Rest.Diagnostics;
-using NetBpm.Rest.Endpoints;
-using NetBpm.Rest.Security;
+using NetBpm.Rest.Hosting;
 using NetBpm.Runtime;
-using NetBpm.Workflow.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,36 +21,6 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
 });
 
-// OpenAPI
-// OpenAPI 文档：修复 System.Text.Json 对日期与数字的 schema 弱化（OpenAPI 3.1 + JSON Schema）。
-//   - DateTime 只输出 format: date-time 而缺 type（dotnet/aspnetcore 已知问题）→ 前端生成 unknown；
-//   - int 因 JsonNumberHandling 输出 ["integer","string"] 联合 → 前端生成 number | string。
-// 两者都会让 openapi-typescript 产出不可用的契约类型，这里统一收敛。
-builder.Services.AddOpenApi(options =>
-{
-    options.AddSchemaTransformer((schema, _, _) =>
-    {
-        NormalizeOpenApiSchemaTypes(schema);
-
-        return Task.CompletedTask;
-    });
-});
-
-// 请求级身份上下文（由鉴权中间件填充）
-builder.Services.AddScoped<RequestContext>();
-
-// 组合根：引擎 / 持久化 / 身份（方言随 NetBpm:DatabaseType）
-builder.Services.AddNetBpm(builder.Configuration);
-
-// 定时边界事件：后台轮询 ACT_RU_TIMER_JOB（NetBpm:Timer 可调间隔 / 关闭）
-builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
-
-// 异步作业（asyncBefore / asyncAfter）：后台轮询 ACT_RU_JOB（NetBpm:Jobs 可调间隔 / 关闭）
-builder.Services.AddNetBpmAsyncJobExecutor(builder.Configuration);
-
-// 事务性 outbox：需要 NetBpm:EnableOutbox=true 且宿主注册 IOutboxEventHandler 才会真正投递
-builder.Services.AddNetBpmOutboxPublisher(builder.Configuration);
-
 // 管理端业务存储：流程模型 + 流程类型注册表
 builder.Services.AddAdminStores();
 
@@ -68,80 +32,33 @@ if (builder.Configuration.GetValue("NetBpm:Admin:BuiltInDelegates:Enabled", true
     builder.Services.AddServiceTaskDelegates(typeof(BuiltInApprovalCompletionDelegate).Assembly);
 }
 
-// 全局异常处理 + 时间口径
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-builder.Services.AddProblemDetails();
-builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.Converters.Add(new UtcDateTimeJsonConverter()));
+// 兼容 0.1.x 的 NetBpm:Admin:RateLimit:*：新配置节存在时以新配置为准，
+// 否则沿用旧节名读取（已上线的部署不需要改配置）。
+var useLegacyRateLimitSection =
+    !builder.Configuration.GetSection("NetBpm:RateLimit").Exists()
+    && builder.Configuration.GetSection("NetBpm:Admin:RateLimit").Exists();
 
-// 幂等记录定期清理
-builder.Services.AddHostedService<IdempotencyCleanupService>();
-
-// 管理动作审计（转办 / 跳转 / 变量直写）
-builder.Services.AddNetBpmAuditing();
-
-// 账号密码登录：账号存储（admin_user）+ 令牌签发（复用 NetBpm:Security:Jwt 的密钥）
-builder.Services.AddNetBpmAuth(builder.Configuration);
-
-// 审计保留策略（NetBpm:Admin:AuditRetentionDays，默认 0 = 永久保留）
-builder.Services.AddHostedService<AdminAuditCleanupService>();
-builder.Services.AddHostedService<AdminArchiveCleanupService>();
-
-// 可选 OpenTelemetry 接线（NetBpm:Otel:Enabled 或 OTEL_EXPORTER_OTLP_ENDPOINT）
-builder.Services.AddNetBpmOpenTelemetry(builder.Configuration);
-
-// 限流（按客户端 IP 分区，匿名与已认证同口径）：
-//   - 凭据校验探针 /api/auth/me（登录页用）每 IP 30 次/分钟，防密钥爆破；
-//   - 其余 /api（含匿名可达的 /api/admin/info 运维信息）每 IP 600 次/分钟，防脚本失控
-//     （正常管理操作远达不到）。
-// 静态资源与 /health 不限流；阈值可经 NetBpm:Admin:RateLimit:ApiPerMinute /
-// ProbePerMinute 覆盖，集成测试宿主用 NetBpm:Admin:RateLimit:Enabled=false 关闭。
-var rateLimitEnabled = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:Enabled", true);
-
-if (rateLimitEnabled)
+var hostOptions = builder.AddNetBpmHost(options =>
 {
-    var apiPerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:ApiPerMinute", 600);
-    var probePerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:ProbePerMinute", 30);
-    var loginPerMinute = builder.Configuration.GetValue("NetBpm:Admin:RateLimit:LoginPerMinute", 10);
+    options.VersionAssembly = typeof(AdminEndpoints).Assembly;
 
-    builder.Services.AddRateLimiter(limiter =>
+    if (useLegacyRateLimitSection)
     {
-        limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.RateLimitSection = "NetBpm:Admin:RateLimit";
+    }
 
-        limiter.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        {
-            var ip = context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+    // 收敛 System.Text.Json 生成的 OpenAPI schema 类型标注（前端契约生成用）：
+    //   - DateTime 只输出 format: date-time 而缺 type → 前端生成 unknown；
+    //   - int 因 JsonNumberHandling 输出 ["integer","string"] 联合 → 前端生成 number | string。
+    options.ConfigureOpenApi = openApi => openApi.AddSchemaTransformer((schema, _, _) =>
+    {
+        NormalizeOpenApiSchemaTypes(schema);
 
-            // 凭据校验探针：登录页拿它判断手里的密钥 / 令牌是否可用，按 IP 收紧防爆破
-            if (context.Request.Path.StartsWithSegments("/api/auth/me"))
-            {
-                return RateLimitPartition.GetFixedWindowLimiter(
-                    $"probe:{ip}",
-                    _ => new FixedWindowRateLimiterOptions { PermitLimit = probePerMinute, Window = TimeSpan.FromMinutes(1) });
-            }
-
-            // 登录接口：比探针更紧（口令爆破），阈值 NetBpm:Admin:RateLimit:LoginPerMinute
-            if (context.Request.Path.StartsWithSegments("/api/auth/login"))
-            {
-                return RateLimitPartition.GetFixedWindowLimiter(
-                    $"login:{ip}",
-                    _ => new FixedWindowRateLimiterOptions { PermitLimit = loginPerMinute, Window = TimeSpan.FromMinutes(1) });
-            }
-
-            if (context.Request.Path.StartsWithSegments("/api"))
-            {
-                return RateLimitPartition.GetFixedWindowLimiter(
-                    $"api:{ip}",
-                    _ => new FixedWindowRateLimiterOptions { PermitLimit = apiPerMinute, Window = TimeSpan.FromMinutes(1) });
-            }
-
-            return RateLimitPartition.GetNoLimiter("unlimited");
-        });
+        return Task.CompletedTask;
     });
-}
+});
 
 var app = builder.Build();
-var startedAt = DateTime.UtcNow;
 
 // 反代头必须最先处理：后面的限流分区（按 RemoteIpAddress）与重定向（按 Scheme）都依赖它。
 app.UseForwardedHeaders();
@@ -160,96 +77,20 @@ if (!string.IsNullOrWhiteSpace(adminPathBase))
         pathBase + "/designer/");
 }
 
+// 管道：异常处理 → 限流 → 鉴权 → 幂等
+app.UseNetBpmHost(hostOptions);
+
 // OpenAPI 文档默认只在开发环境暴露（契约生成 / 联调用）；
 // 生产环境需要时显式打开 NetBpm:Admin:OpenApi:Enabled=true。
 var openApiEnabled = builder.Configuration.GetValue(
     "NetBpm:Admin:OpenApi:Enabled",
     builder.Environment.IsDevelopment());
 
-app.UseExceptionHandler();
-
-if (rateLimitEnabled)
-{
-    app.UseRateLimiter();
-}
-
-// 鉴权 → 幂等：未配置 NetBpm:Security:ApiKey 时鉴权中间件放行
-app.UseMiddleware<AuthenticationMiddleware>();
-app.UseMiddleware<IdempotencyMiddleware>();
-
-if (openApiEnabled)
-{
-    app.MapOpenApi();
-}
-
-app.MapGet("/health", () => Results.Ok(new
-{
-    status = "ok",
-    engine = "NetBpm",
-    version = typeof(AdminEndpoints).Assembly.GetName().Version?.ToString(),
-}));
-
-// 存活 / 就绪分离（与 Rest 宿主同口径）：live 判断「要不要重启」，ready 判断「能不能接流量」
-app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
-
-app.MapGet("/health/ready", (IServiceProvider services) =>
-{
-    var options = services.GetRequiredService<NetBpmOptions>();
-
-    if (!options.UsesDatabase)
-    {
-        return Results.Ok(new { status = "ready", database = "in-memory" });
-    }
-
-    try
-    {
-        var factory = services.GetRequiredService<IDbConnectionFactory>();
-
-        // CreateConnection() 已负责打开连接（见 IDbConnectionFactory 契约）
-        using var connection = factory.CreateConnection();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = "select 1";
-        command.ExecuteScalar();
-
-        return Results.Ok(new { status = "ready", database = options.DatabaseType.ToString() });
-    }
-    catch (Exception exception)
-    {
-        // 探针面向编排系统与负载均衡，不是排障入口：异常原文可能带服务器地址 / 账号，
-        // 只进日志，响应固定为「数据库不可用」。
-        services.GetRequiredService<ILoggerFactory>()
-            .CreateLogger("NetBpm.Health")
-            .LogError(exception, "就绪探针失败：数据库不可用（{Database}）", options.DatabaseType);
-
-        return Results.Json(
-            new { status = "unavailable", database = options.DatabaseType.ToString(), error = "database unavailable" },
-            statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
-});
-
-app.MapGet("/api/admin/info", (IServiceProvider services) =>
-{
-    var options = services.GetRequiredService<NetBpmOptions>();
-
-    return Results.Ok(new
-    {
-        engine = "NetBpm",
-        version = typeof(AdminEndpoints).Assembly.GetName().Version?.ToString(),
-        database = options.UsesDatabase ? options.DatabaseType.ToString() : "in-memory",
-        historyEnabled = options.EnableHistory,
-        schemaVersion = DatabaseSchemaChecker.ExpectedSchemaVersion,
-        uptimeSeconds = (long)(DateTime.UtcNow - startedAt).TotalSeconds,
-    });
-});
-
-// 引擎 REST 面 + 管理端扩展
-app.MapDesignerEndpoints();
-app.MapRuntimeEndpoints();
-app.MapIdentityEndpoints();
-app.MapAdminEndpoints();
-// 账号密码登录（/api/auth/login、/api/auth/me）：登录接口匿名可达，内部自带限流分区。
-app.MapAuthEndpoints();
+// 探针 / 运维信息 / 引擎端点 + 管理端扩展端点（模型 / 历史 / 发布 / 审计）
+app.MapNetBpmHostEndpoints(
+    hostOptions,
+    mapOpenApi: openApiEnabled,
+    mapAdditionalEndpoints: host => host.MapAdminEndpoints());
 
 // React 管理前端：静态文件 + SPA history 路由回退。
 // hash 文件名的资源（/assets、/designer/assets）长缓存 immutable；
@@ -270,42 +111,14 @@ app.UseStaticFiles(new StaticFileOptions
 app.Map("/api/{**slug}", (HttpContext context) =>
 {
     context.Response.StatusCode = StatusCodes.Status404NotFound;
+
     return Task.CompletedTask;
 });
 
 app.MapFallbackToFile("{*path:nonfile}", "index.html");
 
 // 数据库模式：执行幂等初始化脚本（库里缺什么补什么），再校验结构版本
-var netBpmOptions = app.Services.GetRequiredService<NetBpmOptions>();
-
-if (netBpmOptions.UsesDatabase)
-{
-    if (netBpmOptions.AutoMigrate)
-    {
-        var migration = app.Services.GetRequiredService<DatabaseMigrator>().Migrate();
-
-        if (migration.AlreadyInitialized)
-        {
-            app.Logger.LogInformation(
-                "数据库已存在，已按幂等脚本校验并补齐结构：{Scripts}",
-                string.Join(", ", migration.AppliedScripts));
-        }
-        else
-        {
-            app.Logger.LogInformation(
-                "已执行数据库初始化脚本：{Scripts}",
-                string.Join(", ", migration.AppliedScripts));
-        }
-    }
-
-    if (netBpmOptions.ValidateSchemaOnStartup)
-    {
-        app.Services.GetRequiredService<DatabaseSchemaChecker>().Check();
-        app.Logger.LogInformation(
-            "数据库结构版本校验通过：schema.version = {Version}",
-            DatabaseSchemaChecker.ExpectedSchemaVersion);
-    }
-}
+app.ApplyNetBpmDatabaseStartup();
 
 app.Run();
 

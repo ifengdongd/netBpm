@@ -22,8 +22,8 @@ namespace NetBpm.Persistence.Execution;
 /// <list type="number">
 ///   <item><description>
 ///   <b>一级缓存 + 提交前 flush</b>：命令期间对执行树的内存改动（<c>ACT_ID_</c>、
-///   <c>IS_ACTIVE_</c> …）在提交前统一写库；缓存与 DbSession 同生共死
-///   （通过 <see cref="ConditionalWeakTable{TKey,TValue}"/> 挂在会话上）。
+///   <c>IS_ACTIVE_</c> …）在提交前统一写库；缓存挂在会话的
+///   <see cref="SessionState"/> 上，与命令/会话同生共死。
 ///   对应 <c>DbSqlSession</c> 的 entity cache。
 ///   </description></item>
 ///   <item><description>
@@ -56,7 +56,6 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
     private readonly IHistoryManager _historyManager;
     private readonly ITimerJobManager? _timerJobs;
     private readonly IAsyncJobManager? _asyncJobs;
-    private readonly ConditionalWeakTable<IDbSession, SessionCache> _caches = new();
 
     public DapperExecutionManager(
         IDbSessionProvider sessions,
@@ -454,17 +453,14 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
             new { processInstanceId },
             ct).ConfigureAwait(false);
 
-        // 先删子执行（深层在前），再删根执行 —— 满足 ACT_FK_EXE_PARENT
-        var children = await QueryStatesAsync(
+        // 整棵树一次取回（根 + 子执行），按深度倒序分层批删。
+        // 旧实现每个节点再查一次子执行、再逐条删任务 / 变量 / 身份关系 / 作业 ——
+        // 而这些在实例级已经整体删过了，深 50 层的树会空转出数百次往返且全程持锁。
+        var states = await QueryStatesAsync(
             session,
             SelectChildExecutionsOfProcessInstanceSql,
             new { processInstanceId },
             ct).ConfigureAwait(false);
-
-        foreach (var state in children)
-        {
-            await DeleteRecursiveAsync(session, cache, Materialize(cache, state), deleteReason, ct).ConfigureAwait(false);
-        }
 
         var rootStates = await QueryStatesAsync(
             session,
@@ -472,10 +468,11 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
             new { executionId = processInstanceId },
             ct).ConfigureAwait(false);
 
-        if (rootStates.Count > 0)
+        states.AddRange(rootStates);
+
+        if (states.Count > 0)
         {
-            await DeleteRecursiveAsync(session, cache, Materialize(cache, rootStates[0]), deleteReason, ct)
-                .ConfigureAwait(false);
+            await DeleteExecutionTreeAsync(session, cache, states, deleteReason, ct).ConfigureAwait(false);
         }
 
         // 对应 deleteProcessInstanceExecutionEntity 的最后一步：历史流程实例收口
@@ -613,7 +610,9 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
         var parameters = new DynamicParameters();
         var where = BuildProcessInstanceWhere(filter, parameters);
         var direction = filter.Descending ? "desc" : "asc";
-        var paging = BuildPaging(session.DatabaseType, filter.FirstResult, filter.MaxResults, parameters);
+        var paging = filter.MaxResults is { } take
+            ? SqlPaging.Build(session.DatabaseType, filter.FirstResult, take, parameters)
+            : SqlPaging.BuildUnlimited(session.DatabaseType, filter.FirstResult, parameters);
 
         var sql = $"""
             select {ExecutionColumns.All}
@@ -680,7 +679,9 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
 
         if (filter.TenantId is not null)
         {
-            conditions.Add("coalesce(TENANT_ID_, '') = @tenantId");
+            // 等值比较而不是 coalesce(TENANT_ID_, '')：函数包裹会让 TENANT_ID_ 上的索引失效。
+            // 历史 NULL 已由初始化脚本的 0012 段归一到 ''（ACT_RU_EXECUTION / ACT_HI_* 三张表）。
+            conditions.Add("TENANT_ID_ = @tenantId");
             parameters.Add("tenantId", filter.TenantId);
         }
 
@@ -703,36 +704,6 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
         }
 
         return " where " + string.Join(" and ", conditions);
-    }
-
-    /// <summary>方言分页子句（空 <paramref name="take"/> 表示调用方显式要求不限条数）。</summary>
-    private static string BuildPaging(
-        DatabaseType databaseType,
-        int firstResult,
-        int? take,
-        DynamicParameters parameters)
-    {
-        var skip = Math.Max(0, firstResult);
-
-        if (take is null)
-        {
-            if (skip == 0)
-            {
-                return string.Empty;
-            }
-
-            parameters.Add("skip", skip);
-            return databaseType == DatabaseType.MySql
-                ? " limit 100000 offset @skip"
-                : " offset @skip rows fetch next 100000 rows only";
-        }
-
-        parameters.Add("skip", skip);
-        parameters.Add("take", Math.Max(1, take.Value));
-
-        return databaseType == DatabaseType.MySql
-            ? " limit @take offset @skip"
-            : " offset @skip rows fetch next @take rows only";
     }
 
     /// <summary>把会话内已跟踪实体的挂起状态与脏检查基线一起改写。</summary>
@@ -905,6 +876,154 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
         await DeleteSingleAsync(session, cache, execution, deleteReason, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 整棵实例执行树的批量删除：按深度倒序（子先父后）分层，同一层合成一条 DELETE。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔑 为什么单开一条路径：实例级删除之前已经把<b>任务 / 变量 / 字节行 / 定时作业 / 异步作业</b>
+    /// 整体删掉了，逐节点再跑「查任务 → 删变量 3 条 → 删身份关系 → 删作业」全是 0 行的空转。
+    /// </para>
+    /// <para>
+    /// 语义保持：子先父后（满足 <c>ACT_FK_EXE_PARENT</c>）、按 <c>REV_</c> 做乐观校验、
+    /// 历史活动行仍逐条收口（时长 = 结束时间 − 该行自己的开始时间，无法合并成一条 SQL）。
+    /// </para>
+    /// </remarks>
+    private async Task DeleteExecutionTreeAsync(
+        IDbSession session,
+        SessionCache cache,
+        IReadOnlyList<ExecutionState> states,
+        string? deleteReason,
+        CancellationToken ct)
+    {
+        var known = states.Select(state => state.Id).ToHashSet(StringComparer.Ordinal);
+
+        var childrenByParent = states
+            .Where(state => state.ParentId is not null)
+            .ToLookup(state => state.ParentId!, StringComparer.Ordinal);
+
+        // 根 = 父不在本批次（根执行的 PARENT_ID_ 为 null；被裁剪出来的子树也按根处理）
+        var current = states
+            .Where(state => state.ParentId is null || !known.Contains(state.ParentId))
+            .ToList();
+
+        var levels = new List<IReadOnlyList<ExecutionState>>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+
+        while (current.Count > 0)
+        {
+            levels.Add(current);
+
+            var next = new List<ExecutionState>();
+
+            foreach (var state in current)
+            {
+                // 数据异常（成环 / 重复行）时只处理一次，避免重复删除撞乐观锁
+                if (!visited.Add(state.Id))
+                {
+                    continue;
+                }
+
+                next.AddRange(childrenByParent[state.Id]);
+            }
+
+            current = next;
+        }
+
+        // 环或悬空行的兜底：没被遍历到的行仍要删掉，否则实例永远删不干净
+        var unreachable = states.Where(state => !visited.Contains(state.Id)).ToList();
+
+        if (unreachable.Count > 0)
+        {
+            levels.Add(unreachable);
+        }
+
+        for (var index = levels.Count - 1; index >= 0; index--)
+        {
+            var entities = levels[index].Select(state => Materialize(cache, state)).ToList();
+
+            foreach (var execution in entities)
+            {
+                await _historyManager
+                    .RecordActivityEndQuietlyAsync(execution, deleteReason, ct)
+                    .ConfigureAwait(false);
+            }
+
+            await DeleteExecutionsBatchAsync(session, cache, entities, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>批量删除同一层执行：身份关系一条、执行行按 <c>REV_</c> 分组各一条。</summary>
+    private static async Task DeleteExecutionsBatchAsync(
+        IDbSession session,
+        SessionCache cache,
+        IReadOnlyList<ExecutionEntity> executions,
+        CancellationToken ct)
+    {
+        var targets = executions
+            .Where(execution => !cache.Deleted.Contains(execution.Id))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        // SQL Server 单语句最多 2100 个参数：in @ids 必须分片（超限会直接报 8000 系列错误）
+        foreach (var chunk in targets.Chunk(MaxParametersPerStatement))
+        {
+            await ExecuteAsync(
+                session,
+                DeleteIdentityLinksByExecutionsSql,
+                new { ids = chunk.Select(execution => execution.Id).ToList() },
+                ct).ConfigureAwait(false);
+
+            foreach (var revisionGroup in chunk.GroupBy(execution => execution.Revision))
+            {
+                var revisionIds = revisionGroup.Select(execution => execution.Id).ToList();
+
+                var affected = await ExecuteAsync(
+                    session,
+                    DeleteExecutionsByIdSql,
+                    new { ids = revisionIds, revision = revisionGroup.Key },
+                    ct).ConfigureAwait(false);
+
+                if (affected != revisionIds.Count)
+                {
+                    throw new OptimisticLockingException(
+                        $"批量删除执行失败：REV_ = {revisionGroup.Key} 的 {revisionIds.Count} 行中只有 {affected} 行命中。" +
+                        "这些行可能已被其它命令修改或删除。");
+                }
+            }
+
+            foreach (var execution in chunk)
+            {
+                cache.Deleted.Add(execution.Id);
+                cache.InDatabase.Remove(execution.Id);
+                cache.Persisted.Remove(execution.Id);
+
+                execution.IsEnded = true;
+
+                if (execution.Parent is not null)
+                {
+                    execution.Parent.Children.Remove(execution);
+                }
+                else if (
+                    execution.ParentId is not null
+                    && cache.Entities.TryGetValue(execution.ParentId, out var parentEntity))
+                {
+                    var match = parentEntity.Children
+                        .FirstOrDefault(child => string.Equals(child.Id, execution.Id, StringComparison.Ordinal));
+
+                    if (match is not null)
+                    {
+                        parentEntity.Children.Remove(match);
+                    }
+                }
+            }
+        }
+    }
+
     private async Task DeleteSingleAsync(
         IDbSession session,
         SessionCache cache,
@@ -1021,10 +1140,10 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
     }
 
     private SessionCache GetCache(IDbSession session) =>
-        _caches.GetValue(session, key =>
+        session.State.GetOrCreate(() =>
         {
             // 注册为 flush 参与方：命令提交前先把一级缓存写库
-            key.RegisterFlusher(this);
+            session.RegisterFlusher(this);
             return new SessionCache();
         });
 
@@ -1043,16 +1162,9 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
             .ConfigureAwait(false);
         var states = new List<ExecutionState>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
-            var values = new Dictionary<string, object?>(StringComparer.Ordinal);
-
-            foreach (var pair in row)
-            {
-                values[pair.Key] = pair.Value;
-            }
-
-            states.Add(ExecutionColumns.Read(values));
+            states.Add(ExecutionColumns.Read(row));
         }
 
         return states;
@@ -1170,6 +1282,21 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
     private const string DeleteSql =
         "delete from ACT_RU_EXECUTION where ID_ = @id and REV_ = @revision";
 
+    /// <summary>批量删除同版本号的执行行（保留 <c>REV_</c> 条件，逐行乐观校验不降级）。</summary>
+    private const string DeleteExecutionsByIdSql =
+        "delete from ACT_RU_EXECUTION where ID_ in @ids and REV_ = @revision";
+
+    /// <summary>批量摘除挂在这一层执行的任务上的身份关系（与单条版本同口径）。</summary>
+    private const string DeleteIdentityLinksByExecutionsSql =
+        "delete from ACT_RU_IDENTITYLINK " +
+        "where TASK_ID_ in (select ID_ from ACT_RU_TASK where EXECUTION_ID_ in @ids)";
+
+    /// <summary>
+    /// SQL Server 单语句参数上限 2100（错误 8000 系列），这里取 1000 留余量。
+    /// <c>in @ids</c> 不分片时，大并行分支的实例删除会直接报错。
+    /// </summary>
+    private const int MaxParametersPerStatement = 1000;
+
     /// <summary><c>ACT_RU_EXECUTION.SUSPENSION_STATE_</c> 的取值（与 Activiti <c>SuspensionState</c> 一致）。</summary>
     private const int ActiveState = 1;
 
@@ -1235,28 +1362,14 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
     private const string CaptureByteArrayIdsByProcessInstanceSql =
         "select BYTEARRAY_ID_ from ACT_RU_VARIABLE where PROC_INST_ID_ = @processInstanceId and BYTEARRAY_ID_ is not null";
 
-    private const string DeleteByteArraysByIdsSql =
-        "delete from ACT_GE_BYTEARRAY where DEPLOYMENT_ID_ is null and ID_ in @ids";
-
-    /// <summary>删除变量行 + 其 longString 字节行（先取 id → 删变量行 → 按 id 删字节行，满足 RESTRICT 外键）。</summary>
-    private static async Task DeleteVariablesAndByteArraysAsync(
+    /// <summary>删除变量行 + 其 longString 字节行（共享实现，见 <see cref="VariableCleanup"/>）。</summary>
+    private static Task DeleteVariablesAndByteArraysAsync(
         IDbSession session,
         string captureByteArrayIdsSql,
         string deleteVariablesSql,
         object args,
-        CancellationToken ct)
-    {
-        var byteArrayIds = (await QueryColumnAsync(session, captureByteArrayIdsSql, args, ct).ConfigureAwait(false))
-            .ToList();
-
-        await ExecuteAsync(session, deleteVariablesSql, args, ct).ConfigureAwait(false);
-
-        if (byteArrayIds.Count > 0)
-        {
-            await ExecuteAsync(session, DeleteByteArraysByIdsSql, new { ids = byteArrayIds }, ct)
-                .ConfigureAwait(false);
-        }
-    }
+        CancellationToken ct) =>
+        VariableCleanup.DeleteAsync(session, captureByteArrayIdsSql, deleteVariablesSql, args, ct);
 
     private const string DeleteIdentityLinksByExecutionSql =
         "delete from ACT_RU_IDENTITYLINK where TASK_ID_ in (select ID_ from ACT_RU_TASK where EXECUTION_ID_ = @id)";

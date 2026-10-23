@@ -22,6 +22,12 @@ public interface IDbSession : ICommandTransaction
     DbTransaction? Transaction { get; }
 
     /// <summary>
+    /// 会话级状态（一级缓存等）。生命周期与命令/会话严格一致，
+    /// 见 <see cref="SessionState"/>。
+    /// </summary>
+    SessionState State { get; }
+
+    /// <summary>
     /// 注册 flush 参与方。<see cref="ICommandTransaction.CommitAsync"/> 会先按注册顺序 flush 再提交 ——
     /// 这样命令期间对执行树的内存改动才能落库（对应 Activiti 的 <c>DbSqlSession.flush()</c>）。
     /// </summary>

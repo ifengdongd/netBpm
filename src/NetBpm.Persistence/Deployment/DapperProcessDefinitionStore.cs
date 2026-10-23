@@ -4,6 +4,7 @@ using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine;
 using NetBpm.Persistence.Database;
+using static NetBpm.Persistence.RowValues;
 
 namespace NetBpm.Persistence.Deployment;
 
@@ -75,68 +76,107 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         using var lease = _sessions.Acquire();
         var session = lease.Session;
         var connection = session.Connection;
-        var transaction = session.Transaction;
         var tenant = tenantId ?? string.Empty;
 
-        // VERSION_ = 同一 (KEY_, TENANT_ID_) 下的 max(VERSION_) + 1（见 §7.4；Activiti 同口径）
-        var version = await connection.ExecuteScalarAsync<int>(
-            NextVersionSql,
-            new { key, tenantId = tenant },
-            transaction).ConfigureAwait(false) + 1;
+        // 命令外调用（部署脚本 / 运维工具）没有事务：下面三条 INSERT 必须原子落库，
+        // 否则中途失败会留下「有部署无定义」「有定义无资源」的残行，而且这些残行还会占掉版本号。
+        var ownsTransaction = session.Transaction is null;
 
-        var deploymentId = _idGenerator.NextId();
-        var definitionId = ProcessDefinition.BuildId(key, version, _idGenerator.NextId());
-        var engineVersion = EngineVersion;
-        var deployTime = DateTime.UtcNow;
-        // B2.5：调用方给原始字节就存原始字节（与 Activiti 一致）；内部路径退回重新序列化
-        var xmlBytes = rawResourceBytes is { Length: > 0 }
-            ? rawResourceBytes
-            : Encoding.UTF8.GetBytes(Serialize(bpmnModel));
+        if (ownsTransaction)
+        {
+            session.Begin();
+        }
 
-        // 1) 部署
-        // ⚠️ KEY_ / CATEGORY_ 必须为 null：Activiti 的部署默认不带 key（DeploymentBuilder.key 需显式设置）、
-        // category 也不从 targetNamespace 取 —— 真值比对（2026-10-12）里这两列全线差异，皆因我们画蛇添足。
-        await connection.ExecuteAsync(
-            InsertDeploymentSql,
-            new
+        try
+        {
+            var transaction = session.Transaction;
+
+            // VERSION_ = 同一 (KEY_, TENANT_ID_) 下的 max(VERSION_) + 1（见 §7.4；Activiti 同口径）。
+            // ⚠️ 必须「加锁读最新版本行」而不是 max()：max 无法加锁，两个并发部署会算出同一个版本号，
+            // 只能靠 ACT_UNIQ_PROCDEF 撞库失败；加锁读把「读版本 → 写定义」串成临界区。
+            var currentVersion = await connection.ExecuteScalarAsync<int?>(
+                new CommandDefinition(
+                    NextVersionLockingSql(session.DatabaseType),
+                    new { key, tenantId = tenant },
+                    transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+
+            var version = (currentVersion ?? 0) + 1;
+
+            var deploymentId = _idGenerator.NextId();
+            var definitionId = ProcessDefinition.BuildId(key, version, _idGenerator.NextId());
+            var engineVersion = EngineVersion;
+            var deployTime = DateTime.UtcNow;
+            // B2.5：调用方给原始字节就存原始字节（与 Activiti 一致）；内部路径退回重新序列化
+            var xmlBytes = rawResourceBytes is { Length: > 0 }
+                ? rawResourceBytes
+                : Encoding.UTF8.GetBytes(Serialize(bpmnModel));
+
+            // 1) 部署
+            // ⚠️ KEY_ / CATEGORY_ 必须为 null：Activiti 的部署默认不带 key（DeploymentBuilder.key 需显式设置）、
+            // category 也不从 targetNamespace 取 —— 真值比对（2026-10-12）里这两列全线差异，皆因我们画蛇添足。
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    InsertDeploymentSql,
+                    new
+                    {
+                        deploymentId,
+                        name = deploymentName,
+                        category = (string?)null,
+                        key = (string?)null,
+                        tenantId = tenant,
+                        deployTime,
+                        engineVersion,
+                    },
+                    transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+
+            // 2) 资源（BPMN XML）
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    InsertByteArraySql,
+                    new { id = _idGenerator.NextId(), name = resourceName, deploymentId, bytes = xmlBytes },
+                    transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+
+            // 3) 流程定义
+            var hasGraphicalNotation = bpmnModel.Shapes.Count > 0 || bpmnModel.Edges.Count > 0;
+
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    InsertProcessDefinitionSql,
+                    new
+                    {
+                        id = definitionId,
+                        category = bpmnModel.TargetNamespace,
+                        name = process.Name,
+                        key,
+                        version,
+                        deploymentId,
+                        resourceName,
+                        hasGraphicalNotation = hasGraphicalNotation ? 1 : 0,
+                        engineVersion,
+                        tenantId = tenant,
+                    },
+                    transaction,
+                    cancellationToken: ct)).ConfigureAwait(false);
+
+            if (ownsTransaction)
             {
-                deploymentId,
-                name = deploymentName,
-                category = (string?)null,
-                key = (string?)null,
-                tenantId = tenant,
-                deployTime,
-                engineVersion,
-            },
-            transaction).ConfigureAwait(false);
+                await session.CommitAsync(ct).ConfigureAwait(false);
+            }
 
-        // 2) 资源（BPMN XML）
-        await connection.ExecuteAsync(
-            InsertByteArraySql,
-            new { id = _idGenerator.NextId(), name = resourceName, deploymentId, bytes = xmlBytes },
-            transaction).ConfigureAwait(false);
-
-        // 3) 流程定义
-        var hasGraphicalNotation = bpmnModel.Shapes.Count > 0 || bpmnModel.Edges.Count > 0;
-
-        await connection.ExecuteAsync(
-            InsertProcessDefinitionSql,
-            new
+            return new ProcessDefinition(definitionId, key, process.Name, version, deploymentId, resourceName);
+        }
+        catch
+        {
+            if (ownsTransaction)
             {
-                id = definitionId,
-                category = bpmnModel.TargetNamespace,
-                name = process.Name,
-                key,
-                version,
-                deploymentId,
-                resourceName,
-                hasGraphicalNotation = hasGraphicalNotation ? 1 : 0,
-                engineVersion,
-                tenantId = tenant,
-            },
-            transaction).ConfigureAwait(false);
+                session.Rollback();
+            }
 
-        return new ProcessDefinition(definitionId, key, process.Name, version, deploymentId, resourceName);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -157,13 +197,13 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                 cancellationToken: ct))
             .ConfigureAwait(false);
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             return new ProcessDefinition(
                 Text(row, "ID_")!,
                 Text(row, "KEY_")!,
                 Text(row, "NAME_"),
-                Number(row, "VERSION_"),
+                Number(row, "VERSION_") ?? 0,
                 Text(row, "DEPLOYMENT_ID_")!,
                 Text(row, "RESOURCE_NAME_")!);
         }
@@ -192,13 +232,13 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                 cancellationToken: ct))
             .ConfigureAwait(false);
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             return new ProcessDefinition(
                 Text(row, "ID_")!,
                 Text(row, "KEY_")!,
                 Text(row, "NAME_"),
-                Number(row, "VERSION_"),
+                Number(row, "VERSION_") ?? 0,
                 Text(row, "DEPLOYMENT_ID_")!,
                 Text(row, "RESOURCE_NAME_")!);
         }
@@ -224,7 +264,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
 
         var result = new List<DeployedProcessDefinition>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             DateTime? deployTime = row.TryGetValue("DEPLOY_TIME_", out var time) && time is not DBNull
                 ? DateTime.SpecifyKind(Convert.ToDateTime(time, System.Globalization.CultureInfo.InvariantCulture), DateTimeKind.Utc)
@@ -234,11 +274,11 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                 Text(row, "ID_")!,
                 Text(row, "KEY_")!,
                 Text(row, "NAME_"),
-                Number(row, "VERSION_"),
+                Number(row, "VERSION_") ?? 0,
                 Text(row, "DEPLOYMENT_ID_")!,
                 deployTime,
                 Text(row, "TENANT_ID_"),
-                Number(row, "SUSPENSION_STATE_") == SuspendedState,
+                (Number(row, "SUSPENSION_STATE_") ?? 0) == SuspendedState,
                 Text(row, "RESOURCE_NAME_"),
                 Text(row, "DEPLOYMENT_NAME_")));
         }
@@ -372,13 +412,13 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
 
         var result = new List<ProcessDefinition>();
 
-        foreach (IDictionary<string, object> row in rows)
+        foreach (IDictionary<string, object?> row in rows)
         {
             result.Add(new ProcessDefinition(
                 Text(row, "ID_")!,
                 Text(row, "KEY_")!,
                 Text(row, "NAME_"),
-                Number(row, "VERSION_"),
+                Number(row, "VERSION_") ?? 0,
                 Text(row, "DEPLOYMENT_ID_")!,
                 Text(row, "RESOURCE_NAME_")!));
         }
@@ -394,46 +434,72 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
         using var lease = _sessions.Acquire();
         var session = lease.Session;
 
-        // 删定义前先记住 id，用于清进程内缓存（Dapper 版有模型 / 租户 LRU；
-        // 若不清，删除后按 id 启动仍会命中缓存模型，最后撞 ACT_RU_EXECUTION.PROC_DEF_ID_ 外键）
-        var definitionIds = (await session.Connection.QueryAsync<string>(
-            new CommandDefinition(
-                SelectDefinitionIdsByDeploymentIdSql,
+        // 命令外调用没有事务：三条 DELETE 必须原子，否则可能删了定义却留下字节行，
+        // 或部署行还在而定义已消失（后续按 id 启动直接找不到模型）。
+        var ownsTransaction = session.Transaction is null;
+
+        if (ownsTransaction)
+        {
+            session.Begin();
+        }
+
+        try
+        {
+            // 删定义前先记住 id，用于清进程内缓存（Dapper 版有模型 / 租户 LRU；
+            // 若不清，删除后按 id 启动仍会命中缓存模型，最后撞 ACT_RU_EXECUTION.PROC_DEF_ID_ 外键）
+            var definitionIds = (await session.Connection.QueryAsync<string>(
+                new CommandDefinition(
+                    SelectDefinitionIdsByDeploymentIdSql,
+                    new { deploymentId },
+                    session.Transaction,
+                    cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+            // 顺序受外键约束：ACT_RE_PROCDEF / ACT_GE_BYTEARRAY 都指向 ACT_RE_DEPLOYMENT
+            await session.Connection.ExecuteAsync(new CommandDefinition(
+                DeleteDefinitionsByDeploymentIdSql,
                 new { deploymentId },
                 session.Transaction,
-                cancellationToken: ct)).ConfigureAwait(false)).ToList();
+                cancellationToken: ct)).ConfigureAwait(false);
 
-        // 顺序受外键约束：ACT_RE_PROCDEF / ACT_GE_BYTEARRAY 都指向 ACT_RE_DEPLOYMENT
-        await session.Connection.ExecuteAsync(new CommandDefinition(
-            DeleteDefinitionsByDeploymentIdSql,
-            new { deploymentId },
-            session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
+            await session.Connection.ExecuteAsync(new CommandDefinition(
+                DeleteByteArraysByDeploymentIdSql,
+                new { deploymentId },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
 
-        await session.Connection.ExecuteAsync(new CommandDefinition(
-            DeleteByteArraysByDeploymentIdSql,
-            new { deploymentId },
-            session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
+            var affected = await session.Connection.ExecuteAsync(new CommandDefinition(
+                DeleteDeploymentSql,
+                new { deploymentId },
+                session.Transaction,
+                cancellationToken: ct)).ConfigureAwait(false);
 
-        var affected = await session.Connection.ExecuteAsync(new CommandDefinition(
-            DeleteDeploymentSql,
-            new { deploymentId },
-            session.Transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
+            if (ownsTransaction)
+            {
+                await session.CommitAsync(ct).ConfigureAwait(false);
+            }
 
-        if (affected == 0)
-        {
-            return false;
+            if (affected == 0)
+            {
+                return false;
+            }
+
+            foreach (var definitionId in definitionIds)
+            {
+                _models.Remove(definitionId);
+                _tenants.Remove(definitionId);
+            }
+
+            return true;
         }
-
-        foreach (var definitionId in definitionIds)
+        catch
         {
-            _models.Remove(definitionId);
-            _tenants.Remove(definitionId);
-        }
+            if (ownsTransaction)
+            {
+                session.Rollback();
+            }
 
-        return true;
+            throw;
+        }
     }
 
     /// <summary>直接取 XML 字节，避免「字节 → string → 字节」的两次编码转换。</summary>
@@ -467,14 +533,6 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
     /// </summary>
     private static string EngineVersion =>
         $"netbpm-{typeof(DapperProcessDefinitionStore).Assembly.GetName().Version?.ToString() ?? "0.0.0"}";
-
-    private static string? Text(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull ? value as string : null;
-
-    private static int Number(IDictionary<string, object> row, string column) =>
-        row.TryGetValue(column, out var value) && value is not DBNull
-            ? Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)
-            : 0;
 
     // ─────────────────────────── SQL ───────────────────────────
 
@@ -510,8 +568,25 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
     private const string DeleteDeploymentSql =
         "delete from ACT_RE_DEPLOYMENT where ID_ = @deploymentId";
 
-    private const string NextVersionSql =
-        "select coalesce(max(VERSION_), 0) from ACT_RE_PROCDEF where KEY_ = @key and TENANT_ID_ = @tenantId";
+    /// <summary>
+    /// 加锁读同一 (KEY_, TENANT_ID_) 下的最新版本行。
+    /// <para>
+    /// MySQL：<c>for update</c> 在 REPEATABLE READ 下也读最新已提交行并持有排他行锁；
+    /// SQL Server：<c>updlock, holdlock</c> 等价。索引
+    /// <c>ACT_UNIQ_PROCDEF (KEY_, VERSION_, TENANT_ID_)</c> 使空集合也落在同一条索引区间上，
+    /// 并发插入因此被串行化。
+    /// </para>
+    /// </summary>
+    private static string NextVersionLockingSql(DatabaseType databaseType) => databaseType switch
+    {
+        DatabaseType.SqlServer =>
+            "select top 1 VERSION_ from ACT_RE_PROCDEF with (updlock, holdlock) " +
+            "where KEY_ = @key and TENANT_ID_ = @tenantId order by VERSION_ desc",
+
+        _ =>
+            "select VERSION_ from ACT_RE_PROCDEF " +
+            "where KEY_ = @key and TENANT_ID_ = @tenantId order by VERSION_ desc limit 1 for update",
+    };
 
     private const string InsertDeploymentSql = """
         insert into ACT_RE_DEPLOYMENT (

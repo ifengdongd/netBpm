@@ -1,4 +1,5 @@
 using NetBpm.Bpmn.Model;
+using NetBpm.El;
 
 namespace NetBpm.Bpmn.Validation;
 
@@ -15,7 +16,17 @@ public sealed class ProcessValidator : IProcessValidator
     private readonly IReadOnlyList<IProcessValidationRule> _rules;
 
     /// <summary>使用默认的规则集构造（含脚本任务、多实例、异步作业、边界定时器与表达式预解析规则，共 23 条）。</summary>
+    /// <remarks>表达式规则使用自己的兜底解析器；宿主应优先用 <see cref="ProcessValidator(IExpressionManager)"/> 共享运行期实例。</remarks>
     public ProcessValidator()
+        : this(new ExpressionManager())
+    {
+    }
+
+    /// <summary>
+    /// 使用默认规则集构造，并让表达式校验共用运行期的解析器实例。
+    /// </summary>
+    /// <param name="expressions">运行期的 <see cref="IExpressionManager"/>（DI 单例）。</param>
+    public ProcessValidator(IExpressionManager expressions)
         : this(
         [
             new ProcessIdRule(),
@@ -32,7 +43,7 @@ public sealed class ProcessValidator : IProcessValidator
             new UnsupportedEventDefinitionRule(),
             new BoundaryEventConfigurationRule(),
             new TerminateEndEventRule(),
-            new ExpressionParseRule(),
+            new ExpressionParseRule(expressions),
             new RequiredAttributesRule(),
             new ListenerConfigurationRule(),
             new UnsupportedCapabilityRule(),
