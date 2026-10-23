@@ -35,6 +35,27 @@ public sealed class RedisJobQueueOptions
     /// <summary>是否启用 TLS。</summary>
     public bool Ssl { get; set; }
 
+    /// <summary>
+    /// 是否允许客户端下发 Redis 的 admin 类命令（默认 <see langword="true"/>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// StackExchange.Redis 把 <c>INFO</c> 归入 admin 命令，<b>不开这个开关就读不到服务端信息</b>
+    /// （管理端「Redis 诊断」页的「服务端信息」会一直是空态）。
+    /// 队列本身只用 <c>PING</c> / <c>LLEN</c> / <c>ZCARD</c> / Lua 脚本，从不主动下发
+    /// <c>FLUSH*</c> / <c>CONFIG</c> / <c>SHUTDOWN</c> 这类破坏性命令。
+    /// </para>
+    /// <para>
+    /// 连接串模式（<see cref="ConnectionString"/>）同样生效：连接串里没写 <c>allowAdmin</c>
+    /// 时按本项补齐，写了则以连接串为准。
+    /// </para>
+    /// <para>
+    /// 真正的权限边界在服务端：Redis 6+ 可用 ACL 单独收紧（只授 <c>+ping +llen +zcard +info +eval</c>），
+    /// 客户端开关只是「允不允许发」，不等于「服务端允许执行」。
+    /// </para>
+    /// </remarks>
+    public bool AllowAdmin { get; set; } = true;
+
     /// <summary>建连超时。</summary>
     public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(5);
 

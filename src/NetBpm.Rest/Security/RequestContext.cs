@@ -120,6 +120,9 @@ public static class TaskScopes
     /// <summary>指标查询。</summary>
     public const string AdminMetricsRead = "netbpm.admin.metrics.read";
 
+    /// <summary>Redis 作业队列诊断（连接状态 / 队列键条目数 / 服务端 INFO）。</summary>
+    public const string AdminRedisRead = "netbpm.admin.redis.read";
+
     /// <summary>管理动作审计查询。</summary>
     public const string AdminAuditRead = "netbpm.admin.audit.read";
 

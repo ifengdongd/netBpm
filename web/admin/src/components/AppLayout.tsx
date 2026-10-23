@@ -4,6 +4,7 @@ import {
   AuditOutlined,
   CloudServerOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   EyeOutlined,
   LogoutOutlined,
   SafetyCertificateOutlined,
@@ -35,6 +36,8 @@ const menuItems = [
   { key: '/monitoring', icon: <EyeOutlined />, label: '实例监控' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
   { key: '/metrics', icon: <DashboardOutlined />, label: '管理指标' },
+  // 运维诊断：作业队列走 Redis 时这里能直接看到键与连接状态（内存队列则如实提示「未使用 Redis」）
+  { key: '/redis', icon: <DatabaseOutlined />, label: 'Redis 诊断' },
 ];
 
 export default function AppLayout() {

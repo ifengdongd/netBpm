@@ -192,4 +192,50 @@ public class JobQueueTests
             stopwatch.ElapsedMilliseconds >= 150,
             $"应至少等待到超时，实际只等了 {stopwatch.ElapsedMilliseconds}ms。");
     }
+
+    [Fact]
+    public void Redis连接配置_默认应开启admin模式_否则读不到服务端INFO()
+    {
+        // StackExchange.Redis 把 INFO 归为 admin 命令：AllowAdmin=false 时
+        // 「Redis 诊断」页的「服务端信息」恒为空（只报一句“未取到服务端 INFO”），
+        // 页面与解析逻辑都白写。这条用例把默认值钉住。
+        var configuration = RedisJobQueue.BuildConfiguration(new RedisJobQueueOptions
+        {
+            Host = "127.0.0.1",
+            Port = 6379,
+        });
+
+        Assert.True(configuration.AllowAdmin);
+    }
+
+    [Fact]
+    public void Redis连接配置_连接串模式未写allowAdmin时按选项补齐()
+    {
+        var configuration = RedisJobQueue.BuildConfiguration(new RedisJobQueueOptions
+        {
+            ConnectionString = "127.0.0.1:6379,password=secret,defaultDatabase=1",
+        });
+
+        Assert.True(configuration.AllowAdmin);
+    }
+
+    [Fact]
+    public void Redis连接配置_显式关闭admin模式时应尊重配置()
+    {
+        // 高安全环境可以关掉；此时诊断页只少了「服务端信息」这一块，其余照常
+        var fromOptions = RedisJobQueue.BuildConfiguration(new RedisJobQueueOptions
+        {
+            AllowAdmin = false,
+        });
+
+        Assert.False(fromOptions.AllowAdmin);
+
+        // 连接串里显式写了 allowAdmin 时以连接串为准（含 false）
+        var fromConnectionString = RedisJobQueue.BuildConfiguration(new RedisJobQueueOptions
+        {
+            ConnectionString = "127.0.0.1:6379,allowAdmin=false",
+        });
+
+        Assert.False(fromConnectionString.AllowAdmin);
+    }
 }

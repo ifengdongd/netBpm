@@ -1,3 +1,5 @@
+using NetBpm.Runtime.Hosting.JobQueue;
+
 namespace NetBpm.Admin;
 
 /// <summary>一条管理动作审计（REST 响应）。</summary>
@@ -79,3 +81,42 @@ public sealed record AdminMetricsResponse(
     IReadOnlyDictionary<string, int>? PendingTasksByProcessKey,
     int? ArchivedInstances,
     IReadOnlyList<AdminAuditActionCount> AuditActions);
+
+/// <summary>
+/// Redis 作业队列诊断（<c>GET /api/admin/redis</c>）。
+/// <para>
+/// 只暴露运维口径的信息：连上了没有、三个队列键里各有多少条目、服务端版本与内存；
+/// <b>口令永远不回传</b>，连接串只以 <see cref="UsesConnectionString"/> 这个布尔标记体现。
+/// </para>
+/// <para>
+/// 队列键全部为 0 / 不存在是<b>正常</b>状态：Redis 只存「作业到期提示」，
+/// 作业执行完即删除，空键由 Redis 自动回收；流程数据始终在数据库里。
+/// </para>
+/// </summary>
+/// <param name="Provider">实际生效的队列实现名：<c>redis</c> / <c>memory</c>。</param>
+/// <param name="IsRedis">是否由 Redis 实现承载；<see langword="false"/> 时其余连接类字段多为 <see langword="null"/>。</param>
+/// <param name="Target">目标地址摘要（<c>host:port</c>；连接串模式下为解析出的端点，不含口令）。</param>
+/// <param name="Database">实际命中的逻辑库编号；连不上时无法确定，为 <see langword="null"/>。</param>
+/// <param name="KeyPrefix">队列键前缀（如 <c>netbpm:</c>）。</param>
+/// <param name="Ssl">是否启用 TLS。</param>
+/// <param name="UsesConnectionString">是否由 <c>ConnectionString</c> 指定连接（此时 Host / Port / Database 配置被忽略）。</param>
+/// <param name="CheckedAt">采集时间（UTC）。</param>
+/// <param name="Reachable">PING 是否成功。</param>
+/// <param name="LatencyMs">PING 往返时延（毫秒）。</param>
+/// <param name="Error">失败原因（不含口令）；正常时为 <see langword="null"/>。</param>
+/// <param name="Keys">三个队列键的条目数（键不存在即为 0）。</param>
+/// <param name="Server">服务端 INFO 摘要；INFO 被拒或不支持时为 <see langword="null"/>。</param>
+public sealed record AdminRedisInfoResponse(
+    string Provider,
+    bool IsRedis,
+    string? Target,
+    int? Database,
+    string? KeyPrefix,
+    bool? Ssl,
+    bool UsesConnectionString,
+    DateTime CheckedAt,
+    bool Reachable,
+    double? LatencyMs,
+    string? Error,
+    IReadOnlyList<RedisQueueKeyInfo> Keys,
+    RedisServerInfo? Server);

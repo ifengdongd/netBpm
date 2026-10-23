@@ -4,6 +4,7 @@ import type {
   AdminAuditOptions,
   AdminAuditPurgeResponse,
   AdminMetricsResponse,
+  AdminRedisInfoResponse,
   BpmnModelDetail,
   BpmnModelSummary,
   BpmnModelRevisionDetail,
@@ -472,4 +473,14 @@ export const metricsApi = {
         timeZoneOffsetMinutes: params?.timeZoneOffsetMinutes,
       })}`,
     ),
+};
+
+// ─────────────────────────── 运维 · Redis 诊断 ───────────────────────────
+
+export const redisApi = {
+  /**
+   * 作业队列诊断：实现选择、目标地址、PING 时延、三个队列键条目数、服务端 INFO 摘要。
+   * 只读，不写键、不消费；`provider=memory` 时说明 Redis 根本没被用上。
+   */
+  info: () => http.get<AdminRedisInfoResponse>('/api/admin/redis'),
 };

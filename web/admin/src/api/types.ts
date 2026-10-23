@@ -521,3 +521,61 @@ export interface AdminAuditActionCount {
   action: string;
   count: number;
 }
+
+// ─────────────────────────── 运维 · Redis 诊断 ───────────────────────────
+
+/**
+ * 一个队列键的当前状态（`GET /api/admin/redis`）。
+ *
+ * 键不存在时后端返回 `length: 0` —— 队列只存「作业到期提示」，作业执行完即删除，
+ * 空键由 Redis 自动回收，所以「三个键都是 0」是正常状态，不是故障。
+ */
+export interface RedisQueueKeyInfo {
+  /** 语义角色：delay（延迟段）/ ready（就绪段）/ inflight（在途段）。 */
+  role: string;
+  /** 完整键名（含 keyPrefix）。 */
+  key: string;
+  /** Redis 数据类型：zset / list。 */
+  type: string;
+  length: number;
+}
+
+/** Redis 服务端 INFO 摘要（只取诊断需要的几项）。 */
+export interface RedisServerInfo {
+  version?: string | null;
+  mode?: string | null;
+  uptimeSeconds?: number | null;
+  connectedClients?: number | null;
+  usedMemoryBytes?: number | null;
+  totalCommandsProcessed?: number | null;
+  keyspaceHits?: number | null;
+  keyspaceMisses?: number | null;
+  /** 各逻辑库的键数量，键名形如 `db1`。 */
+  keyspace: Record<string, number>;
+}
+
+/**
+ * Redis 作业队列诊断（`GET /api/admin/redis`）。
+ *
+ * 口令永远不会回传：连接串只以 `usesConnectionString` 布尔标记体现。
+ * `isRedis=false` 表示当前宿主用的是内存队列，Redis 里不会有任何 netbpm 键。
+ */
+export interface AdminRedisInfoResponse {
+  /** 实际生效的队列实现名：redis / memory。 */
+  provider: string;
+  isRedis: boolean;
+  /** 目标地址（host:port，不含口令）；内存队列为 null。 */
+  target?: string | null;
+  /** 实际命中的逻辑库；连不上时为 null（连接串模式下只有连上才知道库号）。 */
+  database?: number | null;
+  keyPrefix?: string | null;
+  ssl?: boolean | null;
+  usesConnectionString: boolean;
+  checkedAt: string;
+  reachable: boolean;
+  /** PING 往返时延（毫秒）。 */
+  latencyMs?: number | null;
+  error?: string | null;
+  keys: RedisQueueKeyInfo[];
+  server?: RedisServerInfo | null;
+}

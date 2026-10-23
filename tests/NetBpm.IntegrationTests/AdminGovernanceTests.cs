@@ -309,6 +309,7 @@ public sealed class AdminGovernanceTests : IClassFixture<AdminEngineFactory>
         var auditOnly = CreateToken(userId: "audit", scopes: "netbpm.admin.audit.read");
         var archiveOnly = CreateToken(userId: "archive", scopes: "netbpm.admin.history.archive");
         var modelRead = CreateToken(userId: "reader", scopes: "netbpm.admin.model.read");
+        var redisOnly = CreateToken(userId: "redis", scopes: "netbpm.admin.redis.read");
 
         // metrics.read：只有指标放行
         using (var ok = await SendAsync(client, HttpMethod.Get, "/api/admin/metrics", metricsOnly))
@@ -324,6 +325,47 @@ public sealed class AdminGovernanceTests : IClassFixture<AdminEngineFactory>
         using (var deniedModels = await SendAsync(client, HttpMethod.Get, "/api/admin/models", metricsOnly))
         {
             Assert.Equal(HttpStatusCode.Forbidden, deniedModels.StatusCode);
+        }
+
+        using (var deniedRedis = await SendAsync(client, HttpMethod.Get, "/api/admin/redis", metricsOnly))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, deniedRedis.StatusCode);
+        }
+
+        // redis.read：Redis 诊断放行，指标不放行。具体队列实现跟随集成宿主的配置
+        //（当前 src/NetBpm.Admin/appsettings.json 是 Redis；内存队列宿主则回 provider=memory）——
+        // 这里验证的是「如实回报且自洽」，而不是某个写死的实现。
+        using (var redis = await SendAsync(client, HttpMethod.Get, "/api/admin/redis", redisOnly))
+        {
+            Assert.True(redis.IsSuccessStatusCode, $"Redis 诊断应放行：{redis.StatusCode}");
+
+            using var document = JsonDocument.Parse(await redis.Content.ReadAsStringAsync(Ct));
+            var root = document.RootElement;
+
+            var provider = root.GetProperty("provider").GetString();
+            var isRedis = root.GetProperty("isRedis").GetBoolean();
+
+            Assert.Contains(provider, new[] { "redis", "memory" });
+            Assert.Equal(string.Equals(provider, "redis", StringComparison.OrdinalIgnoreCase), isRedis);
+
+            // 口令永不回传：连接串只以布尔标记体现
+            Assert.False(root.GetProperty("usesConnectionString").GetBoolean());
+
+            if (isRedis)
+            {
+                // 走 Redis 时至少要说清连的是哪儿；连不上也不能 500（只是 reachable=false）
+                Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("target").GetString()));
+
+                if (root.GetProperty("reachable").GetBoolean())
+                {
+                    Assert.Equal(3, root.GetProperty("keys").GetArrayLength());
+                }
+            }
+        }
+
+        using (var deniedMetricsForRedis = await SendAsync(client, HttpMethod.Get, "/api/admin/metrics", redisOnly))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, deniedMetricsForRedis.StatusCode);
         }
 
         // audit.read：审计放行，归档不放行

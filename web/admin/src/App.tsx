@@ -14,6 +14,7 @@ const ModelEditorPage = lazy(() => import('./pages/ModelEditorPage'));
 const ModelsPage = lazy(() => import('./pages/ModelsPage'));
 const MonitoringPage = lazy(() => import('./pages/MonitoringPage'));
 const ProcessTypesPage = lazy(() => import('./pages/ProcessTypesPage'));
+const RedisPage = lazy(() => import('./pages/RedisPage'));
 
 /** 路由切换时的加载占位。 */
 function PageFallback() {
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/metrics" element={<MetricsPage />} />
+          <Route path="/redis" element={<RedisPage />} />
           <Route path="*" element={<Navigate to="/models" replace />} />
         </Route>
       </Routes>

@@ -18,12 +18,14 @@ namespace NetBpm.Admin.Endpoints;
 /// <para>
 /// 🔐 细粒度授权：读模型要 <c>netbpm.admin.model.read</c>，写 / 回滚 / 发布要
 /// <c>netbpm.admin.model.write</c>，审计 <c>netbpm.admin.audit.read</c>，指标
-/// <c>netbpm.admin.metrics.read</c>，归档 <c>netbpm.admin.history.archive</c>。
+/// <c>netbpm.admin.metrics.read</c>，Redis 诊断 <c>netbpm.admin.redis.read</c>，
+/// 归档 <c>netbpm.admin.history.archive</c>。
 /// 超级范围 <c>netbpm.admin</c> 覆盖全部；未启用凭据（开发）与 API Key（可信服务）放行。
 /// </para>
 /// <para>
 /// 处理器按领域拆分到 partial 文件：<see cref="AdminEndpoints.Models"/>（模型 + 流程类型）、
-/// <see cref="AdminEndpoints.Governance"/>（审计 + 指标 + 归档）；本文件只保留路由表与公共辅助。
+/// <see cref="AdminEndpoints.Governance"/>（审计 + 指标 + 归档）、
+/// <see cref="AdminEndpoints.Diagnostics"/>（Redis 队列诊断）；本文件只保留路由表与公共辅助。
 /// </para>
 /// </summary>
 public static partial class AdminEndpoints
@@ -124,6 +126,10 @@ public static partial class AdminEndpoints
         // ── 管理指标 ──
         group.MapGet("/metrics", GetMetricsAsync).Produces<AdminMetricsResponse>()
             .RequireAdminScope(TaskScopes.AdminMetricsRead, "查看管理指标");
+
+        // ── Redis 队列诊断（运维只读：连接状态 / 队列键条目数 / 服务端 INFO）──
+        group.MapGet("/redis", GetRedisInfoAsync).Produces<AdminRedisInfoResponse>()
+            .RequireAdminScope(TaskScopes.AdminRedisRead, "查看 Redis 队列诊断");
 
         // ── 定时作业（边界定时器诊断）──
         group.MapGet("/jobs", FindJobsAsync).Produces<TimerJobSummary>()

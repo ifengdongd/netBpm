@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetBpm.Engine.Jobs;
@@ -192,6 +193,205 @@ public sealed class RedisJobQueue : IJobQueue, IDisposable
 
         return (database.Database, Stopwatch.GetElapsedTime(startedAt));
     }
+
+    /// <summary>
+    /// 采集队列运行快照（管理端「Redis 诊断」页用）：PING 时延、三个队列键的条目数、服务端 INFO 摘要。
+    /// </summary>
+    /// <remarks>
+    /// <para>全程只读（<c>PING</c> / <c>LLEN</c> / <c>ZCARD</c> / <c>INFO</c>），不创建键、不改数据。</para>
+    /// <para>
+    /// 失败<b>不抛异常</b>：连不上时 <see cref="RedisQueueSnapshot.Reachable"/> 为 <see langword="false"/>，
+    /// 键查询失败 / INFO 被拒只把对应字段置空 —— 诊断页不该因为「被诊断对象故障」而变成 500。
+    /// 仅有「请求被取消」（宿主停机）按约定抛 <see cref="OperationCanceledException"/>。
+    /// </para>
+    /// </remarks>
+    public async ValueTask<RedisQueueSnapshot> InspectAsync(CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var startedAt = Stopwatch.GetTimestamp();
+        IDatabase database;
+        double latencyMs;
+
+        try
+        {
+            database = Database;
+
+            await database.PingAsync().WaitAsync(ct).ConfigureAwait(false);
+
+            latencyMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new RedisQueueSnapshot(false, null, _options.Database, DescribeError(exception), [], null);
+        }
+
+        var keys = new List<RedisQueueKeyInfo>(3);
+        string? error = null;
+
+        try
+        {
+            // 三条命令并行下发：StackExchange.Redis 在同一条连接上做管线化，比串行少两个 RTT
+            var delayTask = database.SortedSetLengthAsync(_delayKey);
+            var readyTask = database.ListLengthAsync(_readyKey);
+            var inflightTask = database.SortedSetLengthAsync(_inflightKey);
+
+            await Task.WhenAll(delayTask, readyTask, inflightTask).WaitAsync(ct).ConfigureAwait(false);
+
+            keys.Add(new RedisQueueKeyInfo("delay", _delayKey.ToString(), "zset", delayTask.Result));
+            keys.Add(new RedisQueueKeyInfo("ready", _readyKey.ToString(), "list", readyTask.Result));
+            keys.Add(new RedisQueueKeyInfo("inflight", _inflightKey.ToString(), "zset", inflightTask.Result));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            error = DescribeError(exception);
+        }
+
+        return new RedisQueueSnapshot(
+            true,
+            latencyMs,
+            database.Database,
+            error,
+            keys,
+            await TryReadServerInfoAsync(ct).ConfigureAwait(false));
+    }
+
+    /// <summary>目标地址摘要（<b>不含口令</b>），供启动日志与管理端诊断复用。</summary>
+    /// <param name="options">队列配置。</param>
+    public static string DescribeTarget(RedisJobQueueOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (string.IsNullOrWhiteSpace(options.ConnectionString))
+        {
+            return $"{options.Host}:{options.Port}";
+        }
+
+        try
+        {
+            // 只回显解析出的端点：连接串里可能带 password，绝不能原样透出
+            var configuration = BuildConfiguration(options);
+
+            return string.Join(", ", configuration.EndPoints.Select(endPoint => endPoint.ToString()));
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException)
+        {
+            return "ConnectionString 指定的实例（解析失败）";
+        }
+    }
+
+    /// <summary>读服务端 INFO 摘要；权限不足 / 服务端禁用 INFO 时返回 <see langword="null"/>。</summary>
+    /// <remarks>INFO 只是「锦上添花」的一段展示，失败不应让整张诊断页报错。</remarks>
+    private async ValueTask<RedisServerInfo?> TryReadServerInfoAsync(CancellationToken ct)
+    {
+        try
+        {
+            var endPoint = Connection.GetEndPoints().FirstOrDefault();
+
+            if (endPoint is null)
+            {
+                return null;
+            }
+
+            var sections = await Connection.GetServer(endPoint).InfoAsync().WaitAsync(ct).ConfigureAwait(false);
+
+            return ParseServerInfo(sections);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogDebug(exception, "读取 Redis INFO 失败（诊断页将缺少服务端信息）。");
+
+            return null;
+        }
+    }
+
+    /// <summary>把 INFO 的分段结果压成 <see cref="RedisServerInfo"/>（只取少量标量字段）。</summary>
+    private static RedisServerInfo ParseServerInfo(IGrouping<string, KeyValuePair<string, string>>[] sections)
+    {
+        ArgumentNullException.ThrowIfNull(sections);
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var keyspace = new Dictionary<string, long>(StringComparer.Ordinal);
+
+        foreach (var section in sections)
+        {
+            var isKeyspaceSection = section.Key.Equals("Keyspace", StringComparison.OrdinalIgnoreCase);
+
+            foreach (var (name, value) in section)
+            {
+                values[name] = value;
+
+                // Keyspace 段每行的值是 db1=keys=12,expires=1,avg_ttl=0 里的 "keys=12,expires=1,avg_ttl=0"
+                if (isKeyspaceSection && TryReadKeyCount(value, out var count))
+                {
+                    keyspace[name] = count;
+                }
+            }
+        }
+
+        return new RedisServerInfo(
+            Text(values, "redis_version"),
+            Text(values, "redis_mode"),
+            Number(values, "uptime_in_seconds"),
+            (int?)Number(values, "connected_clients"),
+            Number(values, "used_memory"),
+            Number(values, "total_commands_processed"),
+            Number(values, "keyspace_hits"),
+            Number(values, "keyspace_misses"),
+            keyspace);
+
+        static string? Text(Dictionary<string, string> map, string key) =>
+            map.TryGetValue(key, out var raw) && raw.Length > 0 ? raw : null;
+
+        static long? Number(Dictionary<string, string> map, string key) =>
+            map.TryGetValue(key, out var raw)
+            && long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : null;
+    }
+
+    /// <summary>从 <c>keys=12,expires=1,avg_ttl=0</c> 里取出 <c>keys</c> 的值。</summary>
+    private static bool TryReadKeyCount(string raw, out long count)
+    {
+        count = 0;
+
+        const string marker = "keys=";
+
+        var index = raw.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var rest = raw.AsSpan(index + marker.Length);
+        var comma = rest.IndexOf(',');
+
+        if (comma >= 0)
+        {
+            rest = rest[..comma];
+        }
+
+        return long.TryParse(rest, NumberStyles.Integer, CultureInfo.InvariantCulture, out count);
+    }
+
+    /// <summary>把异常压成一行诊断文案：外层常常只有「没有可用连接」，真正原因在内层。</summary>
+    private static string DescribeError(Exception exception) =>
+        exception.InnerException is null
+            ? exception.Message
+            : $"{exception.Message} → {exception.InnerException.Message}";
 
     /// <inheritdoc />
     public async ValueTask EnqueueAsync(JobQueueItem item, CancellationToken ct = default)
@@ -578,7 +778,17 @@ public sealed class RedisJobQueue : IJobQueue, IDisposable
 
         if (!string.IsNullOrWhiteSpace(options.ConnectionString))
         {
-            return ConfigurationOptions.Parse(options.ConnectionString.Trim());
+            var raw = options.ConnectionString.Trim();
+            var parsed = ConfigurationOptions.Parse(raw);
+
+            // 连接串里通常不写 allowAdmin：诊断页的 INFO 依赖它，按选项补齐；
+            // 显式写了（true / false）则以连接串为准 —— 与 RedisJobQueueOptions 的说明一致。
+            if (raw.IndexOf("allowAdmin", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                parsed.AllowAdmin = options.AllowAdmin;
+            }
+
+            return parsed;
         }
 
         var configuration = new ConfigurationOptions
@@ -589,7 +799,10 @@ public sealed class RedisJobQueue : IJobQueue, IDisposable
 
             // Redis 不可用时不要在启动时炸掉宿主，交给后台重连
             AbortOnConnectFail = false,
-            AllowAdmin = false,
+
+            // INFO 是 admin 命令：不开就拿不到服务端版本 / 内存 / 命中率（诊断页「服务端信息」恒为空）。
+            // 本客户端只下发 PING / LLEN / ZCARD / INFO / Lua，不含任何破坏性命令。
+            AllowAdmin = options.AllowAdmin,
         };
 
         configuration.EndPoints.Add(options.Host, options.Port);

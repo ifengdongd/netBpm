@@ -319,6 +319,7 @@ POST /api/runtime/process-instances/{id}/migrate
 | `netbpm.admin.instance.suspend` | 挂起 / 激活实例 |
 | `netbpm.admin.variables.write` | **越权**直写 / 删除实例变量与任务局部变量 |
 | `netbpm.admin.metrics.read` | 管理指标 |
+| `netbpm.admin.redis.read` | Redis 作业队列诊断（连接状态 / 队列键条目数 / 服务端 INFO） |
 | `netbpm.admin.audit.read` | 管理动作审计查询 |
 | `netbpm.admin.audit.purge` | 清理审计记录（可抹除历史痕迹，单独授权） |
 | `netbpm.admin.history.archive` | 历史归档（执行与查询） |
@@ -383,6 +384,15 @@ POST /api/runtime/process-instances/{id}/migrate
 - 管理控制台提供「管理指标」页（`/metrics`）：运行中 / 待办 / 逾期 / 今日到期 / 历史 / 已结束 /
   已删除实例、流程定义、归档量九张统计卡，待办按流程 key 的占比分布，窗口内审计动作计数；
   「不可用」明确标注为宿主无法统计（内存宿主），与 0 区分。
+- 管理控制台提供「Redis 诊断」页（`/redis`）：队列实现（`redis` / `memory`）、目标地址与逻辑库、
+  PING 时延、三个队列键（`netbpm:job:delay` / `job:ready` / `job:inflight`）的条目数、服务端 INFO 摘要；
+  连接不可用或配置没生效（还在走内存队列）都会直接给出结论 —— 「Redis 里看不到 netbpm 键」先看这里。
+  只读、不消费；口令永不回传。页面每 10 秒自动刷新。
+  「服务端信息」依赖 StackExchange.Redis 的 admin 模式（`NetBpm:Jobs:Queue:Redis:AllowAdmin`，默认 `true`）
+  —— 它把 `INFO` 归为 admin 命令，关掉这个开关页面就只剩连接与键统计；连接串里显式写 `allowAdmin` 时以连接串为准。
+  客户端只下发 `PING` / `LLEN` / `ZCARD` / `INFO` / Lua，从不执行 `FLUSH*` / `CONFIG` / `SHUTDOWN`，
+  真正的权限边界仍在服务端（Redis 6+ 可用 ACL 单独收紧）。
+  注意：队列只存「作业到期提示」，**三个键没有数据是正常状态**（作业执行完即删除，空键由 Redis 回收）。
 
 **③ 指标与历史归档**
 
@@ -842,6 +852,7 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 | GET | `/api/admin/audit` | 管理动作审计（`action`/`actor`/`processInstanceId`/`success`/时间 + 分页） |
 | DELETE | `/api/admin/audit` | 审计保留策略清理（`before` 必填，需要 `netbpm.admin.audit.purge`） |
 | GET | `/api/admin/metrics` | 管理指标（实例 / 定义 / 待办 / 审计动作 / 归档量） |
+| GET | `/api/admin/redis` | Redis 作业队列诊断（实现 / 目标地址 / PING / 队列键条目数 / 服务端 INFO，需要 `netbpm.admin.redis.read`） |
 | POST | `/api/admin/history/archive` | 历史归档（`before` 必填，`dryRun` 预演） |
 | GET | `/api/admin/history/archives` | 归档记录列表（不含 payload） |
 | GET | `/api/admin/history/archives/{processInstanceId}` | 归档详情（含历史行 JSON 快照） |

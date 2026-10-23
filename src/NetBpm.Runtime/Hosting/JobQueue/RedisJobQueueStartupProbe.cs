@@ -56,9 +56,10 @@ public sealed class RedisJobQueueStartupProbe : BackgroundService
     }
 
     /// <summary>探测目标（诊断用）：尽量写清「连的是哪儿」，让 Error 日志本身可定位。</summary>
+    /// <remarks>与 <see cref="RedisJobQueue.DescribeTarget"/> 同源：口令永远不会出现在日志里。</remarks>
     private string Target => string.IsNullOrWhiteSpace(_options.ConnectionString)
-        ? $"{_options.Host}:{_options.Port} / db{_options.Database}"
-        : "ConnectionString 指定的实例（Database 配置项被忽略）";
+        ? $"{RedisJobQueue.DescribeTarget(_options)} / db{_options.Database}"
+        : $"{RedisJobQueue.DescribeTarget(_options)}（ConnectionString 指定，Database 配置项被忽略）";
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
