@@ -54,7 +54,15 @@ public sealed class OutboxPublisherService : BackgroundService
             return;
         }
 
-        await Task.Delay(_options.StartupDelay, stoppingToken).ConfigureAwait(false);
+        try
+        {
+            await Task.Delay(_options.StartupDelay, stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // 启动延迟窗口内宿主已在停机：正常退出，别让取消变成「后台服务崩溃」。
+            return;
+        }
 
         var batchSize = Math.Max(1, _options.BatchSize);
 

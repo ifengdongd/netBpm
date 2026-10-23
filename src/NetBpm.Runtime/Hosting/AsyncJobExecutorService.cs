@@ -46,7 +46,16 @@ public sealed class AsyncJobExecutorService : BackgroundService
             return;
         }
 
-        await Task.Delay(_options.StartupDelay, stoppingToken).ConfigureAwait(false);
+        try
+        {
+            await Task.Delay(_options.StartupDelay, stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // 启动延迟窗口内宿主已在停机（端口冲突 / 快速重启 / Ctrl+C）：正常退出即可。
+            // 否则取消会以未处理异常冒出去，被 BackgroundService 记成「后台服务崩溃」并触发 StopHost。
+            return;
+        }
 
         var batchSize = Math.Max(1, _options.BatchSize);
 
