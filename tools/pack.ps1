@@ -10,7 +10,7 @@ param([string]$Configuration = "Release")
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$version = "0.1.2"
+$version = "0.1.3"
 $nugetDir = Join-Path $root "artifacts\nuget"
 $distDir = Join-Path $root "artifacts\netbpm-$version"
 $dllDir = Join-Path $distDir "dll"
@@ -50,7 +50,8 @@ if ($LASTEXITCODE -ne 0) { throw "publish NetBpm.Workflow 失败" }
 # publish 会把 Persistence 内嵌的建表脚本带进 dll\db\，与顶层 db\ 重复，删掉
 if (Test-Path (Join-Path $dllDir "db")) { Remove-Item -Recurse -Force (Join-Path $dllDir "db") }
 
-Copy-Item (Join-Path $nugetDir "*.nupkg") (Join-Path $distDir "nuget")
+# 只取本次版本：artifacts\nuget 是累积的本地源，通配 *.nupkg 会把旧版本一并塞进发行包
+Copy-Item (Join-Path $nugetDir "*.$version.nupkg") (Join-Path $distDir "nuget")
 Copy-Item (Join-Path $root "db\mysql\*.sql") (Join-Path $distDir "db\mysql")
 Copy-Item (Join-Path $root "db\sqlserver\*.sql") (Join-Path $distDir "db\sqlserver")
 
@@ -101,4 +102,4 @@ Compress-Archive -Path (Join-Path $distDir "*") -DestinationPath $zip -Force
 
 Write-Host ""
 Write-Host "完成：$zip" -ForegroundColor Green
-Get-ChildItem $nugetDir -Filter *.nupkg | Select-Object Name, Length | Format-Table
+Get-ChildItem $nugetDir -Filter "*.$version.nupkg" | Select-Object Name, Length | Format-Table

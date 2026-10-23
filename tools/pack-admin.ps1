@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 #  NetBpm 管理控制台打包：前端构建（designer + admin）→ dotnet publish → 发行 zip
 #  用法：powershell -File tools\pack-admin.ps1 [-Configuration Release] [-SkipFrontend]
 #  产物：artifacts\netbpm-admin-<ver>\       发布目录（app\ 为 publish 输出，含 wwwroot）
@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 
 # 与 tools\pack.ps1 的 $version 保持一致
-$version = "0.1.2"
+$version = "0.1.3"
 
 $adminProject = Join-Path $root "src\NetBpm.Admin\NetBpm.Admin.csproj"
 $distDir = Join-Path $root "artifacts\netbpm-admin-$version"
@@ -70,14 +70,14 @@ NetBpm 管理控制台 · 发行包（$version）
   app\  NetBpm.Admin 宿主（net10.0 framework-dependent 发布），含：
         - wwwroot\          管理控制台前端（React + Ant Design）
         - wwwroot\designer\ 流程设计器（bpmn-js）
-        - appsettings*.json 配置（默认 MySQL + AutoMigrate）
+        - appsettings*.json 配置（DatabaseType=MySql；ConnectionString 为空，需自行填写）
 
 二、运行
   1. 安装 .NET 10 运行时（dotnet --list-runtimes 确认）。
-  2. 修改 app\appsettings.json 数据库连接串：
+  2. 修改 app\appsettings.json：
        - DatabaseType: MySql / SqlServer
-       - ConnectionString 指向你的库
-       - AutoMigrate: true 会自动建库建表（含 bpmn_model / workflow_type / ACT_* 等）
+       - ConnectionString 指向你的库（默认空字符串，启动前必须填写）
+       - AutoMigrate: true 会自动建库建表（含 bpmn_model / workflow_type / ACT_* 等；默认 false）
      （鉴权可选：NetBpm:Security:ApiKey 或 NetBpm:Security:Jwt:SigningKey 任一非空即开启）
   3. 启动：dotnet app\NetBpm.Admin.dll --urls http://0.0.0.0:5081
      访问：http://localhost:5081 （管理控制台；开启鉴权时首次请求会自动跳登录页）
