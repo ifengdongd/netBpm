@@ -67,7 +67,7 @@ public sealed class AsyncJobExecutorOptions
 ///         "Host": "127.0.0.1",
 ///         "Port": 6379,
 ///         "Auth": "******",
-///         "KeyPrefix": "opms:"
+///         "KeyPrefix": "netbpm:"
 ///       }
 ///     }
 ///   }

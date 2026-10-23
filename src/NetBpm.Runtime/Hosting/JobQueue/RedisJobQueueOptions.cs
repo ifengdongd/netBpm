@@ -29,7 +29,7 @@ public sealed class RedisJobQueueOptions
     /// <summary>
     /// 键前缀：多系统共用同一 Redis 实例时的命名空间隔离。
     /// </summary>
-    /// <remarks>建议以英文冒号结尾（如 <c>opms:</c>），便于在 redis-cli 里按层级 <c>SCAN</c>。</remarks>
+    /// <remarks>建议以英文冒号结尾（如 <c>netbpm:</c>），便于在 redis-cli 里按层级 <c>SCAN</c>。</remarks>
     public string KeyPrefix { get; set; } = "netbpm:";
 
     /// <summary>是否启用 TLS。</summary>
