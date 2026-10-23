@@ -314,7 +314,7 @@ public static partial class RuntimeEndpoints
         if (string.IsNullOrWhiteSpace(task.ProcessDefinitionId)
             || string.IsNullOrWhiteSpace(task.TaskDefinitionKey))
         {
-            return Results.BadRequest(new ErrorResponse("任务缺少流程定义或节点信息，无法解析表单。"));
+            return InvalidRequest("任务缺少流程定义或节点信息，无法解析表单。");
         }
 
         var model = await engine.GetBpmnModelAsync(task.ProcessDefinitionId, ct).ConfigureAwait(false);

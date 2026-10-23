@@ -20,7 +20,7 @@
 
 | 边界 | 症状 |
 |---|---|
-| **模块边界** | `RuntimeEndpoints`（2042 行 / 49 个端点）、`DapperExecutionManager`（1287 行 / 注入 8 个协作者）、`IProcessEngine`（约 69 个方法）三处 God 化 |
+| **模块边界** | `DapperExecutionManager`（1150 行 / 7 个协作者：5 必选 + 2 可选）、`IProcessEngine`（47 个异步方法 + 同步重载，479 行）两处仍 God 化；`RuntimeEndpoints` 已拆分（§十二），此项减一 |
 | **事务边界** | 命令内靠拦截器；**命令外**（管理端 / 迁移 / 归档 / 作业失败回记）多语句写无事务，靠「碰巧不失败」 |
 | **并发边界** | 内存宿主是全局共享可变图；多宿主作业抢占在 Redis / DB / 内存三处实现语义各不相同 |
 
@@ -57,12 +57,13 @@
 | 11 | 作业抢占做两遍 | `ProcessEngine.cs:254` 与 `ExecuteAsyncJobCommand.cs:55` 各抢一次（不同 `now`） | 语义分散，难以推理 |
 | 12 | 先删后执行 | `ExecuteAsyncJobCommand.cs:105` 先 `TryDeleteAsync` 再推进 | 内存宿主失败即丢行，靠旧快照重插兜底 |
 
-> **状态（迭代 3 第一批）**：P1-1、P1-2、P1-3、P1-5 已闭环（详见 §十）；
-> P1-4（发布非原子）、P1-6（内存宿主单例）、P1-7（委托解析绕过 DI 的剩余部分已改为抛
-> `EngineException`，但「委托依赖 Scoped 服务」仍需把解析器改为 scoped 作用域解析）、
-> P1-11（作业抢占两遍）、P1-12（先删后执行）仍开放；
-> P1-8 的限流与体积上限已做，CORS 仍未配置；P1-9 已按租户白名单收敛（白名单内仍是全权限）；
-> P1-10 现在会记 warning（语义仍是「默认不阻断」）。
+> **状态（迭代 3 第四批后复核，2026-10-23）**：已闭环 P1-1/2/3/5（§十）、P1-4（§十一「发布与快照同事务」）、
+> P1-11（§十一「作业抢占合一」）、P1-12（`ExecuteAsyncJobCommand` 现为「执行成功后才 `TryDeleteAsync`」，
+> 前置删除只用于陈旧 / 已结束作业的作废路径）。
+> **仍开放**：P1-6（内存宿主仍是 `AddSingleton`，但已补命令级快照 + `OnAborted` 回滚，风险从「脏树」降为
+> 「跨请求可见性」）、P1-7（解析器仍注册为单例并注入根 `IServiceProvider`，`Activator.CreateInstance`
+> 兜底仍在 —— Scoped 依赖会被静默解析到根作用域）、P1-10（监听器异常仍只记 warning，语义为「默认不阻断」）。
+> P1-8：限流与体积上限已做，CORS 仍未配置；P1-9 已按租户白名单收敛（白名单内仍是全权限）。
 
 ---
 
@@ -70,13 +71,11 @@
 
 ### A. 统一「会话 / 工作单元」，把事务边界显式化
 
-> **状态（迭代 3 第一批）**：已交付「最小工作单元」`SessionUnitOfWork`
-> （`Persistence/Database/SessionUnitOfWork.cs`）：`lease.BeginUnitOfWork()` 在命令外真正
-> `Begin()`、命令内退化为 no-op（提交权仍归 `TransactionInterceptor`），必须显式
-> `CommitAsync`，未提交即 Dispose ⇒ 回滚。
-> 先覆盖了审阅点名的两条命令外多语句写（任务删除、变量更新）。
-> **`IExecutionSession` 与「Admin 存储统一走会话」仍未做**，`BpmnModelStore` 的 4 处
-> 同步 `BeginTransaction()` 也仍在。
+> **状态（迭代 3 第二批后复核 ✅ 基本闭环）**：`SessionUnitOfWork` 已交付；`IDbSession.State`
+> （`SessionState`）接管一级缓存，`IExecutionSession` 完整化；`BpmnModelStore` 的 4 处裸
+> `BeginTransaction()` 全部改走 `Acquire()` + `BeginUnitOfWork()`；全仓 `BeginTransaction(` 只剩
+> `DbSession`（会话自身）与 `IdBlockAllocator`（**故意**用独立短事务占块）。
+> **剩余**：归档 / 迁移 / 审计三条命令外写入仍各自 `BeginUnitOfWork`（已显式，未统一成同一入口）。
 
 当前命令内靠 `TransactionInterceptor`，命令外靠「每条语句自动提交」。
 
@@ -129,8 +128,8 @@
 | `Text/Number/Date` 行映射助手（逐字相同） | 原先 10 份；现统一到 `Persistence/Database/RowValues.cs` | ✅ 已收敛（`DapperTaskManager` 的 `ToNullable` 适配层一并删除） |
 | `BuildPaging`（含 `limit 100000` 魔法数） | 原先 2 份 | ✅ 已收敛为 `SqlPaging`（执行树 / 历史 / 作业 / outbox / 两个 Admin 存储共用） |
 | 方言 `limit/top` switch | `DapperTimerJobManager:89` / `DapperAsyncJobManager` / `DapperEventOutbox` | ✅ 分页部分已收敛；`DapperAsyncJobManager` 的「取 N 条」仍各自内联 |
-| 整个作业存储（Insert/Find/Acquire/Renew/Release/MarkFailure/DeadLetter + SQL 常量） | `DapperTimerJobManager:27-370` ≈ `DapperAsyncJobManager:26-353` | ⛔ 未做（抽 `DapperJobStore<T>` 仍待办） |
-| bytearray 三步序列（捕获 id → 删变量 → 删字节） | `DapperExecutionManager` / `DapperVariableInstanceManager` / `DapperTaskManager` | ⛔ 未做（顺序约束相同，可抽 `ByteArrayCleaner`） |
+| 整个作业存储（Insert/Find/Acquire/Renew/Release/MarkFailure/DeadLetter + SQL 常量） | `DapperTimerJobManager:27-370` ≈ `DapperAsyncJobManager:26-353` | ✅ 已收敛为 `Persistence/Jobs/DapperJobStoreBase.cs`（两个存储各减约 200 行，只保留 Insert/FindById/FindDue/Map） |
+| bytearray 三步序列（捕获 id → 删变量 → 删字节） | `DapperExecutionManager` / `DapperVariableInstanceManager` / `DapperTaskManager` | ✅ 已收敛为 `Persistence/Database/VariableCleanup.cs`（按任务 / 按实例 / 任意捕获三种入口，字节 id 按 1000 分片） |
 
 另：`SqlPaging.Build` **不再静默截断** —— `take` 为空直接抛 `EngineException`，
 只跳过不限条数的调用方必须显式写 `SqlPaging.BuildUnlimited`；
@@ -138,7 +137,12 @@
 
 ### F. 可测试性
 
-- **`IClock`**：`DateTime.UtcNow` 散落在 `InMemoryExecutionManager:96,123`、`TaskBehaviors:156`、`AsyncJobScheduler:35`、`ExecuteAsyncJobCommand:55,81`。
+> **状态（复核）**：`IClock` ✅ 已落地（引擎内 10 处 `DateTime.UtcNow` 全部走时钟；
+> 复核时发现 Rest 层 `TaskCommandService` 统计仍直读 `DateTime.UtcNow`，本次已一并改为 `IClock`）。
+> 下面两条仍开放。
+
+- **`IClock`** ✅：`InMemoryExecutionManager`、`TaskBehaviors`、`AsyncJobScheduler`、`ExecuteAsyncJobCommand` 已改；
+  仓储写库时间戳仍各自取时间（属数据契约，不进业务时钟）。
 - **去静态 `AsyncLocal` 兜底**：`CommandContext.cs:22` + `EngineServices.cs:64` 的 `?? _commandlessAgenda` 会让「命令外调用」静默进入一个没人排空的队列。
 - **可替换性**：`ActivityBehaviorFactory.cs:34-50` 与 `MultiInstanceUserTaskBehavior.cs:72` 直接 `new` 行为；`TransactionInterceptor.cs:25` 强制 `as CommandContext`，`RetryInterceptor.cs:42-47` 同类情形却静默不重试。
 
@@ -190,7 +194,7 @@
 
 ## 七、一天内可完成的低风险改进
 
-1. `ExpressionManager` 缓存 key 改 `Trim()` + 加容量上限。 ⛔ 未做（`El/ExpressionManager.cs:21,28` 仍以原文为 key，无上限）
+1. `ExpressionManager` 缓存 key 改 `Trim()` + 加容量上限。 ✅ 已做（key 为 trim 后文本，容量上限 2048 FIFO，`CacheCount` 可观测；`ExpressionRules` 与运行期共用同一实例）
 2. 删除 4 处死代码（`failed`、`PendingOperationCount`、`SkipReason`、`Unit`/`NoOpCommand`）。
    ✅ `PendingOperationCount`、`SkipReason`（连同 `ApprovalChainPlan` 整个 record）已删除；
    `failed` 经核查是**活变量**（三个轮询循环各自统计并打日志），不删；
@@ -239,7 +243,8 @@
 
 ### 后续建议（P1 起）
 
-见上文 §三 ~ §六。优先级最高的三项：级联删除批量化（P1-1）、命令外写事务边界（P1-2）、`RuntimeEndpoints` 拆 Service + 授权 Filter。
+见上文 §三 ~ §六。三项已全部消化（级联删除批量化 P1-1、命令外写事务边界 P1-2、`RuntimeEndpoints`
+拆 Service + 授权 Filter §十二）；后续优先级见 §十三。
 
 ---
 
@@ -301,16 +306,15 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 | `dotnet build NetBpm.slnx -c Debug` | 0 error |
 | `NetBpm.UnitTests`（MTP 直接运行） | **743 用例，0 失败，13 跳过**（Redis 不可用） |
 
-### 仍未完成（按建议顺序的下一步）
+### 仍未完成（2026-10-23 复核更新）
 
-1. **`IExecutionSession` 完整化**：`IExecutionManager` 不再自管缓存；`BpmnModelStore` 4 处同步
-   `BeginTransaction` 改走会话工厂；归档 / 迁移 / 审计全部切到 `BeginUnitOfWork`。
-2. ~~**`RuntimeEndpoints` 拆 Service + 授权 Filter**（2042 行 / 49 端点）~~ ✅ 已交付（§十二）：
-   4 个应用服务 + 声明式授权过滤器 + `EngineErrorCode`，配 `RuntimeEndpointRegressionTests` 端点级回归。
-3. **作业存储抽 `DapperJobStore<T>`** 与 **bytearray 三步序列抽公共方法**（§四E 剩余两行）。
-4. **表达式缓存治理**（key trim + 容量上限 + 与校验侧共用实例）与 `ElResolver` 反射元数据缓存。
-5. **`IClock`**、**内存宿主去单例**、**作业抢占合一**、**发布与快照同事务**。
-   → 前三项已在 §十一 落地；作业抢占合一与发布同事务仍开放。
+1. ~~`IExecutionSession` 完整化~~ ✅ 已交付（§十一）：`SessionState` 接管一级缓存，`BpmnModelStore`
+   4 处裸 `BeginTransaction` 改走 `Acquire()` + `BeginUnitOfWork()`。
+2. ~~`RuntimeEndpoints` 拆 Service + 授权 Filter~~ ✅ 已交付（§十二）。
+3. ~~作业存储抽 `DapperJobStore<T>`~~ / ~~bytearray 三步序列抽公共方法~~ ✅ 已交付（§十一）。
+4. **表达式缓存治理** ✅ 已交付；**`ElResolver` 反射元数据缓存** ⛔ 仍开放
+   （`ElResolver.cs:392` 每次方法调用都 `type.GetMethods()` 并 LINQ 过滤，热路径上的稳定开销）。
+5. `IClock` ✅、内存宿主去单例 ⛔（保留单例 + 快照兜底）、作业抢占合一 ✅、发布与快照同事务 ✅。
 
 ---
 
@@ -425,3 +429,63 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 - **`GET /process-instances/{id}/migrations` 维持「未知实例返回空表」**：
   它属于审计类查询，与历史查询同口径（不区分「没有记录」与「对象不存在」）；
   改成 404 会让前端多写一条分支，且需要额外一次存在性查询。
+
+---
+
+## 十三、二次 Review（2026-10-23，迭代 3 收尾后）
+
+复核方式：把文档里的每条断言回到 HEAD 代码取证（grep + 读实现）——能复现的保留、
+已失效的当场改文档、文档没覆盖的补录。**结论：文档多数结论仍成立，但有 8 处状态已过期**
+（前几轮改完没回写），另有 2 个本轮新引入的不一致已修。
+
+### 13.1 已校正的失效断言
+
+| 位置 | 原文 | 实际（证据） |
+|---|---|---|
+| §一 模块边界 | `RuntimeEndpoints` 2042 行是 God 对象 | 已拆为 6 个文件、最大 434 行（§十二）；God 对象只剩 `DapperExecutionManager`（1150 行）与 `IProcessEngine`（479 行 / 47 个异步方法） |
+| §三 状态注 | P1-4 发布非原子「仍开放」 | ✅ 已闭环：`PublishModelCommand` 把部署与快照写入放进同一命令/事务（§十一「顺带清账」） |
+| §三 状态注 | P1-11 作业抢占两遍「仍开放」 | ✅ 已闭环：`ExecuteAsyncJobCommand` 新增 `leaseAlreadyHeld`，轮询路径只在命令内抢一次 |
+| §三 状态注 | P1-12 先删后执行「仍开放」 | ✅ 已闭环：`ExecuteAsyncJobCommand.cs:113` 业务执行成功后才 `TryDeleteAsync`；前置删除仅用于陈旧/已结束作业作废 |
+| §四A 状态注 | `IExecutionSession` 与 `BpmnModelStore` 4 处同步 `BeginTransaction` 未做 | ✅ 已做：`SessionState` 接管一级缓存；`BpmnModelStore.cs:249,446,492,531` 全部 `BeginUnitOfWork`。全仓 `BeginTransaction(` 仅剩 `DbSession`（会话自身）与 `IdBlockAllocator`（故意独立短事务） |
+| §四E 表格 | `DapperJobStore<T>`、bytearray 三步序列「⛔ 未做」 | ✅ 已做：`Jobs/DapperJobStoreBase.cs`（223 行）、`Database/VariableCleanup.cs` |
+| §四F / §七.1 | `IClock` 未落地、表达式缓存无 trim/无上限 | ✅ 已做：引擎 10 处走时钟；`ExpressionManager` key 为 trim 文本 + 2048 上限 + `CacheCount` |
+| §十 未完成清单第 1/3/5 条 | 指向已交付项 | 已改为「已交付 / 剩余项」；`ElResolver` 反射缓存单独标为仍开放 |
+
+### 13.2 仍未闭环（按优先级，附证据）
+
+| 优先级 | 项 | 现状与证据 | 建议 |
+|---|---|---|---|
+| 高 | **P1-7 委托解析仍走根容器** | `IActivityDelegateResolver` 注册为 **单例**（`NetBpmServiceCollectionExtensions.cs:323`），构造注入的是根 `IServiceProvider`；`ServiceProviderActivityDelegateResolver.cs:44,55` 依次 `GetService(type)` → `Activator.CreateInstance` | 改成 `IEngineServices` 持有 `IServiceScopeFactory`，在**命令作用域**内解析并释放；或明确文档化「委托不得依赖 Scoped」并加部署期校验 |
+| 中 | **P1-6 内存宿主单例** | `InMemoryExecutionManager` 仍是 `AddSingleton`；但已补命令级快照 + `OnAborted` 回滚（§十一），失败不再留下半棵树 | 若要彻底解决需改 `IProcessEngine` 生命周期（连锁改动大），建议保持现状并在文档写明「内存宿主 = 单进程单租户演示」 |
+| 中 | **§四C 定义层四条全部未做** | `Process.cs:11` 仍是 public `IList<IFlowElement> FlowElements` + `AddFlowElement`；校验仍是 `foreach (rule) rule.Validate(process)`（`ProcessValidator.cs:76`），5 个规则文件里 34 处 `OfType<` 全扫；`ExtensionElements` **解析侧从不填充**（`BaseBpmnXmlConverter.cs:351-376` 只认已知子元素，未知扩展子元素被静默丢弃），写侧虽遍历该集合但集合恒为空 ⇒ 往返丢失仍在；转换器仍无 `IXmlLineInfo`（全项目 0 处） | 先做往返保真（收集未知扩展子元素）—— 它直接导致设计器保存一次就丢自定义扩展；`Freeze()` 与单次遍历属重构，收益低于风险 |
+| 中 | **§四D-2 `ElResolver` 反射元数据缓存** | `ElResolver.cs:392-399` 每次方法调用都 `type.GetMethods()` + LINQ 过滤；表达式缓存只缓存 AST，不缓存反射结果 | 加 `ConcurrentDictionary<(Type,string,argc), MethodInfo[]>`；热路径上这是稳定开销 |
+| 中 | **P1-10 监听器异常默认吞** | `EngineEventDispatcher.cs:87` 仍是 `catch (Exception) when (listener.ThrowOnFailure != true)` + `LogWarning` | 语义已文档化；建议在部署期校验里对「关键监听器」强制 `throwOnFailure=true` |
+| 低 | **错误码仍有 7 处无 `code`** | 运行态已全量（本轮补齐 form 400 / history 404 / diagram 404）；`DesignerEndpoints.cs:88,166,463,532`、`IdentityEndpoints.cs:69,84`、`AuthEndpoints.cs:82` 仍是裸 `ErrorResponse` | 把 `InvalidRequest` 提升为公共助手，设计器/身份/登录一并改用 `EngineErrorCode` |
+| 低 | **§四G 过度设计仍在** | `IOperation` 4 个实现 + 接口（`Operations/*.cs`）；`IJobQueue` 三件套（Redis/InMemory/JobQueue.cs） | 维持现状：这两处是「看得见调用链」的代价，裁掉的收益低于改错风险 |
+
+### 13.3 本轮发现并已修（代码）
+
+| 问题 | 说明 | 文件 |
+|---|---|---|
+| 运行态仍手工构造无 `code` 响应 | 拆分时从旧代码原样带过来，与「错误码集中」目标不一致 | `RuntimeEndpoints.Tasks.cs`（form 400 → `validation_error`）、`RuntimeEndpoints.History.cs`（2 处 404 → `not_found`） |
+| 待办统计绕过 `IClock` | `TaskCommandService` 用 `DateTime.UtcNow` 判断逾期/今天到期，与引擎决策不同源，固定时钟测试会对不上 | `Services/TaskCommandService.cs` |
+
+### 13.4 新发现（未改，建议排期）
+
+| 项 | 证据 | 建议 |
+|---|---|---|
+| **`AdminEndpoints.Models.cs` 是下一个「大文件」** | 1095 行 / 22 个 handler（partial class，路由在 `AdminEndpoints.cs`） | 按「模型 CRUD / 发布与版本 / 历史与剪枝」拆成 3 个文件，模板直接复用 §十二 |
+| `DapperExecutionManager` 仍是最大单文件 | 1150 行 / 7 个协作者（级联删除批量化后从 1287 降下来；原文档「8 个」为笔误） | 按「执行树 CRUD / 级联删除 / 查询映射」拆接口，但需先有跨库集成测试兜底 |
+| `InstanceCommandService` 三处批量循环重复 | `BatchDelete` / `BatchSetSuspension` / `BatchMigrate` 各自 45 行同构（逐项租户 + 执行 + 成败审计） | 抽 `RunBatchAsync(ids, action, detailFor, execute)`，可减约 120 行 |
+| `ResourceNotFoundException` 继承引擎异常 | 为了让批量端点用单条 `catch (EngineException)` 做逐项隔离 | 可接受（类注释已说明）；替代方案是批量里 `catch (ResourceNotFoundException or EngineException)` 两分支 |
+| 历史查询对未知实例的**双语义** | 不受限身份：`/history/.../activities`、`/variables` 返回 200 空数组；受限身份：404（过滤器先拒） | 客户端需同时处理两态；若要统一需额外存在性查询，暂不划算 |
+| 集成测试 7 例 401 失败是环境问题 | 6×`AdminModelGovernanceTests` + 1×`DualDatabaseConsoleApiTests`，改动前基线同样失败 | 修 Admin 测试宿主的凭据注入（`RestEngineFactory` 已有对照实现） |
+
+### 13.5 复核回归
+
+| 项 | 结果 |
+|---|---|
+| `dotnet build NetBpm.slnx -c Debug` | 0 error |
+| `NetBpm.UnitTests` | 744 用例，0 失败，13 跳过 |
+| `RuntimeEndpointRegressionTests`（真实 MySQL） | 7 / 7 通过 |
+| `NetBpm.IntegrationTests` 全量 | 200 用例：157 通过 / 36 跳过 / 7 失败（与改动前基线一致，均为 Admin 宿主 401） |

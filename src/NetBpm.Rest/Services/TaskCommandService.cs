@@ -101,6 +101,7 @@ public interface ITaskCommandService
 internal sealed class TaskCommandService(
     IProcessEngine engine,
     IExecutionManager executionManager,
+    IClock clock,
     RuntimeAudit audit) : ITaskCommandService
 {
     public async Task CompleteAsync(
@@ -361,7 +362,8 @@ internal sealed class TaskCommandService(
 
         var tasks = await engine.FindTasksAsync(query, ct).ConfigureAwait(false);
 
-        var now = DateTime.UtcNow;
+        // 走 IClock：统计口径与引擎决策（到期判断）必须同源，否则固定时钟的测试会对不上
+        var now = clock.UtcNow;
 
         // 「今天到期」按调用方时区计算自然日（默认 UTC）；把本地 00:00~24:00 换算回 UTC 区间比较
         var offset = timeZoneOffsetMinutes ?? 0;

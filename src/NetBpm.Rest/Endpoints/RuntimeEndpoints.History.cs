@@ -84,7 +84,8 @@ public static partial class RuntimeEndpoints
 
         return instance is null
             ? Results.NotFound(new ErrorResponse(
-                $"流程实例 '{processInstanceId}' 没有历史记录（历史写入可能未启用：NetBpm:EnableHistory）。"))
+                $"流程实例 '{processInstanceId}' 没有历史记录（历史写入可能未启用：NetBpm:EnableHistory）。",
+                Code: EngineErrorCode.NotFound))
             : Results.Ok(instance);
     }
 
@@ -186,7 +187,9 @@ public static partial class RuntimeEndpoints
         var diagram = await history.GetDiagramAsync(processInstanceId, ct).ConfigureAwait(false);
 
         return diagram is null
-            ? Results.NotFound(new ErrorResponse($"流程实例 '{processInstanceId}' 不存在，且没有历史记录。"))
+            ? Results.NotFound(new ErrorResponse(
+                $"流程实例 '{processInstanceId}' 不存在，且没有历史记录。",
+                Code: EngineErrorCode.NotFound))
             : Results.Ok(diagram);
     }
 }
