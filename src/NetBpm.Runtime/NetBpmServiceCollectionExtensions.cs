@@ -127,12 +127,26 @@ public static class NetBpmServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>注册异步作业执行器，参数从 <c>NetBpm:Jobs</c> 读取。</summary>
+    /// <summary>
+    /// 注册异步作业执行器，参数从 <c>NetBpm:Jobs</c> 读取；
+    /// 队列实现由 <c>NetBpm:Jobs:Queue:Provider</c> 决定（<c>Memory</c> / <c>Redis</c>，缺省 Memory）。
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>必须先选队列、再兜底</b>：<see cref="AddNetBpmJobQueue"/> 与下面的
+    /// <c>TryAddSingleton&lt;IJobQueue, InMemoryJobQueue&gt;()</c> 都是 <c>TryAdd</c>，
+    /// 谁先注册谁生效。顺序反了会静默退化成内存队列，而配置里写的是 Redis。
+    /// 因此这里内聚掉，宿主不需要（也不应该）单独再调一次。
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <c>NetBpm:Jobs:Queue:Provider</c> 取值未知时立即抛出 —— 配错就响亮报错，不静默兜底。
+    /// </exception>
     public static IServiceCollection AddNetBpmAsyncJobExecutor(
         this IServiceCollection services,
         IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+
+        services.AddNetBpmJobQueue(configuration, "NetBpm:Jobs:Queue");
 
         return services.AddNetBpmAsyncJobExecutor(options =>
         {
@@ -151,6 +165,16 @@ public static class NetBpmServiceCollectionExtensions
             if (int.TryParse(section["PollIntervalSeconds"], out var pollSeconds) && pollSeconds > 0)
             {
                 options.PollInterval = TimeSpan.FromSeconds(pollSeconds);
+            }
+
+            if (int.TryParse(section["LeaseSeconds"], out var leaseSeconds) && leaseSeconds > 0)
+            {
+                options.LeaseDuration = TimeSpan.FromSeconds(leaseSeconds);
+            }
+
+            if (int.TryParse(section["MaxPollIntervalSeconds"], out var maxPollSeconds) && maxPollSeconds > 0)
+            {
+                options.MaxPollInterval = TimeSpan.FromSeconds(maxPollSeconds);
             }
         });
     }

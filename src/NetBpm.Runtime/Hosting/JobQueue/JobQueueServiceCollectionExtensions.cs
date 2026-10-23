@@ -48,11 +48,9 @@ public static class JobQueueServiceCollectionExtensions
 
         if (provider.Trim().Equals(nameof(JobQueueProvider.Redis), StringComparison.OrdinalIgnoreCase))
         {
-            services.TryAddSingleton<IConnectionMultiplexer>(sp =>
-                ConnectionMultiplexer.Connect(
-                    RedisJobQueue.BuildConfiguration(
-                        sp.GetRequiredService<IOptions<RedisJobQueueOptions>>().Value)));
-
+            // 用 IOptions 构造：连接是惰性的，第一次真正用到时才建连。
+            // 不注册 IConnectionMultiplexer —— 否则一旦有人解析它就会在启动时同步建连，
+            // Redis 不可用时会拖慢甚至拖垮宿主启动。
             services.TryAddSingleton<IJobQueue>(sp => new RedisJobQueue(
                 sp.GetRequiredService<IOptions<RedisJobQueueOptions>>(),
                 sp.GetService<ILogger<RedisJobQueue>>()));
