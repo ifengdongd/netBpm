@@ -10,6 +10,39 @@
 
 ---
 
+## v1.16 本轮落地（2026-10-31，两处遗留风险定方向）
+
+| 项 | 决策 | 落点 | 验证 |
+|---|---|---|---|
+| **口径 4 残留：引擎面业务写入** | **关掉**（不是补时间线） | `EngineSurfaceScopes.RequireBusinessSurface`：发起 / 办理 / 批量办理对 `Client` 一律 403（与 scope 无关），403 文案直接给 `/workflow/v1` 替代入口 | `EngineSurfaceScopeTests`（13 项：含「有 `task:submit` 仍 403 且任务未动」「批量办理 403」「发起 403 且实例未创建」） |
+| **`nb_approval_snapshot` 保留策略** | **与历史归档共用同一保留期** | `IApprovalSnapshotStore.PruneAsync(captured_at)` + `AdminArchiveCleanupService` 在同一循环里用**同一个 cutoff** 清理两张表；新增 `ix_nb_approval_snapshot_captured` | `ApprovalSnapshotPruneTests`（4 项，内存实现）+ `ApprovalSnapshotTests.Snapshot_ShouldBePrunedByCapturedAt`（MySQL） |
+
+**为什么「关掉」而不「让原语面补写时间线」：**
+
+1. 原语面**拿不到**审批选项，硬写时间线只能靠猜语义；而时间线的设计前提是「写时定稿、不猜」——
+   一条猜出来的记录比缺一条更坏，因为它冒充了唯一权威记录，事后没人能分辨「没记」和「记错了」。
+2. 同样不写时间线的还有跳转 / 终止 / 变量直写（见 §3 ③ 的前置规矩），单补 `complete` 只是把一类漏洞缩小成一个点。
+3. 业务写入本来就是平台面的职责：参数 schema、`writableBy`、`optionId` 校验、时间线、快照全在 `/workflow/v1`。
+   原语面留给客户端的只剩下「读」与「管理干预」——后者是显式管理授权、可审计的运维动作，不冒充审批结论。
+
+**保留下来的边界（不是漏洞，是刻意的）：**
+
+- **变量直写仍开放**（需 `workflow:admin:variables`）：它是运维纠错的显式管理动作，平台面还没有对应写端点；
+  代价是持有它的客户端能改 `result` / `netbpm_outcome` 从而影响结论呈现——这是 admin 的含义，也是审计要覆盖的地方。
+- **跳转 / 终止仍不写时间线**：已单独立在 §3 ③「前置规矩」，不在本次范围内。
+- **旧凭据不受影响**：`None`（开发）与 `ApiKey`（旧单值密钥）下原语面行为不变 ——
+  `Complete_Should204_ForLegacyApiKey` 就是这条护栏，防止「收紧」把已上线的集成一次性打断。
+
+**为什么两份保留期只能有一个键：**
+
+快照靠 `task_id` 与历史行对齐。历史没了、快照还在，是定位不到的孤儿数据；
+历史还在、快照先没了，历史页退化成「有结论、没有内容」。
+各配一个键的最终结果一定是被人分别调到错位，所以 `AdminArchiveCleanupService` **只读一个**
+`NetBpm:Admin:ArchiveRetentionDays`，两张表用同一个 cutoff 一起过期。
+⚠️ 该值应当 ≥ 审计/合规要求的年限；`0`（默认）表示永不清理。
+
+---
+
 ## v1.15 本轮落地（2026-10-31，§10 第 1 步收尾：引擎面收口）
 
 | 项 | 落点 | 验证 |
@@ -28,9 +61,8 @@
    故 `netbpm.admin.model.read→workflow:process:read`、`model.write→admin:process`、`instance.{jump,delete,suspend}→admin:instance`、
    `task.moderate→task:assign`、`variables.write→admin:variables`。指标 / 审计 / Redis / 作业 / 归档**不翻译**——
    平台面还没有对应端点，宁可拒掉也不发明一个 `workflow:admin:*`。
-4. **已知残留**：引擎面的 `POST /tasks/{id}/complete`、`/tasks/batch/complete`、变量直写即使有 scope 也**不写时间线与表单快照**
-   （那是平台面 `submit` 的职责）。所以「有 `workflow:task:submit` 的客户端」仍能拿到一次「无结论的办结」。
-   下一步二选一：让引擎面的 complete 也落时间线，或干脆对 `Client` 关闭写原语（只留读 + 管理干预）。
+4. ~~**已知残留**：引擎面 `complete` 不写时间线~~ —— v1.16 已按「关闭写原语」的方向解决（见开头 v1.16 小节），
+   引擎面对客户端只剩「读 + 管理干预」。**剩下的同类缺口**（跳转 / 终止 / 变量直写仍不写时间线）已单独立在 §3 ③ 的前置规矩。
 
 ---
 
@@ -64,7 +96,8 @@
 | 平台表（`nb_*`） | 13 | 7 | 6 |
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
-**一句话定位**：S1（契约）、S3（业务标准）已全部落地，S2 只剩三条出口用例，S4（独立部署）与 S5（治理/SDK）未动。
+**一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
+S4（独立部署）与 S5（治理/SDK）未动。
 八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）已闭环**；
 C（响应强类型）只差 M3 的 Decorator 收尾，G（委托进程内）卡在 M12 外部任务，
 H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 CI diff 没有。
@@ -76,7 +109,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | 阶段 | 周期 | 状态 | 出口条件达成情况 |
 |---|---|---|---|
 | S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 未做** |
-| S2 身份与授权 | 4 周 | 🟡 基本完成 | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
+| S2 身份与授权 | 4 周 | 🟢 完成（缺出口用例） | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
 | S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
 | S4 独立部署 | 4 周 | ⬜ 未开始 | 阻塞于 **M12 外部任务** |
 | S5 治理与 SDK | 3 周 | ⬜ 未开始 | 阻塞于 **M14 契约治理** |
@@ -128,7 +161,8 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 ### ① S3 遗留三条尾巴 —— 无强依赖，随时可做
 
 - [x] 实例列表**升序**：引擎两个 Query 新增 `Descending`（排序与时间边界一起下推），平台游标按方向选上界/下界（v1.14）。仍保留「上万量级的租户/白名单内存过滤」问题，需自建实例索引表另做
-- [ ] `nb_approval_snapshot` 的**清理 / 归档策略**：必须与 `ACT_HI_*` 保留策略一起定，单独立一条会两边打架
+- [x] `nb_approval_snapshot` 的**清理 / 归档策略**（v1.16）：与历史归档共用 `NetBpm:Admin:ArchiveRetentionDays` 同一个保留期与同一个 cutoff，
+      由 `AdminArchiveCleanupService` 在同一循环清理；新增 `ix_nb_approval_snapshot_captured` 支撑按 `captured_at` 删除
 - [x] `writableBy` 的**写侧强制**（v1.14，见 §2 M7 与开头三条口径）
 
 ### ② S2 欠账 —— 出关前建议补掉
@@ -253,6 +287,10 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 
 > v1.14 新增：`ParameterWriteTests`（8 项，`writableBy` 写侧）、`JwtRs256Tests`（5 项，RS256 / JWKS / 算法白名单 / 外部公钥集缓存）。
 >
+> v1.15 新增：`EngineSurfaceScopeTests`（13 项，引擎面 `workflow:*` 收口 / 管理 scope 翻译 / 先 404 再 403 / 旧凭据不受影响）。
+>
+> v1.16 新增：`ApprovalSnapshotPruneTests`（4 项，快照保留期的内存语义）+ `ApprovalSnapshotTests` 增加一条 MySQL 用例。
+>
 > 另有已落地但不在 §9 表内的类：`ClientAuthenticationTests`（15 项）、`ProcessCatalogTests`（14 项）、
 > `DatabaseScriptTests`（14 项）、`PlatformClientRegistryTests`、`ApprovalVocabularyTests`（8 项）、
 > `TaskCatalogTests`、`InstanceCatalogTests`、`InstanceStartTests`、`RateLimitByClientTests`、`HistoryVisibilityTests`。
@@ -302,14 +340,18 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 
 ## 10. 建议的下一步顺序
 
-1. ~~先补 **S2 欠账**~~ —— RS256 / JWKS（v1.14）与引擎面 `/api/**` 的 scope 收口（v1.15）都已完成。
+1. ~~先补 **S2 欠账**~~ —— RS256 / JWKS（v1.14）、引擎面 scope 收口（v1.15）、业务写入关闭（v1.16）都已完成。
    **只剩三条出口用例**（幂等重放、纯服务 submit 403、密钥轮换期双活）：它们不加新能力，只把已有行为钉住，
    属于「出关前必须有」而不是「做大功能前必须有」。
-   顺带定一件事：引擎面 `complete` 不写时间线这条残留（见 v1.15 口径 4），要么补时间线，要么对 `Client` 关闭写原语。
-2. ~~再清 **S3 三条尾巴**~~ —— 升序与 `writableBy` 写侧已完成（v1.14）。
-   **只剩 `nb_approval_snapshot` 的清理 / 归档策略**，它必须与 `ACT_HI_*` 的保留策略一起定，
-   单独立一条会两边打架（建议与 `AdminArchiveCleanupService` 共用同一个保留期配置）。
-3. 然后判断是否需要 **S4**：只有「引擎独立部署给别人用」才必须做，门槛全在 **M12 外部任务**；
+2. ~~再清 **S3 三条尾巴**~~ —— 升序与 `writableBy` 写侧（v1.14）、快照保留策略（v1.16）都已完成。
+   至此 **S1 / S2 / S3 三条主线的技术项全部落地**，剩下的只是出口用例与 §3 ③ 的写入型端点。
+3. 现在只剩一个判断：要不要做 **S4**。只有「引擎独立部署给别人用」才必须做，门槛全在 **M12 外部任务**；
+   在那之前，§3 ③ 的 `terminate` / `claim` / 参数快照 / `diagram.svg` 等端点可以先补——
+   它们都是「让业务面自己能闭环」的动作，不需要 S4 的前提。
 4. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
 
-> 若目标只是「让内部系统统一走一套干净 API」，做到第 1 步的引擎面收口即可收口，S4/S5 可以整体后移。
+> 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
+> 引擎原语面对客户端只留读与管理干预。S4/S5 可以整体后移。
+>
+> ⚠️ 后移前建议先把 §3 ③ 的「前置规矩」做掉：跳转 / 终止 / 变量直写目前仍不写时间线，
+> 管理干预能在审计里留下断档——这是当前唯一「有授权但没记录」的口子。
