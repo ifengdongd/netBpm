@@ -1080,6 +1080,49 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: false);
 
+    // 0014 外部任务表（`activiti:topic` 的等待点）
+    internal static readonly TableDef ExternalTaskTable = new(
+        "nb_external_task",
+        "外部任务：serviceTask 标记 activiti:topic 时登记的待领取记录（独立部署下由 worker 拉走执行并回执）",
+        [
+            C("id", ColType.Varchar, 64, false, comment: "主键"),
+            C("process_instance_id", ColType.Varchar, 64, false, comment: "流程实例 id（= 根执行 id）"),
+            C("execution_id", ColType.Varchar, 64, false,
+                comment: "停留在该节点的执行 id（回执后靠它推进流程，不能只存实例 id）"),
+            C("process_definition_id", ColType.Varchar, 64, comment: "流程定义 id"),
+            C("process_definition_key", ColType.Varchar, 255, comment: "流程 key（回显用，可空）"),
+            C("activity_id", ColType.Varchar, 255, false, comment: "节点 id（BPMN serviceTask/@id）"),
+            C("activity_name", ColType.Varchar, 255, comment: "节点名（回显用）"),
+            C("topic", ColType.Varchar, 255, false, comment: "主题（activiti:topic，worker 按它订阅）"),
+            C("tenant_id", ColType.Varchar, 64, false, def: "'default'", comment: "租户"),
+            C("business_key", ColType.Varchar, 255, comment: "业务键（回显用）"),
+            C("payload_json", ColType.MediumText,
+                comment: "领取时交给 worker 的变量快照（JSON 对象；快照而非实时视图，两侧不互相覆盖）"),
+            C("priority", ColType.Int, nullable: false, def: "0", comment: "优先级，大的先领"),
+            C("retries", ColType.Int, nullable: false, def: "3", comment: "剩余重试次数；0 且再次失败进死信"),
+            C("status", ColType.Varchar, 32, nullable: false, def: "'PENDING'",
+                comment: "状态词汇：PENDING / LOCKED / COMPLETED / DEAD_LETTER（存字符串不存序号）"),
+            C("worker_id", ColType.Varchar, 255, comment: "锁持有者（worker id）；无人持有时为空"),
+            C("lock_expires_at", ColType.DateTime3,
+                comment: "锁到期时间（UTC）；持有者崩溃后不续租即到期，任务可被别的 worker 接管"),
+            C("next_due_at", ColType.DateTime3, comment: "失败退避后可再被领取的时间（UTC）；空=立即可领"),
+            C("error_message", ColType.Varchar, 1000, comment: "最近一次失败原因（摘要）"),
+            C("error_details", ColType.MediumText, comment: "最近一次失败详情（堆栈 / 上下文）"),
+            C("created_at", ColType.DateTime3, nullable: false, comment: "登记时间（UTC）"),
+            C("completed_at", ColType.DateTime3, comment: "回执成功时间（UTC）"),
+        ],
+        ["id"],
+        [
+            // fetch & lock 的主查询：按状态 + 主题找可领取的，再按退避时间与优先级排序
+            new IndexDef("ix_nb_external_task_fetch", ["status", "topic", "next_due_at"]),
+            // 锁过期扫描（worker 崩溃后回收）
+            new IndexDef("ix_nb_external_task_lock", ["lock_expires_at"]),
+            // 实例删除 / 终止时清理（流程已不存在，留着是孤儿数据）
+            new IndexDef("ix_nb_external_task_instance", ["tenant_id", "process_instance_id"]),
+        ],
+        [], [],
+        EngineCharset: false);
+
     // 0010 HTTP 幂等键表（幂等，无表注释）
     internal static readonly TableDef IdempotencyTable = new(
         "ACT_IDEMPOTENCY",

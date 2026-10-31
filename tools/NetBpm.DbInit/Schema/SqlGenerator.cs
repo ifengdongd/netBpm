@@ -202,6 +202,7 @@ internal static class SqlGenerator
         SchemaCatalog.ApprovalDictionaryTable,
         SchemaCatalog.InstanceTimelineTable,
         SchemaCatalog.ApprovalSnapshotTable,
+        SchemaCatalog.ExternalTaskTable,
     ];
 
     /// <summary>脚本内出现过的全部表（SQL Server 注释渲染用）。</summary>
@@ -1135,6 +1136,7 @@ internal static class SqlGenerator
         "--  nb_approval_dictionary  审批语义字典（optionId→semantic 映射；node_id 空=流程级默认）",
         "--  nb_instance_timeline 审批记录时间线（append-only；sequence 单调，作增量拉取游标）",
         "--  nb_approval_snapshot 表单快照（键=task_id：历史办理页按提交当时的字段定义渲染）",
+        "--  nb_external_task    外部任务（activiti:topic 的等待点；锁 + 重试 + 死信，供 worker 拉取回执）",
         "--",
         "--  全部幂等：表已存在时跳过，缺索引/缺列由后续守卫补齐。",
         string.Empty,

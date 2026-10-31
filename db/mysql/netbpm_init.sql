@@ -1344,6 +1344,7 @@ deallocate prepare stmt;
 --  nb_approval_dictionary  审批语义字典（optionId→semantic 映射；node_id 空=流程级默认）
 --  nb_instance_timeline 审批记录时间线（append-only；sequence 单调，作增量拉取游标）
 --  nb_approval_snapshot 表单快照（键=task_id：历史办理页按提交当时的字段定义渲染）
+--  nb_external_task    外部任务（activiti:topic 的等待点；锁 + 重试 + 死信，供 worker 拉取回执）
 --
 --  全部幂等：表已存在时跳过，缺索引/缺列由后续守卫补齐。
 
@@ -1915,6 +1916,58 @@ set @ddl = (select if(count(*) = 0,
         'create index ix_nb_approval_snapshot_captured on nb_approval_snapshot (captured_at)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'nb_approval_snapshot' and index_name = 'ix_nb_approval_snapshot_captured');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_external_task (
+    id varchar(64) not null comment '主键',
+    process_instance_id varchar(64) not null comment '流程实例 id（= 根执行 id）',
+    execution_id varchar(64) not null comment '停留在该节点的执行 id（回执后靠它推进流程，不能只存实例 id）',
+    process_definition_id varchar(64) comment '流程定义 id',
+    process_definition_key varchar(255) comment '流程 key（回显用，可空）',
+    activity_id varchar(255) not null comment '节点 id（BPMN serviceTask/@id）',
+    activity_name varchar(255) comment '节点名（回显用）',
+    topic varchar(255) not null comment '主题（activiti:topic，worker 按它订阅）',
+    tenant_id varchar(64) not null default 'default' comment '租户',
+    business_key varchar(255) comment '业务键（回显用）',
+    payload_json mediumtext comment '领取时交给 worker 的变量快照（JSON 对象；快照而非实时视图，两侧不互相覆盖）',
+    priority int not null default 0 comment '优先级，大的先领',
+    retries int not null default 3 comment '剩余重试次数；0 且再次失败进死信',
+    status varchar(32) not null default 'PENDING' comment '状态词汇：PENDING / LOCKED / COMPLETED / DEAD_LETTER（存字符串不存序号）',
+    worker_id varchar(255) comment '锁持有者（worker id）；无人持有时为空',
+    lock_expires_at datetime(3) comment '锁到期时间（UTC）；持有者崩溃后不续租即到期，任务可被别的 worker 接管',
+    next_due_at datetime(3) comment '失败退避后可再被领取的时间（UTC）；空=立即可领',
+    error_message varchar(1000) comment '最近一次失败原因（摘要）',
+    error_details mediumtext comment '最近一次失败详情（堆栈 / 上下文）',
+    created_at datetime(3) not null comment '登记时间（UTC）',
+    completed_at datetime(3) comment '回执成功时间（UTC）',
+    primary key (id),
+    index ix_nb_external_task_fetch (status, topic, next_due_at),
+    index ix_nb_external_task_lock (lock_expires_at),
+    index ix_nb_external_task_instance (tenant_id, process_instance_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='外部任务：serviceTask 标记 activiti:topic 时登记的待领取记录（独立部署下由 worker 拉走执行并回执）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_external_task_fetch on nb_external_task (status, topic, next_due_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_external_task' and index_name = 'ix_nb_external_task_fetch');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_external_task_lock on nb_external_task (lock_expires_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_external_task' and index_name = 'ix_nb_external_task_lock');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_external_task_instance on nb_external_task (tenant_id, process_instance_id)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_external_task' and index_name = 'ix_nb_external_task_instance');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;

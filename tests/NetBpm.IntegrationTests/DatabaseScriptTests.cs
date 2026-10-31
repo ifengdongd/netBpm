@@ -81,6 +81,7 @@ public sealed partial class DatabaseScriptTests
         "nb_process_catalog",
         "nb_approval_dictionary",
         "nb_instance_timeline",
+        "nb_external_task",
     ];
 
     [Theory]

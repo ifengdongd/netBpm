@@ -1052,6 +1052,7 @@ go
 --  nb_approval_dictionary  审批语义字典（optionId→semantic 映射；node_id 空=流程级默认）
 --  nb_instance_timeline 审批记录时间线（append-only；sequence 单调，作增量拉取游标）
 --  nb_approval_snapshot 表单快照（键=task_id：历史办理页按提交当时的字段定义渲染）
+--  nb_external_task    外部任务（activiti:topic 的等待点；锁 + 重试 + 死信，供 worker 拉取回执）
 --
 --  全部幂等：表已存在时跳过，缺索引/缺列由后续守卫补齐。
 
@@ -1456,6 +1457,42 @@ create index ix_nb_approval_snapshot_instance on nb_approval_snapshot (tenant_id
 go
 if not exists (select 1 from sys.indexes where name = 'ix_nb_approval_snapshot_captured' and object_id = object_id('nb_approval_snapshot'))
 create index ix_nb_approval_snapshot_captured on nb_approval_snapshot (captured_at);
+go
+if object_id(N'nb_external_task', N'U') is null
+    create table nb_external_task (
+    id nvarchar(64) not null,
+    process_instance_id nvarchar(64) not null,
+    execution_id nvarchar(64) not null,
+    process_definition_id nvarchar(64),
+    process_definition_key nvarchar(255),
+    activity_id nvarchar(255) not null,
+    activity_name nvarchar(255),
+    topic nvarchar(255) not null,
+    tenant_id nvarchar(64) not null constraint df_nb_external_task_tenant_id default ('default'),
+    business_key nvarchar(255),
+    payload_json nvarchar(max),
+    priority int not null constraint df_nb_external_task_priority default (0),
+    retries int not null constraint df_nb_external_task_retries default (3),
+    status nvarchar(32) not null constraint df_nb_external_task_status default ('PENDING'),
+    worker_id nvarchar(255),
+    lock_expires_at datetime,
+    next_due_at datetime,
+    error_message nvarchar(1000),
+    error_details nvarchar(max),
+    created_at datetime not null,
+    completed_at datetime,
+    constraint pk_nb_external_task primary key clustered (id)
+    );
+go
+
+if not exists (select 1 from sys.indexes where name = 'ix_nb_external_task_fetch' and object_id = object_id('nb_external_task'))
+create index ix_nb_external_task_fetch on nb_external_task (status, topic, next_due_at);
+go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_external_task_lock' and object_id = object_id('nb_external_task'))
+create index ix_nb_external_task_lock on nb_external_task (lock_expires_at);
+go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_external_task_instance' and object_id = object_id('nb_external_task'))
+create index ix_nb_external_task_instance on nb_external_task (tenant_id, process_instance_id);
 go
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
@@ -4481,6 +4518,204 @@ if exists (select 1 from sys.columns
     exec sp_addextendedproperty @name = N'MS_Description', @value = N'定稿时间（UTC）',
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_approval_snapshot',
         @level2type = N'COLUMN', @level2name = N'captured_at';
+go
+
+if object_id('nb_external_task', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('nb_external_task') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'外部任务：serviceTask 标记 activiti:topic 时登记的待领取记录（独立部署下由 worker 拉走执行并回执）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'nb_external_task';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'主键',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'process_instance_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'process_instance_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id（= 根执行 id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'process_instance_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'execution_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'execution_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'停留在该节点的执行 id（回执后靠它推进流程，不能只存实例 id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'execution_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'process_definition_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'process_definition_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程定义 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'process_definition_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'process_definition_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'process_definition_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程 key（回显用，可空）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'process_definition_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'activity_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'activity_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'节点 id（BPMN serviceTask/@id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'activity_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'activity_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'activity_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'节点名（回显用）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'activity_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'topic')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'topic')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'主题（activiti:topic，worker 按它订阅）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'topic';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'business_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'business_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'业务键（回显用）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'business_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'payload_json')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'payload_json')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'领取时交给 worker 的变量快照（JSON 对象；快照而非实时视图，两侧不互相覆盖）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'payload_json';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'priority')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'priority')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'优先级，大的先领',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'priority';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'retries')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'retries')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'剩余重试次数；0 且再次失败进死信',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'retries';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'status')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'status')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'状态词汇：PENDING / LOCKED / COMPLETED / DEAD_LETTER（存字符串不存序号）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'status';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'worker_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'worker_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'锁持有者（worker id）；无人持有时为空',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'worker_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'lock_expires_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'lock_expires_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'锁到期时间（UTC）；持有者崩溃后不续租即到期，任务可被别的 worker 接管',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'lock_expires_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'next_due_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'next_due_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'失败退避后可再被领取的时间（UTC）；空=立即可领',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'next_due_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'error_message')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'error_message')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最近一次失败原因（摘要）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'error_message';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'error_details')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'error_details')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最近一次失败详情（堆栈 / 上下文）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'error_details';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'created_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'created_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'登记时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'created_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_external_task') and name = N'completed_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_external_task') and c.name = N'completed_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'回执成功时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
+        @level2type = N'COLUMN', @level2name = N'completed_at';
 go
 
 

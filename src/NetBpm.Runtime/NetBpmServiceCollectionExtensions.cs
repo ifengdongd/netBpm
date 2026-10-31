@@ -285,6 +285,36 @@ public static class NetBpmServiceCollectionExtensions
                 provider => provider.GetRequiredService<IEventOutboxStore>());
         }
 
+        // ── 外部任务（activiti:topic）：独立部署下执行 serviceTask 的唯一手段 ──
+        // 与异步作业同属「作业」但刻意不共用存储：作业是引擎自己晚点做，外部任务是等别人做完，
+        // 生命周期与重试语义都不同（见 ExternalTask 的注释）。这里只共用它的租约模型。
+        services.AddSingleton(provider =>
+        {
+            var section = provider.GetService<IConfiguration>()?.GetSection("NetBpm:ExternalTasks");
+            var options = new ExternalTaskOptions();
+
+            if (section is not null && int.TryParse(section["LockSeconds"], out var lockSeconds) && lockSeconds > 0)
+            {
+                options.DefaultLockDuration = TimeSpan.FromSeconds(lockSeconds);
+            }
+
+            if (section is not null && int.TryParse(section["Retries"], out var retries) && retries >= 0)
+            {
+                options.DefaultRetries = retries;
+            }
+
+            return options;
+        });
+
+        if (options.UsesDatabase)
+        {
+            services.AddSingleton<IExternalTaskBroker, DapperExternalTaskBroker>();
+        }
+        else
+        {
+            services.AddSingleton<IExternalTaskBroker, InMemoryExternalTaskBroker>();
+        }
+
         // ── HTTP 幂等：内存宿主单进程去重，数据库宿主跨实例去重 ─────────
         if (options.UsesDatabase)
         {
@@ -342,7 +372,8 @@ public static class NetBpmServiceCollectionExtensions
             provider.GetService<ICommandIdempotencyStore>(),
             provider.GetService<IApproverResolver>(),
             provider.GetService<IJobQueue>(),
-            provider.GetRequiredService<IClock>()));
+            provider.GetRequiredService<IClock>(),
+            provider.GetService<IExternalTaskBroker>()));
 
         // ── 命令与拦截器 ────────────────────────────────────────────
         // 链序：Log → Retry → Transaction → CommandContext
