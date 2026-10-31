@@ -10,6 +10,8 @@
     <Project Path="src/NetBpm.Runtime/NetBpm.Runtime.csproj" />
     <Project Path="src/NetBpm.Rest/NetBpm.Rest.csproj" />
     <Project Path="src/NetBpm.Admin/NetBpm.Admin.csproj" />
+    <!-- S4 独立部署形态的生产宿主：默认要求凭据、默认连数据库、启动自检不过就失败 -->
+    <Project Path="src/NetBpm.Platform.Service/NetBpm.Platform.Service.csproj" />
     <Project Path="src/NetBpm.Workflow/NetBpm.Workflow.csproj" />
     <!-- 平台对外契约（不引用任何引擎工程，见 docs/platform-api-refactoring-plan.md §2.2） -->
     <Project Path="src/NetBpm.Platform.Contracts/NetBpm.Platform.Contracts.csproj" />
@@ -21,6 +23,8 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/NetBpm.Demo/NetBpm.Demo.csproj" />
+    <!-- S4：外部任务 worker —— 刻意不引用任何 NetBpm 工程，只靠 HTTP + JSON 与平台通信 -->
+    <Project Path="samples/NetBpm.ExternalWorker/NetBpm.ExternalWorker.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/NetBpm.DbMigrate/NetBpm.DbMigrate.csproj" />

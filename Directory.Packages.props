@@ -28,6 +28,10 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.12" />
+    <!-- 独立部署形态（S4）的 worker 是独立进程：需要 HttpClientFactory 与控制台日志。
+         Web 宿主由共享框架自带这两个能力，控制台工程没有。 -->
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup Label="AspnetCore">

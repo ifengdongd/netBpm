@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Platform.Service</RootNamespace>
+    <AssemblyName>NetBpm.Platform.Service</AssemblyName>
+    <!-- 容器镜像里的服务不进 user-secrets：所有敏感值走环境变量或挂载的密钥文件 -->
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 宿主能力全部来自组合根，本工程只负责「部署形态」：端口 / 日志 / 默认值 / 启动自检 -->
+    <ProjectReference Include="..\NetBpm.Rest\NetBpm.Rest.csproj" />
+  </ItemGroup>
+
+</Project>
