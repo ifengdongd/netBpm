@@ -674,6 +674,24 @@ public static class AdminAuditActions
 
     /// <summary>清理审计记录（按保留期删除）。</summary>
     public const string AuditPurge = "audit.purge";
+
+    /// <summary>注册接入客户端（签发首个密钥）。</summary>
+    public const string ClientRegister = "client.register";
+
+    /// <summary>修改接入客户端（名称 / 状态 / scope / 流程白名单 / 配额）。</summary>
+    public const string ClientUpdate = "client.update";
+
+    /// <summary>轮换客户端密钥（旧密钥进入宽限期）。</summary>
+    public const string ClientRotate = "client.rotate";
+
+    /// <summary>注销接入客户端（密钥立即失效）。</summary>
+    public const string ClientRevoke = "client.revoke";
+
+    /// <summary>登记租户。</summary>
+    public const string TenantRegister = "tenant.register";
+
+    /// <summary>修改租户状态（停用会让其下全部客户端鉴权失败）。</summary>
+    public const string TenantStatusChange = "tenant.status_change";
 }
 
 /// <summary>审计目标类型常量。</summary>
@@ -711,4 +729,10 @@ public static class AdminAuditTargets
 
     /// <summary>审计记录本身（保留策略清理）。</summary>
     public const string Audit = "audit";
+
+    /// <summary>接入客户端（nb_api_client）。</summary>
+    public const string Client = "client";
+
+    /// <summary>租户（nb_tenant）。</summary>
+    public const string Tenant = "tenant";
 }

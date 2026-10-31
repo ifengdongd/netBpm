@@ -7,19 +7,21 @@ namespace NetBpm.Rest.Security;
 /// <para>
 /// 规则：
 /// <list type="bullet">
-///   <item><description>JWT：令牌是唯一可信来源；请求声明了不同值 → 403；未声明 → 用令牌值。</description></item>
-///   <item><description>API Key / 未启用鉴权：保留「显式传参优先，缺省回落到上下文」的既有行为。</description></item>
+///   <item><description>JWT / 客户端凭据：凭据是唯一可信来源；请求声明了不同值 → 403；未声明 → 用凭据值。</description></item>
+///   <item><description>旧 API Key / 未启用鉴权：保留「显式传参优先，缺省回落到上下文」的既有行为。</description></item>
 /// </list>
 /// </para>
 /// </summary>
 public static class RequestIdentity
 {
-    /// <summary>解析租户：JWT 下禁止用 query / body 跨租户；限定租户的服务密钥同样不能越界。</summary>
+    /// <summary>解析租户：JWT / 客户端凭据下禁止用 query / body 跨租户；限定租户的服务密钥同样不能越界。</summary>
     public static string? Tenant(string? requested, RequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.IsUserPrincipal)
+        // 客户端凭据必须走这条：否则一个 ?tenantId=别人 的列表请求就能跨租户读。
+        // （按 id 访问有 TenantGuard 兜底，但「列表」的过滤条件完全由这里决定。）
+        if (context.IsUserPrincipal || context.IsClientPrincipal)
         {
             EnsureMatches(requested, context.TenantId, "租户", normalizeEmpty: true);
 

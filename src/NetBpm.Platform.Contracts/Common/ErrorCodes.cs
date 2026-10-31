@@ -1,0 +1,143 @@
+namespace NetBpm.Platform.Contracts;
+
+/// <summary>
+/// 对外错误码总表（与 <c>docs/platform-api-refactoring-plan.md</c> 附录 B 一一对应）。
+/// </summary>
+/// <remarks>
+/// 错误码是<b>稳定契约</b>：调用方可以按它分支，所以一旦发布就只能新增、不能改字符串、不能改语义。
+/// 命名格式固定为 <c>域.原因</c>（小写下划线），响应体见 <see cref="PlatformProblem"/>。
+/// </remarks>
+public static class ErrorCodes
+{
+    /// <summary>未携带任何凭据。<c>401</c></summary>
+    public const string AuthMissingCredential = "auth.missing_credential";
+
+    /// <summary>令牌签名 / 过期 / 受众不符。<c>401</c></summary>
+    public const string AuthInvalidToken = "auth.invalid_token";
+
+    /// <summary>scope 不足。<c>403</c></summary>
+    public const string AuthInsufficientScope = "auth.insufficient_scope";
+
+    /// <summary>纯服务令牌调用了需要真人主体的接口（提交审批）。<c>403</c></summary>
+    public const string AuthSubjectRequired = "auth.subject_required";
+
+    /// <summary>客户端已被停用或密钥已吊销。<c>401</c></summary>
+    public const string AuthClientDisabled = "auth.client_disabled";
+
+    /// <summary>跨租户访问。<b>按不存在处理</b>，返回 <c>404</c> 而不是 403，避免泄露存在性。</summary>
+    public const string TenantMismatch = "tenant.mismatch";
+
+    /// <summary>流程 key 不存在，或该客户端未被授权使用此流程。<c>404</c></summary>
+    public const string ProcessNotFound = "process.not_found";
+
+    /// <summary>流程存在但没有任何生效定义。<c>409</c></summary>
+    public const string ProcessNotDeployed = "process.not_deployed";
+
+    /// <summary>流程定义已挂起，不能发起或推进。<c>409</c></summary>
+    public const string ProcessSuspended = "process.suspended";
+
+    /// <summary>版本不存在。<c>404</c></summary>
+    public const string ProcessVersionNotFound = "process.version_not_found";
+
+    /// <summary>实例不存在（或不属于当前租户 / 客户端）。<c>404</c></summary>
+    public const string InstanceNotFound = "instance.not_found";
+
+    /// <summary>实例已结束、已终止或已挂起，不能继续推进。<c>409</c></summary>
+    public const string InstanceNotRunning = "instance.not_running";
+
+    /// <summary>任务不存在（常见原因：已被他人办结）。<c>404</c></summary>
+    public const string TaskNotFound = "task.not_found";
+
+    /// <summary>任务已被办结（重复提交）。<c>409</c></summary>
+    public const string TaskAlreadyCompleted = "task.already_completed";
+
+    /// <summary>当前主体不是该任务的办理人 / 候选人也未认领。<c>403</c></summary>
+    public const string TaskNotAssignee = "task.not_assignee";
+
+    /// <summary>该任务已被他人认领。<c>409</c></summary>
+    public const string TaskAlreadyClaimed = "task.already_claimed";
+
+    /// <summary>选项 id 不属于该节点的选项集。<c>422</c></summary>
+    public const string DecisionNotInOptionSet = "decision.not_in_option_set";
+
+    /// <summary>调用方声明的 semantic 与该选项的字典定义不一致。<c>422</c></summary>
+    public const string DecisionSemanticMismatch = "decision.semantic_mismatch";
+
+    /// <summary>该选项要求填写审批意见。<c>422</c></summary>
+    public const string DecisionCommentRequired = "decision.comment_required";
+
+    /// <summary>该选项要求指定目标节点（退回 / 跳转语义）。<c>422</c></summary>
+    public const string DecisionTargetNodeRequired = "decision.target_node_required";
+
+    /// <summary>指定的目标节点不在允许范围内。<c>422</c></summary>
+    public const string DecisionTargetNodeInvalid = "decision.target_node_invalid";
+
+    /// <summary>必填参数缺失。<c>422</c></summary>
+    public const string ParameterRequiredMissing = "parameter.required_missing";
+
+    /// <summary>参数类型或约束不符。<c>422</c></summary>
+    public const string ParameterTypeInvalid = "parameter.type_invalid";
+
+    /// <summary>参数在该环节不可写。<c>422</c></summary>
+    public const string ParameterReadOnly = "parameter.readonly";
+
+    /// <summary>参数名与保留命名空间（<c>sys.</c> 等）冲突。<c>400</c></summary>
+    public const string ParameterConflictWithReserved = "parameter.conflict_with_reserved";
+
+    /// <summary>乐观并发：<c>expectedRevision</c> 与当前值不符。<c>409</c></summary>
+    public const string ConcurrencyRevisionMismatch = "concurrency.revision_mismatch";
+
+    /// <summary>乐观并发：<c>If-Match</c> 与当前 ETag 不符。<c>412</c></summary>
+    public const string ConcurrencyEtagMismatch = "concurrency.etag_mismatch";
+
+    /// <summary>幂等键被复用但请求体不同。<c>409</c></summary>
+    public const string IdempotencyKeyReused = "idempotency.key_reused";
+
+    /// <summary>EL 表达式求值失败。<c>500</c></summary>
+    public const string EngineExpressionError = "engine.expression_error";
+
+    /// <summary>
+    /// 委托解析失败。<c>500</c>
+    /// <para>独立部署下正常流程<b>不应该</b>出现此码——应走 <see cref="ExternalTaskNoWorker"/>。</para>
+    /// </summary>
+    public const string EngineDelegateMissing = "engine.delegate_missing";
+
+    /// <summary>外部任务锁已过期，任务被回收给其它 worker。<c>409</c></summary>
+    public const string ExternalTaskLockExpired = "external_task.lock_expired";
+
+    /// <summary>没有 worker 领取该 topic 的外部任务（超时）。<c>503</c></summary>
+    public const string ExternalTaskNoWorker = "external_task.no_worker";
+
+    /// <summary>超出配额。<c>429</c></summary>
+    public const string RateLimited = "rate_limited";
+
+    /// <summary>请求体结构不合法（JSON 层）。<c>400</c></summary>
+    public const string RequestMalformed = "request.malformed";
+
+    /// <summary>服务端未预期异常（响应里不带堆栈，只带 <c>traceId</c>）。<c>500</c></summary>
+    public const string InternalError = "internal.error";
+
+    /// <summary>客户端不存在（管理面按 id 查询时）。<c>404</c></summary>
+    public const string ClientNotFound = "client.not_found";
+
+    /// <summary>授予了未定义的 scope（拼错或跨版本）。<c>422</c></summary>
+    public const string ClientScopeUnknown = "client.scope_unknown";
+
+    /// <summary>授予高危 scope 但未显式确认。<c>422</c></summary>
+    public const string ClientScopeNeedsConfirmation = "client.scope_needs_confirmation";
+
+    /// <summary>租户不存在（注册客户端时的所属租户）。<c>404</c></summary>
+    public const string TenantNotFound = "tenant.not_found";
+
+    /// <summary>登记租户时缺少名称。<c>400</c></summary>
+    public const string TenantNameRequired = "tenant.name_required";
+
+    /// <summary>试图停用当前凭据所属租户（停用后无法自行恢复）。<c>400</c></summary>
+    public const string TenantSelfSuspend = "tenant.self_suspend_forbidden";
+
+    /// <summary>注册客户端时缺少系统名称。<c>400</c></summary>
+    public const string ClientNameRequired = "client.name_required";
+
+    /// <summary>需要请求体但收到空（或 JSON 为空对象）。<c>400</c></summary>
+    public const string RequestBodyRequired = "request.body_required";
+}

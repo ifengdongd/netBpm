@@ -1,9 +1,7 @@
 using System.Reflection;
-using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.OpenApi;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,6 +11,8 @@ using NetBpm.Persistence;
 using NetBpm.Rest.Auditing;
 using NetBpm.Rest.Diagnostics;
 using NetBpm.Rest.Endpoints;
+using NetBpm.Rest.Platform;
+using NetBpm.Rest.RateLimiting;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 using NetBpm.Workflow.Hosting;
@@ -24,7 +24,7 @@ namespace NetBpm.Rest.Hosting;
 /// </summary>
 public sealed class NetBpmHostOptions
 {
-    /// <summary>限流配置节前缀（键：<c>Enabled</c> / <c>ApiPerMinute</c> / <c>ProbePerMinute</c> / <c>LoginPerMinute</c>）。</summary>
+    /// <summary>限流配置节前缀（键：<c>Enabled</c> / <c>ApiPerMinute</c> / <c>ProbePerMinute</c> / <c>LoginPerMinute</c> / <c>ClientPerMinute</c>）。</summary>
     public string RateLimitSection { get; set; } = "NetBpm:RateLimit";
 
     /// <summary>是否启用限流（被配置节 <c>Enabled</c> 覆盖）。</summary>
@@ -38,6 +38,12 @@ public sealed class NetBpmHostOptions
 
     /// <summary>登录（<c>/api/auth/login</c>）每 IP 每分钟上限。</summary>
     public int LoginPerMinute { get; set; } = 10;
+
+    /// <summary>
+    /// 已注册客户端<b>未配置配额</b>时的兜底每分钟上限。
+    /// <para>正常情况用客户端记录里的 <c>quota_per_minute</c>（一系统一配额），这里只是兜底。</para>
+    /// </summary>
+    public int ClientPerMinute { get; set; } = 600;
 
     /// <summary>
     /// 请求体上限（字节）。默认 10 MB：整段 BPMN XML / 整字典变量都在请求体里，
@@ -82,6 +88,7 @@ public static class NetBpmHost
         options.ApiPerMinute = configuration.GetValue($"{section}:ApiPerMinute", options.ApiPerMinute);
         options.ProbePerMinute = configuration.GetValue($"{section}:ProbePerMinute", options.ProbePerMinute);
         options.LoginPerMinute = configuration.GetValue($"{section}:LoginPerMinute", options.LoginPerMinute);
+        options.ClientPerMinute = configuration.GetValue($"{section}:ClientPerMinute", options.ClientPerMinute);
         options.MaxRequestBodySizeBytes = configuration.GetValue(
             "NetBpm:MaxRequestBodySizeBytes",
             options.MaxRequestBodySizeBytes);
@@ -114,6 +121,41 @@ public static class NetBpmHost
         // 运行态应用服务（实例命令 / 任务命令 / 变量 / 历史查询）：端点只做 HTTP 形状
         builder.Services.AddNetBpmRuntimeServices();
         builder.Services.AddNetBpmAuth(configuration);
+
+        // 平台接入层：租户目录 + 客户端注册表（有库走库、无库走内存）。
+        // 必须在 AddNetBpmAuth 之后：两者都依赖 NetBpmOptions / IDbConnectionFactory 的注册结果。
+        builder.Services.AddNetBpmPlatformSecurity(configuration);
+
+        // 平台业务面：流程目录（引擎定义 + BPMN 派生 + nb_process_catalog 覆盖）
+        builder.Services.AddNetBpmProcessCatalog();
+
+        // 平台业务面：审批语义字典（默认字典 + nb_approval_dictionary 流程声明）
+        builder.Services.AddNetBpmApprovalVocabulary();
+
+        // 平台业务面：待办读模型（TaskView.options 消费语义字典）
+        builder.Services.AddNetBpmTaskCatalog();
+
+        // 平台业务面：实例读模型（InstanceView 单一出口，供详情端点与提交结果复用）
+        builder.Services.AddNetBpmInstanceCatalog();
+
+        // 平台业务面：提交审批编排（校验 → 落变量 → 完成 → 组装结果）
+        builder.Services.AddNetBpmTaskSubmit();
+
+        // 平台业务面：发起流程编排（闸门 → 参数镜像/校验 → 发号 → 启动 → 组装结果）
+        builder.Services.AddNetBpmInstanceStart();
+
+        // 平台业务面：审批记录时间线（append-only；写时定稿 + 老实例从引擎历史回填）
+        builder.Services.AddNetBpmApprovalTimeline();
+
+        // 平台业务面：实例列表读模型（运行态 + 历史双源合并，游标分页）
+        builder.Services.AddNetBpmInstanceList();
+
+        // 平台业务面：参与者索引（ACT_HI_IDENTITYLINK + 历史任务 + 发起人，三个来源合成「人与单据的关系」）
+        builder.Services.AddNetBpmInstanceParticipation();
+
+        // 平台业务面：表单快照（提交时把「字段定义 + 值」一起冻住，历史页按当时定义渲染）
+        builder.Services.AddNetBpmApprovalSnapshot();
+
         builder.Services.AddHostedService<AdminAuditCleanupService>();
         builder.Services.AddHostedService<AdminArchiveCleanupService>();
 
@@ -131,11 +173,28 @@ public static class NetBpmHost
         {
             AddRateLimiting(builder, options);
         }
+        else
+        {
+            // 关闭限流也要注册选项与计数器：中间件不装、依赖仍然可解析（测试里会注入断言）
+            builder.Services.AddSingleton(new ClientRateLimitOptions { Enabled = false });
+            builder.Services.AddSingleton(_ => new FixedWindowRateLimiter(1024));
+        }
 
         return options;
     }
 
     /// <summary>装配中间件管道（反代头 / PathBase 已由宿主处理）。</summary>
+    /// <remarks>
+    /// 顺序不敏感是假的，这里的顺序是<b>结论</b>：
+    /// <list type="number">
+    ///   <item><description>异常处理：最先装，后面任何一环抛错都能被翻译成 JSON；</description></item>
+    ///   <item><description>鉴权：必须先于限流。限流要按 <c>clientId</c> 分区，而 <c>clientId</c>
+    ///     只有验过密钥才有——反过来就只能按 IP 分区（这正是本次要修掉的问题）；</description></item>
+    ///   <item><description>限流：先于幂等。被 429 的请求不该写一条幂等记录，
+    ///     否则调用方重试时会被「同键同体」直接回放一个 429，永远解不开；</description></item>
+    ///   <item><description>幂等：紧贴业务端点。</description></item>
+    /// </list>
+    /// </remarks>
     public static WebApplication UseNetBpmHost(this WebApplication app, NetBpmHostOptions options)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -143,13 +202,14 @@ public static class NetBpmHost
 
         app.UseExceptionHandler();
 
+        // 鉴权 → 限流 → 幂等：未配置凭据时鉴权中间件放行，保持开发体验
+        app.UseMiddleware<AuthenticationMiddleware>();
+
         if (options.RateLimitEnabled)
         {
-            app.UseRateLimiter();
+            app.UseMiddleware<ClientRateLimitMiddleware>();
         }
 
-        // 鉴权 → 幂等：未配置 NetBpm:Security:ApiKey 时鉴权中间件放行，保持开发体验
-        app.UseMiddleware<AuthenticationMiddleware>();
         app.UseMiddleware<IdempotencyMiddleware>();
 
         return app;
@@ -212,6 +272,18 @@ public static class NetBpmHost
         app.MapRuntimeEndpoints();
         app.MapIdentityEndpoints();
 
+        // 平台业务面（对外契约）：流程目录。与 /api/** 的引擎原语面分开，变更纪律不同
+        app.MapProcessCatalogEndpoints();
+
+        // 平台业务面（对外契约）：待办（options 消费语义字典）
+        app.MapTaskEndpoints();
+
+        // 平台业务面（对外契约）：实例详情
+        app.MapInstanceEndpoints();
+
+        // 平台接入管理（租户 / 客户端）：两个宿主都要有，否则「在哪发密钥」取决于部署形态
+        app.MapClientAdminEndpoints();
+
         mapAdditionalEndpoints?.Invoke(app);
 
         app.MapAuthEndpoints();
@@ -222,6 +294,10 @@ public static class NetBpmHost
     /// <summary>
     /// 数据库启动步骤：按需执行幂等初始化脚本，再校验 <c>ACT_GE_PROPERTY.schema.version</c>。
     /// </summary>
+    /// <remarks>
+    /// 末尾顺带做平台侧引导（确保默认租户存在）。放在这里而不是各宿主 <c>Program</c> 里，
+    /// 是因为它必须发生在「建表脚本执行之后」——顺序错了会得到一个「表不存在」的启动错误。
+    /// </remarks>
     public static WebApplication ApplyNetBpmDatabaseStartup(this WebApplication app)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -230,7 +306,8 @@ public static class NetBpmHost
 
         if (!options.UsesDatabase)
         {
-            return app;
+            // 无库模式也要引导：内存注册表同样是空的，没有租户就注册不了客户端
+            return app.ApplyNetBpmPlatformStartup();
         }
 
         if (options.AutoMigrate)
@@ -257,7 +334,7 @@ public static class NetBpmHost
                 DatabaseSchemaChecker.ExpectedSchemaVersion);
         }
 
-        return app;
+        return app.ApplyNetBpmPlatformStartup();
     }
 
     private static string? VersionOf(NetBpmHostOptions options) =>
@@ -302,59 +379,32 @@ public static class NetBpmHost
     }
 
     /// <summary>
-    /// 限流（按客户端 IP 分区，匿名与已认证同口径）：
+    /// 限流：<b>按调用方分区</b>（客户端 id → 用户 → IP），不再是按 IP。
     /// <list type="bullet">
-    ///   <item><description>登录 <c>/api/auth/login</c>：默认 10 次/分钟，防口令爆破；</description></item>
-    ///   <item><description>凭据探针 <c>/api/auth/me</c>：默认 30 次/分钟，防密钥爆破；</description></item>
-    ///   <item><description>其余 <c>/api</c>：默认 600 次/分钟，防脚本失控；</description></item>
+    ///   <item><description>已注册客户端：用记录里的 <c>quota_per_minute</c>（一系统一配额），未配置则 <see cref="NetBpmHostOptions.ClientPerMinute"/>；</description></item>
+    ///   <item><description>JWT 用户：按（租户, 操作人）分桶，默认 600 次/分钟；</description></item>
+    ///   <item><description>无身份：按 IP 分档——登录 10、凭据探针 30、其余 600；</description></item>
     ///   <item><description>静态资源与 <c>/health</c>：不限流。</description></item>
     /// </list>
     /// </summary>
+    /// <remarks>
+    /// 计数器是进程内的固定窗口：多实例部署时总配额 = 实例数 × 配置值。
+    /// 需要全局配额时把 <see cref="FixedWindowRateLimiter"/> 换成分区在 Redis 上的实现，中间件不用改。
+    /// </remarks>
     private static void AddRateLimiting(WebApplicationBuilder builder, NetBpmHostOptions options)
     {
-        builder.Services.AddRateLimiter(limiter =>
+        var rateLimit = new ClientRateLimitOptions
         {
-            limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            Enabled = true,
+            ApiPerMinute = options.ApiPerMinute,
+            ProbePerMinute = options.ProbePerMinute,
+            LoginPerMinute = options.LoginPerMinute,
+            ClientPerMinute = options.ClientPerMinute,
+        };
 
-            limiter.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-            {
-                var ip = context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
-
-                if (context.Request.Path.StartsWithSegments("/api/auth/login"))
-                {
-                    return RateLimitPartition.GetFixedWindowLimiter(
-                        $"login:{ip}",
-                        _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = options.LoginPerMinute,
-                            Window = TimeSpan.FromMinutes(1),
-                        });
-                }
-
-                if (context.Request.Path.StartsWithSegments("/api/auth/me"))
-                {
-                    return RateLimitPartition.GetFixedWindowLimiter(
-                        $"probe:{ip}",
-                        _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = options.ProbePerMinute,
-                            Window = TimeSpan.FromMinutes(1),
-                        });
-                }
-
-                if (context.Request.Path.StartsWithSegments("/api"))
-                {
-                    return RateLimitPartition.GetFixedWindowLimiter(
-                        $"api:{ip}",
-                        _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = options.ApiPerMinute,
-                            Window = TimeSpan.FromMinutes(1),
-                        });
-                }
-
-                return RateLimitPartition.GetNoLimiter("unlimited");
-            });
-        });
+        builder.Services.AddSingleton(rateLimit);
+        builder.Services.AddSingleton(provider => new FixedWindowRateLimiter(
+            rateLimit.MaxPartitions,
+            provider.GetService<TimeProvider>()));
     }
 }

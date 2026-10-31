@@ -11,6 +11,8 @@
     <Project Path="src/NetBpm.Rest/NetBpm.Rest.csproj" />
     <Project Path="src/NetBpm.Admin/NetBpm.Admin.csproj" />
     <Project Path="src/NetBpm.Workflow/NetBpm.Workflow.csproj" />
+    <!-- 平台对外契约（不引用任何引擎工程，见 docs/platform-api-refactoring-plan.md §2.2） -->
+    <Project Path="src/NetBpm.Platform.Contracts/NetBpm.Platform.Contracts.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetBpm.UnitTests/NetBpm.UnitTests.csproj" />

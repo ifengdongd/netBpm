@@ -107,6 +107,7 @@ public sealed class AdminActionAuditor
     {
         RequestAuthMode.Jwt => "jwt",
         RequestAuthMode.ApiKey => "api_key",
+        RequestAuthMode.Client => "client",
         _ => "none",
     };
 

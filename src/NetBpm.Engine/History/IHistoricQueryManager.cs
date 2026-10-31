@@ -69,4 +69,21 @@ public interface IHistoricQueryManager
     ValueTask<int> CountTaskInstancesAsync(
         HistoricTaskFilter filter,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 分页查历史身份关系（<c>ACT_HI_IDENTITYLINK</c>）——<b>参与者索引</b>的数据源。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 有了它，「我参与过的单据」才能交给数据库回答：候选命中（<c>USER_ID_</c> 或
+    /// <c>GROUP_ID_</c>）的行直接索引命中，不用把整张关系表读进内存去比对。
+    /// </para>
+    /// <para>
+    /// 排序按 <c>ID_</c> 升序：调用方只用它的<b>实例 id 投影</b>（会去重），
+    /// 行之间的先后没有业务含义。
+    /// </para>
+    /// </remarks>
+    ValueTask<IReadOnlyList<HistoricIdentityLink>> QueryIdentityLinksAsync(
+        HistoricIdentityLinkFilter filter,
+        CancellationToken ct = default);
 }

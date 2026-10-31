@@ -27,12 +27,29 @@ public sealed record LoginResponse(
     IReadOnlyList<string> Scopes);
 
 /// <summary>当前身份（<c>GET /api/auth/me</c>）。</summary>
+/// <param name="User">操作人（兼容字段，等价于 <paramref name="Subject"/>）。</param>
+/// <param name="Tenant">租户。</param>
+/// <param name="AuthMode">鉴权方式（<c>none</c> / <c>apikey</c> / <c>jwt</c> / <c>client</c>）。</param>
+/// <param name="Scopes">凭据携带的 scope。</param>
+/// <param name="IsAdmin">是否具备引擎管理范围（<c>netbpm.admin</c>）。</param>
+/// <param name="Subject">实际操作人；纯服务令牌为 <see langword="null"/>。</param>
+/// <param name="Caller">调用方系统（客户端凭据模式下的 <c>clientId</c>）。</param>
+/// <param name="CallerName">调用方系统名称。</param>
+/// <param name="CanSubmitApproval">
+/// 是否允许提交审批。纯服务令牌恒为 <see langword="false"/>——审批结论必须落到一个真人。
+/// </param>
+/// <param name="RequestId">本次请求 id（与响应头 <c>X-Request-Id</c> 一致）。</param>
 public sealed record CurrentIdentity(
     string? User,
     string? Tenant,
     string AuthMode,
     IReadOnlyList<string> Scopes,
-    bool IsAdmin);
+    bool IsAdmin,
+    string? Subject = null,
+    string? Caller = null,
+    string? CallerName = null,
+    bool CanSubmitApproval = true,
+    string? RequestId = null);
 
 /// <summary>
 /// 账号密码登录端点：<c>POST /api/auth/login</c> 校验 <c>admin_user</c> 里的账号，
@@ -176,11 +193,16 @@ public static class AuthEndpoints
     private static IResult MeAsync(RequestContext requestContext)
     {
         return Results.Ok(new CurrentIdentity(
-            requestContext.UserId,
+            requestContext.SubjectId,
             requestContext.TenantId,
             requestContext.AuthMode.ToString().ToLowerInvariant(),
             [.. requestContext.Scopes],
-            requestContext.IsAdmin));
+            requestContext.IsAdmin,
+            requestContext.SubjectId,
+            requestContext.CallerId,
+            requestContext.CallerName,
+            requestContext.CanSubmitApproval,
+            requestContext.RequestId));
     }
 }
 

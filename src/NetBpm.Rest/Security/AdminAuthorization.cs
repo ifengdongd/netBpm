@@ -10,9 +10,14 @@ namespace NetBpm.Rest.Security;
 /// 判定口径与任务 / 变量授权保持一致：
 /// <list type="bullet">
 ///   <item><description>未启用凭据（开发 / 单机演示）：放行；</description></item>
-///   <item><description>API Key：调用方是<b>可信服务</b>，服务级凭据本身即代表管理授权，放行；</description></item>
-///   <item><description>JWT 用户：必须持有对应 <c>netbpm.admin.*</c> scope，或超级范围 <c>netbpm.admin</c>。</description></item>
+///   <item><description>旧版 API Key：调用方是<b>可信服务</b>，服务级凭据本身即代表管理授权，放行；</description></item>
+///   <item><description>JWT 用户 / 注册客户端：必须持有对应 <c>netbpm.admin.*</c> scope，或超级范围 <c>netbpm.admin</c>。</description></item>
 /// </list>
+/// </para>
+/// <para>
+/// ⚠️ <b>注册客户端不再自动获得管理授权</b>。旧 API Key 是「一个密钥代表整个可信内网」的历史产物；
+/// 客户端是「一个业务系统」——只被授予 <c>workflow:instance:read</c> 的系统若不逐条命中也放行，
+/// 多系统接入后第一周就会出越权事故。
 /// </para>
 /// <para>
 /// ⚠️ 这里只回答「是否具备管理能力」。业务参与人依业务规则可以做的事（办理人完成任务、发起人写变量等）
@@ -32,7 +37,9 @@ public static class AdminAuthorization
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
 
-        if (!context.IsUserPrincipal)
+        // 只对「旧口径」放行：未启用鉴权 + 单值 API Key。
+        // 客户端凭据（RequestAuthMode.Client）必须逐条命中 scope。
+        if (context.AuthMode is RequestAuthMode.None or RequestAuthMode.ApiKey)
         {
             return;
         }

@@ -1,0 +1,410 @@
+using Microsoft.Extensions.Logging;
+using NetBpm.Engine;
+using NetBpm.Platform.Contracts;
+using NetBpm.Rest.Security;
+using NetBpm.Runtime;
+using NetBpm.Workflow;
+
+namespace NetBpm.Rest.Platform;
+
+/// <summary>
+/// 提交审批（<c>POST /workflow/v1/tasks/{id}/submit</c>）的编排服务。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 职责边界：校验「这个决定合不合法」→ 落流程变量 → 完成引擎任务 → 组装提交结果。
+/// 校验只依赖 <see cref="ITaskCatalog.FindAsync"/> 返回的 <see cref="TaskView.Options"/>
+/// （服务端已用语义字典算好），因此「调用方看到的按钮」与「服务端认可的按钮」是同一份，
+/// 不会出现「前端能点、后端 422」的分裂。
+/// </para>
+/// <para>
+/// 两层授权在进入校验前先过：scope（<see cref="PlatformScopes.TaskSubmit"/>，端点查）与
+/// 真人主体 + 任务归属（本服务查）。归属不满足与任务不存在<b>同口径 404</b>，不泄露待办归属。
+/// </para>
+/// </remarks>
+public interface ITaskSubmitService
+{
+    /// <summary>
+    /// 提交审批。校验失败抛 <see cref="SubmitDecisionException"/>（携带稳定错误码与状态码）。
+    /// </summary>
+    /// <param name="taskId">任务 id。</param>
+    /// <param name="request">提交请求。</param>
+    /// <param name="context">调用方身份。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<SubmitTaskResult> SubmitAsync(
+        string taskId,
+        SubmitTaskRequest request,
+        RequestContext context,
+        CancellationToken ct = default);
+}
+
+/// <inheritdoc />
+public sealed class TaskSubmitService : ITaskSubmitService
+{
+    private readonly IProcessEngine _engine;
+    private readonly ITaskCatalog _taskCatalog;
+    private readonly IInstanceCatalog _instanceCatalog;
+    private readonly IApprovalTimeline _timeline;
+    private readonly IApprovalSnapshot _snapshots;
+    private readonly ILogger<TaskSubmitService> _logger;
+
+    /// <summary>构造。</summary>
+    /// <param name="engine">引擎门面（完成任务）。</param>
+    /// <param name="taskCatalog">待办读模型（选项与归属判定）。</param>
+    /// <param name="instanceCatalog">实例读模型（提交结果的 Instance 单一出口）。</param>
+    /// <param name="timeline">审批记录时间线（写 <c>TASK_COMPLETED</c> 与结束条目）。</param>
+    /// <param name="snapshots">表单快照（冻住「当时的字段定义 + 值」）。</param>
+    /// <param name="logger">日志。</param>
+    public TaskSubmitService(
+        IProcessEngine engine,
+        ITaskCatalog taskCatalog,
+        IInstanceCatalog instanceCatalog,
+        IApprovalTimeline timeline,
+        IApprovalSnapshot snapshots,
+        ILogger<TaskSubmitService> logger)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(taskCatalog);
+        ArgumentNullException.ThrowIfNull(instanceCatalog);
+        ArgumentNullException.ThrowIfNull(timeline);
+        ArgumentNullException.ThrowIfNull(snapshots);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _engine = engine;
+        _taskCatalog = taskCatalog;
+        _instanceCatalog = instanceCatalog;
+        _timeline = timeline;
+        _snapshots = snapshots;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<SubmitTaskResult> SubmitAsync(
+        string taskId,
+        SubmitTaskRequest request,
+        RequestContext context,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // 真人主体：审批结论必须能追到一个人（纯服务令牌即便持有 submit scope 也拒绝）
+        if (!context.CanSubmitApproval || string.IsNullOrWhiteSpace(context.SubjectId))
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.AuthSubjectRequired,
+                "缺少操作主体",
+                StatusCodes.Status403Forbidden,
+                "审批结论必须落到一个真人主体；纯服务令牌不得提交审批。");
+        }
+
+        var view = await _taskCatalog.FindAsync(taskId, context, ct).ConfigureAwait(false);
+
+        // 待办不存在、已完成，或对当前调用方不可见 → 404（与读模型同口径，不泄露归属）
+        if (view is null || !view.CurrentUserCanSubmit)
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.TaskNotFound,
+                "待办不存在",
+                StatusCodes.Status404NotFound,
+                $"待办 '{taskId}' 不存在、已完成，或当前调用方无权办理。");
+        }
+
+        var option = ResolveOption(view, request.OptionId);
+        ValidateDecision(option, request);
+
+        var variables = BuildVariables(request);
+
+        try
+        {
+            await _engine.CompleteTaskAsync(
+                taskId,
+                variables.Count == 0 ? null : variables,
+                ToExpectedRevision(request.ExpectedRevision),
+                ct).ConfigureAwait(false);
+        }
+        catch (OptimisticLockingException exception)
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.ConcurrencyRevisionMismatch,
+                "并发冲突",
+                StatusCodes.Status409Conflict,
+                exception.Message);
+        }
+        catch (EngineObjectNotFoundException)
+        {
+            // 校验通过但完成时任务已被并发办结 → 与「不存在」同口径 404
+            throw new SubmitDecisionException(
+                ErrorCodes.TaskNotFound,
+                "待办不存在",
+                StatusCodes.Status404NotFound,
+                $"待办 '{taskId}' 已被办结。");
+        }
+
+        return await BuildResultAsync(view, option, request, context, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>在服务端已算好的选项集里找调用方回传的选项；没有就是 422。</summary>
+    private static ApprovalOption ResolveOption(TaskView view, string optionId)
+    {
+        var option = view.Options.FirstOrDefault(item =>
+            string.Equals(item.OptionId, optionId, StringComparison.Ordinal));
+
+        if (option is null)
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.DecisionNotInOptionSet,
+                "选项不属于该节点",
+                StatusCodes.Status422UnprocessableEntity,
+                $"选项 '{optionId}' 不在该待办的可选项里（可选项："
+                + string.Join(" / ", view.Options.Select(item => item.OptionId)) + "）。");
+        }
+
+        return option;
+    }
+
+    /// <summary>按 <see cref="ApprovalOption"/> 的校验规则核验本次决定。</summary>
+    private static void ValidateDecision(ApprovalOption option, SubmitTaskRequest request)
+    {
+        // 一致性：调用方声明的 semantic 必须与字典定义一致（挡住「流程定义被改而调用方不知情」）
+        if (request.Semantic is { } semantic && semantic != option.Semantic)
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.DecisionSemanticMismatch,
+                "语义不一致",
+                StatusCodes.Status422UnprocessableEntity,
+                $"调用方声明选项 '{request.OptionId}' 的语义为 {semantic}，"
+                + $"但服务端解析为 {option.Semantic}。请按 TaskView.options 的语义重新提交。");
+        }
+
+        if (option.RequiresComment && string.IsNullOrWhiteSpace(request.Comment))
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.DecisionCommentRequired,
+                "需要填写审批意见",
+                StatusCodes.Status422UnprocessableEntity,
+                $"选项 '{request.OptionId}'（{option.Label}）要求填写审批意见。");
+        }
+
+        if (option.RequiresTargetNode && string.IsNullOrWhiteSpace(request.TargetNodeId))
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.DecisionTargetNodeRequired,
+                "需要指定目标节点",
+                StatusCodes.Status422UnprocessableEntity,
+                $"选项 '{request.OptionId}'（{option.Label}）要求指定目标节点。");
+        }
+
+        if (option.AllowedTargetNodes is { Count: > 0 }
+            && request.TargetNodeId is { Length: > 0 } targetNodeId
+            && !option.AllowedTargetNodes.Contains(targetNodeId, StringComparer.Ordinal))
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.DecisionTargetNodeInvalid,
+                "目标节点不在允许范围",
+                StatusCodes.Status422UnprocessableEntity,
+                $"目标节点 '{targetNodeId}' 不在选项 '{request.OptionId}' 允许的范围（"
+                + string.Join(" / ", option.AllowedTargetNodes) + "）。");
+        }
+    }
+
+    /// <summary>
+    /// 组装要写进引擎的流程变量：审批结论（<c>result</c>/<c>comment</c>）+ 本次参数（镜像裸名）。
+    /// </summary>
+    /// <remarks>
+    /// <para><c>targetNodeId</c> 本轮只校验不落变量——退回 / 跳转的执行与时间线记录属于后续块。</para>
+    /// <para><c>formValues</c> 本轮不落库——表单值快照（<c>nb_approval_snapshot</c>）属于表单快照块（§4.5）。</para>
+    /// </remarks>
+    private static Dictionary<string, object?> BuildVariables(SubmitTaskRequest request)
+    {
+        var variables = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [BaseModelVariables.Result] = request.OptionId,
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.Comment))
+        {
+            variables[BaseModelVariables.Comment] = request.Comment;
+        }
+
+        if (request.Parameters is { Count: > 0 })
+        {
+            foreach (var (name, value) in request.Parameters)
+            {
+                // 对外键 param.{name} 镜像回引擎裸名（与发起 / 网关条件同一套变量名）
+                var bareName = name.StartsWith("param.", StringComparison.Ordinal)
+                    ? name["param.".Length..]
+                    : name;
+
+                if (BaseModelVariables.All.Contains(bareName, StringComparer.Ordinal))
+                {
+                    throw new SubmitDecisionException(
+                        ErrorCodes.ParameterConflictWithReserved,
+                        "参数名与保留字段冲突",
+                        StatusCodes.Status400BadRequest,
+                        $"参数 '{name}' 与审批元数据字段 '{bareName}' 冲突。");
+                }
+
+                variables[bareName] = value;
+            }
+        }
+
+        return variables;
+    }
+
+    /// <summary>把实例修订号（契约用 <see cref="long"/>）转成引擎的 <see cref="int"/> 乐观锁版本。</summary>
+    private static int? ToExpectedRevision(long? expected)
+    {
+        if (expected is not { } value)
+        {
+            return null;
+        }
+
+        if (value is < 0 or > int.MaxValue)
+        {
+            throw new SubmitDecisionException(
+                ErrorCodes.RequestMalformed,
+                "修订号不合法",
+                StatusCodes.Status400BadRequest,
+                $"expectedRevision 必须在 [0, {int.MaxValue}] 内，实际为 {value}。");
+        }
+
+        return (int)value;
+    }
+
+    /// <summary>
+    /// 组装提交结果：实例视图（单一出口）+ 新待办 + 本次时间线增量 + 事件类型。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 时间线条目<b>在业务完成之后才写</b>：引擎已经办结任务，这里失败只会少一条审计记录，
+    /// 不能让调用方以为提交失败（<see cref="IApprovalTimeline.AppendAsync"/> 内部已按此取舍）。
+    /// </para>
+    /// <para>
+    /// <see cref="SubmitTaskResult.TimelineDelta"/> 只带<b>本次操作新增</b>的条目，
+    /// 调用方直接用 <c>?afterSequence=</c> 接着拉即可，不需要自己算序号。
+    /// </para>
+    /// </remarks>
+    private async ValueTask<SubmitTaskResult> BuildResultAsync(
+        TaskView view,
+        ApprovalOption option,
+        SubmitTaskRequest request,
+        RequestContext context,
+        CancellationToken ct)
+    {
+        // 表单快照要早于时间线落：时间线条目里的 formSnapshotTaskId 是指向它的钥匙，
+        // 先有键再有引用，避免出现「时间线指向一份不存在的快照」。
+        // （反过来不成立：快照写不进去也不该挡住审批，见 IApprovalSnapshot 的取舍。）
+        var snapshotCaptured = await _snapshots
+            .CaptureAsync(view, request, request.OptionId, context, ct)
+            .ConfigureAwait(false);
+
+        var delta = new List<TimelineEntry>(2);
+
+        // 本次审批决定：引擎不认识审批意见，只有在这里写下来，历史页才看得到「谁为什么批的」
+        var completed = await _timeline.AppendAsync(
+            view.InstanceId,
+            new TimelineEntry(
+                Sequence: 0,
+                InstanceId: view.InstanceId,
+                Kind: TimelineEntryKind.TaskCompleted,
+                ActivityId: view.ActivityId,
+                ActivityName: view.ActivityName,
+                TaskId: view.TaskId,
+                ActorId: context.SubjectId,
+                ActorCallerId: null,
+                OptionId: request.OptionId,
+                Semantic: option.Semantic,
+                Comment: request.Comment,
+                TargetNodeId: request.TargetNodeId,
+                FormSnapshotTaskId: snapshotCaptured ? view.TaskId : null,
+                OccurredAt: DateTimeOffset.UtcNow),
+            context,
+            ct).ConfigureAwait(false);
+
+        if (completed is not null)
+        {
+            delta.Add(completed);
+        }
+
+        var instance = await _instanceCatalog.FindAsync(view.InstanceId, context, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"流程实例 '{view.InstanceId}' 在提交后查不到（引擎历史也没有）。");
+
+        var finished = instance.Status is InstanceStatus.Completed or InstanceStatus.Terminated;
+
+        var events = new List<string> { "task.completed" };
+
+        if (finished)
+        {
+            events.Add("instance.completed");
+
+            var terminal = await _timeline.AppendAsync(
+                instance.InstanceId,
+                new TimelineEntry(
+                    Sequence: 0,
+                    InstanceId: instance.InstanceId,
+                    Kind: instance.Status == InstanceStatus.Completed
+                        ? TimelineEntryKind.InstanceCompleted
+                        : TimelineEntryKind.InstanceTerminated,
+                    ActivityId: null,
+                    ActivityName: null,
+                    TaskId: null,
+                    ActorId: null,
+                    ActorCallerId: null,
+                    OptionId: null,
+                    Semantic: instance.Conclusion?.Semantic,
+                    Comment: null,
+                    TargetNodeId: null,
+                    FormSnapshotTaskId: null,
+                    OccurredAt: instance.EndedAt ?? DateTimeOffset.UtcNow),
+                context,
+                ct).ConfigureAwait(false);
+
+            if (terminal is not null)
+            {
+                delta.Add(terminal);
+            }
+        }
+
+        return new SubmitTaskResult(
+            Instance: instance,
+            NextTasks: instance.Tasks,
+            TimelineDelta: delta,
+            Events: events);
+    }
+}
+
+/// <summary>
+/// 提交审批的可预期拒绝（校验失败 / 归属不符 / 并发冲突），携带稳定错误码与状态码。
+/// </summary>
+/// <remarks>由端点捕获后转 <see cref="PlatformProblems.Create"/>，不经过全局异常处理器的旧错误体。</remarks>
+internal sealed class SubmitDecisionException : Exception
+{
+    /// <summary>构造。</summary>
+    /// <param name="code">稳定错误码（见 <see cref="ErrorCodes"/>）。</param>
+    /// <param name="title">短标题。</param>
+    /// <param name="status">HTTP 状态码。</param>
+    /// <param name="detail">具体说明。</param>
+    public SubmitDecisionException(string code, string title, int status, string? detail = null)
+        : base(title)
+    {
+        Code = code;
+        Title = title;
+        Status = status;
+        Detail = detail;
+    }
+
+    /// <summary>稳定错误码。</summary>
+    public string Code { get; }
+
+    /// <summary>短标题。</summary>
+    public string Title { get; }
+
+    /// <summary>HTTP 状态码。</summary>
+    public int Status { get; }
+
+    /// <summary>具体说明。</summary>
+    public string? Detail { get; }
+}

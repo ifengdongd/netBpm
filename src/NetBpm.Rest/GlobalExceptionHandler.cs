@@ -4,6 +4,7 @@ using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
 using NetBpm.Engine;
 using NetBpm.Persistence;
+using NetBpm.Persistence.Platform;
 using NetBpm.Rest.Security;
 
 namespace NetBpm.Rest;
@@ -67,7 +68,23 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
                 null,
                 EngineErrorCode.BpmnXmlParseError),
 
+            // 查询参数 / 路由参数绑定失败（例如枚举取值不匹配、数字格式错）。
+            // 不接这一条的话 Minimal API 抛的上游异常会落到兜底的 500：
+            // 调用方写错一个参数就得到「服务器内部错误」，排查方向完全被带偏。
+            BadHttpRequestException ex => (
+                StatusCodes.Status400BadRequest,
+                ex.Message,
+                null,
+                EngineErrorCode.ValidationError),
+
             ForbiddenException ex => (StatusCodes.Status403Forbidden, ex.Message, null, EngineErrorCode.Forbidden),
+
+            // 接入管理：scope 未定义 / 高危未确认 / 租户不存在等，错误码随异常走（客户端按码分支）
+            ClientRegistryException ex => (
+                StatusCodes.Status400BadRequest,
+                ex.Message,
+                null,
+                ex.Code),
 
             // 带业务码的 404（例如「实例不在运行中」→ 调用方应改查历史）
             ResourceNotFoundException ex => (StatusCodes.Status404NotFound, ex.Message, null, ex.Code),

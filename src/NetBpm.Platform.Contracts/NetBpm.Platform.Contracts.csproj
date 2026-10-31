@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Platform.Contracts</RootNamespace>
+    <AssemblyName>NetBpm.Platform.Contracts</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <Description>NetBpm 平台对外契约：流程目录、审批语义、参数规范、实例与待办视图、时间线、身份与错误模型</Description>
+
+    <!--
+      契约工程的枚举值是【对外 JSON 词汇】，序列化成 STRING / LONG / SINGLE 这类名字，
+      调用方与生成的 SDK 都按它写代码，因此不能为了满足 CA1720/CA1000 把名字改成 Text/Integer。
+      CA1000：CursorPage<T>.Empty 是给 SDK 用的空页常量，不是实例状态。
+    -->
+    <NoWarn>$(NoWarn);CA1720;CA1000</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    依赖铁律（见 docs/platform-api-refactoring-plan.md §2.2）：
+    本工程【不得】引用 NetBpm.Engine / NetBpm.Bpmn.Model / NetBpm.Workflow。
+    一旦引用，ExecutionEntity、TaskEntity、Activiti 概念就会漏进公开契约，
+    引擎任何一次升级都会变成外部客户端的破坏性变更。
+-->
+
+</Project>

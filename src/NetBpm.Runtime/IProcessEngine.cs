@@ -374,6 +374,24 @@ public interface IProcessEngine
     ValueTask<int> CountHistoricTasksAsync(HistoricTaskQuery query, CancellationToken ct = default);
 
     /// <summary>
+    /// 查历史身份关系（<c>ACT_HI_IDENTITYLINK</c>）——「谁与这条单据有关」的参与者索引。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 运行态的 <see cref="FindProcessInstanceIdentityLinksAsync"/> 补不上「我的已办」：
+    /// 任务完成、实例结束时 <c>ACT_RU_IDENTITYLINK</c> 的行会被级联清理，
+    /// 而已办清单<b>全部</b>是已结束的任务。历史表只增不删，它是唯一能回答这个问题的源头。
+    /// </para>
+    /// <para>
+    /// 至少需要 USER_ID_ / GROUP_ID_ / PROC_INST_ID_ / TASK_ID_ 中的一个条件
+    /// （本子集不提供无条件的历史关系全表扫描）；支持持久化层下推，不支持时返回空集合。
+    /// </para>
+    /// </remarks>
+    ValueTask<IReadOnlyList<HistoricIdentityLink>> FindHistoricIdentityLinksAsync(
+        HistoricIdentityLinkQuery query,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// 分页查历史流程实例（已办结检索 / 审计 / 报表）。
     /// <para>实例结束后运行时行已删除，这是唯一能按业务主键 / 发起人 / 时间范围反查的入口。</para>
     /// </summary>

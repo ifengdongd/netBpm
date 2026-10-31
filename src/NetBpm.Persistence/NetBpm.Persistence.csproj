@@ -9,6 +9,8 @@
     <ProjectReference Include="..\NetBpm.Bpmn.Converter\NetBpm.Bpmn.Converter.csproj" />
     <ProjectReference Include="..\NetBpm.Bpmn.Model\NetBpm.Bpmn.Model.csproj" />
     <ProjectReference Include="..\NetBpm.Engine\NetBpm.Engine.csproj" />
+    <!-- 平台接入标准（客户端 / 租户 / scope）直接复用对外契约，避免内部再定义一套同名字段 -->
+    <ProjectReference Include="..\NetBpm.Platform.Contracts\NetBpm.Platform.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

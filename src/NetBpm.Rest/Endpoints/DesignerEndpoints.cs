@@ -133,9 +133,30 @@ public static class DesignerEndpoints
                 ct)
             .ConfigureAwait(false);
 
-        var warnings = precheck is null
-            ? result.Warnings
-            : result.Warnings.Concat(precheck).ToArray();
+        // 部署后自检：审批选项的语义映射（宽容：无映射只告警，不阻断部署）。
+        // 与委托自检同理——把「这个选项调用方拿不到稳定 semantic」在部署响应里就暴露出来。
+        var vocabularyWarnings = await ApprovalVocabularyGuard.VerifyAsync(
+                httpContext.RequestServices,
+                engine,
+                definition.Id,
+                definition.Key,
+                tenant,
+                loggerFactory.CreateLogger(nameof(ApprovalVocabularyGuard)),
+                rejectUnmapped: false,
+                ct)
+            .ConfigureAwait(false);
+
+        var warnings = result.Warnings;
+
+        if (precheck is not null)
+        {
+            warnings = warnings.Concat(precheck).ToArray();
+        }
+
+        if (vocabularyWarnings is not null)
+        {
+            warnings = warnings.Concat(vocabularyWarnings).ToArray();
+        }
 
         return Results.Created(
             $"/api/designer/definitions/{definition.Id}",

@@ -373,7 +373,79 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
                 // 流程级事件监听器：记到 Process 上，运行期由引擎事件分发器逐个通知
                 process.EventListeners.Add(ReadEventListener(child));
             }
+            else
+            {
+                // 认不出来的扩展元素（比如平台自己的 <netbpm:parameters>）：
+                // 整体挂到宿主元素上，而不是静默丢掉。
+                // 「模型写了、引擎没看见」是最短的一类差异——它不会报错，只是悄悄地不该做。
+                // 平台层（目录 / 参数规范 / 表单快照）按需再读，这里只负责保真。
+                CaptureExtensionElement(child, element);
+            }
         });
+    }
+
+    /// <summary>
+    /// 把一个<b>未知</b>扩展元素及其子树原样捕获到 <paramref name="parent"/> 上。
+    /// </summary>
+    /// <remarks>
+    /// 用 <see cref="XmlReader.ReadSubtree"/> 而不是手工跳级：嵌套的扩展元素（
+    /// <c>netbpm:parameters</c> 里还有 <c>netbpm:parameter</c>）层级不固定，
+    /// 手写循环早晚会把某一层的结束标签读漏。
+    /// </remarks>
+    private static void CaptureExtensionElement(XmlReader reader, BaseElement parent)
+    {
+        parent.ExtensionElements.Add(ReadExtensionElement(reader));
+    }
+
+    private static ExtensionElement ReadExtensionElement(XmlReader reader)
+    {
+        var element = new ExtensionElement
+        {
+            ElementName = reader.LocalName,
+            NamespacePrefix = reader.Prefix,
+            Id = Attr(reader, "id"),
+            Name = Attr(reader, "name"),
+        };
+
+        if (reader.HasAttributes)
+        {
+            while (reader.MoveToNextAttribute())
+            {
+                // xmlns:* 是命名空间声明而不是数据，记下来只会污染 round-trip
+                if (reader.Prefix.Length == 0
+                    || !string.Equals(reader.LocalName, "xmlns", StringComparison.Ordinal))
+                {
+                    element.AddAttribute(reader.NamespaceURI, reader.LocalName, reader.Value);
+                }
+            }
+
+            reader.MoveToElement();
+        }
+
+        if (!reader.IsEmptyElement)
+        {
+            using var subtree = reader.ReadSubtree();
+
+            // 子树 reader 需要先越过自己的根元素
+            subtree.Read();
+
+            while (subtree.Read())
+            {
+                switch (subtree.NodeType)
+                {
+                    case XmlNodeType.Element:
+                        element.ExtensionElements.Add(ReadExtensionElement(subtree));
+                        break;
+
+                    case XmlNodeType.Text:
+                    case XmlNodeType.CDATA:
+                        element.ElementText ??= subtree.Value.Trim();
+                        break;
+                }
+            }
+        }
+
+        return element;
     }
 
     private static FormProperty ReadFormProperty(XmlReader reader)

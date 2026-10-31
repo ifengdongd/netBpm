@@ -1773,6 +1773,44 @@ public sealed class ProcessEngine : IProcessEngine
             || (task.EndTime is { } finishedBefore && finishedBefore <= query.FinishedBefore));
 
     /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<HistoricIdentityLink>> FindHistoricIdentityLinksAsync(
+        HistoricIdentityLinkQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(query.FirstResult, query.MaxResults);
+
+        if (!query.HasCriteria)
+        {
+            throw new EngineException(
+                "历史身份关系查询至少需要一个条件（userId / groupIds / processInstanceId / taskId）。"
+                + "本子集不提供无条件的历史全表扫描。");
+        }
+
+        if (_historyManager is IHistoricQueryManager pushdown)
+        {
+            return await pushdown
+                .QueryIdentityLinksAsync(
+                    new HistoricIdentityLinkFilter(
+                        UserId: string.IsNullOrWhiteSpace(query.UserId) ? null : query.UserId,
+                        GroupIds: query.GroupIds is { Count: > 0 } ? query.GroupIds : null,
+                        ProcessInstanceId: string.IsNullOrWhiteSpace(query.ProcessInstanceId)
+                            ? null
+                            : query.ProcessInstanceId,
+                        TaskId: string.IsNullOrWhiteSpace(query.TaskId) ? null : query.TaskId,
+                        Type: string.IsNullOrWhiteSpace(query.Type) ? null : query.Type,
+                        FirstResult: query.FirstResult,
+                        MaxResults: query.MaxResults),
+                    ct)
+                .ConfigureAwait(false);
+        }
+
+        // 没有下推能力（历史关闭 / 内存宿主）：历史身份关系本来就是历史才能产出的数据源，
+        // 这里只能如实返回空——不能退回运行态冒充「已办」，否则会漏掉全部已结束的任务。
+        return [];
+    }
+
+    /// <inheritdoc />
     public async ValueTask<IReadOnlyList<HistoricProcessInstance>> FindHistoricProcessInstancesAsync(
         HistoricProcessInstanceQuery query,
         CancellationToken ct = default)

@@ -784,6 +784,109 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
             cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<HistoricIdentityLink>> QueryIdentityLinksAsync(
+        HistoricIdentityLinkFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+        var session = lease.Session;
+        var parameters = new DynamicParameters();
+        var where = BuildIdentityLinkWhere(filter, parameters);
+        var paging = filter.MaxResults is { } take
+            ? SqlPaging.Build(session.DatabaseType, filter.FirstResult, take, parameters)
+            : SqlPaging.BuildUnlimited(session.DatabaseType, filter.FirstResult, parameters);
+
+        // ⚠️ 为什么必须 join ACT_HI_TASKINST：候选关系的行是「任务级」的，
+        // PROC_INST_ID_ 为空、只有 TASK_ID_（见 DapperTaskManager.AddCandidateUsersAsync）。
+        // 直接按 USER_ID_ 查表会拿到一堆实例 id 为空的行——尤其候选组只落任务级行，
+        // 少了这层解析，「我所在组待批的单据」会被整类漏掉。
+        var sql = $"""
+            select l.ID_, l.TYPE_, l.USER_ID_, l.GROUP_ID_, l.TASK_ID_,
+                   coalesce(l.PROC_INST_ID_, t.PROC_INST_ID_) as PROC_INST_ID_
+            from ACT_HI_IDENTITYLINK l
+            left join ACT_HI_TASKINST t on t.ID_ = l.TASK_ID_
+            {where}
+            order by l.ID_ asc
+            {paging}
+            """;
+
+        var rows = await session.Connection
+            .QueryAsync(new CommandDefinition(sql, parameters, session.Transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var result = new List<HistoricIdentityLink>();
+
+        foreach (IDictionary<string, object?> row in rows)
+        {
+            result.Add(MapIdentityLink(row));
+        }
+
+        return result;
+    }
+
+    private static HistoricIdentityLink MapIdentityLink(IDictionary<string, object?> row) =>
+        new(
+            Text(row, "ID_")!,
+            Text(row, "TYPE_") ?? string.Empty,
+            Text(row, "USER_ID_"),
+            Text(row, "GROUP_ID_"),
+            Text(row, "TASK_ID_"),
+            Text(row, "PROC_INST_ID_"));
+
+    /// <summary>
+    /// 拼接历史身份关系的 WHERE：用户与组之间是 OR（命中任一即算参与），其余条件 AND。
+    /// </summary>
+    private static string BuildIdentityLinkWhere(
+        HistoricIdentityLinkFilter filter,
+        DynamicParameters parameters)
+    {
+        var conditions = new List<string>();
+        var userOrGroup = new List<string>();
+
+        // 解析不出实例的行（流程定义级关系）对「参与者索引」毫无意义，直接挡掉
+        conditions.Add("coalesce(l.PROC_INST_ID_, t.PROC_INST_ID_) is not null");
+
+        if (!string.IsNullOrWhiteSpace(filter.UserId))
+        {
+            userOrGroup.Add("l.USER_ID_ = @userId");
+            parameters.Add("userId", filter.UserId);
+        }
+
+        if (filter.GroupIds is { Count: > 0 } groups)
+        {
+            userOrGroup.Add("l.GROUP_ID_ in @groupIds");
+            parameters.Add("groupIds", groups);
+        }
+
+        if (userOrGroup.Count > 0)
+        {
+            conditions.Add($"({string.Join(" or ", userOrGroup)})");
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.ProcessInstanceId))
+        {
+            conditions.Add("coalesce(l.PROC_INST_ID_, t.PROC_INST_ID_) = @processInstanceId");
+            parameters.Add("processInstanceId", filter.ProcessInstanceId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.TaskId))
+        {
+            conditions.Add("l.TASK_ID_ = @taskId");
+            parameters.Add("taskId", filter.TaskId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Type))
+        {
+            conditions.Add("l.TYPE_ = @type");
+            parameters.Add("type", filter.Type);
+        }
+
+        return " where " + string.Join(" and ", conditions);
+    }
+
     private static string BuildProcessInstanceWhere(
         HistoricProcessInstanceFilter filter,
         DynamicParameters parameters)
