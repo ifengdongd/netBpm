@@ -1,0 +1,315 @@
+# NetBpm 平台化改造 —— 任务清单（勾选版）
+
+> 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
+> 导出时间：2026-10-31 ｜ 代码基线：`9cfe44f` / `db56e5b` / `fdb0677`（已推送 `origin/main`）
+>
+> **图例**
+> - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
+> - `[!]` 阻塞项（不做它，后面的都推不动）
+> - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.15 本轮落地（2026-10-31，§10 第 1 步收尾：引擎面收口）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **S2 欠账：引擎面按 `workflow:*` 收紧** | `Security/EngineSurfaceScopes`（`RequireEngineScope` + `netbpm.admin.* ⇄ workflow:*` 桥接）、`RuntimeEndpoints`（40 条路由逐条标注）、`DesignerEndpoints`、`IdentityEndpoints`；`AdminAuthorization` 改为经桥接判定 | `EngineSurfaceScopeTests`（13 项） |
+| **跨人读取收紧** | `RuntimeAccess.IsAdminPrincipal`：注册客户端不再「非用户身份即管理方」，全量待办需 `workflow:admin:instance` / `workflow:history:read:all` | 同上 |
+| **可观测** | `AdminDiagnostics.AuthModeTag` 增加 `client` 桶；拒绝计数同时覆盖 `workflow:*` 的拒绝 | — |
+
+**四条口径：**
+
+1. **只对 `RequestAuthMode.Client` 生效**。`None`（开发/演示）、`ApiKey`（旧单值密钥）、`Jwt`（真人令牌）保持既有行为——
+   一次性收紧会打断全部已上线调用方，而这三类本来就有别的兜底（前两类是「可信服务」，第三类走数据级授权）。
+2. **两层授权，顺序不能反**：`RequireInstanceAccess` / `RequireTaskAccess` / `RequireHistoryAccess`（404 + 租户 + 数据级）
+   **在前**，`RequireEngineScope`（403）**在后**。反过来跨租户探测会从 404 变成 403，泄露 id 是否存在。
+3. **管理动作要翻译**：客户端的 scope 只能取自 `PlatformScopes.All`（`ClientRegistry` 校验），里面没有 `netbpm.admin.*`。
+   故 `netbpm.admin.model.read→workflow:process:read`、`model.write→admin:process`、`instance.{jump,delete,suspend}→admin:instance`、
+   `task.moderate→task:assign`、`variables.write→admin:variables`。指标 / 审计 / Redis / 作业 / 归档**不翻译**——
+   平台面还没有对应端点，宁可拒掉也不发明一个 `workflow:admin:*`。
+4. **已知残留**：引擎面的 `POST /tasks/{id}/complete`、`/tasks/batch/complete`、变量直写即使有 scope 也**不写时间线与表单快照**
+   （那是平台面 `submit` 的职责）。所以「有 `workflow:task:submit` 的客户端」仍能拿到一次「无结论的办结」。
+   下一步二选一：让引擎面的 complete 也落时间线，或干脆对 `Client` 关闭写原语（只留读 + 管理干预）。
+
+---
+
+## v1.14 本轮落地（2026-10-31，按 §10 建议顺序的第 1、2 步）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **M5 JWT 升级（RS256 + JWKS + 外部 IdP）** | `Security/JwtKeyMaterial`（密钥唯一来源）、`Security/RemoteJwksProvider`（外部公钥集缓存 + 限频）、`GET /.well-known/jwks.json`、`AuthenticationMiddleware` 算法白名单 | `JwtRs256Tests`（5 项，内存宿主，无需 MySQL） |
+| **M7 写侧强制 `writableBy`** | `Platform/ParameterWritePolicy` + `InstanceStartService`（APPLICANT）/ `TaskSubmitService`（APPROVER），错误码 `parameter.readonly` | `ParameterWriteTests`（8 项） |
+| **S3 尾巴①：实例列表升序** | `ProcessInstanceQuery` / `HistoricProcessInstanceQuery` 新增 `Descending`，排序与时间边界一起下推到 `order by START_TIME_, ID_`；平台侧游标按方向选上界/下界 | `InstanceListTests.List_ShouldSupportAscending` |
+
+**三条口径，写在这里免得下次再讨论：**
+
+1. `writableBy` **未声明** = 发起时可写、之后只读（这是 `ParameterDefinition` 的原始约定，不是本轮新加的收紧）。
+   想让审批人改字段，必须在 `netbpm:parameter` 上写 `writableBy="APPROVER"`。
+2. `APPROVER` / `APPLICANT` 判定**不看请求体自述**，只看环节；`ADMIN` 两个环节都放行，
+   但仅当调用方确实持管理视角（`netbpm.admin` / `workflow:admin:instance` / `workflow:history:read:all`）。
+3. 排序两个方向都必须按 `(开始时间, 实例 id 升序)`：tie-break **不随方向翻转**，
+   否则游标在「同刻多条」的边界上会重复或漏行。
+
+---
+
+## 0. 进度总览
+
+| 维度 | 总数 | 已落地 | 未完成 |
+|---|---|---|---|
+| 阶段（S1–S5） | 5 | 2 完成 + 1 基本完成 | 2 |
+| 改造项（M1–M16） | 16 | 7 完成 + 5 部分 | 4 |
+| 守门测试用例 | 25 | 14 | 11 |
+| 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 14 | 8 |
+| 平台表（`nb_*`） | 13 | 7 | 6 |
+| 人日（估算） | 135 | ≈ 75 | ≈ 60 |
+
+**一句话定位**：S1（契约）、S3（业务标准）已全部落地，S2 只剩三条出口用例，S4（独立部署）与 S5（治理/SDK）未动。
+八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）已闭环**；
+C（响应强类型）只差 M3 的 Decorator 收尾，G（委托进程内）卡在 M12 外部任务，
+H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 CI diff 没有。
+
+---
+
+## 1. 阶段进度（§8）
+
+| 阶段 | 周期 | 状态 | 出口条件达成情况 |
+|---|---|---|---|
+| S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 未做** |
+| S2 身份与授权 | 4 周 | 🟡 基本完成 | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
+| S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
+| S4 独立部署 | 4 周 | ⬜ 未开始 | 阻塞于 **M12 外部任务** |
+| S5 治理与 SDK | 3 周 | ⬜ 未开始 | 阻塞于 **M14 契约治理** |
+
+- [x] S1 契约与骨架
+- [ ] S2 身份与授权（剩余见 §3 第 ② 组；RS256 已闭环）
+- [x] S3 业务标准
+- [ ] S4 独立部署
+- [ ] S5 治理与 SDK
+
+---
+
+## 2. 改造项 M1–M16（§6）
+
+- [x] **M1 契约层建立**（8 人日）—— `NetBpm.Platform.Contracts` 13 文件、零警告编译；`Rest` 的 DTO 内收
+- [ ] **M2 多流程路由**（6 人日）
+  - [x] 读半边：`IProcessCatalog` + `{processKey}` 路由参数（v1.4，§7.6.1）
+  - [ ] 写半边：`WorkflowEndpointOptions` 标记 `[Obsolete]`，新 `PlatformApiOptions`
+- [ ] **M3 响应强类型**（5 人日）
+  - [x] 平台面端点直接返回 `Platform.Contracts` 类型（`workflow/v1` 全族）
+  - [ ] `Decorate*` 迁到 `admin/v1` 或删除；`WorkflowEndpoints.cs` 收口
+- [x] **M4 身份三元组**（6 人日）—— `caller/subject/tenant` 落 `RequestContext`，`UserId` 降为兼容别名；Production 禁头身份（v1.3）
+- [x] **M5 JWT 升级**（8 人日）—— RS256 + JWKS + 可选外部 IdP（v1.14）：`JwtKeyMaterial` 统一密钥来源、`RemoteJwksProvider` 拉外部公钥集、`GET /.well-known/jwks.json`、校验侧算法白名单；HS256 保留为内网模式
+- [x] **M6 审批语义字典**（10 人日）—— 三码分离 + 部署期守卫 + `nb_approval_dictionary`（v1.6）
+- [ ] **M7 参数 schema**（12 人日）
+  - [x] 从 `formProperty` 派生 `ParameterSchema`（v1.5）
+  - [x] `netbpm:parameters` 覆盖 `apiName`/`writableBy`/`visibleTo`/约束（v1.13）
+  - [x] **写侧强制**：发起按 `APPLICANT`、提交按 `APPROVER` 拒绝，未声明 = 发起可写 / 审批只读（v1.14）
+  - [ ] `nb_process_parameter` 索引表
+- [x] **M8 表单快照**（5 人日）—— `nb_approval_snapshot`，值带定义一起冻住（v1.13）
+- [ ] **M9 状态机与聚合**（8 人日）
+  - [x] 5 态 `InstanceStatus`（Running/Suspended/Completed/Terminated/…）
+  - [ ] `nodeOutcomes` 会签 / 或签聚合（当前为**临时实现**）
+- [x] **M10 结论推导上移**（4 人日）—— 三级回落 `DECLARED → LAST_DECISION → FALLBACK`（v1.10）
+- [ ] **M11 平台存储**（12 人日）
+  - [x] 目录 / 字典 / 快照 / 时间线 / 客户端 / 租户 六类存储落地
+  - [ ] `nb_process_parameter`、`nb_parameter_snapshot`、`nb_idempotency`、`nb_external_task`、`nb_event_subscription`、`nb_audit_log` 六张表
+  - [ ] 幂等键从「全局」改为「按 client」
+- [ ] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来
+- [ ] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理；outbox 目前只写不发
+- [ ] **[!] M14 契约治理**（6 人日）—— OpenAPI 快照 + CI diff。**S5 的前置**
+- [ ] **M15 官方 SDK**（10 人日）—— `NetBpm.Platform.Client`（.NET）+ 生成 Java/TS
+- [x] **M16 客户端注册与隔离**（10 人日）—— `nb_api_client` + `IClientRegistry` + 认证中间件改造、密钥轮换、流程白名单、按 client 配额（v1.3 / v1.4）
+
+---
+
+## 3. 剩余任务（按可并行性分组）
+
+### ① S3 遗留三条尾巴 —— 无强依赖，随时可做
+
+- [x] 实例列表**升序**：引擎两个 Query 新增 `Descending`（排序与时间边界一起下推），平台游标按方向选上界/下界（v1.14）。仍保留「上万量级的租户/白名单内存过滤」问题，需自建实例索引表另做
+- [ ] `nb_approval_snapshot` 的**清理 / 归档策略**：必须与 `ACT_HI_*` 保留策略一起定，单独立一条会两边打架
+- [x] `writableBy` 的**写侧强制**（v1.14，见 §2 M7 与开头三条口径）
+
+### ② S2 欠账 —— 出关前建议补掉
+
+- [x] JWT 的 RS256 + JWKS（外部 IdP 直连）（v1.14）
+- [x] 引擎面 `/api/runtime` `/api/identity` `/api/designer` 按 `workflow:*` scope 逐条收紧（v1.15，只对 `AuthMode=Client` 生效；
+      管理动作经 `netbpm.admin.* ⇄ workflow:admin:*` 桥接；见开头 v1.15 四条口径）
+- [ ] 补 S2 出口用例：跨租户 404、密钥轮换期双活、幂等重放、纯服务 submit 403
+
+### ③ 写入型端点 —— 属 S4 面
+
+- [ ] `POST /instances/{id}/terminate`
+- [ ] `POST /tasks/{id}/claim` / `unclaim` / `transfer`
+- [ ] `GET /tasks/{id}/attachments`（只存引用，不做存储）
+- [ ] `GET /instances/{id}/diagram.svg`（高亮流转状态图）
+- [ ] `GET /instances/{id}/parameters`（参数快照）
+- [ ] `GET /processes/{key}/form/schema`
+- [ ] `/admin/v1/processes` 写路径（`IProcessCatalogStore` 目前无写方法）
+- [ ] **前置规矩**：跳转 / 终止也要写时间线条目，否则审计出现断档
+
+### ④ S4 独立部署（最大一块）
+
+- [ ] **[!]** M12 外部任务 + 表 `nb_external_task`
+- [ ] M13 事件投递（CloudEvents + 签名 + 订阅）+ 表 `nb_event_subscription`
+- [ ] M11 平台存储收尾：六张 `nb_*` 表 + 幂等键按 client
+- [ ] 全局（跨实例）配额改 Redis 版（现为进程内计数）
+- [ ] `Platform.Service` 容器化 + 一条含 `serviceTask` 的流程端到端跑通
+
+### ⑤ S5 治理与 SDK
+
+- [ ] M14 契约治理：OpenAPI 快照 + CI diff（`contracts/` 目录 + CI 脚本）
+- [ ] M15 官方 SDK：.NET 优先，再生成 TS / Java
+- [ ] M3 收尾：Decorator 迁移 / 删除，`WorkflowEndpointOptions` 标 `[Obsolete]`
+- [ ] 配额与限流看板、审计、SLO、迁移与接入文档（Runbook）
+
+---
+
+## 4. 业务面端点（§5.1 `/workflow/v1`）
+
+| 方法 | 路径 | Scope | 状态 |
+|---|---|---|---|
+| GET | `/processes` | `workflow:process:read` | [x] v1.4 |
+| GET | `/processes/{key}` | 同上 | [x] v1.4 |
+| GET | `/processes/{key}/definition` | 同上 | [x] v1.4 |
+| GET | `/processes/{key}/versions` | 同上 | [x] v1.4 |
+| GET | `/processes/{key}/diagram.svg` | 同上 | [x] v1.4 |
+| GET | `/processes/{key}/parameters/schema` | 同上 | [x] v1.5 |
+| GET | `/processes/{key}/form/schema` | 同上 | [ ] |
+| POST | `/instances` | `workflow:instance:start` | [x] v1.9（幂等） |
+| GET | `/instances` | `workflow:instance:read` | [x] v1.11（cursor） |
+| GET | `/instances/{id}` | 同上 | [x] v1.8 |
+| GET | `/instances/{id}/history` | `workflow:history:read` | [x] v1.10 |
+| GET | `/instances/{id}/diagram.svg` | `workflow:instance:read` | [ ] |
+| GET | `/instances/{id}/parameters` | 同上 | [ ] |
+| POST | `/instances/{id}/terminate` | `workflow:instance:terminate` | [ ] |
+| GET | `/tasks`（`scope=MINE\|CLAIMED\|ALL`；`DONE` 为已办，另需 `history:read`） | `workflow:task:read` | [x] v1.7 / v1.12 |
+| GET | `/tasks/{id}` | 同上 | [x] v1.7 |
+| GET | `/tasks/{id}/form` | 同上 | [x] v1.13 |
+| POST | `/tasks/{id}/submit` | `workflow:task:submit` | [x] v1.8（幂等） |
+| POST | `/tasks/{id}/claim` | `workflow:task:assign` | [ ] |
+| POST | `/tasks/{id}/unclaim` | 同上 | [ ] |
+| POST | `/tasks/{id}/transfer` | 同上 | [ ] |
+| GET | `/tasks/{id}/attachments` | `workflow:task:read` | [ ] |
+| ~~GET~~ | ~~/history/tasks~~ | — | [x] v1.12 起**收敛到 `/tasks?scope=DONE`**，不单开历史端点 |
+
+管理面 `/admin/v1`：租户 / 客户端 / 轮换 / 注销已落（v1.3 过渡形态）；`/processes`、`/dictionaries`、`/audit`、`/subscriptions`、`/events/deadletters`、`/quotas` 未落。
+
+---
+
+## 5. 平台表（§7.1）
+
+- [x] `nb_tenant`（一期固定一行 `default`，列不可为空）
+- [x] `nb_api_client`（双密钥并存 7 天做轮换）
+- [x] `nb_client_process_grant`（独立表，便于按 `process_key` 反查影响面）
+- [x] `nb_process_catalog`（目录覆盖层，无行则由 BPMN 派生）
+- [x] `nb_approval_dictionary`
+- [x] `nb_instance_timeline`（append-only，唯一索引 `(process_instance_id, seq)`）
+- [x] `nb_approval_snapshot`
+- [ ] `nb_process_parameter`
+- [ ] `nb_parameter_snapshot`
+- [ ] `nb_idempotency`
+- [ ] `nb_external_task`
+- [ ] `nb_event_subscription`
+- [ ] `nb_audit_log`
+
+---
+
+## 6. 守门测试清单（§9）
+
+**契约层**
+- [ ] `ContractSnapshotTests` —— 提交的 `openapi.v1.json` 与代码生成结果字节一致
+- [x] `ContractSerializationTests` ✅（`PlatformContractTests`）
+- [ ] `CompatibilityTests` —— 上一版 SDK 打新服务全部端点通过
+
+**语义层**
+- [ ] `DecisionVocabularyTests` —— 部分被 `TaskSubmitTests` 覆盖；**会签聚合 `ALL_APPROVED` 未测**
+- [x] `SubmitValidationTests` ✅（`TaskSubmitTests`）
+- [x] `InstanceConclusionTests` ✅
+- [x] `TimelineTests` ✅（`ApprovalTimelineTests`）
+- [x] `ParameterSchemaTests` ✅（`InstanceStartTests` + `ParameterOverridesTests`）
+- [x] `InstanceListTests` ✅
+- [x] `InstanceListCompletedTests` ✅
+- [x] `HistoryVisibilityTests` ✅
+- [x] `ApprovalSnapshotTests` ✅
+- [x] `ParameterOverridesTests` ✅
+- [x] `ParticipantIndexTests` ✅
+- [x] `DeployGuardTests` ✅（`ApprovalVocabularyTests`）
+
+**安全层**
+- [ ] `IdentityTests` —— 无凭据 401 / 头身份在 Production 被忽略 / `client_credentials` submit → 403
+- [ ] `ClientRegistryTests` —— 未注册 401 / `Suspended`/`Revoked` 401 / 轮换过渡期双密钥可用
+- [x] `ClientProcessGrantTests` ✅（`ProcessCatalogTests`）
+- [ ] `TenantIsolationTests` —— A 租户查 B 租户实例 → 404（不是 403）
+- [x] `QuotaTests` ✅（`RateLimitByClientTests`）
+
+**一致性 / 异步 / 性能**
+- [ ] `IdempotencyTests` —— 同键同体 200 + `Idempotent-Replay: true` 且只产生一个实例；同键异体 409
+- [ ] `DualModeTests` —— 同一 BPMN 在嵌入式与独立服务下 timeline 语义等价
+- [ ] `ExternalTaskTests` —— 锁过期后可被另一 worker 取走；`retries=0` 进死信
+- [ ] `WebhookTests` —— 签名可验证 / 按 `eventId` 去重 / 死信可重放
+- [ ] `LoadTests` —— 读 p95 < 80ms、写 p95 < 200ms（100 并发，MySQL 5.7）
+
+> v1.14 新增：`ParameterWriteTests`（8 项，`writableBy` 写侧）、`JwtRs256Tests`（5 项，RS256 / JWKS / 算法白名单 / 外部公钥集缓存）。
+>
+> 另有已落地但不在 §9 表内的类：`ClientAuthenticationTests`（15 项）、`ProcessCatalogTests`（14 项）、
+> `DatabaseScriptTests`（14 项）、`PlatformClientRegistryTests`、`ApprovalVocabularyTests`（8 项）、
+> `TaskCatalogTests`、`InstanceCatalogTests`、`InstanceStartTests`、`RateLimitByClientTests`、`HistoryVisibilityTests`。
+
+---
+
+## 7. 八个硬缺口（§1.2）闭环情况
+
+| 缺口 | 状态 | 依据 |
+|---|---|---|
+| A 两套对外模型并存 | ✅ | `Platform.Contracts` 成为对外唯一真源 |
+| B 单流程绑定的宿主式端点 | ✅ | `IProcessCatalog` + `{processKey}` 路由（读半边） |
+| C 响应体可变 | 🟡 | 平台面已强类型；旧 `Decorate*` 还在（M3 未收尾） |
+| D 审批结论魔法数字 | ✅ | 语义字典打破 1/2/3，可声明任意自定义选项 |
+| E 参数无 schema | ✅ | schema + `netbpm:parameters` 覆盖 + **写侧按 `writableBy` 拒绝**（v1.14） |
+| F 身份只有「一个人」 | ✅ | 三元组 `caller/subject/tenant` |
+| G 委托在宿主进程内 | ❌ | **外部任务未做**（M12），独立部署仍跑不了 `serviceTask` |
+| H 无契约治理 | 🟡 | 有 `/v1` 前缀与错误码总表；无 OpenAPI 快照与 CI diff |
+
+---
+
+## 8. 明确不做（§10）
+
+1. ❌ 通用 BPMN 全语法（保持现有子集）
+2. ❌ 表单引擎 / 表单设计器（参数 schema 只服务校验）
+3. ❌ 附件存储（只存引用）
+4. ❌ 把 `/api/runtime` 的 `identity-links`/`revision`/`variables` 塞进业务面
+5. ❌ SOAP / XML over HTTP（BPMN XML 只作「定义原文」返回）
+6. ❌ 在 `v1` 内做语义开关（`?legacy=true`）—— 要兼容就开新主版本
+
+---
+
+## 9. 执行时的硬约束（踩过的坑）
+
+- **红线**：不改 `ACT_*` 表（13 张保留表由 `DatabaseScriptTests` 守着）；需加列走独立幂等 `alter`。
+  平台表统一 `nb_` 前缀，由 `tools/NetBpm.DbInit/Schema/SchemaCatalog` 生成 —— **别手改 `db/*.sql`**。
+- **无迁移记录表**：新增 `nb_*` 表后老库必须重跑 `DbMigrate migrate` 才补得出来，**缺表只降级不报错**。
+- **租户列不可回收**：一期就按 `tenant_id NOT NULL` 建（默认 `default`）。
+- 脚本与文档统一 **CRLF + UTF-8 无 BOM**（`.editorconfig`）。
+- **测试口径**：涉及 `ACT_HI_*` 的用例（参与者索引、已办、结论）必须跑 **MySQL + 历史宿主**；
+  内存宿主 `EnableHistory=false`，会得到「我没审过任何单」这类安静的错误答案。
+- **集成测试绝不能不加 `-class` 全跑**（`EngineTableCleaner.Purge` 清库）。
+- `ACT_HI_IDENTITYLINK` 的任务级候选行 `PROC_INST_ID_` 为空（候选组只有任务级行），
+  按人下推必须 `left join ACT_HI_TASKINST on t.ID_ = l.TASK_ID_` + `coalesce(...)`，否则整类漏。
+
+---
+
+## 10. 建议的下一步顺序
+
+1. ~~先补 **S2 欠账**~~ —— RS256 / JWKS（v1.14）与引擎面 `/api/**` 的 scope 收口（v1.15）都已完成。
+   **只剩三条出口用例**（幂等重放、纯服务 submit 403、密钥轮换期双活）：它们不加新能力，只把已有行为钉住，
+   属于「出关前必须有」而不是「做大功能前必须有」。
+   顺带定一件事：引擎面 `complete` 不写时间线这条残留（见 v1.15 口径 4），要么补时间线，要么对 `Client` 关闭写原语。
+2. ~~再清 **S3 三条尾巴**~~ —— 升序与 `writableBy` 写侧已完成（v1.14）。
+   **只剩 `nb_approval_snapshot` 的清理 / 归档策略**，它必须与 `ACT_HI_*` 的保留策略一起定，
+   单独立一条会两边打架（建议与 `AdminArchiveCleanupService` 共用同一个保留期配置）。
+3. 然后判断是否需要 **S4**：只有「引擎独立部署给别人用」才必须做，门槛全在 **M12 外部任务**；
+4. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
+
+> 若目标只是「让内部系统统一走一套干净 API」，做到第 1 步的引擎面收口即可收口，S4/S5 可以整体后移。
