@@ -69,6 +69,11 @@ public readonly record struct RateLimitDecision(
 /// 按分区键计数的<b>固定窗口</b>限流器（进程内）。
 /// </summary>
 /// <remarks>
+/// 配额只在<b>本进程</b>内累加：多副本部署时总配额 = 副本数 × 配置值。
+/// 需要跨副本的全局配额时把配置切到 <see cref="RateLimitStore.Redis"/>
+/// （实现见 <see cref="RedisFixedWindowRateLimiter"/>），中间件不用改。
+/// </remarks>
+/// <remarks>
 /// <para>
 /// 为什么不用框架自带的 <c>RateLimiter</c>：它只提供 <c>RetryAfter</c> 元数据，
 /// 拿不到 <c>Remaining</c>，而「还剩多少次」恰恰是调用方最需要的（避免盲重试把配额打光）。
@@ -79,12 +84,8 @@ public readonly record struct RateLimitDecision(
 /// 对本场景可接受——目的是「防脚本失控 / 防爆破」，不是精确计费；
 /// 换成滑动窗口会让实现复杂一个量级，而计费口径本来就不该看这里。
 /// </para>
-/// <para>
-/// ⚠️ 进程内实现：多实例部署时每个实例各算一份，总配额 = 实例数 × 配置值。
-/// 需要全局配额时应把本类换成分区在 Redis 上的实现（接口不变）。
-/// </para>
 /// </remarks>
-public sealed class FixedWindowRateLimiter
+public sealed class FixedWindowRateLimiter : IRateLimiter
 {
     private static readonly TimeSpan WindowSize = TimeSpan.FromMinutes(1);
 
@@ -152,6 +153,18 @@ public sealed class FixedWindowRateLimiter
 
             return new RateLimitDecision(true, permitLimit, permitLimit - window.Count, resetAfter, Counted: true);
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>进程内实现同步完成，返回已完成的 <see cref="ValueTask{TResult}"/>。</remarks>
+    public ValueTask<RateLimitDecision> AcquireAsync(
+        string partitionKey,
+        int permitLimit,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return new ValueTask<RateLimitDecision>(Acquire(partitionKey, permitLimit));
     }
 
     /// <summary>清理已过期的窗口（周期性调用或测试用）。</summary>

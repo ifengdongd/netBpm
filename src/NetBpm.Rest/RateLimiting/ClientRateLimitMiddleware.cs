@@ -41,16 +41,16 @@ public sealed class ClientRateLimitMiddleware
     private static readonly string[] LimitedPrefixes = ["/api", "/workflow", "/engine", "/admin"];
 
     private readonly RequestDelegate _next;
-    private readonly FixedWindowRateLimiter _limiter;
+    private readonly IRateLimiter _limiter;
     private readonly ClientRateLimitOptions _options;
 
     /// <summary>构造。</summary>
     /// <param name="next">下一个中间件。</param>
-    /// <param name="limiter">计数器。</param>
+    /// <param name="limiter">计数器（进程内 / Redis，由 <c>NetBpm:RateLimit:Store</c> 决定）。</param>
     /// <param name="options">配置。</param>
     public ClientRateLimitMiddleware(
         RequestDelegate next,
-        FixedWindowRateLimiter limiter,
+        IRateLimiter limiter,
         ClientRateLimitOptions options)
     {
         ArgumentNullException.ThrowIfNull(next);
@@ -77,7 +77,9 @@ public sealed class ClientRateLimitMiddleware
         }
 
         var partition = Resolve(context, identity);
-        var decision = _limiter.Acquire(partition.Key, partition.Limit);
+        var decision = await _limiter
+            .AcquireAsync(partition.Key, partition.Limit, context.RequestAborted)
+            .ConfigureAwait(false);
 
         if (decision.Counted)
         {

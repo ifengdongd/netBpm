@@ -18,6 +18,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <!-- 全局配额（NetBpm:RateLimit:Store=Redis）用；内存形态下不会建连 -->
+    <PackageReference Include="StackExchange.Redis" />
     <!-- 可选 OTel 接线（默认关闭）：见 Diagnostics/OpenTelemetryExtensions -->
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />

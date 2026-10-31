@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using NetBpm.Persistence;
 using NetBpm.Rest.Auditing;
@@ -24,11 +25,21 @@ namespace NetBpm.Rest.Hosting;
 /// </summary>
 public sealed class NetBpmHostOptions
 {
-    /// <summary>限流配置节前缀（键：<c>Enabled</c> / <c>ApiPerMinute</c> / <c>ProbePerMinute</c> / <c>LoginPerMinute</c> / <c>ClientPerMinute</c>）。</summary>
+    /// <summary>限流配置节前缀（键：<c>Enabled</c> / <c>Store</c> / <c>ApiPerMinute</c> / <c>ProbePerMinute</c> / <c>LoginPerMinute</c> / <c>ClientPerMinute</c> / <c>Redis:*</c>）。</summary>
     public string RateLimitSection { get; set; } = "NetBpm:RateLimit";
 
     /// <summary>是否启用限流（被配置节 <c>Enabled</c> 覆盖）。</summary>
     public bool RateLimitEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 配额计数器的形态（被配置节 <c>Store</c> 覆盖）。
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <see cref="RateLimitStore.Memory"/> 只在<b>单副本</b>下正确：多副本时每个副本各算一份，
+    /// 实际配额 = 副本数 × 配置值。默认取内存是为了「不改配置也能跑」，
+    /// 独立部署（<c>Platform.Service</c>）多副本时必须显式设成 <see cref="RateLimitStore.Redis"/>。
+    /// </remarks>
+    public RateLimitStore RateLimitStore { get; set; } = RateLimitStore.Memory;
 
     /// <summary>普通 <c>/api</c> 请求每 IP 每分钟上限。</summary>
     public int ApiPerMinute { get; set; } = 600;
@@ -85,6 +96,7 @@ public static class NetBpmHost
         var section = options.RateLimitSection;
 
         options.RateLimitEnabled = configuration.GetValue($"{section}:Enabled", options.RateLimitEnabled);
+        options.RateLimitStore = configuration.GetValue($"{section}:Store", options.RateLimitStore);
         options.ApiPerMinute = configuration.GetValue($"{section}:ApiPerMinute", options.ApiPerMinute);
         options.ProbePerMinute = configuration.GetValue($"{section}:ProbePerMinute", options.ProbePerMinute);
         options.LoginPerMinute = configuration.GetValue($"{section}:LoginPerMinute", options.LoginPerMinute);
@@ -180,7 +192,7 @@ public static class NetBpmHost
         {
             // 关闭限流也要注册选项与计数器：中间件不装、依赖仍然可解析（测试里会注入断言）
             builder.Services.AddSingleton(new ClientRateLimitOptions { Enabled = false });
-            builder.Services.AddSingleton(_ => new FixedWindowRateLimiter(1024));
+            builder.Services.AddSingleton<IRateLimiter>(_ => new FixedWindowRateLimiter(1024));
         }
 
         return options;
@@ -400,8 +412,11 @@ public static class NetBpmHost
     /// </list>
     /// </summary>
     /// <remarks>
-    /// 计数器是进程内的固定窗口：多实例部署时总配额 = 实例数 × 配置值。
-    /// 需要全局配额时把 <see cref="FixedWindowRateLimiter"/> 换成分区在 Redis 上的实现，中间件不用改。
+    /// 计数器形态由 <see cref="NetBpmHostOptions.RateLimitStore"/> 决定：
+    /// <list type="bullet">
+    ///   <item><description><see cref="RateLimitStore.Memory"/>：进程内固定窗口，单副本正确；</description></item>
+    ///   <item><description><see cref="RateLimitStore.Redis"/>：跨副本共享同一个桶，配额才是全局的。</description></item>
+    /// </list>
     /// </remarks>
     private static void AddRateLimiting(WebApplicationBuilder builder, NetBpmHostOptions options)
     {
@@ -415,7 +430,24 @@ public static class NetBpmHost
         };
 
         builder.Services.AddSingleton(rateLimit);
-        builder.Services.AddSingleton(provider => new FixedWindowRateLimiter(
+
+        var section = options.RateLimitSection;
+
+        if (options.RateLimitStore == RateLimitStore.Redis)
+        {
+            builder.Services.AddOptions<RedisRateLimitOptions>()
+                .Bind(builder.Configuration.GetSection(section + ":Redis"));
+
+            // 惰性建连：与作业队列同理，不在启动时同步连接 Redis（连不上不该拖慢启动）
+            builder.Services.AddSingleton<IRateLimiter>(provider => new RedisFixedWindowRateLimiter(
+                provider.GetRequiredService<IOptions<RedisRateLimitOptions>>().Value,
+                provider.GetService<TimeProvider>(),
+                provider.GetService<ILogger<RedisFixedWindowRateLimiter>>()));
+
+            return;
+        }
+
+        builder.Services.AddSingleton<IRateLimiter>(provider => new FixedWindowRateLimiter(
             rateLimit.MaxPartitions,
             provider.GetService<TimeProvider>()));
     }

@@ -35,6 +35,7 @@ public static class PlatformServiceGuards
 
         VerifyDatabase(configuration);
         VerifyJobQueue(configuration);
+        VerifyRateLimit(configuration);
         VerifyCredentialMaterials(configuration);
     }
 
@@ -89,6 +90,30 @@ public static class PlatformServiceGuards
     }
 
     /// <summary>
+    /// 全局配额写了 Redis 却没地址时，限流会静默退化（Redis 不可用时默认放行），
+    /// 结果就是「配了全局配额、实际没有限流」——比直接报错难查得多。
+    /// </summary>
+    private static void VerifyRateLimit(IConfiguration configuration)
+    {
+        var store = configuration["NetBpm:RateLimit:Store"];
+
+        if (!string.Equals(store, "Redis", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var connectionString = configuration["NetBpm:RateLimit:Redis:ConnectionString"];
+        var host = configuration["NetBpm:RateLimit:Redis:Host"];
+
+        if (string.IsNullOrWhiteSpace(connectionString) && string.IsNullOrWhiteSpace(host))
+        {
+            throw new InvalidOperationException(
+                "配额存储配置为 Redis（NetBpm:RateLimit:Store=Redis）但没有地址。"
+                + "请设置 NetBpm__RateLimit__Redis__ConnectionString 或 ...Redis__Host。");
+        }
+    }
+
+    /// <summary>
     /// 要求凭据就必须至少有一种校验材料，否则每个接口都以 401 收场，
     /// 而健康检查仍然通过 —— 从编排视角看一切正常。
     /// </summary>
@@ -137,19 +162,29 @@ public static class PlatformServiceGuards
         // 启动横幅不是仪式感：排障时第一个被问到的永远是「这个容器到底连的哪个库、
         // 用的什么队列、有没有开凭据」，而这些都是运行时读到的值，日志里留下一条最省事。
         var queue = configuration["NetBpm:Jobs:Queue:Provider"] ?? "Memory";
+        var quotaStore = configuration["NetBpm:RateLimit:Store"] ?? "Memory";
         var requireCredential = configuration.GetValue("NetBpm:Security:RequireCredential", false);
         var wire = options.UsesDatabase
             ? $"{configuration["NetBpm:DatabaseType"]}"
             : "InMemory（数据不持久！）";
 
         logger.LogInformation(
-            "NetBpm Platform.Service 就绪：env={Environment} wire={Wire} history={History} outbox={Outbox} queue={Queue} requireCredential={RequireCredential}",
+            "NetBpm Platform.Service 就绪：env={Environment} wire={Wire} history={History} outbox={Outbox} queue={Queue} quota={Quota} requireCredential={RequireCredential}",
             app.Environment.EnvironmentName,
             wire,
             options.EnableHistory,
             options.EnableOutbox,
             queue,
+            quotaStore,
             requireCredential);
+
+        if (string.Equals(quotaStore, "Memory", StringComparison.OrdinalIgnoreCase))
+        {
+            // 多副本下内存配额的实际上限 = 副本数 × 配置值，而每个副本的日志看起来都是「没超」
+            logger.LogWarning(
+                "配额为进程内计数（NetBpm:RateLimit:Store=Memory）：多副本部署时实际配额 = 副本数 × 配置值。"
+                + "多副本请设 NetBpm__RateLimit__Store=Redis 并配置 NetBpm__RateLimit__Redis__*。");
+        }
 
         if (!requireCredential)
         {
