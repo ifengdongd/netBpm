@@ -1,12 +1,37 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.18 小节
+> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.19 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.19 本轮落地（2026-10-31，S4 收官：收窄幂等 + 容器化 + 端到端演示）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **幂等键按调用主体收窄** | `IdempotencyMiddleware.ToStorageKey`：幂等键是表主键、全局唯一，两个接入方各用自己的键（`order-1001-submit` 这类「业务单号+步骤」）迟早撞车；撞上后后到的一方拿到 409「已用于另一个请求」，而它明明是第一次调用，换自己的键却要等 24 小时过期。按 `caller → subject → tenant` 收窄命名空间，形态保持可读（`Anon` 分支 / `c\u001f{clientId}\u001f{key}`），超列宽才退化为哈希 | `IdempotencyNamespaceTests`（3 项：同主体回放 / **跨主体同键各走各的** / 跨租户不撞） |
+| **`Platform.Service` 生产宿主** | `src/NetBpm.Platform.Service`：与 `NetBpm.Rest`（演示宿主）分开，因为两者默认值相反 —— 演示要「一行命令跑起来」，独立部署要「宁可起不来也不能起来却是残的」。同一套开关切安全基线，迟早出「忘了设 RequireCredential」的事故 | 本机以容器形态实跑：`/health` ok、`/health/ready` → `database=MySql`、`PORT` 生效 |
+| **启动自检（fail fast）** | `PlatformServiceGuards.VerifyConfiguration`，**早于 `AddNetBpmHost`**（引擎也会检查连接串，但给的是技术文案）：① 数据库模式无连接串 → 抛（否则静默退化成内存引擎，数据随容器消失）② 队列配了 Redis 却没地址 → 抛（否则退化内存队列，多副本下同一作业执行多次）③ 要求凭据却没有任何校验材料 → 抛（否则所有 `/api/**` 401 而健康检查仍绿）。启动横幅打印生效配置 | 缺连接串时非 0 退出，文案给出可直接照抄的 `NetBpm__ConnectionString` |
+| **容器化** | `deploy/Dockerfile`（多阶段 + 非 root + entrypoint 用 `exec` 保信号 + healthcheck 打 `/health` 而非 `/health/ready`）+ `deploy/docker-compose.yml`（MySQL / Redis / platform / worker）+ 仓库根 `.dockerignore` | 本机无 docker 引擎，改用进程形态等价验证（见下） |
+| **外部任务 worker** | `samples/NetBpm.ExternalWorker` —— **刻意不引用任何 NetBpm 工程**，只靠 HTTP+JSON：轮询 fetch → 处理 → complete / failure。**worker 内不做重试**，退避与死信全在服务端；网络异常时不回执也不本地重做，放任锁到期由服务端回收 | `run-demo.sh` 实跑全链路 |
+| **含 serviceTask 的端到端演示** | `processes/external-task-demo.bpmn20.xml`：`开始 → 通知(notify) → 开票(invoice) → 复核(userTask) → 结束`，两个服务节点都没有 `activiti:class`，只有 `topic` | 演示脚本全绿（见下） |
+
+**端到端实跑结果（两个独立进程，非 docker，用的是同一套组合根）：**
+
+```
+⑤ worker 拉走两个服务节点 → 出现「复核」待办          ✅ 实现代码不在引擎进程里
+⑥ simulateFailure=true → 3 次退避重试 → 进 DEAD_LETTER ✅ 失败绝不跳过节点
+  失败实例的当前待办：[]                              ✅ 流程停在原地
+  管理员重投 POST /external-tasks/{id}/retry → 204    ✅ 闭环
+```
+
+**仍未做：** 订阅投递的可观测看板（`netbpm.event.delivery` 指标已埋点，没有面板与告警规则）、
+单个订阅的独立限速（`nb_event_delivery.next_attempt_at` 已留列，当前不参与判定）。
 
 ---
 
@@ -36,8 +61,10 @@
    订阅密钥等价于「能伪造 NetBpm 通知」的凭据；另外 PATCH 不接受 `secret`，换密钥必须走 `/rotate` ——
    混在通用更新里容易出现「以为改了地址结果把密钥也换了」的事故。
 
-**仍未做（S4 收尾）：** `Platform.Service` 容器化、一条含 `serviceTask` 的端到端演示流程、
-订阅投递的可观测看板（`netbpm.event.delivery` 指标已埋点，没有面板与告警规则）、
+**v1.19 已收完这道：** `Platform.Service` 宿主 + 容器化（Dockerfile / compose）+ 一条含 `serviceTask` 的端到端演示，
+并顺手修掉幂等键跨接入方撞车。详见下面 v1.19 小节。
+
+**仍未做（S5 范畴）：** 订阅投递的可观测看板（`netbpm.event.delivery` 指标已埋点，没有面板与告警规则）、
 单个订阅的独立限速（`nb_event_delivery.next_attempt_at` 已留列，当前不参与判定）。
 
 ---
@@ -177,8 +204,8 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
-S4（独立部署）**主体已完成**：门槛项 M12 外部任务在 v1.17 落地、M12 收尾与 M13 事件投递在 v1.18 落地，
-缺的只剩 `Platform.Service` 容器化与端到端演示；S5（治理/SDK）未动。
+S4（独立部署）**已完成**：门槛项 M12 外部任务 v1.17、M12 收尾与 M13 事件投递 v1.18、
+`Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 v1.19；S5（治理/SDK）未动。
 八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）、
 G（委托进程内）已闭环**；C（响应强类型）只差 M3 的 Decorator 收尾，
 H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 CI diff 没有。
@@ -192,13 +219,13 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 未做** |
 | S2 身份与授权 | 4 周 | 🟢 完成（缺出口用例） | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
 | S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
-| S4 独立部署 | 4 周 | 🟢 主体完成（缺演示） | **门槛已破**：M12 外部任务（v1.17）+ 死信重投与告警 + M13 事件投递（v1.18）均已落地，含 `serviceTask` 的 BPMN 在独立部署下能跑通、事件能按订阅外发；仍缺 `Platform.Service` 容器化与端到端演示 |
+| S4 独立部署 | 4 周 | 🟢 **完成** | M12 外部任务（v1.17）+ 死信重投与告警 + M13 事件投递（v1.18）+ `Platform.Service` 宿主、容器化与端到端演示（v1.19）。含 `serviceTask` 的 BPMN 在独立部署下已实跑通过：worker 作为独立进程拉走任务并推流程，失败则停在原地不动 |
 | S5 治理与 SDK | 3 周 | ⬜ 未开始 | 阻塞于 **M14 契约治理** |
 
 - [x] S1 契约与骨架
 - [ ] S2 身份与授权（剩余见 §3 第 ② 组；RS256 已闭环）
 - [x] S3 业务标准
-- [ ] S4 独立部署
+- [x] S4 独立部署
 - [ ] S5 治理与 SDK
 
 ---
@@ -228,7 +255,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [ ] **M11 平台存储**（12 人日）
   - [x] 目录 / 字典 / 快照 / 时间线 / 客户端 / 租户 六类存储落地
   - [ ] `nb_process_parameter`、`nb_parameter_snapshot`、`nb_idempotency`、`nb_external_task`、`nb_audit_log` 五张表（`nb_event_subscription` / `nb_event_delivery` 已随 M13 落地）
-  - [ ] 幂等键从「全局」改为「按 client」
+  - [x] 幂等键从「全局」改为「按调用主体」 ✅ v1.19（`ToStorageKey`：caller → subject → tenant 回落）
 - [x] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来。✅ **v1.17 已落地**（`activiti:topic` + `nb_external_task` + 三条端点 + 死信）；v1.18 补齐死信重投端点与 `external_task.no_worker` / `external_task.dead_letter` 告警，见开头 v1.18 小节
 - [x] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理。✅ **v1.18 已落地**
   （`CloudEvent` + HMAC 签名、`CloudEventOutboxHandler`、`nb_event_subscription` / `nb_event_delivery`、订阅管理端点）；剩余：看板与单订阅限速，见开头 v1.18 小节
@@ -269,9 +296,10 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 
 - [x] **[!]** M12 外部任务 + 表 `nb_external_task` ✅ v1.17；死信重投端点与 `no_worker` / `dead_letter` 告警 ✅ v1.18
 - [x] M13 事件投递（CloudEvents + 签名 + 订阅）+ 表 `nb_event_subscription` / `nb_event_delivery` ✅ v1.18
-- [ ] M11 平台存储收尾：六张 `nb_*` 表 + 幂等键按 client
+- [x] `Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 ✅ v1.19（`deploy/Dockerfile` + `docker-compose.yml` + `samples/NetBpm.ExternalWorker`，已实跑）
+- [x] 幂等键按调用主体收窄（原「按 client」）✅ v1.19
+- [ ] M11 平台存储收尾：`nb_process_parameter` / `nb_parameter_snapshot` 两张表（`nb_idempotency` → `ACT_IDEMPOTENCY`、`nb_audit_log` → `admin_audit_log`、`nb_external_task` 均已存在）
 - [ ] 全局（跨实例）配额改 Redis 版（现为进程内计数）
-- [ ] `Platform.Service` 容器化 + 一条含 `serviceTask` 的流程端到端跑通
 
 ### ⑤ S5 治理与 SDK
 
@@ -434,11 +462,9 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
    至此 **S1 / S2 / S3 三条主线的技术项全部落地**，剩下的只是出口用例与 §3 ③ 的写入型端点。
 3. ~~现在只剩一个判断：要不要做 **S4**~~ —— 门槛项 **M12 外部任务已在 v1.17 落地**，
    「引擎独立部署给别人用」不再卡在「跑不了 `serviceTask`」上。
-   继续 S4 的话，下一步是 **`Platform.Service` 容器化 + 一条含 `serviceTask` 的端到端演示**
-   （M12 收尾与 M13 事件投递已在 v1.18 落地，S4 的技术项到此只剩「部署形态」与「演示」）；
-   若不做 S4，§3 ③ 的 `terminate` / `claim` / 参数快照 / `diagram.svg` 等端点可以先补——
-   它们都是「让业务面自己能闭环」的动作，不需要 S4 的前提。
-4. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
+   ~~继续 S4 的话，下一步是 `Platform.Service` 容器化 + 端到端演示~~ —— **已在 v1.19 完成并实跑**。
+4. 剩下的选项是 **S5（M14 契约治理 / M15 SDK）**，或回头补 M11 的两张平台表与 Redis 版全局配额。
+5. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
 > 引擎原语面对客户端只留读与管理干预。S4/S5 可以整体后移。
