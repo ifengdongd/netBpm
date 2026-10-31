@@ -10,6 +10,34 @@
 
 ---
 
+## v1.17 本轮落地（2026-10-31，S4 门槛：M12 外部任务）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **BPMN 支持 `activiti:topic`** | `BpmnConstants.AttributeTopic`、`ServiceTask.Topic` + `ServiceTaskImplementationType.ExternalTopic`；转换器读写与往返保真、加入 `KnownAttributes`（否则会被 `unknown-activiti-attribute` 警告） | `ExternalTaskTopicTests`（6 项：解析 / 往返 / 无实现报错 / **class 与 topic 并存报错** / 仅 topic 通过） |
+| **部署期「实现方式必有其一且只能有一个」** | `RequiredAttributesRule` 改为逐个属性判空：全无 → 报错；多于一个 → 报错（改一半没删干净是最容易埋雷的写法）。`ServiceTaskDelegateGuard` 跳过 topic 型，不再把它当「委托解析不到」 | 同上 |
+| **引擎侧外部任务** | `Engine/Jobs/ExternalTask`（实体 + `IExternalTaskBroker` + 内存实现）、`ExternalTaskActivityBehavior`（登记后**原地等待**、`TriggerAsync` 才离开）、三个命令（fetch / complete / failure） | `ExternalTaskTests`（7 项，内存宿主） |
+| **表 `nb_external_task`** | `SchemaCatalog` 定义 + 双方言脚本重生成；`DapperExternalTaskBroker`（SQL 抢占式领取） | `ExternalTaskDatabaseTests`（3 项，MySQL 5.7.44 真库） |
+| **端点** | `POST /api/runtime/external-tasks/fetch`（短轮询）/ `{id}/complete` / `{id}/failure` / `{id}/unlock`、`GET /external-tasks`；scope `workflow:external:task`（新增） | 同 `ExternalTaskTests`（含「缺 scope 403」） |
+
+**四条口径：**
+
+1. **不复用 `ACT_RU_JOB` / `IAsyncJobManager`**：异步作业是「引擎自己晚点做」，外部任务是「等别人做完」——
+   生命周期与重试语义都不同（作业失败引擎重跑，外部任务失败要 worker 决定还剩几次），共用一套表会互相污染。
+   只借用它的**租约模型**（`worker_id` ⇄ `LOCK_OWNER_`、`lock_expires_at` ⇄ `LOCK_EXP_TIME_`）。
+2. **失败绝不跳过节点**：重试耗尽进**死信**，流程原地不动。死信的意义就是让「这一步没做」显式可见 ——
+   悄悄跳过会让流程看起来办完了，而那一步从没执行过。
+3. **锁即归属**：complete / failure 都校验 `workerId` 且锁未过期，过期即视为不持有。
+   worker 崩溃不需要有人解锁（锁到期自动回收），但迟到的回执必须被拒 —— 否则一次调用产生两次推进。
+4. **租户必须收窄**：`ExternalTaskFetchRequest.TenantId` 非空即过滤，跨租户按 404（不是 403）处理。
+   A 租户的 worker 领到 B 租户的活，等于把别人的活干在别人的流程上。
+
+**仍未做（M12 之外的 S4 项）：** 管理端「死信重投」端点（`IExternalTaskBroker` 已有 `RetryDeadLetterAsync`，
+缺 HTTP 入口）、外部任务的指标与告警（无 worker 领取时 `external_task.no_worker` 尚未落地）、
+`Platform.Service` 容器化与端到端演示流程。
+
+---
+
 ## v1.16 本轮落地（2026-10-31，两处遗留风险定方向）
 
 | 项 | 决策 | 落点 | 验证 |
@@ -117,9 +145,9 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
-S4（独立部署）与 S5（治理/SDK）未动。
-八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）已闭环**；
-C（响应强类型）只差 M3 的 Decorator 收尾，G（委托进程内）卡在 M12 外部任务，
+S4（独立部署）**已过半**：门槛项 M12 外部任务在 v1.17 落地；S5（治理/SDK）未动。
+八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）、
+G（委托进程内）已闭环**；C（响应强类型）只差 M3 的 Decorator 收尾，
 H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 CI diff 没有。
 
 ---
@@ -131,7 +159,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 未做** |
 | S2 身份与授权 | 4 周 | 🟢 完成（缺出口用例） | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
 | S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
-| S4 独立部署 | 4 周 | ⬜ 未开始 | 阻塞于 **M12 外部任务** |
+| S4 独立部署 | 4 周 | 🟡 过半 | **门槛已破**：M12 外部任务已落地（v1.17），含 `serviceTask` 的 BPMN 在独立部署下能跑通；仍缺 M13 事件投递、`Platform.Service` 容器化与端到端演示 |
 | S5 治理与 SDK | 3 周 | ⬜ 未开始 | 阻塞于 **M14 契约治理** |
 
 - [x] S1 契约与骨架
@@ -168,7 +196,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
   - [x] 目录 / 字典 / 快照 / 时间线 / 客户端 / 租户 六类存储落地
   - [ ] `nb_process_parameter`、`nb_parameter_snapshot`、`nb_idempotency`、`nb_external_task`、`nb_event_subscription`、`nb_audit_log` 六张表
   - [ ] 幂等键从「全局」改为「按 client」
-- [ ] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来
+- [x] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来。✅ **v1.17 已落地**（`activiti:topic` + `nb_external_task` + 三条端点 + 死信），见开头 v1.17 小节；剩余收尾：死信重投的管理端点、`external_task.no_worker` 指标
 - [ ] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理；outbox 目前只写不发
 - [ ] **[!] M14 契约治理**（6 人日）—— OpenAPI 快照 + CI diff。**S5 的前置**
 - [ ] **M15 官方 SDK**（10 人日）—— `NetBpm.Platform.Client`（.NET）+ 生成 Java/TS
@@ -205,7 +233,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 
 ### ④ S4 独立部署（最大一块）
 
-- [ ] **[!]** M12 外部任务 + 表 `nb_external_task`
+- [x] **[!]** M12 外部任务 + 表 `nb_external_task` ✅ v1.17（见开头小节；剩死信重投端点与告警指标）
 - [ ] M13 事件投递（CloudEvents + 签名 + 订阅）+ 表 `nb_event_subscription`
 - [ ] M11 平台存储收尾：六张 `nb_*` 表 + 幂等键按 client
 - [ ] 全局（跨实例）配额改 Redis 版（现为进程内计数）
@@ -312,6 +340,10 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 > v1.16 新增：`ApprovalSnapshotPruneTests`（4 项，快照保留期的内存语义）+ `ApprovalSnapshotTests` 增加一条 MySQL 用例
 > （已在 MySQL 5.7.44 / `netbpm_ittest` 实跑通过，见 v1.16 小节的「真库验证」）。
 >
+> v1.17 新增：`ExternalTaskTopicTests`（6 项，`activiti:topic` 解析 / 往返 / 部署期互斥校验）、
+> `ExternalTaskTests`（7 项，内存宿主的外部任务闭环）、`ExternalTaskDatabaseTests`（3 项，MySQL 真库的
+> SQL 抢占 / payload 类型保真 / 失败退避与死信）。
+>
 > 另有已落地但不在 §9 表内的类：`ClientAuthenticationTests`（15 项）、`ProcessCatalogTests`（14 项）、
 > `DatabaseScriptTests`（14 项）、`PlatformClientRegistryTests`、`ApprovalVocabularyTests`（8 项）、
 > `TaskCatalogTests`、`InstanceCatalogTests`、`InstanceStartTests`、`RateLimitByClientTests`、`HistoryVisibilityTests`。
@@ -328,7 +360,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | D 审批结论魔法数字 | ✅ | 语义字典打破 1/2/3，可声明任意自定义选项 |
 | E 参数无 schema | ✅ | schema + `netbpm:parameters` 覆盖 + **写侧按 `writableBy` 拒绝**（v1.14） |
 | F 身份只有「一个人」 | ✅ | 三元组 `caller/subject/tenant` |
-| G 委托在宿主进程内 | ❌ | **外部任务未做**（M12），独立部署仍跑不了 `serviceTask` |
+| G 委托在宿主进程内 | ✅ | **外部任务已落地**（v1.17 / M12）：`activiti:topic` 的 serviceTask 交给 worker 拉走执行，独立部署不再要求把业务代码放进引擎进程。未注入 broker 时执行到该节点显式报错，不静默跳过 |
 | H 无契约治理 | 🟡 | 有 `/v1` 前缀与错误码总表；无 OpenAPI 快照与 CI diff |
 
 ---
@@ -366,8 +398,10 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
    属于「出关前必须有」而不是「做大功能前必须有」。
 2. ~~再清 **S3 三条尾巴**~~ —— 升序与 `writableBy` 写侧（v1.14）、快照保留策略（v1.16）都已完成。
    至此 **S1 / S2 / S3 三条主线的技术项全部落地**，剩下的只是出口用例与 §3 ③ 的写入型端点。
-3. 现在只剩一个判断：要不要做 **S4**。只有「引擎独立部署给别人用」才必须做，门槛全在 **M12 外部任务**；
-   在那之前，§3 ③ 的 `terminate` / `claim` / 参数快照 / `diagram.svg` 等端点可以先补——
+3. ~~现在只剩一个判断：要不要做 **S4**~~ —— 门槛项 **M12 外部任务已在 v1.17 落地**，
+   「引擎独立部署给别人用」不再卡在「跑不了 `serviceTask`」上。
+   继续 S4 的话，下一步是 **M13 事件投递**与 `Platform.Service` 容器化；
+   若不做 S4，§3 ③ 的 `terminate` / `claim` / 参数快照 / `diagram.svg` 等端点可以先补——
    它们都是「让业务面自己能闭环」的动作，不需要 S4 的前提。
 4. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
 

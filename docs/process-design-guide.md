@@ -332,13 +332,14 @@ var target = string.IsNullOrWhiteSpace(property.Variable) ? property.Id : proper
 
 ### 2.4 服务任务 `serviceTask`
 
-服务任务是自动化环节，用来处理业务数据。**必须指定实现方式**，三种选一：
+服务任务是自动化环节，用来处理业务数据。**必须指定实现方式**，四种选一（且只能写一个）：
 
 | 属性                            | 含义                        |
 | ----------------------------- | ------------------------- |
 | `activiti:delegateExpression` | 表达式求值出的**对象**作为委托（本流程用这个） |
 | `activiti:class`              | 类型名                       |
 | `activiti:expression`         | 表达式直接求值调用                 |
+| `activiti:topic`              | **外部任务**：引擎只登记一条待办，由外部 worker 拉走执行后回执（独立部署用这个，见 §2.4.1） |
 
 ```xml
 <bpmn:serviceTask id="task_approve_complete" name="审批通过" activiti:delegateExpression="leave.ApproveComplete">
@@ -392,6 +393,25 @@ builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly);
 > 部署期 `ServiceTaskDelegateGuard` 会把「名字写错 / 忘了注册」在启动时拦下来，而不是等流程跑到那儿。
 
 > 同一个委托被两条线汇入是允许的（`task_approve_complete` 有两条入流），引擎不会执行两次 —— 每次只有一条路径能走到它。
+
+### 2.4.1 外部任务 `activiti:topic`（独立部署）
+
+引擎独立部署时，业务代码不在引擎进程里 —— `class` / `delegateExpression` 无从解析。
+这类环节改用 `activiti:topic`：引擎执行到该节点只**登记一条外部任务**（`nb_external_task`）并原地等待，
+由外部 worker 拉走、干完、回执，引擎再推进流程。
+
+```xml
+<bpmn:serviceTask id="svc_invoice" name="开票" activiti:topic="invoice" />
+```
+
+- **领取**：`POST /api/runtime/external-tasks/fetch { workerId, topics, maxTasks, lockDurationMs, waitSeconds }`
+  —— 返回任务与领取时刻的**变量快照**，并加锁（`lockDurationMs` 内别人领不走）。
+- **成功回执**：`POST /api/runtime/external-tasks/{id}/complete { workerId, variables }`
+  —— 变量写回流程实例并推进；**不是持锁者或锁已过期 → 409**。
+- **失败回执**：`POST /api/runtime/external-tasks/{id}/failure { workerId, errorMessage, retries, retryAfter }`
+  —— 扣重试次数并按退避重新入队；**重试耗尽进死信，流程原地不动**（绝不会「失败即跳过节点」）。
+- worker 崩溃不需要有人解锁：锁到期自动回收，可被别的 worker 接管，迟到的回执会被拒绝。
+- 需要 scope `workflow:external:task`；`topic` 与 `class` / `delegateExpression` **不能同时写**（部署期报错）。
 
 ### 2.5 结束事件 `endEvent`
 
@@ -676,7 +696,7 @@ Demo 里变量是这样进去的：
 | `boundary-event-configuration` | 错误 | 边界事件没挂用户任务 / 挂了服务任务；`cancelActivity="false"`；无 timer；timeCycle；timeDuration / timeDate 非法或同时配置 | 按 §2.8 修正 |
 | `terminate-end-event` | 错误 | 终止结束事件配置了出流 | 删掉出流（见 §2.9） |
 | `expression-parseable` | 错误 | 条件、办理人、`dueDate`、`priority`、`skipExpression`、多实例表达式、定时值、监听器表达式的 EL 语法错误 | 按 §4 的语法修正 |
-| `required-attributes` | 错误 | 服务任务没写 `class` / `delegateExpression` / `expression` | 三选一补上 |
+| `required-attributes` | 错误 | 服务任务没写 `class` / `delegateExpression` / `expression` / `topic`，或同时写了多个 | 补上一个、删掉多余的（详见 §2.4） |
 | `listener-configuration` | 错误 | 监听器缺事件或取值非法（任务监听器不含 `delete`）；事件监听器缺 events / 实现 | 补全（见 §6.5） |
 | `unsupported-capability` | 错误 | **监听器**上的字段注入 `<activiti:field>`（服务任务字段注入已支持） | 监听器用构造函数/DI 拿依赖 |
 | `unknown-activiti-attribute` | 提示 | 出现引擎未实现的 `activiti:*` 属性（如 `asyncBefore` / `asyncAfter`） | 删掉；引擎按同步执行，写了不生效 |
@@ -768,7 +788,7 @@ builder.Services.Replace(ServiceDescriptor.Singleton<IUserGroupManager, DemoUser
 | `activiti:taskListener` | 用户任务 | `create` / `assignment`（实际指派了办理人时）/ `complete`（删除任务前，提交的变量已写入执行） | `ITaskListener.NotifyAsync(TaskListenerContext)` |
 | `activiti:eventListener` | 流程级 `extensionElements` | `events` 逗号分隔：`PROCESS_STARTED/COMPLETED`、`ACTIVITY_STARTED/COMPLETED`、`TASK_CREATED/COMPLETED` | `IEngineEventListener.OnEventAsync(WorkflowEngineEvent)`；`throwOnFailure=true` 对应 Java 端 `isFailOnException()` |
 
-- 实现方式三选一：`class` / `delegateExpression`（容器服务名，支持 ${name}）/ `expression`（EL 求值）；
+- 实现方式四选一：`class` / `delegateExpression`（容器服务名，支持 ${name}）/ `expression`（EL 求值）/ `topic`（外部任务，见 §2.4）；
 - 注册与服务任务委托同通道：`[ServiceTaskName("名字")]` + `AddServiceTaskDelegates` 扫描（监听器契约一并登记）；
 - 部署期 `listener-configuration` 校验事件与实现必填；`ServiceTaskDelegateGuard` 预解析委托（解析不到宿主起不来）；
 - Demo 样例：`Leave/WorkFlowListeners.cs`（对齐 Java 端 WorkFlowProcessListener / WorkFlowTaskCompletedListener），
