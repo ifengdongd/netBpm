@@ -1,0 +1,5 @@
+# 行尾约定：Windows 开发为主的仓库，默认按 CRLF（与 .editorconfig 一致），
+# 但 shell 脚本必须 LF —— shebang 行带了 \r 会直接变成
+#   bash: ./xxx.sh: /usr/bin/env: bad interpreter
+# runtime-demo 这类脚本在 CI（Linux runner）上也会因此起不来。
+*.sh text eol=lf

@@ -1,0 +1,109 @@
+# NetBpm 独立部署编排（S4 收官演示）
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+# 起四个容器：MySQL（流程库）+ Redis（多副本作业队列）+ platform（平台服务）+ worker（外部任务工作者）。
+# worker 与 platform 是两个进程、两份镜像层共享 —— 这正是外部任务的意义：
+# 「客户系统里的那一段逻辑」不进 NetBpm 的部署单元。
+#
+# ⚠️ 这一份是【演示档】：为让一条命令就能跑通，平台开了匿名访问
+#    （NetBpm__Security__RequireCredential=false）。生产档见 deploy/README.md。
+
+name: netbpm
+
+services:
+  # ─────────────── 流程库 ───────────────
+  mysql:
+    image: mysql:8.0
+    # MySQL 5.7 也可以：改 image: mysql:5.7 即可（建表脚本两个版本都验证过）
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-netbpm}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-netbpm}
+      MYSQL_ROOT_HOST: '%'
+    command:
+      # 幂等脚本用的是 utf8mb4；不指定排序规则在 8.0 下会拿到 utf8mb4_0900_ai_ci，
+      # 索引长度与 5.7 的 utf8mb4_general_ci 不同，混部时会踩到长度限制。
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # 主机 NAT / 隧道场景下短包会被丢弃，这是容器化 MySQL 最常见的「连不上」
+      - --max_allowed_packet=64M
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:-netbpm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ─────────────── 作业队列（多副本时才真正需要） ───────────────
+  redis:
+    image: redis:7-alpine
+    # 只监听内网：容器网络里没有 「公网」这回事，暴露出去只是多一个攻击面
+    command: ["redis-server", "--save", "60", "1", "--requirepass", "${REDIS_PASSWORD:-netbpm}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-netbpm}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ─────────────── 平台服务 ───────────────
+  platform:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: src/NetBpm.Platform.Service/NetBpm.Platform.Service.csproj
+        APP_DLL: NetBpm.Platform.Service.dll
+    image: netbpm/platform:latest
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 双下划线代替冒号：容器内最省事的配置覆盖写法，无需挂载配置文件
+      NetBpm__ConnectionString: "Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-netbpm};User ID=root;Password=${MYSQL_ROOT_PASSWORD:-netbpm};Allow User Variables=true;"
+      NetBpm__DatabaseType: "MySql"
+      NetBpm__UseInMemoryExecutionTree: "false"
+      # 首启自动建表（幂等脚本只补缺的东西）。生产建议：先手跑 DbMigrate migrate，再关掉
+      NetBpm__AutoMigrate: "true"
+      NetBpm__EnableHistory: "true"
+      NetBpm__EnableOutbox: "true"
+      # 多副本部署时这一项必须 Redis：内存队列会让每个副本各自执行同一批作业
+      NetBpm__Jobs__Queue__Provider: "Redis"
+      NetBpm__Jobs__Queue__Redis__ConnectionString: "redis:6379,password=${REDIS_PASSWORD:-netbpm}"
+      # 演示档：关闭凭据校验。生产请置 true 并注册接入客户端（deploy/README.md）
+      NetBpm__Security__RequireCredential: "false"
+      NetBpm__Security__Clients__Enabled: "true"
+    ports:
+      - "${PLATFORM_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  # ─────────────── 外部任务 worker（客户系统侧） ───────────────
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: samples/NetBpm.ExternalWorker/NetBpm.ExternalWorker.csproj
+        APP_DLL: NetBpm.ExternalWorker.dll
+    image: netbpm/worker:latest
+    depends_on:
+      platform:
+        condition: service_healthy
+    environment:
+      NetBpm__BaseUrl: "http://platform:8080"
+      NetBpm__WorkerId: "worker-container-1"
+      # 逗号分隔：Program.cs 会把它摊平回数组（环境变量给不了数组）
+      NetBpm__Topics: "invoice,notify"
+      NetBpm__PollIntervalSeconds: "5"
+      NetBpm__LockDurationMs: "120000"
+      # 演示档不需要；生产档填 nbc.{clientId}.{secret}
+      NetBpm__ApiKey: ""
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

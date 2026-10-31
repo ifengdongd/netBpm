@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NetBpm.ExternalWorker</RootNamespace>
+    <AssemblyName>NetBpm.ExternalWorker</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    🔑 这里刻意【不引用任何 NetBpm 工程】。
+
+    外部任务的意义就是「实现代码在客户系统里」：worker 与引擎之间没有共享类型，
+    只有 HTTP 与 JSON。一旦这里 ProjectReference 了引擎，演示就会骗人 ——
+    看起来解耦了，实际把两边的部署又绑回同一个二进制。
+
+    真实场景里这个进程可以是 Go / Java / Python 写的，本工程只是其中一种参考实现。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 演示流程定义：跑 demo 时把它 POST 到 /api/designer/deploy。
+         放在 worker 侧正是解耦的体现 —— 流程定义也可以由客户系统自己提交。 -->
+    <None Include="processes\external-task-demo.bpmn20.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

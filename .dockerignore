@@ -1,0 +1,25 @@
+# 构建上下文瘦身（必须放在 build context 根目录，即本仓库根）。
+# 这些目录在构建里毫无用处，却占了绝大部分体积
+# （artifacts/bin/obj 里有上千个 dll，web 里是 npm 生态）。
+# 没有 .dockerignore 时一次 docker build 要先打包几百兆传给守护进程。
+
+**/.git
+**/.github
+**/bin/
+**/obj/
+**/node_modules/
+
+artifacts/
+TestResults/
+tests/
+tools/
+doc/
+docs/
+web/
+samples/*/bin/
+samples/*/obj/
+
+# 本机临时日志（开发过程中落在仓库根的 *.log）
+*.log
+.playwright-cli/
+.tmp-*

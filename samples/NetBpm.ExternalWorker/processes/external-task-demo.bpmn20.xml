@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  独立部署演示流程（S4 收官用）：一条流程里串两个外部任务主题。
+
+  start → 通知(notify) → 开票(invoice) → 复核(userTask) → end
+
+  两个 serviceTask 都没有 activiti:class / delegateExpression，只有 activiti:topic：
+  引擎执行到这里【原地停下】，把变量快照登记进 nb_external_task，等外部 worker 拉走。
+  这正是独立部署的关键 —— 实现类在客户系统里，引擎进程内永远解析不到。
+
+  amount 由发起方传入；invoiceTotal / invoiceNo 由 worker 写回，
+  复核环节就能看到「不是这台服务器算出来的」结果。
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:activiti="http://activiti.org/bpmn"
+                  targetNamespace="netbpm-demo">
+  <bpmn:process id="externalTaskDemo" name="外部任务端到端演示" isExecutable="true">
+    <bpmn:startEvent id="start" name="开始" />
+    <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="svc_notify" />
+
+    <bpmn:serviceTask id="svc_notify" name="通知申请人" activiti:topic="notify" />
+    <bpmn:sequenceFlow id="flow2" sourceRef="svc_notify" targetRef="svc_invoice" />
+
+    <bpmn:serviceTask id="svc_invoice" name="开票" activiti:topic="invoice" />
+    <bpmn:sequenceFlow id="flow3" sourceRef="svc_invoice" targetRef="task_review" />
+
+    <bpmn:userTask id="task_review" name="复核" activiti:assignee="reviewer" />
+    <bpmn:sequenceFlow id="flow4" sourceRef="task_review" targetRef="end" />
+
+    <bpmn:endEvent id="end" name="结束" />
+  </bpmn:process>
+</bpmn:definitions>
