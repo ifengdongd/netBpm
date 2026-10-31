@@ -33,6 +33,12 @@ namespace NetBpm.Rest.Endpoints;
 /// </list>
 /// 两层都过才执行 handler —— 与 <see cref="PlatformScopes"/> 声明的「scope 是能力上限，不是数据授权」一致。
 /// </para>
+/// <para>
+/// 🔑 <b>业务写入不对客户端开放</b>：发起实例 / 办理任务 / 批量办理标的是 <c>RequireBusinessSurface</c>，
+/// 注册客户端一律 403（无论持有什么 scope），必须改走 <c>/workflow/v1</c>。
+/// 原因是原语面的写入不产生审批结论（无 <c>optionId</c>、不写时间线与表单快照），
+/// 放行等于允许「无结论的办结」。客户端仍可用的写入只剩管理干预（挂起 / 跳转 / 转办 / 变量直写）。
+/// </para>
 /// </summary>
 public static partial class RuntimeEndpoints
 {
@@ -55,7 +61,7 @@ public static partial class RuntimeEndpoints
     private static RouteGroupBuilder MapProcessInstanceEndpoints(this RouteGroupBuilder group)
     {
         group.MapPost("/process-instances", StartProcessInstanceAsync)
-            .RequireEngineScope(PlatformScopes.InstanceStart, "发起流程实例")
+            .RequireBusinessSurface("发起流程实例", "POST /workflow/v1/instances")
             .Produces<StartProcessInstanceResponse>();
         group.MapGet("/process-instances", FindProcessInstancesAsync)
             .RequireEngineScope(PlatformScopes.InstanceRead, "查询流程实例列表")
@@ -202,9 +208,10 @@ public static partial class RuntimeEndpoints
             .RequireTaskAccess(TaskAccess.Unclaim)
             .RequireEngineScope(PlatformScopes.TaskAssign, "取消认领");
 
+        // 办理 = 业务写入：原语面的 complete 不写审批结论，客户端一律改走平台面的 submit
         group.MapPost("/tasks/{taskId}/complete", CompleteTaskAsync)
             .RequireTaskAccess(TaskAccess.Complete)
-            .RequireEngineScope(PlatformScopes.TaskSubmit, "完成任务");
+            .RequireBusinessSurface("办理任务", "POST /workflow/v1/tasks/{taskId}/submit");
 
         // 统计与批量（管理端）：批量逐项执行，授权在 Service 内逐项完成
         group.MapGet("/tasks/stats", GetTaskStatsAsync)
@@ -217,7 +224,9 @@ public static partial class RuntimeEndpoints
             .RequireEngineScope(PlatformScopes.TaskAssign, "批量改到期时间")
             .Produces<BatchResultResponse>();
         group.MapPost("/tasks/batch/complete", BatchCompleteTasksAsync)
-            .RequireEngineScope(PlatformScopes.TaskSubmit, "批量完成任务")
+            .RequireBusinessSurface(
+                "批量办理任务",
+                "逐个调用 POST /workflow/v1/tasks/{taskId}/submit（平台面没有批量入口）")
             .Produces<BatchResultResponse>();
 
         return group;

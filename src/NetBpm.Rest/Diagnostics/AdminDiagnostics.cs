@@ -17,7 +17,9 @@ namespace NetBpm.Rest.Diagnostics;
 ///     （<c>netbpm.admin.scope</c> / <c>netbpm.auth.mode</c>）；</description></item>
 ///   <item><description><c>netbpm.admin.audit.recorded</c>：审计留痕条数
 ///     （<c>netbpm.admin.action</c> / <c>netbpm.audit.success</c> / <c>netbpm.auth.mode</c>）；</description></item>
-///   <item><description><c>netbpm.admin.audit.purged</c>：保留策略清理删除的条数。</description></item>
+///   <item><description><c>netbpm.admin.audit.purged</c>：保留策略清理删除的条数；</description></item>
+///   <item><description><c>netbpm.platform.surface.denied</c>：注册客户端在引擎原语面做业务写入被拒的次数
+///     （<c>netbpm.admin.action</c> / <c>netbpm.auth.mode</c>）。</description></item>
 /// </list>
 /// </para>
 /// </summary>
@@ -51,6 +53,20 @@ public static class AdminDiagnostics
             "netbpm.admin.audit.purged",
             unit: "{record}",
             description: "按保留策略删除的审计记录数。");
+
+    /// <summary>
+    /// 引擎原语面拒绝「业务写入」的次数（注册客户端被要求改走 <c>/workflow/v1</c>）。
+    /// <para>
+    /// 与 <see cref="AuthorizationDenied"/> 分开计数：那里是「缺 scope，补上就能过」，
+    /// 这里是「这条路根本不给客户端走，补 scope 也没用」。两者的处置完全不同，
+    /// 混在一个指标里会让值班的人一直去补一个补不上的 scope。
+    /// </para>
+    /// </summary>
+    public static readonly Counter<long> BusinessSurfaceDenied =
+        Meter.CreateCounter<long>(
+            "netbpm.platform.surface.denied",
+            unit: "{request}",
+            description: "注册客户端在引擎原语面执行发起 / 办理 / 批量办理被拒绝的次数。");
 
     /// <summary>标签键：所需的管理 scope。</summary>
     public const string TagScope = "netbpm.admin.scope";

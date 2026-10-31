@@ -24,7 +24,9 @@ namespace NetBpm.IntegrationTests;
 ///   <item><description><b>有 scope 就通</b>：包括 <c>workflow:admin:*</c> 对引擎管理动作的翻译
 ///     （客户端拿不到 <c>netbpm.admin.*</c>，不翻译等于管理动作全废）；</description></item>
 ///   <item><description><b>顺序不变</b>：先 404（不存在 / 跨租户）再 403（缺 scope），
-///     否则跨租户探测会从「不存在」变成「无权限」，泄露 id 是否存在。</description></item>
+///     否则跨租户探测会从「不存在」变成「无权限」，泄露 id 是否存在；</description></item>
+///   <item><description><b>业务写入一律不给客户端</b>：发起 / 办理 / 批量办理与 scope 无关地 403
+///     （原语面不写审批结论），必须走 <c>/workflow/v1</c>。</description></item>
 /// </list>
 /// <para>
 /// 另有一条反向护栏：<b>未启用凭据的开发模式与旧 API Key 不受影响</b>。
@@ -35,11 +37,17 @@ public sealed class EngineSurfaceScopeTests
 {
     private const string DefaultTenant = "default";
     private const string ProcessKey = "engine_scope_demo";
+    private const string LegacyApiKey = "netbpm-legacy-engine-key";
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    /// <summary>
+    /// 办理是<b>业务写入</b>：引擎原语面的 <c>complete</c> 不校验 <c>optionId</c>、
+    /// 不写审批时间线与表单快照，办结后无法回答「批了什么」。
+    /// 所以注册客户端一律改走平台面 —— <b>有没有 <c>workflow:task:submit</c> 都一样</b>。
+    /// </summary>
     [Fact]
-    public async Task Complete_Should403_WhenClientLacksTaskSubmit()
+    public async Task Complete_Should403_ForClient_EvenWithTaskSubmit()
     {
         using var host = BuildHost();
         await DeployAsync(host);
@@ -47,37 +55,7 @@ public sealed class EngineSurfaceScopeTests
 
         var secret = await RegisterAsync(
             client,
-            "engine-complete-denied",
-            [PlatformScopes.InstanceRead, PlatformScopes.TaskRead]);
-
-        var (instanceId, taskId) = await StartAndFindTaskAsync(host);
-
-        using var response = await SendJsonAsync(
-            client,
-            HttpMethod.Post,
-            $"/api/runtime/tasks/{taskId}/complete",
-            secret,
-            "lisi");
-
-        var error = await ReadJsonAsync(response);
-
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        Assert.Contains(PlatformScopes.TaskSubmit, error.GetProperty("message").GetString()!, StringComparison.Ordinal);
-
-        // 拒绝必须发生在「办掉」之前：任务还在，实例还在跑
-        Assert.True(await TaskExistsAsync(host, instanceId, taskId));
-    }
-
-    [Fact]
-    public async Task Complete_Should204_WhenClientHoldsTaskSubmit()
-    {
-        using var host = BuildHost();
-        await DeployAsync(host);
-        using var client = host.CreateClient();
-
-        var secret = await RegisterAsync(
-            client,
-            "engine-complete-allowed",
+            "engine-complete-closed",
             [PlatformScopes.InstanceRead, PlatformScopes.TaskRead, PlatformScopes.TaskSubmit]);
 
         var (instanceId, taskId) = await StartAndFindTaskAsync(host);
@@ -89,18 +67,68 @@ public sealed class EngineSurfaceScopeTests
             secret,
             "lisi");
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-        Assert.False(await TaskExistsAsync(host, instanceId, taskId));
+        var error = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        // 文案必须指出替代入口：只说「没权限」等于让接入方在引擎面上反复试 scope
+        Assert.Contains(
+            "/workflow/v1/tasks/{taskId}/submit",
+            error.GetProperty("message").GetString()!,
+            StringComparison.Ordinal);
+
+        // 拒绝必须发生在「办掉」之前：任务还在，实例还在跑
+        Assert.True(await TaskExistsAsync(host, instanceId, taskId));
     }
 
+    /// <summary>批量办理同属业务写入，同样不对客户端开放。</summary>
     [Fact]
-    public async Task StartInstance_Should403_WhenClientLacksInstanceStart()
+    public async Task BatchComplete_Should403_ForClient_EvenWithTaskSubmit()
     {
         using var host = BuildHost();
         await DeployAsync(host);
         using var client = host.CreateClient();
 
-        var secret = await RegisterAsync(client, "engine-start-denied", [PlatformScopes.InstanceRead]);
+        var secret = await RegisterAsync(
+            client,
+            "engine-batch-complete-closed",
+            [PlatformScopes.InstanceRead, PlatformScopes.TaskRead, PlatformScopes.TaskSubmit]);
+
+        var (_, taskId) = await StartAndFindTaskAsync(host);
+
+        using var response = await SendJsonAsync(
+            client,
+            HttpMethod.Post,
+            "/api/runtime/tasks/batch/complete",
+            secret,
+            "lisi",
+            new { taskIds = new[] { taskId } });
+
+        var error = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        Assert.Contains(
+            "/workflow/v1/tasks/{taskId}/submit",
+            error.GetProperty("message").GetString()!,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 发起实例同属业务写入：原语面的 start 不写 <c>INSTANCE_STARTED</c> 时间线、
+    /// 不过参数 schema 与 <c>writableBy</c>，客户端必须走 <c>POST /workflow/v1/instances</c>。
+    /// </summary>
+    [Fact]
+    public async Task StartInstance_Should403_ForClient_EvenWithInstanceStart()
+    {
+        using var host = BuildHost();
+        await DeployAsync(host);
+        using var client = host.CreateClient();
+
+        var secret = await RegisterAsync(
+            client,
+            "engine-start-closed",
+            [PlatformScopes.InstanceRead, PlatformScopes.InstanceStart]);
 
         using var response = await SendJsonAsync(
             client,
@@ -113,30 +141,19 @@ public sealed class EngineSurfaceScopeTests
         var error = await ReadJsonAsync(response);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        Assert.Contains(PlatformScopes.InstanceStart, error.GetProperty("message").GetString()!, StringComparison.Ordinal);
-    }
 
-    [Fact]
-    public async Task StartInstance_Should201_WhenClientHoldsInstanceStart()
-    {
-        using var host = BuildHost();
-        await DeployAsync(host);
-        using var client = host.CreateClient();
+        Assert.Contains(
+            "/workflow/v1/instances",
+            error.GetProperty("message").GetString()!,
+            StringComparison.Ordinal);
 
-        var secret = await RegisterAsync(
-            client,
-            "engine-start-allowed",
-            [PlatformScopes.InstanceRead, PlatformScopes.InstanceStart]);
+        // 拒绝必须发生在「发起」之前：不能先落实例再 403
+        var engine = host.Services.GetRequiredService<IProcessEngine>();
+        var instances = await engine.FindProcessInstancesAsync(
+            new Runtime.ProcessInstanceQuery(ProcessDefinitionKey: ProcessKey),
+            Ct);
 
-        using var response = await SendJsonAsync(
-            client,
-            HttpMethod.Post,
-            "/api/runtime/process-instances",
-            secret,
-            "lisi",
-            new { processDefinitionKey = ProcessKey });
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Empty(instances);
     }
 
     /// <summary>
@@ -357,9 +374,38 @@ public sealed class EngineSurfaceScopeTests
         Assert.False(await TaskExistsAsync(host, instanceId, taskId));
     }
 
+    /// <summary>
+    /// 反向护栏的另一半：旧 API Key（单值密钥代表「整个可信内网」）仍然能办理。
+    /// 只对注册客户端收口的意义就在这里 —— 已上线的既有集成不会因为这次收紧而全线 403。
+    /// </summary>
+    [Fact]
+    public async Task Complete_Should204_ForLegacyApiKey()
+    {
+        using var host = BuildHost(builder =>
+            builder.UseSetting("NetBpm:Security:ApiKey", LegacyApiKey));
+
+        await DeployAsync(host);
+        using var client = host.CreateClient();
+
+        var (instanceId, taskId) = await StartAndFindTaskAsync(host);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            new Uri($"/api/runtime/tasks/{taskId}/complete", UriKind.Relative));
+
+        request.Headers.Add("X-Api-Key", LegacyApiKey);
+        request.Headers.Add("X-Subject-Id", "lisi");
+        request.Content = JsonContent.Create(new { });
+
+        using var response = await client.SendAsync(request, Ct);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.False(await TaskExistsAsync(host, instanceId, taskId));
+    }
+
     // ─────────────────────────── 测试基础设施 ───────────────────────────
 
-    private static WebApplicationFactory<Program> BuildHost() =>
+    private static WebApplicationFactory<Program> BuildHost(Action<IWebHostBuilder>? extra = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("NetBpm:Security:RequireCredential", "false");
@@ -371,6 +417,8 @@ public sealed class EngineSurfaceScopeTests
             builder.UseSetting("NetBpm:Jobs:Enabled", "false");
             builder.UseSetting("NetBpm:RateLimit:Enabled", "false");
             builder.UseSetting("NetBpm:Security:Tenants:Default", DefaultTenant);
+
+            extra?.Invoke(builder);
         });
 
     private static string Xml() => $$"""
