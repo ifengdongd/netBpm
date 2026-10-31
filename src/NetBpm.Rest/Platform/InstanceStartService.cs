@@ -136,9 +136,9 @@ public sealed class InstanceStartService : IInstanceStartService
 
         EnsureStartable(descriptor, request.EntryPointKey);
 
-        // 参数：镜像 + 校验（保留名冲突 400，必填缺失 / 类型不符 422）
+        // 参数：镜像 + 校验（保留名冲突 400，只读 / 必填缺失 / 类型不符 422）
         var schema = await _catalog.GetParameterSchemaAsync(request.ProcessKey, context, ct).ConfigureAwait(false);
-        var variables = BuildVariables(request, schema);
+        var variables = BuildVariables(request, schema, PlatformIdentity.HasAdminPerspective(context));
 
         // 业务主键：调用方传入优先，否则发号
         var businessKey = string.IsNullOrWhiteSpace(request.BusinessKey)
@@ -234,18 +234,23 @@ public sealed class InstanceStartService : IInstanceStartService
     }
 
     /// <summary>
-    /// 组装发起要写进引擎的变量：<c>param.{name}</c> 剥前缀镜像为裸名，校验保留名 / 必填 / 类型。
+    /// 组装发起要写进引擎的变量：<c>param.{name}</c> 剥前缀镜像为裸名，校验只读 / 保留名 / 必填 / 类型。
     /// </summary>
     /// <remarks>
     /// <para>
     /// 未声明参数的流程（schema 为空）按「无 schema 放行」：全部参数原样镜像，不校验（保持旧流程可用）。
-    /// schema 非空时也只对<b>已声明</b>的参数做类型 / 约束校验，未声明的参数仍镜像透传——
+    /// schema 非空时也只对<b>已声明</b>的参数做写权限 / 类型 / 约束校验，未声明的参数仍镜像透传——
     /// 因为 <c>formProperty</c> 派生覆盖不了全部变量（如 <c>${approver}</c> 这种候选组变量）。
+    /// </para>
+    /// <para>
+    /// 写权限先于类型校验：一个 <c>writableBy="APPROVER"</c> 的参数被申请人提交时，
+    /// 正确的回答是「这个环节不允许写它」，而不是「值的类型不对」——后者会误导调用方去改值。
     /// </para>
     /// </remarks>
     private static Dictionary<string, object?> BuildVariables(
         StartInstanceRequest request,
-        ParameterSchema? schema)
+        ParameterSchema? schema,
+        bool callerIsAdmin)
     {
         var variables = new Dictionary<string, object?>(StringComparer.Ordinal);
         var definitions = schema?.Parameters ?? [];
@@ -268,13 +273,16 @@ public sealed class InstanceStartService : IInstanceStartService
                         $"参数 '{name}' 与审批元数据字段 '{bareName}' 冲突。");
                 }
 
-                var definition = definitions.FirstOrDefault(item =>
-                    string.Equals(item.VariableName, bareName, StringComparison.Ordinal)
-                    || string.Equals(item.ApiName, name, StringComparison.Ordinal));
+                var definition = ParameterWritePolicy.Find(definitions, name, bareName);
 
-                if (definition is not null && value is { Length: > 0 })
+                if (definition is not null && value is not null)
                 {
-                    ValidateValue(definition, name, value);
+                    EnsureWritable(definition, name, callerIsAdmin);
+
+                    if (value.Length > 0)
+                    {
+                        ValidateValue(definition, name, value);
+                    }
                 }
 
                 if (value is not null)
@@ -302,6 +310,28 @@ public sealed class InstanceStartService : IInstanceStartService
         }
 
         return variables;
+    }
+
+    /// <summary>
+    /// 发起环节不接受「写了但不让写」的参数（<c>writableBy</c> 不含 <c>APPLICANT</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 静默忽略比报错更危险：调用方会以为值已经生效，而流程按旧值走完，
+    /// 这种偏差要到对账时才会被发现，且无法从响应里看出任何异常。
+    /// </remarks>
+    private static void EnsureWritable(ParameterDefinition definition, string name, bool callerIsAdmin)
+    {
+        if (ParameterWritePolicy.IsWritable(definition, ParameterWriteStage.Start, callerIsAdmin))
+        {
+            return;
+        }
+
+        throw StartException(
+            ErrorCodes.ParameterReadOnly,
+            "参数在发起环节不可写",
+            StatusCodes.Status422UnprocessableEntity,
+            $"参数 '{ParameterWritePolicy.DisplayName(definition, name)}' 不允许申请人写入"
+            + $"（可写角色：{ParameterWritePolicy.DescribeWriters(definition, ParameterWriteStage.Start)}）。");
     }
 
     /// <summary>按参数定义做类型与约束校验（值一律按字符串收，不做强转）。</summary>

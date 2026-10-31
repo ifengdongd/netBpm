@@ -46,6 +46,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
     private readonly IInstanceCatalog _instanceCatalog;
     private readonly IApprovalTimeline _timeline;
     private readonly IApprovalSnapshot _snapshots;
+    private readonly IProcessCatalog _processCatalog;
     private readonly ILogger<TaskSubmitService> _logger;
 
     /// <summary>构造。</summary>
@@ -54,6 +55,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
     /// <param name="instanceCatalog">实例读模型（提交结果的 Instance 单一出口）。</param>
     /// <param name="timeline">审批记录时间线（写 <c>TASK_COMPLETED</c> 与结束条目）。</param>
     /// <param name="snapshots">表单快照（冻住「当时的字段定义 + 值」）。</param>
+    /// <param name="processCatalog">流程目录（参数规范：写侧按 <c>writableBy</c> 拒绝）。</param>
     /// <param name="logger">日志。</param>
     public TaskSubmitService(
         IProcessEngine engine,
@@ -61,6 +63,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         IInstanceCatalog instanceCatalog,
         IApprovalTimeline timeline,
         IApprovalSnapshot snapshots,
+        IProcessCatalog processCatalog,
         ILogger<TaskSubmitService> logger)
     {
         ArgumentNullException.ThrowIfNull(engine);
@@ -68,6 +71,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         ArgumentNullException.ThrowIfNull(instanceCatalog);
         ArgumentNullException.ThrowIfNull(timeline);
         ArgumentNullException.ThrowIfNull(snapshots);
+        ArgumentNullException.ThrowIfNull(processCatalog);
         ArgumentNullException.ThrowIfNull(logger);
 
         _engine = engine;
@@ -75,6 +79,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         _instanceCatalog = instanceCatalog;
         _timeline = timeline;
         _snapshots = snapshots;
+        _processCatalog = processCatalog;
         _logger = logger;
     }
 
@@ -114,7 +119,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         var option = ResolveOption(view, request.OptionId);
         ValidateDecision(option, request);
 
-        var variables = BuildVariables(request);
+        var variables = await BuildVariablesAsync(view, request, context, ct).ConfigureAwait(false);
 
         try
         {
@@ -213,10 +218,23 @@ public sealed class TaskSubmitService : ITaskSubmitService
     /// 组装要写进引擎的流程变量：审批结论（<c>result</c>/<c>comment</c>）+ 本次参数（镜像裸名）。
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// 参数先过写侧授权（<c>writableBy</c>）：审批环节只认 <c>APPROVER</c>，
+    /// <b>未声明 <c>writableBy</c> 的参数在提交时一律只读</b>——这正是
+    /// <see cref="ParameterDefinition.WritableBy"/> 的原始约定（「发起时可写、之后只读」）。
+    /// </para>
+    /// <para>
+    /// 读不到参数规范时按「无 schema 放行」：目录不可用不该让审批提交不了，
+    /// 那时唯一能守的只有下面的保留名冲突检查。
+    /// </para>
     /// <para><c>targetNodeId</c> 本轮只校验不落变量——退回 / 跳转的执行与时间线记录属于后续块。</para>
     /// <para><c>formValues</c> 本轮不落库——表单值快照（<c>nb_approval_snapshot</c>）属于表单快照块（§4.5）。</para>
     /// </remarks>
-    private static Dictionary<string, object?> BuildVariables(SubmitTaskRequest request)
+    private async ValueTask<Dictionary<string, object?>> BuildVariablesAsync(
+        TaskView view,
+        SubmitTaskRequest request,
+        RequestContext context,
+        CancellationToken ct)
     {
         var variables = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -228,29 +246,85 @@ public sealed class TaskSubmitService : ITaskSubmitService
             variables[BaseModelVariables.Comment] = request.Comment;
         }
 
-        if (request.Parameters is { Count: > 0 })
+        if (request.Parameters is not { Count: > 0 } submitted)
         {
-            foreach (var (name, value) in request.Parameters)
+            return variables;
+        }
+
+        var definitions = (await TryLoadSchemaAsync(view.ProcessKey, context, ct).ConfigureAwait(false))?.Parameters
+            ?? [];
+        var callerIsAdmin = PlatformIdentity.HasAdminPerspective(context);
+
+        foreach (var (name, value) in submitted)
+        {
+            // 对外键 param.{name} 镜像回引擎裸名（与发起 / 网关条件同一套变量名）
+            var bareName = name.StartsWith("param.", StringComparison.Ordinal)
+                ? name["param.".Length..]
+                : name;
+
+            if (BaseModelVariables.All.Contains(bareName, StringComparer.Ordinal))
             {
-                // 对外键 param.{name} 镜像回引擎裸名（与发起 / 网关条件同一套变量名）
-                var bareName = name.StartsWith("param.", StringComparison.Ordinal)
-                    ? name["param.".Length..]
-                    : name;
-
-                if (BaseModelVariables.All.Contains(bareName, StringComparer.Ordinal))
-                {
-                    throw new SubmitDecisionException(
-                        ErrorCodes.ParameterConflictWithReserved,
-                        "参数名与保留字段冲突",
-                        StatusCodes.Status400BadRequest,
-                        $"参数 '{name}' 与审批元数据字段 '{bareName}' 冲突。");
-                }
-
-                variables[bareName] = value;
+                throw new SubmitDecisionException(
+                    ErrorCodes.ParameterConflictWithReserved,
+                    "参数名与保留字段冲突",
+                    StatusCodes.Status400BadRequest,
+                    $"参数 '{name}' 与审批元数据字段 '{bareName}' 冲突。");
             }
+
+            var definition = ParameterWritePolicy.Find(definitions, name, bareName);
+
+            if (definition is not null && value is not null)
+            {
+                EnsureWritable(definition, name, callerIsAdmin);
+            }
+
+            variables[bareName] = value;
         }
 
         return variables;
+    }
+
+    /// <summary>审批环节不接受「写了但不让写」的参数（<c>writableBy</c> 不含 <c>APPROVER</c>）。</summary>
+    /// <remarks>
+    /// 422 而不是 403：这是<b>字段级</b>语义冲突（这个字段在这一环节不可写），
+    /// 不是「你没有办这张单的资格」——后者已经在前面按 404 处理过了。
+    /// </remarks>
+    private static void EnsureWritable(ParameterDefinition definition, string name, bool callerIsAdmin)
+    {
+        if (ParameterWritePolicy.IsWritable(definition, ParameterWriteStage.Approve, callerIsAdmin))
+        {
+            return;
+        }
+
+        throw new SubmitDecisionException(
+            ErrorCodes.ParameterReadOnly,
+            "参数在审批环节不可写",
+            StatusCodes.Status422UnprocessableEntity,
+            $"参数 '{ParameterWritePolicy.DisplayName(definition, name)}' 不允许审批人写入"
+            + $"（可写角色：{ParameterWritePolicy.DescribeWriters(definition, ParameterWriteStage.Approve)}）。");
+    }
+
+    /// <summary>取参数规范；读不到返回 <see langword="null"/>（由调用方按「无 schema 放行」降级）。</summary>
+    private async ValueTask<ParameterSchema?> TryLoadSchemaAsync(
+        string? processKey,
+        RequestContext context,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(processKey))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _processCatalog.GetParameterSchemaAsync(processKey, context, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception, "读流程 {ProcessKey} 的参数规范失败：本次不做写侧授权校验。", processKey);
+
+            return null;
+        }
     }
 
     /// <summary>把实例修订号（契约用 <see cref="long"/>）转成引擎的 <see cref="int"/> 乐观锁版本。</summary>

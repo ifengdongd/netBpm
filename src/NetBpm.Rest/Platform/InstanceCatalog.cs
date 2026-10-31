@@ -390,9 +390,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
         // ① 管理视角：不受参数可见性限制（它们本来就走得动实例列表的跨人权限）。
         //    这里返回 null 而不是「加上 ADMIN 角色」——后者会让 visibleTo="APPLICANT" 的字段
         //    反而对管理员不可见，那是把一条安全规则解释成了它的反面。
-        if (context.IsAdmin
-            || context.HasAdminScope(TaskScopes.AdminInstanceJump)
-            || context.HasScope(PlatformScopes.HistoryReadAll))
+        if (PlatformIdentity.HasAdminPerspective(context))
         {
             return null;
         }
