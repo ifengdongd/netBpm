@@ -106,6 +106,9 @@ public static class NetBpmHost
         builder.Services.AddNetBpmTimerScheduler(configuration);
         builder.Services.AddNetBpmAsyncJobExecutor(configuration);
         builder.Services.AddNetBpmOutboxPublisher(configuration);
+        // 事件投递（M13）：outbox 的「发给谁」；没注册订阅就没有任何事件发生出去，开销为零
+        builder.Services.AddNetBpmEventDelivery(configuration);
+        builder.Services.AddNetBpmExternalTaskWatchdog(configuration);
 
         // 全局异常处理：未处理异常返回带 traceId 的 JSON 错误体
         builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -289,6 +292,9 @@ public static class NetBpmHost
 
         // 平台接入管理（租户 / 客户端）：两个宿主都要有，否则「在哪发密钥」取决于部署形态
         app.MapClientAdminEndpoints();
+
+        // 事件订阅管理（M13）：与客户端注册同属接入配置，放同一组路径与鉴权口径下
+        app.MapEventSubscriptionEndpoints();
 
         mapAdditionalEndpoints?.Invoke(app);
 

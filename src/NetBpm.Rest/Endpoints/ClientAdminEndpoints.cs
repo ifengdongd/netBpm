@@ -417,7 +417,7 @@ public static class ClientAdminEndpoints
     /// 接入管理属于平台能力，旧 <c>netbpm.admin.*</c> 只是引擎管理。
     /// 两个都认是为了让既有管理员账号在过渡期仍能发密钥。
     /// </remarks>
-    private static void EnsureAdmin(RequestContext context, string scope, string action)
+    internal static void EnsureAdmin(RequestContext context, string scope, string action)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -437,12 +437,12 @@ public static class ClientAdminEndpoints
     }
 
     /// <summary>租户可见性：凭据绑定了租户时只能看/改自己租户的数据。</summary>
-    private static bool IsVisible(RequestContext context, string tenantId) =>
+    internal static bool IsVisible(RequestContext context, string tenantId) =>
         context.EffectiveTenantId is not { } scoped
         || string.Equals(scoped, tenantId, StringComparison.Ordinal);
 
     /// <summary>列表的租户过滤：显式参数不得越出凭据所属租户。</summary>
-    private static string? ResolveTenantScope(RequestContext context, string? requested)
+    internal static string? ResolveTenantScope(RequestContext context, string? requested)
     {
         if (context.EffectiveTenantId is not { } scoped)
         {

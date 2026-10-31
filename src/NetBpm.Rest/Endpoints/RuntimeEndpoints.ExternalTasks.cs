@@ -49,6 +49,12 @@ public static partial class RuntimeEndpoints
             .RequireEngineScope(PlatformScopes.ExternalTask, "释放外部任务锁")
             .Produces(StatusCodes.Status204NoContent);
 
+        // 重投是「管理干预」而不是「worker 干活」：它把一个已经被判死的等待点重新拉活，
+        // 因此要 workflow:admin:instance，不能让普通 worker 凭据自己复活自己
+        group.MapPost("/external-tasks/{taskId}/retry", RetryExternalTaskAsync)
+            .RequireEngineScope(PlatformScopes.AdminInstance, "重投外部任务死信")
+            .Produces(StatusCodes.Status204NoContent);
+
         group.MapGet("/external-tasks", FindExternalTasksAsync)
             .RequireEngineScope(PlatformScopes.ExternalTask, "查询外部任务")
             .Produces<IReadOnlyList<ExternalTaskResponse>>();
@@ -200,8 +206,7 @@ public static partial class RuntimeEndpoints
         var task = await broker.FindByIdAsync(taskId, ct).ConfigureAwait(false)
             ?? throw new BadHttpRequestException($"外部任务 '{taskId}' 不存在。");
 
-        if (context.EffectiveTenantId is { Length: > 0 } tenantId
-            && !string.Equals(task.TenantId ?? "default", tenantId, StringComparison.Ordinal))
+        if (!IsSameTenant(task.TenantId, context.EffectiveTenantId))
         {
             throw new BadHttpRequestException($"外部任务 '{taskId}' 不存在。");
         }
@@ -210,6 +215,57 @@ public static partial class RuntimeEndpoints
         {
             throw new BadHttpRequestException(
                 $"外部任务 '{taskId}' 的锁不属于 worker '{workerId}'（可能锁已过期被别人领取）。");
+        }
+
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// 死信重投：把 <see cref="ExternalTaskStatus.DeadLetter"/> 的任务拉回
+    /// <see cref="ExternalTaskStatus.Pending"/>，让它重新可以被 worker 领取。
+    /// <para>
+    /// 它是<b>管理干预</b>而不是 worker 的自助通道：重试次数被耗尽意味着「worker 连续失败且
+    /// 已放弃」，此时让同一套 worker 凭据自己复活自己，等于把退避与死信机制架空。
+    /// </para>
+    /// <para>
+    /// 重投<b>不推进流程</b> —— 节点仍然停在原地，等 worker 重新领走并回执成功才推进。
+    /// 这正是外部任务与异步作业的分工：失败绝不跳过节点。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> RetryExternalTaskAsync(
+        string taskId,
+        RetryExternalTaskRequest? request,
+        RequestContext context,
+        IExternalTaskBroker broker,
+        ExternalTaskOptions options,
+        CancellationToken ct)
+    {
+        var task = await broker.FindByIdAsync(taskId, ct).ConfigureAwait(false);
+
+        if (task is null || !IsSameTenant(task.TenantId, context.EffectiveTenantId))
+        {
+            // 跨租户按 404：不能让 A 租户借此探测 B 租户有没有这条任务
+            return Results.NotFound(new ErrorResponse(
+                $"外部任务 '{taskId}' 不存在。",
+                Code: "external_task_not_found"));
+        }
+
+        if (!string.Equals(task.Status, ExternalTaskStatus.DeadLetter, StringComparison.Ordinal))
+        {
+            return Results.Conflict(new ErrorResponse(
+                $"外部任务 '{taskId}' 当前状态为 {task.Status}，只有 {ExternalTaskStatus.DeadLetter} 才能重投。",
+                Code: "external_task_not_dead_letter"));
+        }
+
+        var retries = request?.Retries is > 0
+            ? Math.Min(request.Retries.Value, 100)
+            : options.DefaultRetries;
+
+        if (!await broker.RetryDeadLetterAsync(taskId, retries, ct).ConfigureAwait(false))
+        {
+            return Results.Conflict(new ErrorResponse(
+                $"外部任务 '{taskId}' 重投失败（可能已被别的请求处理）。",
+                Code: "external_task_retry_failed"));
         }
 
         return Results.NoContent();
@@ -238,6 +294,13 @@ public static partial class RuntimeEndpoints
 
         return Results.Ok(tasks.Select(ToResponse).ToArray());
     }
+
+    /// <summary>
+    /// 租户是否匹配。<c>null</c> 的租户归一成 <c>default</c>，与存储层的默认值口径一致。
+    /// </summary>
+    private static bool IsSameTenant(string? taskTenantId, string? effectiveTenantId) =>
+        effectiveTenantId is not { Length: > 0 }
+        || string.Equals(taskTenantId ?? "default", effectiveTenantId, StringComparison.Ordinal);
 
     private static ExternalTaskResponse ToResponse(ExternalTask task) => new(
         task.Id,
@@ -299,6 +362,15 @@ public sealed record FailExternalTaskRequest(
 /// <summary>释放锁。</summary>
 /// <param name="WorkerId">锁持有者。</param>
 public sealed record UnlockExternalTaskRequest(string WorkerId);
+
+/// <summary>
+/// 死信重投。
+/// </summary>
+/// <param name="Retries">
+/// 重投后恢复的剩余重试次数；为空用服务端默认（<c>NetBpm:ExternalTasks:Retries</c>）。
+/// <b>别给太大</b>：它就是「再给几次机会」的额度，给 100 次等于把退避机制关掉。
+/// </param>
+public sealed record RetryExternalTaskRequest(int? Retries = null);
 
 /// <summary>
 /// 外部任务视图。
