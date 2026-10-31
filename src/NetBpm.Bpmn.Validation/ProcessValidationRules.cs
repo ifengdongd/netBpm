@@ -573,13 +573,47 @@ public sealed class RequiredAttributesRule : IProcessValidationRule
 
         foreach (var serviceTask in process.FindFlowElementsOfType<ServiceTask>())
         {
-            if (serviceTask.ImplementationType == ServiceTaskImplementationType.None)
+            // 逐个属性判空而不是只看 ImplementationType：后者只能表达「取了哪一种」，
+            // 表达不了「同时写了两种」——那正是最容易埋雷的写法（改了一半没删干净）
+            var declared = new List<string>(3);
+
+            if (serviceTask.ClassName is not null)
+            {
+                declared.Add("activiti:class");
+            }
+
+            if (serviceTask.DelegateExpression is not null)
+            {
+                declared.Add("activiti:delegateExpression");
+            }
+
+            if (serviceTask.Expression is not null)
+            {
+                declared.Add("activiti:expression");
+            }
+
+            if (serviceTask.Topic is not null)
+            {
+                declared.Add("activiti:topic");
+            }
+
+            if (declared.Count == 0)
             {
                 yield return new ValidationError(
                     Name,
                     serviceTask.Id,
                     nameof(ServiceTask),
-                    "服务任务必须指定 activiti:class / activiti:delegateExpression / activiti:expression 之一。");
+                    "服务任务必须指定 activiti:class / activiti:delegateExpression / activiti:expression / "
+                    + "activiti:topic 之一：前三种在引擎进程内执行，activiti:topic 交给外部 worker 领取。");
+            }
+            else if (declared.Count > 1)
+            {
+                yield return new ValidationError(
+                    Name,
+                    serviceTask.Id,
+                    nameof(ServiceTask),
+                    $"服务任务只能指定一种实现方式，当前同时写了 {string.Join(" 与 ", declared)}；"
+                    + "执行时会按固定优先级取一种，另一种被静默忽略。");
             }
         }
     }

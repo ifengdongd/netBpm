@@ -57,6 +57,12 @@ public static class BpmnConstants
     /// <summary>Activiti 属性：结果变量名。</summary>
     public const string AttributeResultVariableName = "resultVariableName";
 
+    /// <summary>
+    /// Activiti 属性：外部任务主题（<c>activiti:topic</c>）。
+    /// <para>标记了 topic 的 <c>serviceTask</c> 不在引擎进程内执行，而是生成一条外部任务等 worker 领取。</para>
+    /// </summary>
+    public const string AttributeTopic = "topic";
+
     /// <summary>Activiti 属性：跳过表达式。</summary>
     public const string AttributeSkipExpression = "skipExpression";
 

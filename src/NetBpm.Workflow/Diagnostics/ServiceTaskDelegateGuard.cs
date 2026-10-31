@@ -64,6 +64,12 @@ public static class ServiceTaskDelegateGuard
                     Check(task, "activiti:delegateExpression", task.DelegateExpression, resolver.ResolveByExpressionName);
                     break;
 
+                case ServiceTaskImplementationType.ExternalTopic:
+                    // 外部任务不在进程内执行：它需要的是「有没有 worker 领这个 topic」，
+                    // 而不是「能不能解析出委托」。拿委托解析器去查必然查不到，会污染部署响应。
+                    resolvable.Add($"服务任务 '{task.Id}'（topic='{task.Topic}'）由外部 worker 执行，跳过委托预解析。");
+                    break;
+
                 default:
                     // activiti:expression 是 EL 表达式，部署期无法求值（要等执行上下文）。
                     // 未指定实现已被部署期校验规则拒掉，这里不会出现。

@@ -107,7 +107,14 @@ public class UserTask : Task
     public IList<FormProperty> FormProperties { get; } = [];
 }
 
-/// <summary>服务任务实现方式（对应 <c>activiti:class</c> / <c>delegateExpression</c> / <c>expression</c>）。</summary>
+/// <summary>
+/// 服务任务实现方式（对应 <c>activiti:class</c> / <c>delegateExpression</c> / <c>expression</c> /
+/// <c>topic</c>）。
+/// <para>
+/// 前三种是<b>嵌入式宿主</b>语义（引擎进程内解析并执行委托）；<see cref="ExternalTopic"/> 是
+/// <b>独立部署</b>语义（引擎只登记一条外部任务，由 worker 拉走执行后回执）。
+/// </para>
+/// </summary>
 public enum ServiceTaskImplementationType
 {
     /// <summary>未指定（校验阶段报错）。</summary>
@@ -121,11 +128,17 @@ public enum ServiceTaskImplementationType
 
     /// <summary>值表达式。</summary>
     Expression = 3,
+
+    /// <summary>
+    /// 外部任务主题（<c>activiti:topic</c>）：不在引擎进程内执行，等 worker 领取。
+    /// </summary>
+    ExternalTopic = 4,
 }
 
 /// <summary>
 /// 服务任务（<c>serviceTask</c>）。
-/// 三种写法统一路由到 <c>ServiceTaskDelegateBehavior</c>（见 §1.2）。
+/// 三种进程内写法统一路由到 <c>ServiceTaskDelegateBehavior</c>（见 §1.2）；
+/// <c>activiti:topic</c> 写法路由到外部任务行为（引擎只登记、等 worker 回执）。
 /// </summary>
 public class ServiceTask : Task
 {
@@ -140,6 +153,12 @@ public class ServiceTask : Task
 
     /// <summary>值表达式（<c>activiti:expression</c>）。</summary>
     public string? Expression { get; set; }
+
+    /// <summary>
+    /// 外部任务主题（<c>activiti:topic</c>）。
+    /// <para>非空表示该节点交给外部 worker 执行：引擎登记一条外部任务后原地等待，不解析任何委托。</para>
+    /// </summary>
+    public string? Topic { get; set; }
 
     /// <summary>结果变量名（<c>activiti:resultVariableName</c>）。</summary>
     public string? ResultVariableName { get; set; }

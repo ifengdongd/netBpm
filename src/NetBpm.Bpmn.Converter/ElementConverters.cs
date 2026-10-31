@@ -394,6 +394,7 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
         "delegateExpression",
         "expression",
         "resultVariableName",
+        "topic",
         "asyncBefore",
         "asyncAfter",
         "exclusive",
@@ -411,15 +412,20 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
         element.DelegateExpression = Attr(reader, BpmnConstants.AttributeDelegateExpression, BpmnConstants.ActivitiNamespace);
         element.Expression = Attr(reader, BpmnConstants.AttributeExpression, BpmnConstants.ActivitiNamespace);
         element.ResultVariableName = Attr(reader, BpmnConstants.AttributeResultVariableName, BpmnConstants.ActivitiNamespace);
+        element.Topic = Attr(reader, BpmnConstants.AttributeTopic, BpmnConstants.ActivitiNamespace);
         ReadActivityAttributes(reader, element);
 
+        // 推导顺序即优先级；同时写了两种（如 class + topic）由 RequiredAttributesRule 拒绝部署，
+        // 这里只保证「单一实现」时能落到正确的分支
         element.ImplementationType = element.ClassName is not null
             ? ServiceTaskImplementationType.Class
             : element.DelegateExpression is not null
                 ? ServiceTaskImplementationType.DelegateExpression
                 : element.Expression is not null
                     ? ServiceTaskImplementationType.Expression
-                    : ServiceTaskImplementationType.None;
+                    : element.Topic is not null
+                        ? ServiceTaskImplementationType.ExternalTopic
+                        : ServiceTaskImplementationType.None;
 
         // extensionElements（任务监听器 / 字段注入）由基类的 ReadChildren 集中处理
         ReadChildren(reader, element, child =>
@@ -441,6 +447,7 @@ public sealed class ServiceTaskXmlConverter : BaseBpmnXmlConverter<ServiceTask>
         WriteActivitiAttribute(writer, BpmnConstants.AttributeDelegateExpression, element.DelegateExpression);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeExpression, element.Expression);
         WriteActivitiAttribute(writer, BpmnConstants.AttributeResultVariableName, element.ResultVariableName);
+        WriteActivitiAttribute(writer, BpmnConstants.AttributeTopic, element.Topic);
         WriteExtensionElements(writer, element);
         WriteMultiInstanceLoopCharacteristics(writer, element.LoopCharacteristics);
         writer.WriteEndElement();
