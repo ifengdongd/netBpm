@@ -20,6 +20,13 @@ namespace NetBpm.Rest.Security;
 /// 多系统接入后第一周就会出越权事故。
 /// </para>
 /// <para>
+/// ⚠️ 客户端的 scope 只能取自 <see cref="NetBpm.Platform.Contracts.PlatformScopes.All"/>，
+/// 里面没有 <c>netbpm.admin.*</c>。因此客户端的判定要经
+/// <see cref="EngineSurfaceScopes.IsAdminSatisfied"/> 把 <c>netbpm.admin.*</c> 翻译成对应的
+/// <c>workflow:admin:*</c> —— 否则客户端在引擎面上一个管理动作都做不了，与管理端点
+/// （<c>/workflow/v1</c>）的能力对不上。
+/// </para>
+/// <para>
 /// ⚠️ 这里只回答「是否具备管理能力」。业务参与人依业务规则可以做的事（办理人完成任务、发起人写变量等）
 /// 不经过本类判定，否则会把正常办理也挡在门外。
 /// </para>
@@ -44,7 +51,9 @@ public static class AdminAuthorization
             return;
         }
 
-        if (context.HasAdminScope(scope))
+        // 判定内核收在 EngineSurfaceScopes：用户令牌 / 旧 API Key 只认 netbpm.admin.*，
+        // 注册客户端还会按平台话术（workflow:admin:*）再判一次
+        if (EngineSurfaceScopes.IsAdminSatisfied(context, scope))
         {
             return;
         }
@@ -54,6 +63,16 @@ public static class AdminAuthorization
             1,
             new(AdminDiagnostics.TagScope, scope),
             new(AdminDiagnostics.TagAuthMode, AdminDiagnostics.AuthModeTag(context.AuthMode)));
+
+        // 客户端听不懂 netbpm.admin.*：文案直接给平台话术，省一次「按提示配了 scope 还是 403」的来回
+        if (context.AuthMode == RequestAuthMode.Client)
+        {
+            var platform = EngineSurfaceScopes.PlatformEquivalent(scope);
+
+            throw new ForbiddenException(platform is not null
+                ? $"当前客户端缺少 scope '{platform}'，无法{action}。"
+                : $"'{scope}' 是引擎私有 scope，暂不对注册客户端开放，无法{action}；该能力请走平台面 /workflow/v1。");
+        }
 
         throw new ForbiddenException(
             $"当前主体缺少 scope '{scope}'，无法{action}；持有 '{TaskScopes.Admin}' 可覆盖全部管理动作。");

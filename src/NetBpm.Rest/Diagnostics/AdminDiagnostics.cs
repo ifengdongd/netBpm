@@ -31,12 +31,12 @@ public static class AdminDiagnostics
     /// </summary>
     public static readonly Meter Meter = new(MeterName, "1.0.0");
 
-    /// <summary>RBAC 拒绝（JWT 缺 scope，越权尝试被 403）。</summary>
+    /// <summary>RBAC 拒绝（缺 scope，越权尝试被 403）：管理面与引擎面的拒绝共用一条通道。</summary>
     public static readonly Counter<long> AuthorizationDenied =
         Meter.CreateCounter<long>(
             "netbpm.admin.authorization.denied",
             unit: "{request}",
-            description: "管理动作因缺少 netbpm.admin.* scope 被拒绝的次数。");
+            description: "因缺少所需 scope（netbpm.admin.* 或 workflow:*）被拒绝的次数。");
 
     /// <summary>审计留痕（成功与失败都计）。</summary>
     public static readonly Counter<long> AuditRecorded =
@@ -61,14 +61,17 @@ public static class AdminDiagnostics
     /// <summary>标签键：动作是否成功（"true" / "false"，OTel 标签值为字符串）。</summary>
     public const string TagSuccess = "netbpm.audit.success";
 
-    /// <summary>标签键：鉴权方式（jwt / api_key / none）。</summary>
+    /// <summary>标签键：鉴权方式（jwt / api_key / client / none）。</summary>
     public const string TagAuthMode = "netbpm.auth.mode";
 
-    /// <summary>鉴权方式的标签值（与审计表 <c>AUTH_MODE_</c> 同口径）。</summary>
+    /// <summary>鉴权方式的标签值（与审计表 <c>AUTH_MODE_</c> 列同一套取值，见 <c>AdminActionAuditor.AuthModeName</c>）。</summary>
     public static string AuthModeTag(RequestAuthMode mode) => mode switch
     {
         RequestAuthMode.Jwt => "jwt",
         RequestAuthMode.ApiKey => "api_key",
+        // 客户端凭据单独成桶：收紧后第一个要看的就是「哪个接入系统缺哪个 scope」，
+        // 归到 none 里会和开发模式的噪声混在一起
+        RequestAuthMode.Client => "client",
         _ => "none",
     };
 }

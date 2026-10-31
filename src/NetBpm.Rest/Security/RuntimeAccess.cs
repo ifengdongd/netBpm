@@ -4,6 +4,7 @@ using NetBpm.Engine;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
 using NetBpm.Engine.Tasks;
+using NetBpm.Platform.Contracts;
 using NetBpm.Runtime;
 
 namespace NetBpm.Rest.Security;
@@ -245,14 +246,32 @@ public static class RuntimeAccess
 
     /// <summary>
     /// 当前请求是否具备管理能力（判定口径与 <see cref="AdminAuthorization"/> 一致）：
-    /// 未启用凭据（开发 / 单机演示）或 API Key 可信服务视为管理方；JWT 用户必须持 <c>netbpm.admin</c>。
+    /// 未启用凭据（开发 / 单机演示）或 API Key 可信服务视为管理方；JWT 用户必须持 <c>netbpm.admin</c>；
+    /// 注册客户端必须显式持有<b>跨人读</b> scope（<c>workflow:admin:instance</c> / <c>workflow:history:read:all</c>）。
     /// <para>用于「全量待办视图」的显式放行 —— 引擎对无条件任务查询的防呆仍然默认生效。</para>
+    /// <para>
+    /// ⚠️ 客户端不能沿用「非用户身份即管理方」的老口径：引擎面没有人员收窄，
+    /// 「全量待办」等于「读该租户所有人的待办」，一个只被授予 <c>workflow:task:read</c> 的接入系统
+    /// 不该顺带拿到它。
+    /// </para>
     /// </summary>
     public static bool IsAdminPrincipal(RequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return !context.IsUserPrincipal || context.HasAdminScope(TaskScopes.Admin);
+        if (context.AuthMode is RequestAuthMode.None or RequestAuthMode.ApiKey)
+        {
+            return true;
+        }
+
+        if (context.IsUserPrincipal)
+        {
+            return context.HasAdminScope(TaskScopes.Admin);
+        }
+
+        return context.HasAdminScope(TaskScopes.Admin)
+            || PlatformScopes.IsSatisfiedBy([.. context.Scopes], PlatformScopes.AdminInstance)
+            || PlatformScopes.IsSatisfiedBy([.. context.Scopes], PlatformScopes.HistoryReadAll);
     }
 
     /// <summary>过滤器存入的运行态实例（未受限身份为 <see langword="null"/>）。</summary>

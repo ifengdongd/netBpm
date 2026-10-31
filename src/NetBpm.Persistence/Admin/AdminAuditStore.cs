@@ -13,7 +13,7 @@ namespace NetBpm.Persistence.Admin;
 /// <param name="Id">审计记录 id。</param>
 /// <param name="TenantId">租户（与引擎 <c>TENANT_ID_</c> 同口径，可为空）。</param>
 /// <param name="Actor">操作人（JWT 的 <c>sub</c> 或 API Key 模式下的 <c>X-User-Id</c>）。</param>
-/// <param name="AuthMode">鉴权方式（<c>none</c> / <c>api_key</c> / <c>jwt</c>）。</param>
+/// <param name="AuthMode">鉴权方式（<c>none</c> / <c>api_key</c> / <c>jwt</c> / <c>client</c>）。</param>
 /// <param name="Action">动作标识（如 <c>task.reassign</c> / <c>instance.jump</c> / <c>variable.write</c>）。</param>
 /// <param name="TargetType">目标类型（<c>task</c> / <c>process_instance</c> / <c>variable</c>）。</param>
 /// <param name="TargetId">目标 id。</param>

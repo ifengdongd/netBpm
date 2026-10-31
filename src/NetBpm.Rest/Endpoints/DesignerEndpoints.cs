@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using NetBpm.Engine;
 using NetBpm.Persistence.Admin;
 using NetBpm.Persistence.Deployment;
+using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Auditing;
 using NetBpm.Rest.Diagnostics;
 using NetBpm.Rest.Security;
@@ -32,34 +33,46 @@ public static class DesignerEndpoints
         var group = endpoints.MapGroup("/api/designer").WithTags("designer");
 
         // 🔐 设计器是管理工具：发布定义 / 定义级挂起 / 删部署都改变"线上行为"，需要管理 scope
-        // （validate 只解析校验、不落库，保持开放；读接口只受租户约束）
+        // （validate 只解析校验、不落库，只需读定义的授权；读接口只受租户约束）
+        // ⚠️ 每条都补 RequireEngineScope：注册客户端拿不到 netbpm.admin.*（PlatformScopes.All 里没有），
+        // 没有这一层就会被「引擎管理 scope」一律拒掉，与平台面的 workflow:admin:process 对不上
         group.MapPost("/deploy", DeployAsync).Accepts<string>("text/xml").Produces<DeployResponse>()
+            .RequireEngineScope(PlatformScopes.AdminProcess, "部署流程定义")
             .RequireAdminScope(TaskScopes.AdminModelWrite, "部署流程定义");
-        group.MapPost("/validate", ValidateAsync).Accepts<string>("text/xml").Produces<ValidationResponse>();
+        group.MapPost("/validate", ValidateAsync).Accepts<string>("text/xml").Produces<ValidationResponse>()
+            .RequireEngineScope(PlatformScopes.ProcessRead, "校验流程定义");
         group.MapGet("/definitions", FindDefinitionsAsync).Produces<IReadOnlyList<ProcessDefinitionResponse>>()
+            .RequireEngineScope(PlatformScopes.ProcessRead, "查看流程定义")
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程定义");
         group.MapGet("/definitions/{processDefinitionKey}/versions", FindDefinitionVersionsAsync)
             .Produces<IReadOnlyList<ProcessDefinitionResponse>>()
+            .RequireEngineScope(PlatformScopes.ProcessRead, "查看流程定义")
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看流程定义");
         group.MapGet("/definition/{processDefinitionId}/xml", GetDefinitionXmlAsync).Produces<string>()
+            .RequireEngineScope(PlatformScopes.ProcessRead, "回显流程定义")
             .RequireAdminScope(TaskScopes.AdminModelRead, "回显流程定义");
 
         // 流程定义挂起 / 激活（仓库服务语义，不属于设计器契约；放在同一组只是为了按定义聚合端点）
         // ?suspendProcessInstances=true / ?activateProcessInstances=true 一并挂起（激活）运行中的实例
         group.MapPost("/definitions/{processDefinitionId}/suspend", SuspendDefinitionAsync)
+            .RequireEngineScope(PlatformScopes.AdminProcess, "挂起流程定义")
             .RequireAdminScope(TaskScopes.AdminModelWrite, "挂起流程定义");
         group.MapPost("/definitions/{processDefinitionId}/activate", ActivateDefinitionAsync)
+            .RequireEngineScope(PlatformScopes.AdminProcess, "激活流程定义")
             .RequireAdminScope(TaskScopes.AdminModelWrite, "激活流程定义");
 
         // 部署维度：列表 + 资源清单（删除见下方 DELETE）
         group.MapGet("/deployments", FindDeploymentsAsync).Produces<IReadOnlyList<DeploymentSummaryResponse>>()
+            .RequireEngineScope(PlatformScopes.ProcessRead, "查看部署列表")
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看部署列表");
         group.MapGet("/deployments/{deploymentId}/resources", FindDeploymentResourcesAsync)
             .Produces<IReadOnlyList<DeploymentResourceResponse>>()
+            .RequireEngineScope(PlatformScopes.ProcessRead, "查看部署资源")
             .RequireAdminScope(TaskScopes.AdminModelRead, "查看部署资源");
 
         // 删除部署（repositoryService.deleteDeployment）：cascade=true 时连同运行中的实例一起删
         group.MapDelete("/deployments/{deploymentId}", DeleteDeploymentAsync)
+            .RequireEngineScope(PlatformScopes.AdminProcess, "删除部署")
             .RequireAdminScope(TaskScopes.AdminModelWrite, "删除部署");
 
         return group;

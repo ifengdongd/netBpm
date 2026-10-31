@@ -1,4 +1,5 @@
 using NetBpm.Identity;
+using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Security;
 
 namespace NetBpm.Rest.Endpoints;
@@ -10,6 +11,10 @@ namespace NetBpm.Rest.Endpoints;
 /// <see cref="IUserGroupManager"/> 展开候选组。默认注册的是空实现，
 /// 因此这些端点返回空集是「未接入身份源」的正常表现，不是错误。
 /// </para>
+/// <para>
+/// 🔐 注册客户端按 <c>workflow:task:read</c> 记账：组展开是「谁能办这个任务」的一部分，
+/// 与待办读取同级；组 ID / 成员清单属于组织架构，只能被已授权读待办的接入方看到。
+/// </para>
 /// </summary>
 public static class IdentityEndpoints
 {
@@ -18,9 +23,14 @@ public static class IdentityEndpoints
         var group = endpoints.MapGroup("/api/identity").WithTags("identity");
 
         group.MapGet("/users/{userId}/groups", FindGroupsByUserAsync)
+            .RequireEngineScope(PlatformScopes.TaskRead, "查询用户所属组")
             .Produces<IReadOnlyList<UserGroupResponse>>();
-        group.MapGet("/groups/{groupId}", FindGroupAsync).Produces<UserGroupResponse>();
-        group.MapGet("/groups/{groupId}/users", FindUsersInGroupAsync).Produces<IReadOnlyList<string>>();
+        group.MapGet("/groups/{groupId}", FindGroupAsync)
+            .RequireEngineScope(PlatformScopes.TaskRead, "查询组信息")
+            .Produces<UserGroupResponse>();
+        group.MapGet("/groups/{groupId}/users", FindUsersInGroupAsync)
+            .RequireEngineScope(PlatformScopes.TaskRead, "查询组成员")
+            .Produces<IReadOnlyList<string>>();
 
         return endpoints;
     }
