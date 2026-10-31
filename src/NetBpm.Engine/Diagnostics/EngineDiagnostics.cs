@@ -65,4 +65,16 @@ public static class EngineDiagnostics
         "netbpm.outbox.failure",
         unit: "{event}",
         description: "outbox 事件发布失败次数（tag: dead_letter）");
+
+    /// <summary>外部任务告警次数（按告警码）。</summary>
+    public static readonly Counter<long> ExternalTaskAlerts = Meter.CreateCounter<long>(
+        "netbpm.external_task.alert",
+        unit: "{alert}",
+        description: "外部任务告警次数（tag: code / tenant）");
+
+    /// <summary>事件订阅投递结果（按成功 / 失败）。</summary>
+    public static readonly Counter<long> EventDeliveries = Meter.CreateCounter<long>(
+        "netbpm.event.delivery",
+        unit: "{delivery}",
+        description: "事件订阅投递次数（tag: subscription / result）");
 }
