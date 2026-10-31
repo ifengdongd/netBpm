@@ -133,19 +133,9 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(context);
 
-        if (query.Direction != SortDirection.Descending)
-        {
-            // 引擎门面的实例查询固定「开始时间倒序」（见 ProcessInstanceQuery 的注释），
-            // 升序无法下推游标，只能全量拉回来再反向切片——实例量一大就是全表扫描。
-            // 与其安静地返回一个「正确但很慢」的分页，不如明确拒绝，让调用方知道自己要的是什么。
-            throw new InstanceListRejectedException(
-                ErrorCodes.RequestMalformed,
-                "不支持的排序方向",
-                StatusCodes.Status400BadRequest,
-                "实例列表目前只支持 direction=DESCENDING（按开始时间倒序）：引擎的实例查询固定倒序，"
-                + "升序无法下推分页游标。需要「最早的单据」请用 startedFrom/startedTo 收窄时间范围。");
-        }
-
+        // 两个方向都支持：排序与时间边界一起下推给存储层（`order by START_TIME_, ID_` 的 asc/desc），
+        // 平台侧只负责游标语义与 tie-break，不靠「全量拉回来再反向切片」。
+        var descending = query.Direction != SortDirection.Ascending;
         var limit = Math.Clamp(query.Limit ?? DefaultLimit, 1, MaxLimit);
         var cursor = DecodeCursor(query.Cursor);
         var startedBy = ResolveStartedBy(query.StartedBy, context);
@@ -153,7 +143,7 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         // 「我参与过的单据」：一次算出「这个人 → 实例 id → 角色」，既做过滤也用来回填 myRoles
         var involvement = await LoadInvolvementAsync(query.InvolvedUser, context, ct).ConfigureAwait(false);
 
-        var candidates = await LoadCandidatesAsync(query, startedBy, cursor, ct).ConfigureAwait(false);
+        var candidates = await LoadCandidatesAsync(query, startedBy, cursor, descending, ct).ConfigureAwait(false);
 
         var filtered = new List<Candidate>(candidates.Count);
 
@@ -170,10 +160,7 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
                 continue;
             }
 
-            // 游标位置：只保留「排在游标之后」的（倒序 = 更旧）
-            if (cursor is { } position
-                && candidate.StartTime == position.StartTime
-                && string.CompareOrdinal(candidate.InstanceId, position.InstanceId) >= 0)
+            if (cursor is { } position && IsBeforeCursor(candidate, position, descending))
             {
                 continue;
             }
@@ -181,12 +168,19 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
             filtered.Add(candidate);
         }
 
-        // 倒序：开始时间新的在前；同刻按实例 id 升序（保证「跨页不重不漏」的稳定 tie-break）
-        filtered.Sort(static (left, right) =>
+        // 排序：时间为主键、实例 id 为 tie-break（id 恒升序，两个方向都不变）。
+        // 保持这个口径是因为游标的「同刻怎么排」必须与排序完全一致，否则翻页会在边界重复或漏行。
+        filtered.Sort((left, right) =>
         {
-            var byTime = (right.StartTime ?? DateTime.MinValue).CompareTo(left.StartTime ?? DateTime.MinValue);
+            var byTime = (left.StartTime ?? DateTime.MinValue)
+                .CompareTo(right.StartTime ?? DateTime.MinValue);
 
-            return byTime != 0 ? byTime : string.CompareOrdinal(left.InstanceId, right.InstanceId);
+            if (byTime != 0)
+            {
+                return descending ? -byTime : byTime;
+            }
+
+            return string.CompareOrdinal(left.InstanceId, right.InstanceId);
         });
 
         var page = filtered.Count > limit ? filtered.GetRange(0, limit) : filtered;
@@ -225,9 +219,7 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
     /// <param name="context">调用方身份。</param>
     private static string? ResolveStartedBy(string? requested, RequestContext context)
     {
-        var canSeeEveryone = context.IsAdmin
-            || context.HasAdminScope(TaskScopes.AdminInstanceJump)
-            || context.HasScope(PlatformScopes.HistoryReadAll);
+        var canSeeEveryone = PlatformIdentity.HasAdminPerspective(context);
 
         if (canSeeEveryone)
         {
@@ -297,9 +289,7 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
     /// </summary>
     private static string ResolveInvolvedUser(string requested, RequestContext context)
     {
-        var canSeeEveryone = context.IsAdmin
-            || context.HasAdminScope(TaskScopes.AdminInstanceJump)
-            || context.HasScope(PlatformScopes.HistoryReadAll);
+        var canSeeEveryone = PlatformIdentity.HasAdminPerspective(context);
 
         if (canSeeEveryone)
         {
@@ -342,9 +332,19 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         InstanceQuery query,
         string? startedBy,
         CursorPosition? cursor,
+        bool descending,
         CancellationToken ct)
     {
         var merged = new Dictionary<string, Candidate>(StringComparer.Ordinal);
+
+        // 时间边界要跟着方向走：倒序时游标是「上一页最旧的一条」→ 上界；
+        // 升序时它是「上一页最新的一条」→ 下界。唯一的约束是边界必须「含等号」，
+        // 同刻的多条由内存按实例 id 精确剔除（否则会整批漏掉或整批重复）。
+        DateTime? fromBound = query.StartedFrom?.UtcDateTime;
+        DateTime? toBound = query.StartedTo?.UtcDateTime;
+
+        var startedAfter = descending ? fromBound : cursor?.StartTime ?? fromBound;
+        var startedBefore = descending ? cursor?.StartTime ?? toBound : toBound;
 
         if (NeedsHistoric(query.Status))
         {
@@ -355,10 +355,9 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
                 // Status 明确指向「已结束」时由引擎侧筛掉运行中的行：
                 // 这一条能把历史表里绝大部分在办实例挡在门外，是最划算的下推。
                 Finished: query.Status is InstanceStatus.Completed or InstanceStatus.Terminated ? true : null,
-                StartedAfter: ToEngineTime(query.StartedFrom),
-                // 倒序翻页的游标是「上一页最旧的一条」→ 下一页只要比它更旧的（上界含等号，
-                // 同刻的由内存按实例 id 排除）。这是唯一安全的下推：它不会漏掉任何本页该有的行。
-                StartedBefore: ToEngineTime(cursor?.StartTime ?? query.StartedTo));
+                StartedAfter: startedAfter,
+                StartedBefore: startedBefore,
+                Descending: descending);
 
             foreach (var historic in await _engine
                 .FindHistoricProcessInstancesAsync(historicQuery, ct)
@@ -384,8 +383,9 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
                 ProcessDefinitionKey: NullIfBlank(query.ProcessKey),
                 BusinessKey: NullIfBlank(query.BusinessKey),
                 StartUserId: startedBy,
-                StartedAfter: ToEngineTime(query.StartedFrom),
-                StartedBefore: ToEngineTime(cursor?.StartTime ?? query.StartedTo));
+                StartedAfter: startedAfter,
+                StartedBefore: startedBefore,
+                Descending: descending);
 
             foreach (var execution in await _engine
                 .FindProcessInstancesAsync(executionQuery, ct)
@@ -662,11 +662,31 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         return key ?? InstanceReadRules.ParseKey(processDefinitionId);
     }
 
+    /// <summary>
+    /// 这条候选是否「排在游标之前」（已翻过），需要跳过。
+    /// </summary>
+    /// <remarks>
+    /// 排序键是 <c>(开始时间, 实例 id)</c>：时间比游标更晚的在倒序里已经翻过、在升序里还没到；
+    /// 同刻的多条按实例 id 升序排，因此倒序要跳过 id 更大的（<c>&gt;=</c> 含游标自身），
+    /// 升序反过来。这条规则必须与 <see cref="ListAsync"/> 里的排序逐字对应。
+    /// </remarks>
+    private static bool IsBeforeCursor(Candidate candidate, CursorPosition position, bool descending)
+    {
+        var byTime = (candidate.StartTime ?? DateTime.MinValue)
+            .CompareTo(position.StartTime ?? DateTime.MinValue);
+
+        if (byTime != 0)
+        {
+            return descending ? byTime > 0 : byTime < 0;
+        }
+
+        var byId = string.CompareOrdinal(candidate.InstanceId, position.InstanceId);
+
+        return descending ? byId >= 0 : byId <= 0;
+    }
+
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
-
-    /// <summary>接口用的 <see cref="DateTimeOffset"/> → 引擎用的 <see cref="DateTime"/>（UTC）。</summary>
-    private static DateTime? ToEngineTime(DateTimeOffset? value) => value?.UtcDateTime;
 
     // ─────────────────────────── 游标 ───────────────────────────
 

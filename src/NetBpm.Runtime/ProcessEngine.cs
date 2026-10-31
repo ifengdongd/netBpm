@@ -712,7 +712,7 @@ public sealed class ProcessEngine : IProcessEngine
                 query.MaxResults,
                 instance => instance.StartTime,
                 instance => instance.Id,
-                descending: true),
+                descending: query.Descending),
         ];
     }
 
@@ -772,7 +772,7 @@ public sealed class ProcessEngine : IProcessEngine
             StartedBefore: query.StartedBefore,
             FirstResult: query.FirstResult,
             MaxResults: query.MaxResults,
-            Descending: true);
+            Descending: query.Descending);
     }
 
     private async ValueTask<IReadOnlyList<IExecutionEntity>> CollectProcessInstancesAsync(
@@ -1837,7 +1837,7 @@ public sealed class ProcessEngine : IProcessEngine
                 query.MaxResults,
                 instance => instance.StartTime,
                 instance => instance.Id,
-                descending: true),
+                descending: query.Descending),
         ];
     }
 
@@ -1900,7 +1900,7 @@ public sealed class ProcessEngine : IProcessEngine
             TenantId: query.TenantId,
             FirstResult: query.FirstResult,
             MaxResults: query.MaxResults,
-            Descending: true);
+            Descending: query.Descending);
     }
 
     private async ValueTask<IReadOnlyList<HistoricProcessInstance>> CollectHistoricProcessInstancesAsync(

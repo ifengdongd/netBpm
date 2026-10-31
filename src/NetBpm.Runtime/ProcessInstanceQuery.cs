@@ -4,7 +4,8 @@ namespace NetBpm.Runtime;
 /// 运行中流程实例的查询条件（在办监控 / 按业务单号反查）。
 /// <para>
 /// 过滤在门面内完成（本子集不给 <c>ACT_RU_EXECUTION</c> 做任意组合 SQL，与待办查询同一口径）；
-/// 排序固定为 <b>开始时间倒序</b>，保证跨页不重不漏。
+/// 排序默认按<b>开始时间倒序</b>（跨页不重不漏），需要「最早的单据」时显式给
+/// <paramref name="Descending"/> = <see langword="false"/>，排序与分页一起由存储层下推。
 /// </para>
 /// </summary>
 /// <param name="ProcessDefinitionId">按流程定义 id 精确过滤。</param>
@@ -19,6 +20,10 @@ namespace NetBpm.Runtime;
 /// <param name="StartedBefore">开始时间上界（含）。</param>
 /// <param name="FirstResult">跳过的条数，默认 0。</param>
 /// <param name="MaxResults">最多返回的条数；<see langword="null"/> 表示不限（REST 层会给默认页大小）。</param>
+/// <param name="Descending">
+/// 是否按开始时间倒序。两个方向都按「(开始时间, 实例 id)」排序：
+/// 同刻的多条必须有稳定的 tie-break，否则游标翻页会在边界上重复或漏行。
+/// </param>
 public sealed record ProcessInstanceQuery(
     string? ProcessDefinitionId = null,
     string? ProcessDefinitionKey = null,
@@ -29,7 +34,8 @@ public sealed record ProcessInstanceQuery(
     DateTime? StartedAfter = null,
     DateTime? StartedBefore = null,
     int FirstResult = 0,
-    int? MaxResults = null);
+    int? MaxResults = null,
+    bool Descending = true);
 
 /// <summary>
 /// 历史流程实例的查询条件（已办结检索 / 审计 / 报表）。
@@ -55,6 +61,10 @@ public sealed record ProcessInstanceQuery(
 /// <param name="FirstResult">跳过的条数，默认 0。</param>
 /// <param name="MaxResults">最多返回的条数；<see langword="null"/> 表示不限。</param>
 /// <param name="TenantId">按租户过滤；<see langword="null"/> 表示不限制（B2.3）。</param>
+/// <param name="Descending">
+/// 是否按开始时间倒序（默认）。升序同样由存储层下推（<c>order by START_TIME_ asc, ID_ asc</c>），
+/// 不靠「全量拉回来再反向切片」——那个实现在实例上万时就是全表扫描。
+/// </param>
 public sealed record HistoricProcessInstanceQuery(
     string? ProcessDefinitionId = null,
     string? ProcessDefinitionKey = null,
@@ -68,7 +78,8 @@ public sealed record HistoricProcessInstanceQuery(
     DateTime? EndedBefore = null,
     int FirstResult = 0,
     int? MaxResults = null,
-    string? TenantId = null);
+    string? TenantId = null,
+    bool Descending = true);
 
 /// <summary>
 /// 流程定义的查询条件（定义列表 / 按 key 查全部版本）。

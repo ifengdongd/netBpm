@@ -267,20 +267,81 @@ public sealed class InstanceListTests
         Assert.Equal(ErrorCodes.RequestMalformed, problem.GetProperty("code").GetString());
     }
 
-    /// <summary>升序被明确拒绝，而不是安静地返回一个「看起来对、其实是全表扫描」的分页。</summary>
+    /// <summary>
+    /// 升序（<c>direction=ASCENDING</c>）：最早的单据在前，且游标翻页同样不重不漏。
+    /// </summary>
+    /// <remarks>
+    /// 断言的是<b>排序契约</b>而不只是「顺序反了」：时间为主键、实例 id 为 tie-break 且 id 恒升序。
+    /// 两个方向必须共用这一条规则，否则翻页会在「同刻多条」的边界上重复或漏行——
+    /// 而这正是 v1.11 之前直接 400 拒绝升序的原因（当时无法下推游标）。
+    /// </remarks>
     [Fact]
-    public async Task List_Should400_WhenAscending()
+    public async Task List_ShouldSupportAscending()
     {
         using var harness = await Harness.StartAsync([PlatformScopes.InstanceRead]);
         await harness.DeployAsync(LeaveKey);
 
-        using var response = await harness.GetAsync(
-            "/workflow/v1/instances?direction=ASCENDING",
-            "zhangsan");
-        var problem = await ReadJsonAsync(response);
+        for (var index = 0; index < 3; index++)
+        {
+            await harness.StartAsync(LeaveKey, "zhangsan", businessKey: $"BILL-ASC{index}");
+        }
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal(ErrorCodes.RequestMalformed, problem.GetProperty("code").GetString());
+        var descending = await ReadOrderAsync(harness, "/workflow/v1/instances");
+        var ascending = await ReadOrderAsync(harness, "/workflow/v1/instances?direction=ASCENDING");
+
+        Assert.Equal(3, descending.Count);
+        Assert.Equal(3, ascending.Count);
+
+        // 同一批实例：两个方向只是顺序不同
+        Assert.Equal(
+            descending.Select(item => item.InstanceId).OrderBy(id => id, StringComparer.Ordinal),
+            ascending.Select(item => item.InstanceId).OrderBy(id => id, StringComparer.Ordinal));
+
+        // 倒序：开始时间倒序、同刻按实例 id 升序
+        Assert.Equal(
+            descending
+                .OrderByDescending(item => item.StartedAt)
+                .ThenBy(item => item.InstanceId, StringComparer.Ordinal)
+                .Select(item => item.InstanceId),
+            descending.Select(item => item.InstanceId));
+
+        // 升序：开始时间正序、同刻仍按实例 id 升序（tie-break 不随方向翻转）
+        Assert.Equal(
+            ascending
+                .OrderBy(item => item.StartedAt)
+                .ThenBy(item => item.InstanceId, StringComparer.Ordinal)
+                .Select(item => item.InstanceId),
+            ascending.Select(item => item.InstanceId));
+
+        // 升序翻页：2 + 1，拼起来必须与单页结果完全一致
+        var paged = new List<string>();
+        string? cursor = null;
+
+        for (var page = 0; page < 5; page++)
+        {
+            var path = cursor is null
+                ? "/workflow/v1/instances?direction=ASCENDING&limit=2"
+                : $"/workflow/v1/instances?direction=ASCENDING&limit=2&cursor={Uri.EscapeDataString(cursor)}";
+
+            using var response = await harness.GetAsync(path, "zhangsan");
+            var body = await ReadJsonAsync(response);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            paged.AddRange(body.GetProperty("items").EnumerateArray()
+                .Select(item => item.GetProperty("instanceId").GetString()!));
+
+            if (!body.GetProperty("hasMore").GetBoolean())
+            {
+                break;
+            }
+
+            cursor = body.GetProperty("nextCursor").GetString();
+
+            Assert.False(string.IsNullOrWhiteSpace(cursor), "hasMore=true 时必须给出 nextCursor。");
+        }
+
+        Assert.Equal(ascending.Select(item => item.InstanceId), paged);
     }
 
     [Fact]
@@ -295,6 +356,26 @@ public sealed class InstanceListTests
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(ErrorCodes.AuthInsufficientScope, problem.GetProperty("code").GetString());
+    }
+
+    /// <summary>列表里的一条，只留排序断言需要的两个字段。</summary>
+    private sealed record ListedInstance(string InstanceId, DateTimeOffset StartedAt);
+
+    private static async Task<IReadOnlyList<ListedInstance>> ReadOrderAsync(Harness harness, string path)
+    {
+        using var response = await harness.GetAsync(path, "zhangsan");
+        var body = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        return
+        [
+            .. body.GetProperty("items").EnumerateArray().Select(item => new ListedInstance(
+                item.GetProperty("instanceId").GetString()!,
+                DateTimeOffset.Parse(
+                    item.GetProperty("startedAt").GetString()!,
+                    System.Globalization.CultureInfo.InvariantCulture))),
+        ];
     }
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response)
