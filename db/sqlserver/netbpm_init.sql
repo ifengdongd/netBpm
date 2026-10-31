@@ -1494,6 +1494,46 @@ go
 if not exists (select 1 from sys.indexes where name = 'ix_nb_external_task_instance' and object_id = object_id('nb_external_task'))
 create index ix_nb_external_task_instance on nb_external_task (tenant_id, process_instance_id);
 go
+if object_id(N'nb_event_subscription', N'U') is null
+    create table nb_event_subscription (
+    id nvarchar(64) not null,
+    tenant_id nvarchar(64) not null constraint df_nb_event_subscription_tenant_id default ('default'),
+    name nvarchar(200) not null,
+    event_types nvarchar(1000),
+    process_definition_id nvarchar(64),
+    endpoint_url nvarchar(1000) not null,
+    secret nvarchar(255) not null,
+    headers_json nvarchar(max),
+    enabled tinyint not null constraint df_nb_event_subscription_enabled default (1),
+    max_attempts int not null constraint df_nb_event_subscription_max_attempts default (5),
+    created_at datetime not null,
+    updated_at datetime not null,
+    constraint pk_nb_event_subscription primary key clustered (id)
+    );
+go
+
+if not exists (select 1 from sys.indexes where name = 'ix_nb_event_subscription_tenant' and object_id = object_id('nb_event_subscription'))
+create index ix_nb_event_subscription_tenant on nb_event_subscription (tenant_id, enabled);
+go
+if object_id(N'nb_event_delivery', N'U') is null
+    create table nb_event_delivery (
+    event_id nvarchar(64) not null,
+    subscription_id nvarchar(64) not null,
+    tenant_id nvarchar(64) not null constraint df_nb_event_delivery_tenant_id default ('default'),
+    status nvarchar(32) not null constraint df_nb_event_delivery_status default ('PENDING'),
+    attempts int not null constraint df_nb_event_delivery_attempts default (0),
+    last_error nvarchar(1000),
+    next_attempt_at datetime,
+    created_at datetime not null,
+    updated_at datetime not null,
+    delivered_at datetime,
+    constraint pk_nb_event_delivery primary key clustered (event_id, subscription_id)
+    );
+go
+
+if not exists (select 1 from sys.indexes where name = 'ix_nb_event_delivery_subscription' and object_id = object_id('nb_event_delivery'))
+create index ix_nb_event_delivery_subscription on nb_event_delivery (subscription_id, status);
+go
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
 
@@ -4716,6 +4756,222 @@ if exists (select 1 from sys.columns
     exec sp_addextendedproperty @name = N'MS_Description', @value = N'回执成功时间（UTC）',
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_external_task',
         @level2type = N'COLUMN', @level2name = N'completed_at';
+go
+
+if object_id('nb_event_subscription', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('nb_event_subscription') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件订阅：谁关心哪类引擎事件、往哪个回调地址送、用什么密钥签名（M13 事件投递）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'nb_event_subscription';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订阅 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户；事件与该值不同则不投递',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订阅名（给人看，便于区分「ERP 回调」「归档服务」）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'event_types')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'event_types')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'关心的引擎事件类型，逗号分隔；空=全部（不用 JSON 类型，两个方言要一致）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'event_types';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'process_definition_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'process_definition_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'只关心该流程定义 id 的事件；空=不限',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'process_definition_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'endpoint_url')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'endpoint_url')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'回调地址（HTTP/HTTPS）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'endpoint_url';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'secret')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'secret')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'HMAC-SHA256 签名密钥（明文存才能验签，回显只给后 4 位）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'secret';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'headers_json')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'headers_json')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'附加静态请求头（JSON 对象；网关鉴权 / 路由标记）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'headers_json';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'enabled')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'enabled')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'是否启用；停用保留记录便于恢复',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'enabled';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'max_attempts')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'max_attempts')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'单条订阅最大投递尝试次数，超出进死信',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'max_attempts';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'created_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'created_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'创建时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'created_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'updated_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'updated_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'更新时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'updated_at';
+go
+
+if object_id('nb_event_delivery', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('nb_event_delivery') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'事件投递：一条 outbox 事件对某个订阅的投递状态（重投时跳过已成功的订阅，避免无谓重发）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'nb_event_delivery';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'event_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'event_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'outbox 事件 id（ACT_EVT_OUTBOX.ID_）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'event_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'subscription_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'subscription_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'订阅 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'subscription_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户（冗余存一份，便于按租户统计与清理）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'status')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'status')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'状态词汇：PENDING / DELIVERED / FAILED / DEAD_LETTER',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'status';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'attempts')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'attempts')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'已尝试次数',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'attempts';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'last_error')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'last_error')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'最近一次失败原因',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'last_error';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'next_attempt_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'next_attempt_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'退避后下次可投时间（UTC）；空=立即可投',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'next_attempt_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'created_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'created_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'首次创建时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'created_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'updated_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'updated_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'更新时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'updated_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_delivery') and name = N'delivered_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_delivery') and c.name = N'delivered_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'投递成功时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_delivery',
+        @level2type = N'COLUMN', @level2name = N'delivered_at';
 go
 
 

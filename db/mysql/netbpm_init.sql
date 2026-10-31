@@ -1972,6 +1972,54 @@ prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
 
+create table if not exists nb_event_subscription (
+    id varchar(64) not null comment '订阅 id',
+    tenant_id varchar(64) not null default 'default' comment '租户；事件与该值不同则不投递',
+    name varchar(200) not null comment '订阅名（给人看，便于区分「ERP 回调」「归档服务」）',
+    event_types varchar(1000) comment '关心的引擎事件类型，逗号分隔；空=全部（不用 JSON 类型，两个方言要一致）',
+    process_definition_id varchar(64) comment '只关心该流程定义 id 的事件；空=不限',
+    endpoint_url varchar(1000) not null comment '回调地址（HTTP/HTTPS）',
+    secret varchar(255) not null comment 'HMAC-SHA256 签名密钥（明文存才能验签，回显只给后 4 位）',
+    headers_json mediumtext comment '附加静态请求头（JSON 对象；网关鉴权 / 路由标记）',
+    enabled tinyint not null default 1 comment '是否启用；停用保留记录便于恢复',
+    max_attempts int not null default 5 comment '单条订阅最大投递尝试次数，超出进死信',
+    created_at datetime(3) not null comment '创建时间（UTC）',
+    updated_at datetime(3) not null comment '更新时间（UTC）',
+    primary key (id),
+    index ix_nb_event_subscription_tenant (tenant_id, enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='事件订阅：谁关心哪类引擎事件、往哪个回调地址送、用什么密钥签名（M13 事件投递）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_event_subscription_tenant on nb_event_subscription (tenant_id, enabled)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_event_subscription' and index_name = 'ix_nb_event_subscription_tenant');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_event_delivery (
+    event_id varchar(64) not null comment 'outbox 事件 id（ACT_EVT_OUTBOX.ID_）',
+    subscription_id varchar(64) not null comment '订阅 id',
+    tenant_id varchar(64) not null default 'default' comment '租户（冗余存一份，便于按租户统计与清理）',
+    status varchar(32) not null default 'PENDING' comment '状态词汇：PENDING / DELIVERED / FAILED / DEAD_LETTER',
+    attempts int not null default 0 comment '已尝试次数',
+    last_error varchar(1000) comment '最近一次失败原因',
+    next_attempt_at datetime(3) comment '退避后下次可投时间（UTC）；空=立即可投',
+    created_at datetime(3) not null comment '首次创建时间（UTC）',
+    updated_at datetime(3) not null comment '更新时间（UTC）',
+    delivered_at datetime(3) comment '投递成功时间（UTC）',
+    primary key (event_id, subscription_id),
+    index ix_nb_event_delivery_subscription (subscription_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='事件投递：一条 outbox 事件对某个订阅的投递状态（重投时跳过已成功的订阅，避免无谓重发）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_event_delivery_subscription on nb_event_delivery (subscription_id, status)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_event_delivery' and index_name = 'ix_nb_event_delivery_subscription');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
 

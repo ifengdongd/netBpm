@@ -203,6 +203,8 @@ internal static class SqlGenerator
         SchemaCatalog.InstanceTimelineTable,
         SchemaCatalog.ApprovalSnapshotTable,
         SchemaCatalog.ExternalTaskTable,
+        SchemaCatalog.EventSubscriptionTable,
+        SchemaCatalog.EventDeliveryTable,
     ];
 
     /// <summary>脚本内出现过的全部表（SQL Server 注释渲染用）。</summary>

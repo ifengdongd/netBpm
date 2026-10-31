@@ -1123,6 +1123,56 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: false);
 
+    // 0015 事件订阅表（M13：outbox 事件往哪儿送）
+    internal static readonly TableDef EventSubscriptionTable = new(
+        "nb_event_subscription",
+        "事件订阅：谁关心哪类引擎事件、往哪个回调地址送、用什么密钥签名（M13 事件投递）",
+        [
+            C("id", ColType.Varchar, 64, false, comment: "订阅 id"),
+            C("tenant_id", ColType.Varchar, 64, false, def: "'default'", comment: "租户；事件与该值不同则不投递"),
+            C("name", ColType.Varchar, 200, false, comment: "订阅名（给人看，便于区分「ERP 回调」「归档服务」）"),
+            C("event_types", ColType.Varchar, 1000,
+                comment: "关心的引擎事件类型，逗号分隔；空=全部（不用 JSON 类型，两个方言要一致）"),
+            C("process_definition_id", ColType.Varchar, 64, comment: "只关心该流程定义 id 的事件；空=不限"),
+            C("endpoint_url", ColType.Varchar, 1000, false, comment: "回调地址（HTTP/HTTPS）"),
+            C("secret", ColType.Varchar, 255, false, comment: "HMAC-SHA256 签名密钥（明文存才能验签，回显只给后 4 位）"),
+            C("headers_json", ColType.MediumText, comment: "附加静态请求头（JSON 对象；网关鉴权 / 路由标记）"),
+            C("enabled", ColType.TinyInt, nullable: false, def: "1", comment: "是否启用；停用保留记录便于恢复"),
+            C("max_attempts", ColType.Int, nullable: false, def: "5", comment: "单条订阅最大投递尝试次数，超出进死信"),
+            C("created_at", ColType.DateTime3, nullable: false, comment: "创建时间（UTC）"),
+            C("updated_at", ColType.DateTime3, nullable: false, comment: "更新时间（UTC）"),
+        ],
+        ["id"],
+        [
+            // 投递时按「租户 + 启用」取候选，再在内存里按事件类型 / 流程 key 精筛
+            new IndexDef("ix_nb_event_subscription_tenant", ["tenant_id", "enabled"]),
+        ],
+        [], [],
+        EngineCharset: false);
+
+    // 0016 事件投递表（M13：一条事件 × 一个订阅 的投递状态）
+    internal static readonly TableDef EventDeliveryTable = new(
+        "nb_event_delivery",
+        "事件投递：一条 outbox 事件对某个订阅的投递状态（重投时跳过已成功的订阅，避免无谓重发）",
+        [
+            C("event_id", ColType.Varchar, 64, false, comment: "outbox 事件 id（ACT_EVT_OUTBOX.ID_）"),
+            C("subscription_id", ColType.Varchar, 64, false, comment: "订阅 id"),
+            C("tenant_id", ColType.Varchar, 64, false, def: "'default'", comment: "租户（冗余存一份，便于按租户统计与清理）"),
+            C("status", ColType.Varchar, 32, nullable: false, def: "'PENDING'",
+                comment: "状态词汇：PENDING / DELIVERED / FAILED / DEAD_LETTER"),
+            C("attempts", ColType.Int, nullable: false, def: "0", comment: "已尝试次数"),
+            C("last_error", ColType.Varchar, 1000, comment: "最近一次失败原因"),
+            C("next_attempt_at", ColType.DateTime3, comment: "退避后下次可投时间（UTC）；空=立即可投"),
+            C("created_at", ColType.DateTime3, nullable: false, comment: "首次创建时间（UTC）"),
+            C("updated_at", ColType.DateTime3, nullable: false, comment: "更新时间（UTC）"),
+            C("delivered_at", ColType.DateTime3, comment: "投递成功时间（UTC）"),
+        ],
+        // 复合主键：粒度就是「一条事件 × 一个订阅」，天然幂等，不需要额外唯一索引
+        ["event_id", "subscription_id"],
+        [new IndexDef("ix_nb_event_delivery_subscription", ["subscription_id", "status"])],
+        [], [],
+        EngineCharset: false);
+
     // 0010 HTTP 幂等键表（幂等，无表注释）
     internal static readonly TableDef IdempotencyTable = new(
         "ACT_IDEMPOTENCY",
