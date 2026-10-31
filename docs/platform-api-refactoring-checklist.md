@@ -1,12 +1,44 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）
+> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.18 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.18 本轮落地（2026-10-31，M12 收尾 + M13 事件投递）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **死信重投端点** | `POST /api/runtime/external-tasks/{id}/retry`，scope `workflow:admin:instance`（**管理干预，不是 worker 自助**）：非死信 409、跨租户 404、可指定恢复的重试次数 | `ExternalTaskDeadLetterRetryTests`（4 项，内存宿主：404 / 409 / 复活后可重新被领 / 缺 scope 403） |
+| **`external_task.no_worker` 告警** | `Runtime/Diagnostics/PlatformAlerts`（`IAlertSink` + 日志出口 + 内存出口）+ `ExternalTaskWatchdogService` 巡检：登记后超阈值无人领 → Critical；死信 → Critical；按 `告警码 + 任务 id` 冷却去重 | `ExternalTaskWatchdogTests`（6 项：阈值内外 / 曾被领过不算 / **冷却期内只报一次** / 死信告警 / 禁用时安静） |
+| **表 `nb_event_subscription` / `nb_event_delivery`** | `SchemaCatalog` 定义 + 双方言脚本重生成；`DapperEventSubscriptionStore` / `DapperEventDeliveryStore`（复合主键 + `insert ignore` 幂等） | `EventSubscriptionDatabaseTests`（2 项，MySQL 5.7.44 真库：多值列往返 / 取或建幂等 / 死信与重投） |
+| **CloudEvents 1.0 + HMAC 签名** | `Runtime/Events/CloudEvent.cs`：`specversion/id/source/type/time/datacontenttype/subject/data` + `netbpm*` 扩展属性；签名 = HMAC-SHA256 over `{timestamp}.{body}`，`X-NetBpm-Signature` / `X-NetBpm-Timestamp`，校验走常量时间比较 | `CloudEventTests`（12 项：信封 / 类型映射 / 验签 / **改 body 与过期时间戳都验不过** / 订阅匹配 / 投递行为） |
+| **投递器** | `CloudEventOutboxHandler`（`IOutboxEventHandler`）：按订阅投递，成功打标、失败抛错交给 outbox 退避重投；**已成功的订阅不重复打扰**；超 `MaxAttempts` 进死信并发告警 | 同上 |
+| **订阅管理端点** | `/api/admin/event-subscriptions` CRUD + `/rotate` + `/status` + 投递记录查询 + `POST /api/admin/events/{eventId}/deliveries/{subscriptionId}/retry`；scope `workflow:event:subscribe` | `EventSubscriptionEndpointTests`（5 项：明文密钥只出现一次 / 非法地址 400 / 轮换 / 非死信重投 409 / 缺 scope 403） |
+
+**四条口径：**
+
+1. **告警 ≠ 异常**：异常是「这次调用失败了」，告警是「根本没人来调用」。
+   worker 全挂时 fetch 只会正常返回空列表，死信也不会让任何请求报错 —— 流程静静卡在 `serviceTask` 上，
+   只能靠巡检发现。巡检**只告警、不动数据**：重投是人的决定，自动处置会把「worker 有 bug 反复失败」掩盖成「看起来在重试」。
+2. **退避只由 outbox 管一层**：投递记录里的 `next_attempt_at` 只作展示，**不参与是否尝试的判定**。
+   两级退避叠加会出现「事件说可以投了、订阅说自己还在退避」的死结 —— 事件一次次重试、投递一次次拒绝，
+   计数永远涨不上去，最后双双进死信却一次都没真发过。
+3. **至少一次，幂等在订阅方**：同一条事件重投时 CloudEvents 的 `id` 不变（就是 `ACT_EVT_OUTBOX.ID_`）。
+   投递记录（一条事件 × 一个订阅）只用于减少无谓重发，**不是幂等的替代品**。
+   一个订阅挂了不会拖住别家：已成功的订阅靠投递记录跳过，只有「还有订阅没投成」时才让事件重来。
+4. **订阅密钥只在创建 / 轮换时出现一次**：读接口只有 `secretPreview`（后 4 位）。
+   订阅密钥等价于「能伪造 NetBpm 通知」的凭据；另外 PATCH 不接受 `secret`，换密钥必须走 `/rotate` ——
+   混在通用更新里容易出现「以为改了地址结果把密钥也换了」的事故。
+
+**仍未做（S4 收尾）：** `Platform.Service` 容器化、一条含 `serviceTask` 的端到端演示流程、
+订阅投递的可观测看板（`netbpm.event.delivery` 指标已埋点，没有面板与告警规则）、
+单个订阅的独立限速（`nb_event_delivery.next_attempt_at` 已留列，当前不参与判定）。
 
 ---
 
@@ -138,14 +170,15 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 维度 | 总数 | 已落地 | 未完成 |
 |---|---|---|---|
 | 阶段（S1–S5） | 5 | 2 完成 + 1 基本完成 | 2 |
-| 改造项（M1–M16） | 16 | 7 完成 + 5 部分 | 4 |
-| 守门测试用例 | 25 | 14 | 11 |
+| 改造项（M1–M16） | 16 | 8 完成 + 5 部分 | 3 |
+| 守门测试用例 | 30 | 19 | 11 |
 | 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 14 | 8 |
-| 平台表（`nb_*`） | 13 | 7 | 6 |
+| 平台表（`nb_*`） | 15 | 9 | 6 |
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
-S4（独立部署）**已过半**：门槛项 M12 外部任务在 v1.17 落地；S5（治理/SDK）未动。
+S4（独立部署）**主体已完成**：门槛项 M12 外部任务在 v1.17 落地、M12 收尾与 M13 事件投递在 v1.18 落地，
+缺的只剩 `Platform.Service` 容器化与端到端演示；S5（治理/SDK）未动。
 八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）、
 G（委托进程内）已闭环**；C（响应强类型）只差 M3 的 Decorator 收尾，
 H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 CI diff 没有。
@@ -159,7 +192,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 未做** |
 | S2 身份与授权 | 4 周 | 🟢 完成（缺出口用例） | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
 | S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
-| S4 独立部署 | 4 周 | 🟡 过半 | **门槛已破**：M12 外部任务已落地（v1.17），含 `serviceTask` 的 BPMN 在独立部署下能跑通；仍缺 M13 事件投递、`Platform.Service` 容器化与端到端演示 |
+| S4 独立部署 | 4 周 | 🟢 主体完成（缺演示） | **门槛已破**：M12 外部任务（v1.17）+ 死信重投与告警 + M13 事件投递（v1.18）均已落地，含 `serviceTask` 的 BPMN 在独立部署下能跑通、事件能按订阅外发；仍缺 `Platform.Service` 容器化与端到端演示 |
 | S5 治理与 SDK | 3 周 | ⬜ 未开始 | 阻塞于 **M14 契约治理** |
 
 - [x] S1 契约与骨架
@@ -194,10 +227,11 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] **M10 结论推导上移**（4 人日）—— 三级回落 `DECLARED → LAST_DECISION → FALLBACK`（v1.10）
 - [ ] **M11 平台存储**（12 人日）
   - [x] 目录 / 字典 / 快照 / 时间线 / 客户端 / 租户 六类存储落地
-  - [ ] `nb_process_parameter`、`nb_parameter_snapshot`、`nb_idempotency`、`nb_external_task`、`nb_event_subscription`、`nb_audit_log` 六张表
+  - [ ] `nb_process_parameter`、`nb_parameter_snapshot`、`nb_idempotency`、`nb_external_task`、`nb_audit_log` 五张表（`nb_event_subscription` / `nb_event_delivery` 已随 M13 落地）
   - [ ] 幂等键从「全局」改为「按 client」
-- [x] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来。✅ **v1.17 已落地**（`activiti:topic` + `nb_external_task` + 三条端点 + 死信），见开头 v1.17 小节；剩余收尾：死信重投的管理端点、`external_task.no_worker` 指标
-- [ ] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理；outbox 目前只写不发
+- [x] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来。✅ **v1.17 已落地**（`activiti:topic` + `nb_external_task` + 三条端点 + 死信）；v1.18 补齐死信重投端点与 `external_task.no_worker` / `external_task.dead_letter` 告警，见开头 v1.18 小节
+- [x] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理。✅ **v1.18 已落地**
+  （`CloudEvent` + HMAC 签名、`CloudEventOutboxHandler`、`nb_event_subscription` / `nb_event_delivery`、订阅管理端点）；剩余：看板与单订阅限速，见开头 v1.18 小节
 - [ ] **[!] M14 契约治理**（6 人日）—— OpenAPI 快照 + CI diff。**S5 的前置**
 - [ ] **M15 官方 SDK**（10 人日）—— `NetBpm.Platform.Client`（.NET）+ 生成 Java/TS
 - [x] **M16 客户端注册与隔离**（10 人日）—— `nb_api_client` + `IClientRegistry` + 认证中间件改造、密钥轮换、流程白名单、按 client 配额（v1.3 / v1.4）
@@ -233,8 +267,8 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 
 ### ④ S4 独立部署（最大一块）
 
-- [x] **[!]** M12 外部任务 + 表 `nb_external_task` ✅ v1.17（见开头小节；剩死信重投端点与告警指标）
-- [ ] M13 事件投递（CloudEvents + 签名 + 订阅）+ 表 `nb_event_subscription`
+- [x] **[!]** M12 外部任务 + 表 `nb_external_task` ✅ v1.17；死信重投端点与 `no_worker` / `dead_letter` 告警 ✅ v1.18
+- [x] M13 事件投递（CloudEvents + 签名 + 订阅）+ 表 `nb_event_subscription` / `nb_event_delivery` ✅ v1.18
 - [ ] M11 平台存储收尾：六张 `nb_*` 表 + 幂等键按 client
 - [ ] 全局（跨实例）配额改 Redis 版（现为进程内计数）
 - [ ] `Platform.Service` 容器化 + 一条含 `serviceTask` 的流程端到端跑通
@@ -400,7 +434,8 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
    至此 **S1 / S2 / S3 三条主线的技术项全部落地**，剩下的只是出口用例与 §3 ③ 的写入型端点。
 3. ~~现在只剩一个判断：要不要做 **S4**~~ —— 门槛项 **M12 外部任务已在 v1.17 落地**，
    「引擎独立部署给别人用」不再卡在「跑不了 `serviceTask`」上。
-   继续 S4 的话，下一步是 **M13 事件投递**与 `Platform.Service` 容器化；
+   继续 S4 的话，下一步是 **`Platform.Service` 容器化 + 一条含 `serviceTask` 的端到端演示**
+   （M12 收尾与 M13 事件投递已在 v1.18 落地，S4 的技术项到此只剩「部署形态」与「演示」）；
    若不做 S4，§3 ③ 的 `terminate` / `claim` / 参数快照 / `diagram.svg` 等端点可以先补——
    它们都是「让业务面自己能闭环」的动作，不需要 S4 的前提。
 4. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
