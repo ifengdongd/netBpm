@@ -28,6 +28,8 @@ using NetBpm.Persistence.Idempotency;
 using NetBpm.Persistence.Jobs;
 using NetBpm.Persistence.Migration;
 using NetBpm.Persistence.Tasks;
+using NetBpm.Runtime.Diagnostics;
+using NetBpm.Runtime.Events;
 using NetBpm.Runtime.Hosting.JobQueue;
 
 namespace NetBpm.Runtime;
@@ -125,6 +127,143 @@ public static class NetBpmServiceCollectionExtensions
         services.AddHostedService<Hosting.OutboxPublisherService>();
 
         return services;
+    }
+
+    /// <summary>
+    /// 注册外部任务巡检（<c>external_task.no_worker</c> / <c>external_task.dead_letter</c> 告警）。
+    /// </summary>
+    /// <remarks>
+    /// 显式启用而不是跟着 <see cref="AddNetBpm"/> 自动挂：巡检是常驻后台服务，
+    /// 内存宿主里没有 worker 会来领任务，扫一遍只会刷屏。参数读 <c>NetBpm:ExternalTasks:Watchdog</c>。
+    /// </remarks>
+    public static IServiceCollection AddNetBpmExternalTaskWatchdog(
+        this IServiceCollection services,
+        Action<Hosting.ExternalTaskWatchdogOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var options = services.AddOptions<Hosting.ExternalTaskWatchdogOptions>();
+
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        services.AddHostedService<Hosting.ExternalTaskWatchdogService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// 注册事件投递（M13）：把 <c>ACT_EVT_OUTBOX</c> 的事件按订阅以 CloudEvents + HMAC 签名投出去。
+    /// </summary>
+    /// <remarks>
+    /// 必须与 <see cref="AddNetBpmOutboxPublisher"/> 一起用 —— 前者负责「什么时候发」，
+    /// 这个负责「发给谁、怎么发」。只挂这个不挂发布器，事件会一直躺在 outbox 里。
+    /// </remarks>
+    public static IServiceCollection AddNetBpmEventDelivery(
+        this IServiceCollection services,
+        Action<EventDeliveryOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var options = services.AddOptions<EventDeliveryOptions>();
+
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IOutboxEventHandler, CloudEventOutboxHandler>());
+
+        return services;
+    }
+
+    /// <summary>
+    /// 注册外部任务巡检，参数从 <c>NetBpm:ExternalTasks:Watchdog</c> 读取。
+    /// </summary>
+    public static IServiceCollection AddNetBpmExternalTaskWatchdog(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return services.AddNetBpmExternalTaskWatchdog(options =>
+        {
+            var section = configuration.GetSection("NetBpm:ExternalTasks:Watchdog");
+
+            if (bool.TryParse(section["Enabled"], out var enabled))
+            {
+                options.Enabled = enabled;
+            }
+
+            if (bool.TryParse(section["AlertOnDeadLetter"], out var alertOnDeadLetter))
+            {
+                options.AlertOnDeadLetter = alertOnDeadLetter;
+            }
+
+            if (int.TryParse(section["PollIntervalSeconds"], out var pollSeconds) && pollSeconds > 0)
+            {
+                options.PollInterval = TimeSpan.FromSeconds(pollSeconds);
+            }
+
+            if (int.TryParse(section["StartupDelaySeconds"], out var delaySeconds) && delaySeconds >= 0)
+            {
+                options.StartupDelay = TimeSpan.FromSeconds(delaySeconds);
+            }
+
+            if (int.TryParse(section["NoWorkerThresholdSeconds"], out var thresholdSeconds) && thresholdSeconds > 0)
+            {
+                options.NoWorkerThreshold = TimeSpan.FromSeconds(thresholdSeconds);
+            }
+
+            if (int.TryParse(section["AlertCooldownSeconds"], out var cooldownSeconds) && cooldownSeconds > 0)
+            {
+                options.AlertCooldown = TimeSpan.FromSeconds(cooldownSeconds);
+            }
+
+            if (int.TryParse(section["MaxResults"], out var maxResults) && maxResults > 0)
+            {
+                options.MaxResults = maxResults;
+            }
+        });
+    }
+
+    /// <summary>
+    /// 注册事件投递，参数从 <c>NetBpm:Events</c> 读取。
+    /// </summary>
+    public static IServiceCollection AddNetBpmEventDelivery(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return services.AddNetBpmEventDelivery(options =>
+        {
+            var section = configuration.GetSection("NetBpm:Events");
+
+            if (int.TryParse(section["TimeoutSeconds"], out var timeoutSeconds) && timeoutSeconds > 0)
+            {
+                options.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+            }
+
+            if (section["SourcePrefix"] is { Length: > 0 } prefix)
+            {
+                options.SourcePrefix = prefix;
+            }
+
+            if (int.TryParse(section["DefaultMaxAttempts"], out var attempts) && attempts > 0)
+            {
+                options.DefaultMaxAttempts = attempts;
+            }
+
+            if (int.TryParse(section["MaxSubscriptionsPerEvent"], out var maxSubscriptions)
+                && maxSubscriptions > 0)
+            {
+                options.MaxSubscriptionsPerEvent = maxSubscriptions;
+            }
+        });
     }
 
     /// <summary>
@@ -314,6 +453,79 @@ public static class NetBpmServiceCollectionExtensions
         {
             services.AddSingleton<IExternalTaskBroker, InMemoryExternalTaskBroker>();
         }
+
+        // ── 告警出口与巡检 ─────────────────────────────────────────────
+        // TryAddEnumerable 而不是 TryAdd：宿主注册的出口（企业微信 / 工单系统）与日志出口并存，
+        // 日志出口是「告警至少有一条不会丢的兜底通道」，不该被覆盖掉。
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IAlertSink, Diagnostics.LoggingAlertSink>());
+
+        services.AddOptions<Hosting.ExternalTaskWatchdogOptions>()
+            .Configure<IServiceProvider>((watchdog, provider) =>
+            {
+                var section = provider.GetService<IConfiguration>()
+                    ?.GetSection("NetBpm:ExternalTasks:Watchdog");
+
+                if (section is null)
+                {
+                    return;
+                }
+
+                if (bool.TryParse(section["Enabled"], out var enabled))
+                {
+                    watchdog.Enabled = enabled;
+                }
+
+                if (bool.TryParse(section["AlertOnDeadLetter"], out var alertOnDeadLetter))
+                {
+                    watchdog.AlertOnDeadLetter = alertOnDeadLetter;
+                }
+
+                if (int.TryParse(section["PollIntervalSeconds"], out var pollSeconds) && pollSeconds > 0)
+                {
+                    watchdog.PollInterval = TimeSpan.FromSeconds(pollSeconds);
+                }
+
+                if (int.TryParse(section["StartupDelaySeconds"], out var delaySeconds) && delaySeconds >= 0)
+                {
+                    watchdog.StartupDelay = TimeSpan.FromSeconds(delaySeconds);
+                }
+
+                if (int.TryParse(section["NoWorkerThresholdSeconds"], out var thresholdSeconds)
+                    && thresholdSeconds > 0)
+                {
+                    watchdog.NoWorkerThreshold = TimeSpan.FromSeconds(thresholdSeconds);
+                }
+
+                if (int.TryParse(section["AlertCooldownSeconds"], out var cooldownSeconds) && cooldownSeconds > 0)
+                {
+                    watchdog.AlertCooldown = TimeSpan.FromSeconds(cooldownSeconds);
+                }
+
+                if (int.TryParse(section["MaxResults"], out var maxResults) && maxResults > 0)
+                {
+                    watchdog.MaxResults = maxResults;
+                }
+            });
+
+        // 巡检本身不自动挂：它是常驻后台服务，内存宿主（单元测试 / POC）里没有 worker 会来领，
+        // 扫一遍只会刷屏。生产宿主显式调 AddNetBpmExternalTaskWatchdog() 启用。
+
+        // ── 事件订阅与投递（M13）────────────────────────────────────
+        // 存储总是注册（管理端点要能增删订阅），真正开始投递则靠 AddNetBpmEventDelivery()
+        // 挂上 CloudEventOutboxHandler —— 没挂时 outbox 事件照样写、只是没人送。
+        if (options.UsesDatabase)
+        {
+            services.AddSingleton<IEventSubscriptionStore, Persistence.Events.DapperEventSubscriptionStore>();
+            services.AddSingleton<IEventDeliveryStore, Persistence.Events.DapperEventDeliveryStore>();
+        }
+        else
+        {
+            services.AddSingleton<IEventSubscriptionStore, InMemoryEventSubscriptionStore>();
+            services.AddSingleton<IEventDeliveryStore, InMemoryEventDeliveryStore>();
+        }
+
+        services.TryAddSingleton<IEventDeliveryTransport, HttpEventDeliveryTransport>();
 
         // ── HTTP 幂等：内存宿主单进程去重，数据库宿主跨实例去重 ─────────
         if (options.UsesDatabase)
