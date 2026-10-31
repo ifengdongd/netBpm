@@ -28,15 +28,29 @@ public sealed class ExternalTaskDatabaseTests : IClassFixture<RestEngineFactory>
 {
     private const string DefaultTenant = "default";
     private const string ProcessKey = "external_task_db";
-    private const string Topic = "invoice";
 
     private readonly RestEngineFactory _factory;
+
+    /// <summary>
+    /// 🔑 <b>每条用例一个独立 topic</b>。
+    /// <para>
+    /// 测试库是长期复用的（不是每次新建），而 <c>nb_external_task</c> 不在
+    /// <c>EngineTableCleaner.Purge</c> 的清理范围内 —— 上一轮留下的行会一直躺着。
+    /// 锁过期的 <c>LOCKED</c> 行按设计要能被接管（worker 崩了不能把活锁死），
+    /// 于是它们迟早重新变成「可领取」；等到下一轮 fetch，本用例就会一次领到好几条，
+    /// <c>Assert.Single</c> 红 —— 而且红不红取决于距上次跑了多久，是典型的偶发失败。
+    /// 用随机 topic 把每条用例与历史残留、以及彼此之间彻底隔开。
+    /// </para>
+    /// </summary>
+    private readonly string _topic = "invoice-" + Guid.NewGuid().ToString("N")[..8];
 
     public ExternalTaskDatabaseTests(RestEngineFactory factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
         _factory = factory;
     }
+
+    private string Topic => _topic;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -214,7 +228,7 @@ public sealed class ExternalTaskDatabaseTests : IClassFixture<RestEngineFactory>
             ct: Ct);
     }
 
-    private static string Xml() => $$"""
+    private string Xml() => $$"""
         <?xml version="1.0" encoding="UTF-8"?>
         <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                           xmlns:activiti="http://activiti.org/bpmn"
@@ -222,7 +236,7 @@ public sealed class ExternalTaskDatabaseTests : IClassFixture<RestEngineFactory>
           <bpmn:process id="{{ProcessKey}}" name="外部任务数据库演示" isExecutable="true">
             <bpmn:startEvent id="start" name="Start" />
             <bpmn:sequenceFlow id="flow1" sourceRef="start" targetRef="svc_invoice" />
-            <bpmn:serviceTask id="svc_invoice" name="开票" activiti:topic="{{Topic}}" />
+            <bpmn:serviceTask id="svc_invoice" name="开票" activiti:topic="{{_topic}}" />
             <bpmn:sequenceFlow id="flow2" sourceRef="svc_invoice" targetRef="task_review" />
             <bpmn:userTask id="task_review" name="复核" activiti:assignee="lisi" />
             <bpmn:sequenceFlow id="flow3" sourceRef="task_review" targetRef="end" />
