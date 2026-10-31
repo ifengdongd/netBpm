@@ -1,7 +1,7 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-10-31 ｜ 代码基线：`9cfe44f` / `db56e5b` / `fdb0677`（已推送 `origin/main`）
+> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
@@ -40,6 +40,26 @@
 各配一个键的最终结果一定是被人分别调到错位，所以 `AdminArchiveCleanupService` **只读一个**
 `NetBpm:Admin:ArchiveRetentionDays`，两张表用同一个 cutoff 一起过期。
 ⚠️ 该值应当 ≥ 审计/合规要求的年限；`0`（默认）表示永不清理。
+
+**真库验证（2026-10-31，MySQL 5.7.44 / 隔离库 `netbpm_ittest`）：**
+
+v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
+`delete from nb_approval_snapshot where captured_at < @before` 此前只被内存实现覆盖过。本次补上真库验证：
+
+- ⚠️ **平台表变更后老库必须重跑幂等脚本**——新索引不会随建表自动出现，补它靠的是全幂等脚本：
+
+  ```bash
+  dotnet run --project tools/NetBpm.DbMigrate -- migrate --provider mysql \
+    --connection "Server=127.0.0.1;Port=3306;Database=netbpm_ittest;User ID=root;Password=;Allow User Variables=true;"
+  ```
+
+  本次执行完 `ix_nb_approval_snapshot_captured` 才真正落到库里（此前只有 `ix_nb_approval_snapshot_instance`）。
+- MySQL 门控用例全绿：`ApprovalSnapshotTests` 6（含新增的保留期用例）、`InstanceConclusionTests` 4、
+  `InstanceListCompletedTests` 1、`ParticipantIndexTests` 3、`JwtAuthenticationTests` 11、`DatabaseScriptTests` 14；
+  双库用例的 MySQL 半边也全绿（sqlserver 半边 SKIP）。
+- **仍缺的一环：SQL Server 方言**（本机无实例）。`ClientRegistryDatabaseTests` / `AdminUserStoreDatabaseTests` /
+  `ConcurrentSubmitIntegrationTests` / `ActivityModificationDualDatabaseTests` 的 sqlserver 半边保持跳过，
+  上生产前要在有 SQL Server 的环境补跑一次。
 
 ---
 
@@ -289,7 +309,8 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 >
 > v1.15 新增：`EngineSurfaceScopeTests`（13 项，引擎面 `workflow:*` 收口 / 管理 scope 翻译 / 先 404 再 403 / 旧凭据不受影响）。
 >
-> v1.16 新增：`ApprovalSnapshotPruneTests`（4 项，快照保留期的内存语义）+ `ApprovalSnapshotTests` 增加一条 MySQL 用例。
+> v1.16 新增：`ApprovalSnapshotPruneTests`（4 项，快照保留期的内存语义）+ `ApprovalSnapshotTests` 增加一条 MySQL 用例
+> （已在 MySQL 5.7.44 / `netbpm_ittest` 实跑通过，见 v1.16 小节的「真库验证」）。
 >
 > 另有已落地但不在 §9 表内的类：`ClientAuthenticationTests`（15 项）、`ProcessCatalogTests`（14 项）、
 > `DatabaseScriptTests`（14 项）、`PlatformClientRegistryTests`、`ApprovalVocabularyTests`（8 项）、
