@@ -618,6 +618,9 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
         Assert.True((int)firstStatus is >= 200 and < 300);
         Assert.False(firstReplayed);
 
+        var carolInstanceId = JsonDocument.Parse(firstBody)
+            .RootElement.GetProperty("processInstanceId").GetString();
+
         // 同一用户重试：回放原响应
         var (replayStatus, replayBody, replayed) = await PostRawAsync(
             client, CreateToken(userId: "carol", tenantId: "tenant-jwt"), payload, key);
@@ -627,12 +630,20 @@ public sealed class JwtAuthenticationTests : IClassFixture<RestEngineFactory>
         Assert.True(replayed);
 
         // 另一用户用同一个 key：不得拿到别人的响应
-        var (otherStatus, otherBody, otherReplayed) = await PostRawAsync(
+        var (_, otherBody, otherReplayed) = await PostRawAsync(
             client, CreateToken(userId: "dave", tenantId: "tenant-jwt"), payload, key);
 
-        Assert.Equal(HttpStatusCode.Conflict, otherStatus);
+        // 幂等键按调用主体收窄后，dave 的键落在自己的命名空间里：
+        //   · 安全诉求仍然满足 —— 他不回放 carol 的响应，拿到的是自己的新实例；
+        //   · 而「冲突」不再是这里该有的结果：用「业务单号 + 步骤」当幂等键时，
+        //     第二个人的第一次调用若被别人的键挡成 409，他就永远发不出去。
+        // 这条断言 v1.19 前是 409（当时键是全局的），语义变更后随之改为「各自成立」。
         Assert.False(otherReplayed);
-        Assert.DoesNotContain("processInstanceId", otherBody, StringComparison.Ordinal);
+
+        var daveInstanceId = JsonDocument.Parse(otherBody)
+            .RootElement.GetProperty("processInstanceId").GetString();
+
+        Assert.NotEqual(carolInstanceId, daveInstanceId);
 
         static async Task<(HttpStatusCode Status, string Body, bool Replayed)> PostRawAsync(
             HttpClient client,

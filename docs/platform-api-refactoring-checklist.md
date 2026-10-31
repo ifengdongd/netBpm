@@ -1,12 +1,47 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.19 小节
+> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.20 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.20 本轮落地（2026-10-31，M11 收尾：全局配额改 Redis + S2 出口用例收口）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **全局（跨副本）配额** | `RateLimiting/IRateLimiter` 抽出唯一抽象，`FixedWindowRateLimiter`（进程内）与新增 `RedisFixedWindowRateLimiter` 两种实现，按 `NetBpm:RateLimit:Store` 切换，中间件只认接口 | `RedisRateLimitTests`（5 项，真 Redis 127.0.0.1:6379） |
+| **窗口由键自身表达** | 键形如 `{prefix}ratelimit:{分钟序号}:{分区键}`，一段 Lua 里原子完成 `INCR` + 首次 `PEXPIRE`（窗口结束 +1s 余量）。窗口切换不需要清理任务，旧键由 Redis 自己过期 | 同一分区被两个 limiter 实例（= 两个副本）共用：3 次配额第 4 次 429 |
+| **Redis 不可用时的取舍** | 默认 **fail-open**：放行但 `Counted=false`——中间件不写限流响应头，调用方看到的是「这次没被计数」而不是伪造的剩余额度；要「宁可 429」设 `FailOpenOnError=false` | 端口 6399（无人监听）两组用例：默认放行 / 关掉后拒绝 |
+| **启动自检补一条** | `PlatformServiceGuards.VerifyRateLimit`：`Store=Redis` 但没地址 → 抛（与作业队列同款处理）；启动横幅新增 `quota=`，`Memory` 形态额外告警「多副本实际配额 = 副本数 × 配置值」 | 本机 `PORT=5199` 实跑：`RateLimit-Limit: 2` → 第 3 次 429，Redis 里能看到窗口键 |
+| **S2 四条出口用例收口** | 幂等重放 / 纯服务 submit 403 / 密钥轮换期双活 / 跨租户 404 —— 逐条核对后**三条已在既有类里覆盖**，一条（`JwtAuthenticationTests.Idempotency_ShouldBeScopedToJwtIdentity`）在 v1.19 之后实际是红的 | `SecurityAndIdempotencyTests` 4 / `TaskSubmitTests` 8 / `ClientAuthenticationTests` 15 / `JwtAuthenticationTests` 11，全绿 |
+
+**为什么「窗口由键表达」而不是存一个 `{count, startTicks}` 的值：**
+
+存值就要先读再写，中间必须有原子性保证；而「读改写」在 Redis 上要么走 Lua、要么走 `WATCH` 重试，复杂度更高，
+还要额外处理「上一段窗口的键什么时候删」。把分钟序号写进键名后，
+**窗口切换天然等价于换一个键**：不需要判断、不需要清理、不需要锁，旧键由 TTL 回收。
+代价是各副本时钟要大致同步（偏差超过一分钟会各自算一段窗口）——进程内实现本来就按本机时钟滚动，行为一致。
+
+**为什么 Redis 挂了默认放行：**
+
+限流是保护手段，不是正确性依赖。让「配额基础设施故障」变成「全站 429」，
+是把一个小故障放大成一次全站事故；而「分区表满时放行」早已是同一条判断（见 `MaxPartitions` 的注释）。
+真正需要「宁可拒绝」的环境可以显式关掉，但必须同时接受「Redis 抖动 = 全站 429」这个**新**故障模式——
+所以它不是默认值，且失败日志**限频 10 秒一条**并打出目标地址，避免一次故障把日志卷打满、把第一条原因冲掉。
+
+**顺手修掉的一个红用例（v1.19 遗留）：**
+
+`JwtAuthenticationTests.Idempotency_ShouldBeScopedToJwtIdentity` 断言「另一个用户用同一个幂等键 → 409」。
+v1.19 把幂等键按调用主体收窄后，这个键在 dave 的命名空间里根本不存在，实际是 201。
+**改的是断言而不是实现**：安全诉求（不回放别人的响应）仍然满足，而「被别人的键挡住」恰恰是收窄要修掉的问题——
+用「业务单号 + 步骤」当幂等键时，第二个人第一次调用若被挡成 409，他就永远发不出去。
+⚠️ 教训：改语义时必须把「断言依赖旧语义」的用例一起找出来，否则红用例会一直躺在 HEAD 上
+（本轮是逐条核对 S2 出口用例时才发现的）。
 
 ---
 
@@ -198,9 +233,9 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 |---|---|---|---|
 | 阶段（S1–S5） | 5 | 2 完成 + 1 基本完成 | 2 |
 | 改造项（M1–M16） | 16 | 8 完成 + 5 部分 | 3 |
-| 守门测试用例 | 30 | 19 | 11 |
+| 守门测试用例 | 30 | 25 | 5 |
 | 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 14 | 8 |
-| 平台表（`nb_*`） | 15 | 9 | 6 |
+| 平台表（`nb_*`） | 13 | 9 | 4 |
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
@@ -279,7 +314,10 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] JWT 的 RS256 + JWKS（外部 IdP 直连）（v1.14）
 - [x] 引擎面 `/api/runtime` `/api/identity` `/api/designer` 按 `workflow:*` scope 逐条收紧（v1.15，只对 `AuthMode=Client` 生效；
       管理动作经 `netbpm.admin.* ⇄ workflow:admin:*` 桥接；见开头 v1.15 四条口径）
-- [ ] 补 S2 出口用例：跨租户 404、密钥轮换期双活、幂等重放、纯服务 submit 403
+- [x] 补 S2 出口用例 ✅ v1.20：逐条核对后四条**都已有归属**（跨租户 404 → `JwtAuthenticationTests`；
+      密钥轮换期双活 → `ClientAuthenticationTests`；幂等重放 → `SecurityAndIdempotencyTests`；
+      纯服务 submit 403 → `TaskSubmitTests`），本轮是**跑通**而不是新写；
+      顺带修掉 `Idempotency_ShouldBeScopedToJwtIdentity` 这条在 v1.19 之后实际为红的用例（详见开头 v1.20 小节）
 
 ### ③ 写入型端点 —— 属 S4 面
 
@@ -298,8 +336,8 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] M13 事件投递（CloudEvents + 签名 + 订阅）+ 表 `nb_event_subscription` / `nb_event_delivery` ✅ v1.18
 - [x] `Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 ✅ v1.19（`deploy/Dockerfile` + `docker-compose.yml` + `samples/NetBpm.ExternalWorker`，已实跑）
 - [x] 幂等键按调用主体收窄（原「按 client」）✅ v1.19
+- [x] 全局（跨实例）配额改 Redis 版 ✅ v1.20（`IRateLimiter` + `RedisFixedWindowRateLimiter`，`NetBpm:RateLimit:Store`；真 Redis 实跑 + 启动自检）
 - [ ] M11 平台存储收尾：`nb_process_parameter` / `nb_parameter_snapshot` 两张表（`nb_idempotency` → `ACT_IDEMPOTENCY`、`nb_audit_log` → `admin_audit_log`、`nb_external_task` 均已存在）
-- [ ] 全局（跨实例）配额改 Redis 版（现为进程内计数）
 
 ### ⑤ S5 治理与 SDK
 
@@ -353,10 +391,10 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] `nb_approval_snapshot`
 - [ ] `nb_process_parameter`
 - [ ] `nb_parameter_snapshot`
-- [ ] `nb_idempotency`
-- [ ] `nb_external_task`
-- [ ] `nb_event_subscription`
-- [ ] `nb_audit_log`
+- [ ] `nb_idempotency`（→ 复用 `ACT_IDEMPOTENCY`，不另建表）
+- [x] `nb_external_task` ✅ v1.17
+- [x] `nb_event_subscription` ✅ v1.18（配套 `nb_event_delivery` 同批落地）
+- [ ] `nb_audit_log`（→ 复用 `admin_audit_log`，不另建表）
 
 ---
 
@@ -382,17 +420,18 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] `DeployGuardTests` ✅（`ApprovalVocabularyTests`）
 
 **安全层**
-- [ ] `IdentityTests` —— 无凭据 401 / 头身份在 Production 被忽略 / `client_credentials` submit → 403
-- [ ] `ClientRegistryTests` —— 未注册 401 / `Suspended`/`Revoked` 401 / 轮换过渡期双密钥可用
+- [x] `IdentityTests` ✅（`JwtAuthenticationTests` 11：跨租户读 / 写 / 管理动作一律 404；`TaskSubmitTests`：纯服务 submit → 403 `auth.subject_required`）
+- [x] `ClientRegistryTests` ✅（`ClientAuthenticationTests` 15：密钥只出现一次 / 伪造密钥 401 / 租户钉死 / **轮换过渡期双密钥可用** / 宽限后旧密钥失效）
 - [x] `ClientProcessGrantTests` ✅（`ProcessCatalogTests`）
-- [ ] `TenantIsolationTests` —— A 租户查 B 租户实例 → 404（不是 403）
-- [x] `QuotaTests` ✅（`RateLimitByClientTests`）
+- [x] `TenantIsolationTests` ✅（`JwtAuthenticationTests`：A 租户查 B 租户实例 → 404 不是 403）
+- [x] `QuotaTests` ✅（`RateLimitByClientTests` 4 + `RedisRateLimitTests` 5：全局配额跨副本共享）
 
 **一致性 / 异步 / 性能**
-- [ ] `IdempotencyTests` —— 同键同体 200 + `Idempotent-Replay: true` 且只产生一个实例；同键异体 409
+- [x] `IdempotencyTests` ✅（`SecurityAndIdempotencyTests` + `IdempotencyNamespaceTests` + `JwtAuthenticationTests`：
+      同键同体回放 `Idempotency-Replayed: true` 且只产生一个实例；同键异体 409；键按调用主体收窄）
 - [ ] `DualModeTests` —— 同一 BPMN 在嵌入式与独立服务下 timeline 语义等价
-- [ ] `ExternalTaskTests` —— 锁过期后可被另一 worker 取走；`retries=0` 进死信
-- [ ] `WebhookTests` —— 签名可验证 / 按 `eventId` 去重 / 死信可重放
+- [x] `ExternalTaskTests` ✅（`ExternalTaskTests` 7 + `ExternalTaskDatabaseTests` 3 + `ExternalTaskDeadLetterRetryTests` 4：锁过期后被另一 worker 取走 / `retries` 耗尽进死信 / 死信重投）
+- [x] `WebhookTests` ✅（`CloudEventTests` 12 + `EventSubscriptionEndpointTests` 5 + `EventSubscriptionDatabaseTests` 2：HMAC 签名可验证 / 投递按 `eventId` 去重 / 死信可重放）
 - [ ] `LoadTests` —— 读 p95 < 80ms、写 p95 < 200ms（100 并发，MySQL 5.7）
 
 > v1.14 新增：`ParameterWriteTests`（8 项，`writableBy` 写侧）、`JwtRs256Tests`（5 项，RS256 / JWKS / 算法白名单 / 外部公钥集缓存）。
@@ -463,7 +502,8 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 3. ~~现在只剩一个判断：要不要做 **S4**~~ —— 门槛项 **M12 外部任务已在 v1.17 落地**，
    「引擎独立部署给别人用」不再卡在「跑不了 `serviceTask`」上。
    ~~继续 S4 的话，下一步是 `Platform.Service` 容器化 + 端到端演示~~ —— **已在 v1.19 完成并实跑**。
-4. 剩下的选项是 **S5（M14 契约治理 / M15 SDK）**，或回头补 M11 的两张平台表与 Redis 版全局配额。
+4. ~~回头补 M11 的两张平台表与 Redis 版全局配额~~ —— **全局配额已在 v1.20 完成**（真 Redis 实跑 + 启动自检）。
+   剩下的选项是 **S5（M14 契约治理 / M15 SDK）**，或 M11 的 `nb_process_parameter` / `nb_parameter_snapshot` 两张表。
 5. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
