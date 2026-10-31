@@ -30,6 +30,13 @@ public sealed class IdempotencyMiddleware
     public const string ReplayedHeaderName = "Idempotency-Replayed";
 
     private const int MaxKeyLength = 120;
+
+    /// <summary>
+    /// 存储列的宽度（<c>ACT_IDEMPOTENCY.IDEMPOTENCY_KEY_ varchar(120)</c>）。
+    /// 加上命名空间前缀后不能越过它，否则 MySQL 严格模式直接报错。
+    /// </summary>
+    private const int MaxStorageKeyLength = 120;
+
     private const int MaxCachedResponseBytes = 1024 * 1024;
     private static readonly TimeSpan Retention = TimeSpan.FromHours(24);
 
@@ -73,10 +80,16 @@ public sealed class IdempotencyMiddleware
         // 否则不同用户用同一个 Idempotency-Key 会互相回放对方的响应。
         var identity = context.RequestServices.GetRequiredService<RequestContext>();
 
+        // 幂等键必须按「谁在调用」分命名空间：键是全局唯一主键，两个接入方各自生成
+        // 幂等键时迟早撞车（业务系统爱用「业务单号+步骤」这类自造键，不像 UUID 那样随机）。
+        // 撞上之后后到的一方会拿到 409「该键已用于另一个请求」，而它明明是第一次调用 ——
+        // 用同样的键永远重试不了，只能等 24 小时过期。
+        var storageKey = ToStorageKey(identity, key);
+
         var requestHash = await ComputeRequestHashAsync(context.Request, identity, context.RequestAborted)
             .ConfigureAwait(false);
 
-        var existing = await store.FindAsync(key, context.RequestAborted).ConfigureAwait(false);
+        var existing = await store.FindAsync(storageKey, context.RequestAborted).ConfigureAwait(false);
 
         if (existing is not null)
         {
@@ -86,7 +99,7 @@ public sealed class IdempotencyMiddleware
 
         var now = DateTime.UtcNow;
         var record = new IdempotencyRecord(
-            key,
+            storageKey,
             requestHash,
             StatusCode: null,
             ContentType: null,
@@ -97,7 +110,7 @@ public sealed class IdempotencyMiddleware
         if (!await store.TryBeginAsync(record, context.RequestAborted).ConfigureAwait(false))
         {
             // 并发：两个请求同时占位，后到的那个重新读一次
-            var raced = await store.FindAsync(key, context.RequestAborted).ConfigureAwait(false);
+            var raced = await store.FindAsync(storageKey, context.RequestAborted).ConfigureAwait(false);
 
             if (raced is not null)
             {
@@ -127,7 +140,7 @@ public sealed class IdempotencyMiddleware
 
             try
             {
-                await store.DeleteAsync(key, CancellationToken.None).ConfigureAwait(false);
+                await store.DeleteAsync(storageKey, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception cleanupException)
             {
@@ -145,14 +158,19 @@ public sealed class IdempotencyMiddleware
         {
             if (statusCode >= StatusCodes.Status500InternalServerError || buffer.Length > MaxCachedResponseBytes)
             {
-                await store.DeleteAsync(key, CancellationToken.None).ConfigureAwait(false);
+                await store.DeleteAsync(storageKey, CancellationToken.None).ConfigureAwait(false);
             }
             else
             {
                 var body = buffer.Length == 0 ? null : Encoding.UTF8.GetString(buffer.ToArray());
 
                 await store
-                    .CompleteAsync(key, statusCode, context.Response.ContentType, body, CancellationToken.None)
+                    .CompleteAsync(
+                        storageKey,
+                        statusCode,
+                        context.Response.ContentType,
+                        body,
+                        CancellationToken.None)
                     .ConfigureAwait(false);
             }
         }
@@ -163,7 +181,7 @@ public sealed class IdempotencyMiddleware
 
             try
             {
-                await store.DeleteAsync(key, CancellationToken.None).ConfigureAwait(false);
+                await store.DeleteAsync(storageKey, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception cleanupException)
             {
@@ -215,6 +233,55 @@ public sealed class IdempotencyMiddleware
             await context.Response.WriteAsync(existing.ResponseBody, context.RequestAborted)
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// 把调用方给的幂等键落到某个命名空间下，避免互不相关的调用方互相抢键。
+    /// <para>
+    /// 命名空间优先用 <c>caller</c>（接入系统），其次是真人 <c>subject</c> 与租户，都没有才落
+    /// <c>anon</c>。同一个 subject 换 key、或同一个 key 换 subject，落到的行都不同 ——
+    /// 这正是要的效果：幂等的边界应当是「一个调用主体的一次意图」，而不是全局字符串。
+    /// </para>
+    /// <para>
+    /// 存储形态刻意保持可读（<c>cl_order:order-1001-submit</c> 而不是一坨哈希）：这张表是
+    /// 24 小时缓存，排障时最常做的就是按业务单号 <c>like</c> 一把。
+    /// </para>
+    /// </summary>
+    internal static string ToStorageKey(RequestContext identity, string rawKey)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        var ns = NormalizeNamespace(ResolveNamespace(identity));
+        var plain = $"{ns}\u001f{rawKey}";
+
+        // 兜底：命名空间 + 原始键塞不进列宽时整体换成哈希。宁可不可读，也不能让 insert 报错。
+        return plain.Length <= MaxStorageKeyLength
+            ? plain
+            : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(plain)));
+    }
+
+    private static string ResolveNamespace(RequestContext identity) =>
+        !string.IsNullOrWhiteSpace(identity.CallerId) ? $"c\u001f{identity.CallerId.Trim()}"
+        : !string.IsNullOrWhiteSpace(identity.SubjectId) ? $"s\u001f{identity.SubjectId.Trim()}"
+        : !string.IsNullOrWhiteSpace(identity.TenantId) ? $"t\u001f{identity.TenantId.Trim()}"
+        : "anon";
+
+    /// <summary>
+    /// 命名空间里可能带分隔符以外的杂乱字符，统一压成安全的短记号；
+    /// 过长的（比如把 JWT 整个塞进来）截断后再补哈希，避免截断引起碰撞。
+    /// </summary>
+    private static string NormalizeNamespace(string ns)
+    {
+        const int MaxNamespaceLength = 40;
+
+        if (ns.Length <= MaxNamespaceLength)
+        {
+            return ns;
+        }
+
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ns)))[..8];
+
+        return $"{ns[..MaxNamespaceLength]}~{digest}";
     }
 
     private static async Task WriteErrorAsync(HttpContext context, int statusCode, string message)
