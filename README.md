@@ -578,9 +578,12 @@ SQL Server 由 SqlClient 负责（4.0 起已移除 TLS 1.0/1.1 支持），请�
 **宿主安全基线（REST / 管理端一致）**：两个宿主共用同一套组合根
 （`src/NetBpm.Rest/Hosting/NetBpmHost.cs`），因此下列保护一次配置、两处生效：
 
-- **限流**（`NetBpm:RateLimit`，按客户端 IP 固定窗口）：登录 `LoginPerMinute`（默认 10）/
-  凭据探针 `ProbePerMinute`（30）/ 其余 `/api` `ApiPerMinute`（600）；`/health` 与静态资源不限流。
-  管理端旧配置节 `NetBpm:Admin:RateLimit:*` 仍然兼容（新节存在时以新节为准）。
+- **限流**（`NetBpm:RateLimit`，固定窗口，**按调用方分区**）：已注册客户端按 `clientId` 分区并用该客户端的
+  `quota_per_minute`（未配置则 `ClientPerMinute`，默认 600）；JWT 用户按（租户, 操作人）分区（`ApiPerMinute`）；
+  无身份时才按 IP 分档——登录 `LoginPerMinute`（10）/ 凭据探针 `ProbePerMinute`（30）/ 其余 `ApiPerMinute`（600）。
+  响应带 `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset`，超限 **429** + `Retry-After` + RFC 9457 错误体。
+  `/health` 与静态资源不限流。管理端旧配置节 `NetBpm:Admin:RateLimit:*` 仍然兼容（新节存在时以新节为准）。
+  ⚠️ 计数器在进程内：多实例部署时总配额 = 实例数 × 配置值。
 - **请求体上限**（`NetBpm:MaxRequestBodySizeBytes`，默认 10 MB）：BPMN XML 与变量字典都走请求体，
   没有上限等于允许单请求把进程内存打满。
 - **异常映射**：唯一约束冲突 → **409**；其余数据库异常 → **503**（不带 SQL / 连接串，细节只进日志）。
@@ -858,6 +861,20 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 ---
 
 ## REST API
+
+对外有两组面，**变更纪律不同**：`/workflow/v1/**` 是平台业务面（对外契约，路径与错误体长期稳定，
+错误体是 RFC 9457），`/api/**` 是引擎原语面（随引擎演进，不承诺向后兼容）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/workflow/v1/processes` | 流程目录（`keyword` / `category` / `status` / `cursor` / `limit`；已按客户端白名单过滤） |
+| GET | `/workflow/v1/processes/{key}` | 流程名片（名称 / 分类 / 入口 / 能力声明 / 定义校验和） |
+| GET | `/workflow/v1/processes/{key}/definition` | 当前定义（`?includeXml=true` 才返回 BPMN 原文） |
+| GET | `/workflow/v1/processes/{key}/versions` | 版本列表（标记 `isCurrent`） |
+| GET | `/workflow/v1/processes/{key}/diagram.svg` | 静态流程图（`?version=` 取历史版本） |
+
+> 目录读端点需要 `workflow:process:read`；未授权的流程不出现，按 key 访问返回 **404**（不是 403）。
+> 名片在「什么都没配置」时也能用：名称与入口从部署的 BPMN 派生，`nb_process_catalog` 只做精修覆盖。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
