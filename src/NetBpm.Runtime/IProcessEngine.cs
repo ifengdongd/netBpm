@@ -466,6 +466,49 @@ public interface IProcessEngine
         int? expectedRevision = null,
         CancellationToken ct = default);
 
+    // ─────────────────────────── 外部任务（M12 / S4） ───────────────────────────
+
+    /// <summary>
+    /// 领取外部任务（fetch &amp; lock）：按主题取走最多 <paramref name="maxTasks"/> 条可领取任务并加锁。
+    /// <paramref name="tenantId"/> 非空时只领本租户的任务（不传即跨租户放行，仅诊断用途可用）。
+    /// </summary>
+    ValueTask<IReadOnlyList<ExternalTask>> FetchExternalTasksAsync(
+        string workerId,
+        IReadOnlyList<string> topics,
+        int maxTasks = 10,
+        TimeSpan? lockDuration = null,
+        string? tenantId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 外部任务成功回执：校验锁 → 写回变量 → 推进流程。
+    /// </summary>
+    /// <exception cref="NetBpm.Engine.EngineObjectNotFoundException">任务不存在或不属于当前租户（404）。</exception>
+    /// <exception cref="NetBpm.Engine.EngineConflictException">锁不属于该 worker / 已进死信（409）。</exception>
+    ValueTask CompleteExternalTaskAsync(
+        string taskId,
+        string workerId,
+        IDictionary<string, object?>? variables = null,
+        string? tenantId = null,
+        string? commandId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 外部任务失败回执：扣重试次数 + 退避；耗尽进死信（<b>不推进流程</b>）。
+    /// </summary>
+    ValueTask FailExternalTaskAsync(
+        string taskId,
+        string workerId,
+        ExternalTaskFailure failure,
+        string? tenantId = null,
+        string? commandId = null,
+        CancellationToken ct = default);
+
+    /// <summary>按条件查询外部任务（管理端列表 / 死信排查）。</summary>
+    ValueTask<IReadOnlyList<ExternalTask>> FindExternalTasksAsync(
+        ExternalTaskQuery query,
+        CancellationToken ct = default);
+
     /// <summary>
     /// 认领任务（P7）。<paramref name="userId"/> 必填（认领人）；取消认领请用
     /// <see cref="UnclaimTaskAsync"/>，不再用 <see langword="null"/> 表达（与 REST 同口径）。

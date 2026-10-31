@@ -36,7 +36,8 @@ public sealed class EngineServices : IEngineServices
         Command.ICommandIdempotencyStore? commandIdempotency = null,
         Tasks.IApproverResolver? approverResolver = null,
         Jobs.IJobQueue? jobQueue = null,
-        IClock? clock = null)
+        IClock? clock = null,
+        Jobs.IExternalTaskBroker? externalTaskBroker = null)
     {
         ExecutionManager = executionManager ?? throw new ArgumentNullException(nameof(executionManager));
         HistoryManager = historyManager ?? throw new ArgumentNullException(nameof(historyManager));
@@ -54,6 +55,7 @@ public sealed class EngineServices : IEngineServices
         TimerJobManager = timerJobManager;
         AsyncJobManager = asyncJobManager;
         EventOutbox = eventOutbox;
+        ExternalTaskBroker = externalTaskBroker;
 
         _commandlessAgenda = new EngineAgenda(() => this);
     }
@@ -88,6 +90,9 @@ public sealed class EngineServices : IEngineServices
 
     public Jobs.IAsyncJobManager? AsyncJobManager { get; }
 
+    /// <inheritdoc />
+    public Jobs.IExternalTaskBroker? ExternalTaskBroker { get; }
+
     public Events.IEventOutbox? EventOutbox { get; }
 
     /// <inheritdoc />
@@ -118,7 +123,8 @@ public sealed class EngineServices : IEngineServices
         Command.ICommandIdempotencyStore? commandIdempotency = null,
         Tasks.IApproverResolver? approverResolver = null,
         Jobs.IJobQueue? jobQueue = null,
-        IClock? clock = null) =>
+        IClock? clock = null,
+        Jobs.IExternalTaskBroker? externalTaskBroker = null) =>
         new(
             executionManager,
             historyManager,
@@ -135,6 +141,7 @@ public sealed class EngineServices : IEngineServices
             commandIdempotency,
             approverResolver,
             jobQueue,
-            clock);
+            clock,
+            externalTaskBroker);
 }
 

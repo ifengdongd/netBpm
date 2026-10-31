@@ -36,6 +36,9 @@ public sealed class ServiceTaskDelegateBehavior : FlowNodeActivityBehavior
             ServiceTaskImplementationType.DelegateExpression => (ResolveByExpressionName(serviceTask), null),
             ServiceTaskImplementationType.Expression => await EvaluateExpressionAsync(serviceTask, execution, ct)
                 .ConfigureAwait(false),
+            ServiceTaskImplementationType.ExternalTopic => throw new EngineException(
+                $"服务任务 '{serviceTask.Id}' 声明了 activiti:topic（topic='{serviceTask.Topic}'）："
+                + "它应由外部任务行为处理、等 worker 回执，不该走委托解析路径（分发见 ActivityBehaviorFactory）。"),
             _ => throw new EngineException(
                 $"服务任务 '{serviceTask.Id}' 未指定实现方式（activiti:class / delegateExpression / expression）。"),
         };

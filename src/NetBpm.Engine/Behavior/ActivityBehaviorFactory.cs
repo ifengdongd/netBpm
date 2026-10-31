@@ -45,6 +45,9 @@ public sealed class ActivityBehaviorFactory : IActivityBehaviorFactory
             UserTask userTask when userTask.LoopCharacteristics is not null
                 => new MultiInstanceUserTaskBehavior(services),
             UserTask => new UserTaskActivityBehavior(services),
+            // 外部任务（activiti:topic）不解析委托：登记后原地等 worker 回执
+            ServiceTask { ImplementationType: ServiceTaskImplementationType.ExternalTopic }
+                => new ExternalTaskActivityBehavior(services),
             ServiceTask => new ServiceTaskDelegateBehavior(services),
             ManualTask => new ManualTaskActivityBehavior(services),
             ScriptTask => new ScriptTaskActivityBehavior(services),

@@ -53,6 +53,12 @@ public interface IEngineServices
     Jobs.IAsyncJobManager? AsyncJobManager { get; }
 
     /// <summary>
+    /// 外部任务存储（<c>activiti:topic</c> / <c>nb_external_task</c>）。
+    /// 未注入时标记了 topic 的流程能部署、执行到该节点会显式报错，而不是静默跳过。
+    /// </summary>
+    Jobs.IExternalTaskBroker? ExternalTaskBroker { get; }
+
+    /// <summary>
     /// 事务性 outbox。未启用时事件只走进程内监听器（<c>activiti:eventListener</c>），
     /// 不产生跨进程投递记录。
     /// </summary>

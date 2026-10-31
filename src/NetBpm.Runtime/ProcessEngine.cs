@@ -30,6 +30,7 @@ public sealed class ProcessEngine : IProcessEngine
     private readonly IHistoryManager _historyManager;
     private readonly ITimerJobManager? _timerJobs;
     private readonly IAsyncJobManager? _asyncJobs;
+    private readonly IExternalTaskBroker? _externalTasks;
     private readonly IMigrationLog? _migrationLog;
     private readonly ILogger<ProcessEngine>? _logger;
     private readonly NetBpmEngineOptions _engineOptions;
@@ -52,7 +53,8 @@ public sealed class ProcessEngine : IProcessEngine
         IAsyncJobManager? asyncJobs = null,
         NetBpmEngineOptions? engineOptions = null,
         IJobQueue? jobQueue = null,
-        IClock? clock = null)
+        IClock? clock = null,
+        IExternalTaskBroker? externalTasks = null)
     {
         ArgumentNullException.ThrowIfNull(commandExecutor);
         ArgumentNullException.ThrowIfNull(xmlConverter);
@@ -73,6 +75,7 @@ public sealed class ProcessEngine : IProcessEngine
         _historyManager = historyManager;
         _timerJobs = timerJobs;
         _asyncJobs = asyncJobs;
+        _externalTasks = externalTasks;
         _migrationLog = migrationLog;
         _logger = logger;
         _engineOptions = engineOptions ?? new NetBpmEngineOptions();
@@ -1251,6 +1254,78 @@ public sealed class ProcessEngine : IProcessEngine
         await _commandExecutor
             .ExecuteAsync(new CompleteTaskCommand(taskId, variables), ct)
             .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<ExternalTask>> FetchExternalTasksAsync(
+        string workerId,
+        IReadOnlyList<string> topics,
+        int maxTasks = 10,
+        TimeSpan? lockDuration = null,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
+
+        var request = new ExternalTaskFetchRequest(
+            workerId,
+            [.. topics.Select(topic => new ExternalTaskTopicRequest(topic, lockDuration))],
+            maxTasks,
+            lockDuration,
+            tenantId);
+
+        return await _commandExecutor
+            .ExecuteAsync(new FetchExternalTasksCommand(request), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask CompleteExternalTaskAsync(
+        string taskId,
+        string workerId,
+        IDictionary<string, object?>? variables = null,
+        string? tenantId = null,
+        string? commandId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
+
+        await _commandExecutor
+            .ExecuteAsync(new CompleteExternalTaskCommand(taskId, workerId, variables, tenantId, commandId), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask FailExternalTaskAsync(
+        string taskId,
+        string workerId,
+        ExternalTaskFailure failure,
+        string? tenantId = null,
+        string? commandId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workerId);
+        ArgumentNullException.ThrowIfNull(failure);
+
+        await _commandExecutor
+            .ExecuteAsync(new FailExternalTaskCommand(taskId, workerId, failure, tenantId, commandId), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<ExternalTask>> FindExternalTasksAsync(
+        ExternalTaskQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var broker = _externalTasks
+            ?? throw new EngineException("未注册 IExternalTaskBroker，无法查询外部任务。");
+
+        // 只读：不必走命令（命令是事务边界，这里没有要保护的一致性）
+        return await broker.FindAsync(query, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
