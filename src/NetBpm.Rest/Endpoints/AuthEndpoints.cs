@@ -104,7 +104,8 @@ public static class AuthEndpoints
             // 签不出令牌就不要让登录「看起来成功」
             return Results.Json(
                 new ErrorResponse(
-                    "未启用令牌签发：请先配置 NetBpm:Security:Jwt:SigningKey（HS256，至少 32 字节）。",
+                    "未启用令牌签发：请先配置 NetBpm:Security:Jwt:RsaPrivateKey（RS256，推荐）"
+                    + "或 SigningKey（HS256，至少 32 字节）。",
                     Code: "jwt_not_configured"),
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
@@ -245,6 +246,21 @@ public static class AuthServiceCollectionExtensions
         }
 
         services.AddSingleton(options);
+
+        // JWT 密钥材料：HS256（内网）与 RS256（对外 / 外部 IdP）统一的唯一来源。
+        // 中间件与签发器都从这里取，避免「签的时候用 A、验的时候用 B」这种登录成功却处处 401 的故障。
+        services.AddSingleton(provider => JwtKeyMaterial.Load(
+            configuration,
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("NetBpm.Security.Jwt")));
+
+        // 外部 IdP 公钥集：必须是单例（缓存就在实例里），因此用工厂从 IHttpClientFactory 取连接池
+        services.AddHttpClient();
+
+        services.AddSingleton(provider => new RemoteJwksProvider(
+            configuration,
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(RemoteJwksProvider)),
+            provider.GetRequiredService<ILogger<RemoteJwksProvider>>()));
+
         services.AddSingleton<AuthTokenIssuer>();
         services.AddSingleton<IAdminUserStore>(provider =>
         {

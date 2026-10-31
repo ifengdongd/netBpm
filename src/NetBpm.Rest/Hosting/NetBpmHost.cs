@@ -252,6 +252,12 @@ public static class NetBpmHost
         app.MapGet("/health/live", () => Results.Ok(new { status = "live" }));
         app.MapGet("/health/ready", ReadinessProbe);
 
+        // 公钥（JWKS）：必须匿名可达，否则外部系统无法自验签（校验令牌却要求先有令牌是死循环）。
+        // 只暴露 RS256 公钥；HS256 内网模式下 keys 为空数组，调用方据此可知本服务不提供非对称验签。
+        app.MapGet("/.well-known/jwks.json", (JwtKeyMaterial keys) => Results.Ok(keys.ToJwks()))
+            .WithTags("security")
+            .AllowAnonymous();
+
         // 运维信息：版本 / 方言 / 历史开关 / 期望结构版本 / 运行时长
         app.MapGet("/api/admin/info", (IServiceProvider services) =>
         {

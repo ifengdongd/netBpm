@@ -21,7 +21,13 @@ public sealed record AuthToken(
 /// <summary>令牌签发参数（<c>NetBpm:Security:Jwt</c> + <c>NetBpm:Security:Login</c>）。</summary>
 public sealed class AuthTokenOptions
 {
-    /// <summary>HS256 签名密钥（<c>NetBpm:Security:Jwt:SigningKey</c>）。为空则不能签发。</summary>
+    /// <summary>
+    /// HS256 对称密钥（<c>NetBpm:Security:Jwt:SigningKey</c>）。
+    /// <para>
+    /// 仅作配置项保留：真正的签名材料由 <see cref="JwtKeyMaterial"/> 统一读取
+    /// （它同时支持 <c>RsaPrivateKey</c> 的 RS256 模式），这里不再参与签发决策。
+    /// </para>
+    /// </summary>
     public string? SigningKey { get; set; }
 
     /// <summary>签发者（<c>NetBpm:Security:Jwt:Issuer</c>，可为空）。</summary>
@@ -43,8 +49,9 @@ public sealed class AuthTokenOptions
 /// <summary>
 /// 访问令牌签发器：账号密码登录成功后签发 JWT，供 <see cref="AuthenticationMiddleware"/> 校验。
 /// <para>
-/// 复用鉴权中间件的同一套密钥与 iss / aud 配置 —— 签出来的令牌必须能被自己验过，
-/// 否则登录成功却处处 401。
+/// 签名材料来自 <see cref="JwtKeyMaterial"/>（登录端点与校验路径用<b>同一份</b>配置）：
+/// 配了 RS256 私钥就签 RS256（令牌头带 <c>kid</c>，外部系统可凭 JWKS 自行验签），
+/// 否则退回 HS256 对称密钥。签出来的令牌必须能被自己验过，否则登录成功却处处 401。
 /// </para>
 /// </summary>
 public sealed class AuthTokenIssuer
@@ -52,32 +59,19 @@ public sealed class AuthTokenIssuer
     private readonly AuthTokenOptions _options;
     private readonly JwtSecurityTokenHandler _handler = new();
     private readonly SigningCredentials? _credentials;
+    private readonly string? _signingKeyId;
 
-    public AuthTokenIssuer(AuthTokenOptions options)
+    public AuthTokenIssuer(AuthTokenOptions options, JwtKeyMaterial keys)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(keys);
 
         _options = options;
-
-        if (string.IsNullOrWhiteSpace(options.SigningKey))
-        {
-            return;
-        }
-
-        var keyBytes = Encoding.UTF8.GetBytes(options.SigningKey);
-
-        if (keyBytes.Length < 32)
-        {
-            throw new InvalidOperationException(
-                "NetBpm:Security:Jwt:SigningKey 至少需要 32 字节（HS256 密钥强度）。");
-        }
-
-        _credentials = new SigningCredentials(
-            new SymmetricSecurityKey(keyBytes),
-            SecurityAlgorithms.HmacSha256);
+        _credentials = keys.SigningCredentials;
+        _signingKeyId = keys.SigningKeyId;
     }
 
-    /// <summary>是否已具备签发能力（配置了签名密钥）。</summary>
+    /// <summary>是否已具备签发能力（配置了任意一种签名密钥）。</summary>
     public bool CanIssue => _credentials is not null;
 
     /// <summary>签发一个访问令牌。</summary>
@@ -93,7 +87,7 @@ public sealed class AuthTokenIssuer
         if (_credentials is null)
         {
             throw new InvalidOperationException(
-                "未配置 NetBpm:Security:Jwt:SigningKey，无法签发令牌。");
+                "未配置 JWT 签名密钥（NetBpm:Security:Jwt:SigningKey 或 RsaPrivateKey），无法签发令牌。");
         }
 
         var issuedAt = DateTime.UtcNow;
@@ -124,6 +118,12 @@ public sealed class AuthTokenIssuer
             notBefore: issuedAt,
             expires: expires,
             signingCredentials: _credentials);
+
+        // RS256 必须带 kid：外部系统拿 JWKS 验签时靠它选公钥（轮换期会有多把）
+        if (_signingKeyId is { Length: > 0 })
+        {
+            token.Header["kid"] = _signingKeyId;
+        }
 
         return new AuthToken(
             _handler.WriteToken(token),

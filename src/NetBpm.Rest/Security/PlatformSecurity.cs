@@ -132,7 +132,13 @@ public static class PlatformSecurityExtensions
     {
         if (configuration.GetValue("NetBpm:Security:RequireCredential", false)
             || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:ApiKey"])
-            || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:Jwt:SigningKey"]))
+            || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:Jwt:SigningKey"])
+            // RS256 / 外部 IdP 同样算「已启用凭据校验」，否则配了非对称密钥仍会被告警误导
+            || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:Jwt:RsaPrivateKey"])
+            || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:Jwt:RsaPrivateKeyPath"])
+            || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:Jwt:RsaPublicKey"])
+            || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:Jwt:RsaPublicKeyPath"])
+            || !string.IsNullOrWhiteSpace(configuration["NetBpm:Security:Jwt:JwksUri"]))
         {
             return;
         }

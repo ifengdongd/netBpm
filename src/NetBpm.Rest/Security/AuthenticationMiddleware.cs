@@ -9,20 +9,27 @@ using NetBpm.Platform.Contracts;
 namespace NetBpm.Rest.Security;
 
 /// <summary>
-/// 可选的鉴权：支持用户级 JWT（HS256）、注册客户端密钥（<c>nbc.*</c>）与服务间 API Key，可同时启用。
+/// 可选的鉴权：支持用户级 JWT（<b>RS256</b> 对外开放 / <b>HS256</b> 内网）、
+/// 注册客户端密钥（<c>nbc.*</c>）与服务间 API Key，可同时启用。
 /// <para>
 /// 配置任一凭据后，所有 <c>/api/**</c> 请求必须通过其中一种校验，否则 401。
 /// 都未配置时保持开放（开发 / 单机演示），但仍解析 <c>X-User-Id</c> / <c>X-Tenant-Id</c>。
 /// </para>
 /// <para>
+/// JWT 的密钥材料统一来自 <see cref="JwtKeyMaterial"/>：配了 RSA 私钥就签 / 验 RS256，
+/// 只配了对称密钥就退回 HS256。两者都配时<b>签发用 RS256、校验两种都接受</b>，方便平滑迁移。
+/// 外部 IdP 签发的令牌则通过 <see cref="RemoteJwksProvider"/> 拉公钥校验（本服务不持私钥）。
+/// </para>
+/// <para>
 /// 例外（见 <see cref="AnonymousPaths"/>，与就绪探针同口径）：
 /// <c>POST /api/auth/login</c> 用来换取令牌，<c>GET /api/admin/info</c> 只含版本 / 方言 / 结构版本
 /// 等运维信息；两者匿名可达，其余 <c>/api/**</c> 一律校验。
+/// <c>GET /.well-known/jwks.json</c> 不在受保护前缀里，因此公钥天然匿名可读。
 /// </para>
 /// <para>
 /// 校验顺序：
 /// <list type="number">
-///   <item><description>带 <c>Authorization: Bearer</c> → 按 JWT 校验（签名 / iss / aud / 过期）；</description></item>
+///   <item><description>带 <c>Authorization: Bearer</c> → 按 JWT 校验（签名 / 算法白名单 / iss / aud / 过期）；</description></item>
 ///   <item><description>凭据形如 <c>nbc.{clientId}.{token}</c> → 走客户端注册表（租户钉死、scope 按客户端记账）；</description></item>
 ///   <item><description>带 <c>X-Api-Key</c> → 按旧版服务密钥校验；</description></item>
 ///   <item><description>都未配置 → 放行；配置了但没带凭据 → 401。</description></item>
@@ -93,10 +100,16 @@ public sealed class AuthenticationMiddleware
     private readonly bool _clientsEnabled;
     private readonly bool _requireCredential;
 
-    public AuthenticationMiddleware(RequestDelegate next, IConfiguration configuration)
+    public AuthenticationMiddleware(
+        RequestDelegate next,
+        IConfiguration configuration,
+        JwtKeyMaterial jwtKeys,
+        RemoteJwksProvider jwks)
     {
         ArgumentNullException.ThrowIfNull(next);
         ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(jwtKeys);
+        ArgumentNullException.ThrowIfNull(jwks);
 
         _next = next;
 
@@ -123,18 +136,10 @@ public sealed class AuthenticationMiddleware
             .Select(tenant => tenant.Trim())
             .ToArray() ?? [];
 
-        var signingKey = configuration["NetBpm:Security:Jwt:SigningKey"];
-
-        if (!string.IsNullOrWhiteSpace(signingKey))
+        // JWT：HS256（内网）与 RS256（对外 / 外部 IdP）共用一套校验参数，差异只在密钥来源。
+        // 只要本地有密钥，或配了外部 JWKS 地址，就认为「启用了 JWT 校验」。
+        if (jwtKeys.HasValidationKeys || jwks.IsConfigured)
         {
-            var keyBytes = Encoding.UTF8.GetBytes(signingKey);
-
-            if (keyBytes.Length < 32)
-            {
-                throw new InvalidOperationException(
-                    "NetBpm:Security:Jwt:SigningKey 至少需要 32 字节（HS256 密钥强度）。");
-            }
-
             var issuer = configuration["NetBpm:Security:Jwt:Issuer"];
             var audience = configuration["NetBpm:Security:Jwt:Audience"];
 
@@ -145,10 +150,9 @@ public sealed class AuthenticationMiddleware
                 MapInboundClaims = false,
             };
 
-            _tokenValidation = new TokenValidationParameters
+            var validation = new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
                 ValidateIssuer = !string.IsNullOrWhiteSpace(issuer),
                 ValidIssuer = issuer,
                 ValidateAudience = !string.IsNullOrWhiteSpace(audience),
@@ -157,6 +161,26 @@ public sealed class AuthenticationMiddleware
                 ClockSkew = TimeSpan.FromSeconds(30),
                 NameClaimType = JwtRegisteredClaimNames.Sub,
             };
+
+            if (jwtKeys.ValidationKeys.Count > 0)
+            {
+                validation.IssuerSigningKeys = jwtKeys.ValidationKeys;
+            }
+
+            // 算法白名单：只放行「确实配了密钥」的算法。
+            // 没有这一步就有算法混淆攻击——拿 RSA 公钥当 HMAC 密钥签一个 HS256 令牌即可伪造签名。
+            if (jwtKeys.ValidAlgorithms.Count > 0)
+            {
+                validation.ValidAlgorithms = jwtKeys.ValidAlgorithms;
+            }
+
+            if (jwks.IsConfigured)
+            {
+                // 外部 IdP 直连：按令牌头里的 kid 取公钥（内部自带缓存与限频）
+                validation.IssuerSigningKeyResolver = (_, _, keyId, _) => jwks.Resolve(keyId);
+            }
+
+            _tokenValidation = validation;
         }
     }
 
