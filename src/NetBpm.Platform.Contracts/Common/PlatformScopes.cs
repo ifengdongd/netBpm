@@ -63,6 +63,16 @@ public static class PlatformScopes
     /// <summary>事件订阅管理。</summary>
     public const string EventSubscribe = "workflow:event:subscribe";
 
+    /// <summary>
+    /// 作为 worker 领取并回执外部任务（<c>activiti:topic</c>）。
+    /// <para>
+    /// 它<b>不是</b>审批办理：<c>workflow:task:submit</c> 是「人对一张单做决定」，
+    /// 这个是「系统把一步活干完」。因此不受「引擎面业务写入对客户端关闭」那条规则约束 ——
+    /// 那条规定针对的是会冒充审批结论的办理动作。
+    /// </para>
+    /// </summary>
+    public const string ExternalTask = "workflow:external:task";
+
     /// <summary>全部公开 scope，供管理端展示与校验（顺序与文档一致）。</summary>
     public static IReadOnlyList<string> All { get; } =
     [
@@ -81,6 +91,7 @@ public static class PlatformScopes
         AdminVariables,
         AdminClient,
         EventSubscribe,
+        ExternalTask,
     ];
 
     /// <summary>

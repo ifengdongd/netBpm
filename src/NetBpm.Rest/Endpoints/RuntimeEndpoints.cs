@@ -52,6 +52,7 @@ public static partial class RuntimeEndpoints
         group.MapProcessInstanceEndpoints();
         group.MapTaskEndpoints();
         group.MapVariableEndpoints();
+        group.MapExternalTaskEndpoints();
         group.MapHistoryEndpoints();
 
         return group;
