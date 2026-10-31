@@ -166,8 +166,12 @@ alter index all on ACT_HI_PROCINST rebuild;
 | 数据 | 机制 | 配置 |
 |---|---|---|
 | 管理动作审计 | `AdminAuditCleanupService`（每 6h） | `NetBpm:Admin:AuditRetentionDays`（0=永久） |
-| 历史归档快照 | `AdminArchiveCleanupService`（每 6h） | `NetBpm:Admin:ArchiveRetentionDays`（0=永久） |
+| 历史归档快照 + 表单快照 | `AdminArchiveCleanupService`（每 6h，两张表同一切点） | `NetBpm:Admin:ArchiveRetentionDays`（0=永久） |
 | 模型版本历史 | 端点手动清理 `DELETE /api/admin/models/{id}/history?keepLatest=N` | — |
 
 > ⚠️ 归档记录删除前如需长期留存，请先把 `admin_history_archive.payload`
 > 导出到对象存储 / 冷库——删除后引擎侧 ACT_HI_* 原行已不存在，无法重建。
+>
+> ⚠️ `nb_approval_snapshot` 与历史归档**共用同一个保留期**：快照靠 `task_id` 与历史行对齐，
+> 历史没了它就是孤儿数据；历史还在而快照先没了，历史页会退化成「有结论、没有内容」。
+> 该值应当 ≥ 审计/合规要求的年限，不要为省空间单独调小。

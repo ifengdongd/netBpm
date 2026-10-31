@@ -48,6 +48,26 @@ public interface IApprovalSnapshotStore
     ValueTask<IReadOnlyList<ApprovalSnapshotRecord>> ListByInstanceAsync(
         string instanceId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 删除定稿时间早于 <paramref name="before"/> 的快照，返回删除条数。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 保留期<b>与历史归档共用同一个配置</b>（<c>NetBpm:Admin:ArchiveRetentionDays</c>，
+    /// 见 <c>AdminArchiveCleanupService</c>）：快照的作用是「解释这张单当时怎么填的」，
+    /// 而它解释的那段历史一旦被归档清理掉，快照就只剩一份无法定位的孤儿数据。
+    /// 两者同进同退，不会出现「历史没了、快照还在」或反之的错位。
+    /// </para>
+    /// <para>
+    /// ⚠️ 与「实例被删除」是两件事：显式删除实例<b>不</b>级联删快照（本表刻意没有外键），
+    /// 快照仍是那张单存在过的唯一解释；只有按保留期清理才会真正抹掉它。
+    /// 因此保留期应当 ≥ 审计/合规要求的年限，<c>0</c>（默认）表示永不清理。
+    /// </para>
+    /// </remarks>
+    /// <param name="before">截止时间（UTC）：早于它的快照被删除。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -221,6 +241,18 @@ public sealed class DapperApprovalSnapshotStore : IApprovalSnapshotStore
         return [.. rows.Select(ToRecord)];
     }
 
+    /// <inheritdoc />
+    public async ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default)
+    {
+        await using var connection = _connections.CreateConnection();
+
+        // 走 ix_nb_approval_snapshot_captured：这张表只增不减，全表扫着删会随数据量线性恶化
+        return await connection.ExecuteAsync(new CommandDefinition(
+            "delete from nb_approval_snapshot where captured_at < @before",
+            new { before },
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
     private static ApprovalSnapshotRecord ToRecord(Row row) =>
         new(
             TaskId: row.TaskId,
@@ -328,6 +360,25 @@ public sealed class InMemoryApprovalSnapshotStore : IApprovalSnapshotStore
                 .ThenBy(item => item.TaskId, StringComparer.Ordinal)];
 
             return ValueTask.FromResult(result);
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var expired = _records
+                .Where(item => item.Value.CapturedAt.UtcDateTime < before)
+                .Select(item => item.Key)
+                .ToArray();
+
+            foreach (var taskId in expired)
+            {
+                _records.Remove(taskId);
+            }
+
+            return ValueTask.FromResult(expired.Length);
         }
     }
 }

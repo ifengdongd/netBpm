@@ -1454,6 +1454,9 @@ go
 if not exists (select 1 from sys.indexes where name = 'ix_nb_approval_snapshot_instance' and object_id = object_id('nb_approval_snapshot'))
 create index ix_nb_approval_snapshot_instance on nb_approval_snapshot (tenant_id, process_instance_id);
 go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_approval_snapshot_captured' and object_id = object_id('nb_approval_snapshot'))
+create index ix_nb_approval_snapshot_captured on nb_approval_snapshot (captured_at);
+go
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
 

@@ -1071,7 +1071,12 @@ internal static class SchemaCatalog
             C("captured_at", ColType.DateTime3, nullable: false, comment: "定稿时间（UTC）"),
         ],
         ["task_id"],
-        [new IndexDef("ix_nb_approval_snapshot_instance", ["tenant_id", "process_instance_id"])],
+        [
+            new IndexDef("ix_nb_approval_snapshot_instance", ["tenant_id", "process_instance_id"]),
+            // 保留期清理按 captured_at 删（AdminArchiveCleanupService，与历史归档同一切点）。
+            // 这张表只增不减且行宽可观，没有这个索引就是每 6 小时全表扫一次。
+            new IndexDef("ix_nb_approval_snapshot_captured", ["captured_at"]),
+        ],
         [], [],
         EngineCharset: false);
 

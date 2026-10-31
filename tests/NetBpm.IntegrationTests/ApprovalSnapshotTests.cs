@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Dapper;
 using Microsoft.Extensions.DependencyInjection;
+using NetBpm.Persistence.Platform;
 using NetBpm.Platform.Contracts;
 using NetBpm.Runtime;
 
@@ -275,7 +276,54 @@ public sealed class ApprovalSnapshotTests : IClassFixture<RestEngineFactory>
                 : JsonValueKind.Null);
     }
 
+    /// <summary>
+    /// 保留期清理：只删 <c>captured_at</c> 早于切点的快照。
+    /// </summary>
+    /// <remarks>
+    /// 切点与历史归档<b>必须来自同一个配置</b>（<c>AdminArchiveCleanupService</c> 只读一个键）：
+    /// 快照靠 <c>task_id</c> 与历史行对齐，两边各配一个保留期迟早会被人调到错位。
+    /// </remarks>
+    [Fact]
+    public async Task Snapshot_ShouldBePrunedByCapturedAt()
+    {
+        SkipUnlessReady();
+        Reset();
+
+        var store = _factory.Services.GetRequiredService<IApprovalSnapshotStore>();
+        var now = DateTimeOffset.UtcNow;
+
+        await store.AppendAsync(NewRecord("prune-old-1", now.AddDays(-400)), Ct);
+        await store.AppendAsync(NewRecord("prune-old-2", now.AddDays(-30)), Ct);
+        await store.AppendAsync(NewRecord("prune-new-1", now.AddDays(-1)), Ct);
+
+        var removed = await store.PruneAsync(now.AddDays(-7).UtcDateTime, Ct);
+
+        Assert.Equal(2, removed);
+        Assert.Null(await store.FindAsync("prune-old-1", Ct));
+        Assert.Null(await store.FindAsync("prune-old-2", Ct));
+        Assert.NotNull(await store.FindAsync("prune-new-1", Ct));
+    }
+
     // ─────────────────────────── 测试基础设施 ───────────────────────────
+
+    /// <summary>构造一份最小快照（只关心 <c>task_id</c> 与定稿时间）。</summary>
+    private static ApprovalSnapshotRecord NewRecord(string taskId, DateTimeOffset capturedAt) =>
+        new(
+            TaskId: taskId,
+            InstanceId: "prune-instance",
+            TenantId: DefaultTenant,
+            ProcessKey: ApprovalKey,
+            ProcessDefinitionId: null,
+            DefinitionVersion: 1,
+            ActivityId: "task_owner",
+            ActivityName: "主管审批",
+            ActorId: "manager",
+            ActorCallerId: null,
+            OptionId: "1",
+            Fields: [],
+            Values: new Dictionary<string, string?>(StringComparer.Ordinal),
+            Attachments: null,
+            CapturedAt: capturedAt);
 
     /// <summary>
     /// 部署两环节流程：主管审批（固定办理人 manager）→ 备案（lisi）。

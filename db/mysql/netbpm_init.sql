@@ -1899,13 +1899,22 @@ create table if not exists nb_approval_snapshot (
     attachments_json mediumtext comment '当时的附件引用（JSON 数组；平台只存引用，不存文件本体）',
     captured_at datetime(3) not null comment '定稿时间（UTC）',
     primary key (task_id),
-    index ix_nb_approval_snapshot_instance (tenant_id, process_instance_id)
+    index ix_nb_approval_snapshot_instance (tenant_id, process_instance_id),
+    index ix_nb_approval_snapshot_captured (captured_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='表单快照：提交审批时的字段定义与表单值（键 = task_id，历史页按当时定义渲染）';
 
 set @ddl = (select if(count(*) = 0,
         'create index ix_nb_approval_snapshot_instance on nb_approval_snapshot (tenant_id, process_instance_id)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'nb_approval_snapshot' and index_name = 'ix_nb_approval_snapshot_instance');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_approval_snapshot_captured on nb_approval_snapshot (captured_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_approval_snapshot' and index_name = 'ix_nb_approval_snapshot_captured');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
