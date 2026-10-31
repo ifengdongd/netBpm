@@ -160,7 +160,7 @@ internal static class SqlGenerator
         }
 
         // ⑤ 应用层扩展表
-        lines.AddRange(BlankSection("⑤ 应用层扩展表（幂等键 / 定时作业 / 迁移审计 / 模型历史 / 治理 / 异步作业）"));
+        lines.AddRange(BlankSection("⑤ 应用层扩展表（幂等键 / 定时作业 / 迁移审计 / 模型历史 / 治理 / 异步作业 / 平台接入）"));
         lines.AddRange(ExtensionsNotes);
         foreach (var table in ExtensionTables)
         {
@@ -195,6 +195,13 @@ internal static class SqlGenerator
         SchemaCatalog.AsyncJobTable,
         SchemaCatalog.EventOutboxTable,
         SchemaCatalog.CommandIdempotencyTable,
+        SchemaCatalog.TenantTable,
+        SchemaCatalog.ApiClientTable,
+        SchemaCatalog.ClientProcessGrantTable,
+        SchemaCatalog.ProcessCatalogTable,
+        SchemaCatalog.ApprovalDictionaryTable,
+        SchemaCatalog.InstanceTimelineTable,
+        SchemaCatalog.ApprovalSnapshotTable,
     ];
 
     /// <summary>脚本内出现过的全部表（SQL Server 注释渲染用）。</summary>
@@ -1004,7 +1011,7 @@ internal static class SqlGenerator
         "--    ② 流程实例业务表（instances / instance_current_task / deal_history）+ 流程类型 + 流程模型",
         "--    ③ Demo 业务表（leave_bill / order_bill / workflow_parameters）+ 组织架构 + 演示种子数据",
         "--    ④ 运行期查询索引（性能增强）",
-        "--    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox",
+        "--    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox / 平台接入（nb_*）",
         "--    ⑥ 老库兼容补齐（大文本扩容、定时作业可靠性列）",
         "--    ⑦ 表与列注释（SQL Server 扩展属性；MySQL 注释内联在建表语句里）",
         "--",
@@ -1121,6 +1128,13 @@ internal static class SqlGenerator
         "--  admin_history_archive 历史归档快照（归档后原 ACT_HI_* 行删除）",
         "--  ACT_RU_JOB           asyncBefore / asyncAfter 异步作业（含重试与死信）",
         "--  ACT_EVT_OUTBOX       事务性事件外发队列（至少一次投递，含发布重试/死信）",
+        "--  nb_tenant            平台租户（一期固定 default 一行，仍按多租户建模）",
+        "--  nb_api_client        接入客户端（一系统一客户端一密钥，只存 SHA-256 摘要）",
+        "--  nb_client_process_grant  客户端流程白名单（一行一条授权；无行=不限流程）",
+        "--  nb_process_catalog  流程目录覆盖层（无行=由部署的 BPMN 派生，部署即可见）",
+        "--  nb_approval_dictionary  审批语义字典（optionId→semantic 映射；node_id 空=流程级默认）",
+        "--  nb_instance_timeline 审批记录时间线（append-only；sequence 单调，作增量拉取游标）",
+        "--  nb_approval_snapshot 表单快照（键=task_id：历史办理页按提交当时的字段定义渲染）",
         "--",
         "--  全部幂等：表已存在时跳过，缺索引/缺列由后续守卫补齐。",
         string.Empty,

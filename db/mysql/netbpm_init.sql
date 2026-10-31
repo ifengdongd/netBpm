@@ -18,7 +18,7 @@
 --    ② 流程实例业务表（instances / instance_current_task / deal_history）+ 流程类型 + 流程模型
 --    ③ Demo 业务表（leave_bill / order_bill / workflow_parameters）+ 组织架构 + 演示种子数据
 --    ④ 运行期查询索引（性能增强）
---    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox
+--    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox / 平台接入（nb_*）
 --    ⑥ 老库兼容补齐（大文本扩容、定时作业可靠性列）
 --    ⑦ 表与列注释（SQL Server 扩展属性；MySQL 注释内联在建表语句里）
 --
@@ -1326,7 +1326,7 @@ deallocate prepare stmt;
 
 
 
--- ─────────────────────────── ⑤ 应用层扩展表（幂等键 / 定时作业 / 迁移审计 / 模型历史 / 治理 / 异步作业） ───────────────────────────
+-- ─────────────────────────── ⑤ 应用层扩展表（幂等键 / 定时作业 / 迁移审计 / 模型历史 / 治理 / 异步作业 / 平台接入） ───────────────────────────
 
 --  ACT_IDEMPOTENCY      HTTP 幂等键（POST 重试回放，不属于 Activiti 引擎表）
 --  ACT_RU_TIMER_JOB     边界定时器作业（任务创建时写一条，到点触发取消分支）
@@ -1337,6 +1337,13 @@ deallocate prepare stmt;
 --  admin_history_archive 历史归档快照（归档后原 ACT_HI_* 行删除）
 --  ACT_RU_JOB           asyncBefore / asyncAfter 异步作业（含重试与死信）
 --  ACT_EVT_OUTBOX       事务性事件外发队列（至少一次投递，含发布重试/死信）
+--  nb_tenant            平台租户（一期固定 default 一行，仍按多租户建模）
+--  nb_api_client        接入客户端（一系统一客户端一密钥，只存 SHA-256 摘要）
+--  nb_client_process_grant  客户端流程白名单（一行一条授权；无行=不限流程）
+--  nb_process_catalog  流程目录覆盖层（无行=由部署的 BPMN 派生，部署即可见）
+--  nb_approval_dictionary  审批语义字典（optionId→semantic 映射；node_id 空=流程级默认）
+--  nb_instance_timeline 审批记录时间线（append-only；sequence 单调，作增量拉取游标）
+--  nb_approval_snapshot 表单快照（键=task_id：历史办理页按提交当时的字段定义渲染）
 --
 --  全部幂等：表已存在时跳过，缺索引/缺列由后续守卫补齐。
 
@@ -1736,6 +1743,169 @@ set @ddl = (select if(count(*) = 0,
         'create index ACT_IDX_CMD_IDEMP_EXPIRES on ACT_CMD_IDEMPOTENCY (EXPIRES_AT_)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'ACT_CMD_IDEMPOTENCY' and index_name = 'ACT_IDX_CMD_IDEMP_EXPIRES');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_tenant (
+    id varchar(64) not null comment '租户 id（同时是引擎 TENANT_ID_ 的取值）',
+    name varchar(128) not null comment '租户名称（审计与看板展示）',
+    status varchar(16) not null default 'ACTIVE' comment 'ACTIVE=可用；SUSPENDED=停用（其下客户端鉴权一律失败）',
+    quota_per_minute int not null default 600 comment '默认每分钟请求配额（客户端未单独配置时取此值）',
+    created_at datetime(3) not null comment '创建时间（UTC）',
+    updated_at datetime(3) not null comment '更新时间（UTC）',
+    primary key (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='平台租户：数据隔离的最外层（一期固定 default 一行，仍按多租户建模）';
+
+create table if not exists nb_api_client (
+    id varchar(64) not null comment '客户端 id（对外 clientId，出现在令牌 azp）',
+    tenant_id varchar(64) not null comment '所属租户（刻意不做外键：租户下线不该连带删客户端）',
+    name varchar(128) not null comment '接入系统名称（进审计与运维看板）',
+    status varchar(16) not null default 'PENDING' comment 'PENDING/ACTIVE/SUSPENDED/REVOKED（与对外 JSON 词汇一致，不存枚举序号）',
+    scopes varchar(1000) not null default '' comment '授权范围（空格分隔，取值见 PlatformScopes.All）',
+    quota_per_minute int not null default 600 comment '每分钟请求配额（0 表示取租户默认值）',
+    secret_hash varchar(64) not null comment '当前密钥的 SHA-256（base64）',
+    secret_expires_at datetime(3) comment '当前密钥到期时间（UTC）',
+    previous_secret_hash varchar(64) comment '上一代密钥摘要（轮换宽限期只有一代，连续轮换会让更早的那把立即失效）',
+    previous_secret_expires_at datetime(3) comment '上一代密钥到期时间（UTC）',
+    created_at datetime(3) not null comment '创建时间（UTC）',
+    updated_at datetime(3) not null comment '更新时间（UTC）',
+    last_used_at datetime(3) comment '最近一次成功鉴权时间（UTC；按分钟节流回写）',
+    primary key (id),
+    index ix_nb_api_client_tenant (tenant_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='接入客户端：一系统一客户端一密钥（只存 SHA-256 摘要，明文只在签发响应里出现一次）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_api_client_tenant on nb_api_client (tenant_id, status)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_api_client' and index_name = 'ix_nb_api_client_tenant');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_client_process_grant (
+    client_id varchar(64) not null comment '客户端 id',
+    process_key varchar(255) not null comment '流程 key（= BPMN process/@id）',
+    granted_at datetime(3) not null comment '授权时间（UTC）',
+    granted_by varchar(255) comment '授权操作人（审计）',
+    primary key (client_id, process_key),
+    index ix_nb_client_process_grant_process (process_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='客户端流程白名单：一行一条授权；无行表示「不限流程」（不推荐，接入时应显式授权）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_client_process_grant_process on nb_client_process_grant (process_key)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_client_process_grant' and index_name = 'ix_nb_client_process_grant_process');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_process_catalog (
+    tenant_id varchar(64) not null comment '租户',
+    process_key varchar(255) not null comment '流程 key（= BPMN process/@id，对外稳定标识）',
+    name varchar(255) comment '展示名；NULL 取流程定义里的 name',
+    category varchar(64) comment '分类（分组展示用）；NULL = 未分类',
+    description varchar(1000) comment '说明，允许 Markdown；NULL 表示无说明',
+    icon varchar(512) comment '图标标识或 URL',
+    page_urls_json mediumtext comment '业务页面地址模板（JSON：start / view / approve，值可带 {businessKey} / {taskId} 占位符）',
+    entry_points_json mediumtext comment '入口声明（JSON 数组）；NULL = 由 BPMN 的 startEvent 派生',
+    status varchar(16) comment '显式状态 DRAFT/ACTIVE/SUSPENDED/RETIRED；NULL = 跟随引擎部署态（挂起即 SUSPENDED）',
+    sort_order int not null default 0 comment '展示排序（小的在前；相同则按 process_key）',
+    labels_json varchar(1000) comment '本地化标签（JSON：语言 → 展示名）',
+    parameter_schema_version int not null default 0 comment '参数规范版本；0 表示未声明（调用方按「不校验额外参数」处理）',
+    created_at datetime(3) not null comment '创建时间（UTC）',
+    updated_at datetime(3) not null comment '更新时间（UTC）',
+    primary key (tenant_id, process_key),
+    index ix_nb_process_catalog_category (tenant_id, category)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='流程目录覆盖层：按租户登记流程名片（无行则全部由部署的 BPMN 派生，实现「部署即可见」）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_process_catalog_category on nb_process_catalog (tenant_id, category)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_process_catalog' and index_name = 'ix_nb_process_catalog_category');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_approval_dictionary (
+    tenant_id varchar(64) not null comment '租户',
+    process_key varchar(255) not null comment '流程 key（= BPMN process/@id）',
+    node_id varchar(255) comment '环节 id（BPMN userTask/@id）；NULL = 流程级默认',
+    option_id varchar(128) not null comment '选项 id（activiti:value/@id）',
+    semantic varchar(32) not null comment '平台语义 APPROVE/REJECT/RETURN/DELEGATE/CUSTOM（对外 JSON 词汇，不存枚举序号）',
+    outcome_class varchar(16) not null comment '统计口径 POSITIVE/NEGATIVE/NEUTRAL；与 semantic 推导一致时才落非空（冗余便于查询）',
+    label varchar(128) comment '按钮文案；NULL 取 BPMN activiti:value/@name',
+    requires_comment tinyint not null default 0 comment '是否必须填写审批意见（0/1）',
+    requires_target_node tinyint not null default 0 comment '是否必须指定目标节点（退回/跳转类，0/1）',
+    allowed_target_nodes_json mediumtext comment '可选目标节点白名单（JSON 数组）；NULL = 按流程定义默认',
+    attributes_json mediumtext comment '流程自定义附加属性（JSON 对象）',
+    created_at datetime(3) not null comment '创建时间（UTC）',
+    updated_at datetime(3) not null comment '更新时间（UTC）',
+    primary key (tenant_id, process_key, node_id, option_id),
+    index ix_nb_approval_dictionary_process (tenant_id, process_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='审批语义字典：把流程自定义的 optionId 映射到平台语义（node_id 为空 = 流程级默认）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_approval_dictionary_process on nb_approval_dictionary (tenant_id, process_key)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_approval_dictionary' and index_name = 'ix_nb_approval_dictionary_process');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_instance_timeline (
+    process_instance_id varchar(64) not null comment '流程实例 id（= 根执行 id）',
+    seq bigint not null comment '实例内单调序号（对外名 sequence，从 1 开始）；主键 (process_instance_id, seq) 是单调性的物理保证',
+    tenant_id varchar(64) not null default 'default' comment '租户（平台表一律带租户，便于按租户归档 / 清理）',
+    kind varchar(32) not null comment '条目类型 INSTANCE_STARTED / TASK_COMPLETED / INSTANCE_COMPLETED ...（对外 JSON 词汇，不存枚举序号）',
+    activity_id varchar(255) comment '相关环节 id（BPMN 元素 id）',
+    activity_name varchar(255) comment '环节名（写入时定稿：定义升级后历史条目仍显示当时的名字）',
+    task_id varchar(64) comment '相关任务 id',
+    actor_id varchar(255) comment '实际操作人（令牌 subject）；纯服务令牌产生的条目为空，合规报表要单列',
+    actor_caller_id varchar(64) comment '提交该动作的调用系统（clientId）',
+    option_id varchar(128) comment '审批选项 id（仅 TASK_COMPLETED）',
+    semantic varchar(32) comment '审批语义（写入时按字典定稿；NULL = 该条目不表达审批意见）',
+    comment_text varchar(2000) comment '审批意见 / 说明（对外名 comment）',
+    target_node_id varchar(255) comment '目标节点（退回 / 转办类动作）',
+    form_snapshot_task_id varchar(64) comment '表单快照任务 id；非空时调用方可再拉 /tasks/{id}/form 取当时的字段定义',
+    payload_json mediumtext comment '附加载荷（JSON 对象）：保留尚未建模的字段，避免为一个新字段改表',
+    occurred_at datetime(3) not null comment '发生时间（UTC）',
+    primary key (process_instance_id, seq),
+    index ix_nb_instance_timeline_occurred (tenant_id, occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='审批记录时间线（append-only）：同一实例内 sequence 单调递增，增量拉取以它为游标';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_instance_timeline_occurred on nb_instance_timeline (tenant_id, occurred_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_instance_timeline' and index_name = 'ix_nb_instance_timeline_occurred');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_approval_snapshot (
+    task_id varchar(64) not null comment '引擎任务 id（主键；= 时间线的 formSnapshotTaskId）',
+    process_instance_id varchar(64) not null comment '流程实例 id（= 根执行 id）',
+    tenant_id varchar(64) not null default 'default' comment '租户（平台表一律带租户，便于按租户归档 / 清理）',
+    process_key varchar(255) comment '流程 key（写入时定稿：定义改 key 后仍显示当时的名字）',
+    process_definition_id varchar(64) comment '流程定义 id（引擎内部标识，用于反查原始 BPMN）',
+    definition_version int not null default 1 comment '提交时的定义版本（同 key 多版本的第几版；旧定义上发起的单据按旧版渲染）',
+    activity_id varchar(255) comment '环节 id（BPMN userTask/@id）',
+    activity_name varchar(255) comment '环节名（写入时定稿）',
+    actor_id varchar(255) comment '提交人（令牌 subject）',
+    actor_caller_id varchar(64) comment '提交该动作的调用系统（clientId）',
+    option_id varchar(128) comment '本次审批选项 id',
+    schema_json mediumtext comment '当时的表单定义（JSON 数组：fieldId/type/label/required/options…）',
+    values_json mediumtext comment '当时的表单值（JSON 对象，值一律字符串）',
+    attachments_json mediumtext comment '当时的附件引用（JSON 数组；平台只存引用，不存文件本体）',
+    captured_at datetime(3) not null comment '定稿时间（UTC）',
+    primary key (task_id),
+    index ix_nb_approval_snapshot_instance (tenant_id, process_instance_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='表单快照：提交审批时的字段定义与表单值（键 = task_id，历史页按当时定义渲染）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_approval_snapshot_instance on nb_approval_snapshot (tenant_id, process_instance_id)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_approval_snapshot' and index_name = 'ix_nb_approval_snapshot_instance');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;

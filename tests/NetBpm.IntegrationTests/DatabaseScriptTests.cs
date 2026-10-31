@@ -74,6 +74,13 @@ public sealed partial class DatabaseScriptTests
         "admin_audit_log",
         "admin_history_archive",
         "admin_user",
+        // 平台接入表（docs/platform-api-refactoring-plan.md §7.1）：nb_ 前缀与 ACT_* 严格分开
+        "nb_tenant",
+        "nb_api_client",
+        "nb_client_process_grant",
+        "nb_process_catalog",
+        "nb_approval_dictionary",
+        "nb_instance_timeline",
     ];
 
     [Theory]
