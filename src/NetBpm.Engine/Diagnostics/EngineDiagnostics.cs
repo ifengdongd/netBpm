@@ -77,4 +77,50 @@ public static class EngineDiagnostics
         "netbpm.event.delivery",
         unit: "{delivery}",
         description: "事件订阅投递次数（tag: subscription / result）");
+
+    // ─────────────────────────── outbox 积压 ───────────────────────────
+    // 积压是状态量，只能用 Gauge；而观测式 Gauge 的回调是同步的，不能在里面查库。
+    // 取值统一走 OutboxBacklogProbe（后台采样器写入的快照），这里只做「读」。
+    // Prometheus 侧名字：netbpm_outbox_pending / netbpm_outbox_dead_letter /
+    // netbpm_outbox_oldest_pending_age_seconds / netbpm_outbox_backlog_stale。
+
+    /// <summary>outbox 待发布条数（未发布且未死信）。</summary>
+    public static readonly ObservableGauge<int> OutboxPending = Meter.CreateObservableGauge(
+        "netbpm.outbox.pending",
+        () => OutboxBacklogProbe.Pending,
+        unit: "{event}",
+        description: "outbox 中尚未发布、也未进死信的事件数。");
+
+    /// <summary>outbox 死信条数（已停投，需人工介入）。</summary>
+    public static readonly ObservableGauge<int> OutboxDeadLetter = Meter.CreateObservableGauge(
+        "netbpm.outbox.dead_letter",
+        () => OutboxBacklogProbe.DeadLetter,
+        unit: "{event}",
+        description: "outbox 中已判死信、停止重试的事件数。");
+
+    /// <summary>
+    /// 最老一条待发布事件的年龄（秒）；没有积压时为 0。
+    /// <para>
+    /// 🔑 积压要看<b>年龄</b>而不是条数：条数高可能只是瞬时洪峰，
+    /// 条数低但最老的一条躺了很久，说明发布链路已经断了。
+    /// </para>
+    /// </summary>
+    public static readonly ObservableGauge<double> OutboxOldestPendingAge = Meter.CreateObservableGauge(
+        "netbpm.outbox.oldest_pending_age",
+        () => OutboxBacklogProbe.OldestPendingAgeSeconds,
+        unit: "s",
+        description: "最老一条待发布事件的年龄（秒）；没有待发布事件时为 0。");
+
+    /// <summary>
+    /// 积压采样是否已停止（1 = 上面三个数不可信）。
+    /// <para>
+    /// 缓存式 Gauge 的老问题：进程没了，最后那个数字还在。把「没有积压」
+    /// 和「不知道有没有」混在一条指标里，是最容易让告警失灵的一种混法。
+    /// </para>
+    /// </summary>
+    public static readonly ObservableGauge<int> OutboxBacklogStale = Meter.CreateObservableGauge(
+        "netbpm.outbox.backlog_stale",
+        () => OutboxBacklogProbe.IsStale ? 1 : 0,
+        unit: "{state}",
+        description: "积压指标是否已停止更新（1 = 采样器未运行，积压数值不可信）。");
 }

@@ -79,6 +79,41 @@ groups:
           description: "事件已放弃发布。先看订阅方是否在 5xx，再核对签名与地址。重投前必须确认订阅方能收。"
           runbook: "docs/operations-runbook.md §3.2"
 
+      # ── 积压（v1.28）：发布链路断了不会报错给任何人，只有这张表在悄悄变长 ──
+      # 打在「最老一条的年龄」上而不是条数上：条数高可能只是瞬时洪峰。
+      - alert: NetBpmOutboxBacklogAging
+        expr: netbpm_outbox_oldest_pending_age_seconds > 900
+        for: 5m
+        labels:
+          severity: page
+          component: outbox
+        annotations:
+          summary: "outbox 积压：最老一条已等 15 分钟"
+          description: "发布链路已经断了（订阅方 5xx / 发布器没起 / 限速把整批无限推迟）。接口照常返回 200，只有这里能看出来。先确认 NetBpm:Outbox:Enabled 与发布器是否在跑。"
+          runbook: "docs/operations-runbook.md §7"
+
+      - alert: NetBpmOutboxBacklogGrowing
+        expr: netbpm_outbox_oldest_pending_age_seconds > 120
+        for: 15m
+        labels:
+          severity: ticket
+          component: outbox
+        annotations:
+          summary: "outbox 积压：最老一条已等 2 分钟"
+          description: "还没到故障，但发布速度已经跟不上产生速度。查订阅方耗时与单订阅限速（max_per_minute）。"
+          runbook: "docs/operations-runbook.md §7"
+
+      - alert: NetBpmOutboxBacklogMetricsStale
+        expr: netbpm_outbox_backlog_stale > 0
+        for: 10m
+        labels:
+          severity: ticket
+          component: outbox
+        annotations:
+          summary: "outbox 积压指标已停止更新"
+          description: "采样器没在跑，pending / dead_letter / 年龄三个数都不可信 —— 看板上「积压 0 条」很可能只是没人再更新它。查宿主进程与 NetBpm:Outbox:Metrics:Enabled。"
+          runbook: "docs/operations-runbook.md §7"
+
   - name: netbpm.external_task
     rules:
       - alert: NetBpmExternalTaskNoWorker

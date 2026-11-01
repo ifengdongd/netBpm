@@ -174,6 +174,8 @@ select column_name from information_schema.columns
 | `netbpm.timer_job.failure` / `netbpm.async_job.failure` 增长 | 定时 / 异步作业失败 | 多为表达式或委托解析问题，查对应实例的 `LAST_ERROR_` |
 | `netbpm.admin.authorization.denied` 突增 | 大量 403 | 接入方配错 scope，或有人在扫接口 |
 | `netbpm.platform.surface.denied` 突增 | 客户端在 `/api/**` 做业务写入 | 接入方还在用旧面（已封存），让他们改走 `/workflow/v1` |
+| `netbpm.outbox.oldest_pending_age` > 900s | 发布链路已断（订阅方 5xx / 发布器没起 / 限速无限推迟） | §7，**打在年龄上而不是条数上**：`pending` 高可能只是瞬时洪峰 |
+| `netbpm.outbox.backlog_stale` = 1 | 积压采样已停，上面三个数不可信 | 查宿主进程与 `NetBpm:Outbox:Metrics:Enabled`；**别把此时的「积压 0 条」当成正常** |
 
 冷却与去重：外部任务告警按「告警码 + 任务 id」冷却，冷却期内只报一次。**冷却不是抑制问题**，
 连续多次冷却到期后仍然报警，说明根因没解决。
@@ -190,6 +192,8 @@ curl -s "$BASE/admin/v1/events/stats?since=1h" -H "X-Api-Key: $ADMIN_KEY"
 返回三块：
 
 - `outbox.pending` / `outbox.deadLetter` / `outbox.oldestPendingAt`：**最老一条的年龄**比总数更能说明问题。
+  这三个数同时也进了 Meter（`netbpm.outbox.*`），Prometheus 可直接告警 ——
+  端点仍然保留，因为排查时「是哪几条」比「有多少条」更关键。
 - `subscriptions[].delivered / failed / deadLetter / pending`：`failed` 是「还有重试额度」（会自愈），
   `deadLetter` 是「已停投」（要人管）——两者分开计，别混着看。
 - `name` 为 `null` 的行是**孤儿订阅**：配置删了但投递记录还在。它照样出现，否则「配置删了、死信留一堆」永远发现不了。
@@ -244,7 +248,7 @@ curl -s "$BASE/admin/v1/events/stats?since=1h" -H "X-Api-Key: $ADMIN_KEY"
 | 写延迟（发起） | 串行 p95 < 200ms | `LoadTests` | **21ms** |
 | 写并发 | p95 < 400ms（回归线） | `LoadTests` | **340ms** |
 | 事件投递成功率 | ≥ 99%（`result=success` 占比） | `netbpm.event.delivery` | — |
-| 事件积压 | `outbox.pending` < 100 且最老一条 < 5 分钟 | `GET /admin/v1/events/stats` | — |
+| 事件积压 | 最老一条待发布事件 < 5 分钟 | `netbpm.outbox.oldest_pending_age` / `GET /admin/v1/events/stats` | — |
 | 死信 | 新增死信 = 0（出现即处理） | §3 两个查询 | — |
 
 > 列表读的 300ms 不是「达标」，是**回归线**：租户内的过滤与排序在内存里做（清单 §3 ① 第 1 条），
@@ -274,6 +278,14 @@ NETBPM_RUN_LOAD_TESTS=1 \
 | `netbpm.admin.authorization.denied` | Counter | `netbpm.admin.scope` / `netbpm.auth.mode` |
 | `netbpm.admin.audit.recorded` / `.purged` | Counter | `netbpm.admin.action` / `netbpm.audit.success` |
 | `netbpm.platform.surface.denied` | Counter | `netbpm.admin.action` / `netbpm.auth.mode` |
+| `netbpm.outbox.pending` | Gauge | — |
+| `netbpm.outbox.dead_letter` | Gauge | — |
+| `netbpm.outbox.oldest_pending_age` | Gauge(s) | — |
+| `netbpm.outbox.backlog_stale` | Gauge | — |
+
+积压四个 Gauge 由 `OutboxBacklogMetricsService` 按间隔采样写入（默认 15 秒，
+`NetBpm:Outbox:Metrics:IntervalSeconds`）：**看年龄不看条数**（`oldest_pending_age`），
+且 `backlog_stale=1` 时三个数都不可信 —— 采样停了之后，看板会一直显示最后一次的数字。
 
 导出默认**关闭**。打开方式二选一：`NetBpm__Otel__Enabled=true`，或直接设 `OTEL_EXPORTER_OTLP_ENDPOINT`
 （容器编排里注入端点即生效）。

@@ -34,6 +34,8 @@ OTel 里的点号在 Prometheus 侧会被规整成下划线，Counter 还会加 
 | `netbpm.event.delivery` | `netbpm_event_delivery_total` |
 | `netbpm.admin.authorization.denied` | `netbpm_admin_authorization_denied_total` |
 | `netbpm.platform.surface.denied` | `netbpm_platform_surface_denied_total` |
+| `netbpm.outbox.pending` | `netbpm_outbox_pending`（Gauge，不加 `_total`） |
+| `netbpm.outbox.oldest_pending_age` | `netbpm_outbox_oldest_pending_age_seconds` |
 
 标签（注意 `netbpm.` 前缀的标签名，OTel 会原样保留）：
 
@@ -70,19 +72,26 @@ OTel 里的点号在 Prometheus 侧会被规整成下划线，Counter 还会加 
 
 ---
 
-## 4. 一个缺口，别假装没有
+## 4. outbox 积压（v1.28 补齐）
 
-**outbox 积压没有指标**。`GET /admin/v1/events/stats` 才有：
+积压此前只有端点数据（`GET /admin/v1/events/stats`），Prometheus 抓不到 ——
+现在由 `OutboxBacklogMetricsService` 按固定间隔采样并写进 Meter，与端点同一套口径。
 
-```json
-{ "outbox": { "pending": 12, "deadLetter": 0, "oldestPendingAt": "..." } }
-```
+| 代码里 | Prometheus 里 | 说明 |
+|---|---|---|
+| `netbpm.outbox.pending` | `netbpm_outbox_pending` | 未发布且未死信的条数 |
+| `netbpm.outbox.dead_letter` | `netbpm_outbox_dead_letter` | 已判死信、停止重试的条数 |
+| `netbpm.outbox.oldest_pending_age`（秒） | `netbpm_outbox_oldest_pending_age_seconds` | 最老一条待发布事件的年龄 |
+| `netbpm.outbox.backlog_stale` | `netbpm_outbox_backlog_stale` | 1 = 采样已停，上面三个数不可信 |
 
-它是端点数据，不是 Meter 数据 —— Prometheus 抓不到。要把它接进告警，两条路：
+采样参数（`NetBpm:Outbox:Metrics`）：`Enabled`（默认 true）、`IntervalSeconds`（默认 15）、
+`StartupDelaySeconds`（默认 10）。**开 outbox 就会自动挂上**（`AddNetBpm`）。
 
-1. 用 blackbox exporter / 一个 5 行的 sidecar 定时打这个端点，把 `pending` 与
-   `oldestPendingAt` 的年龄转成指标（推荐，改起来最快）；
-2. 等 outbox 自己加 Gauge（那是代码改动，需要一个发版）。
+两个设计取舍，改的时候别弄反：
 
-**「积压」里最该盯的是 `oldestPendingAt` 的年龄**，不是 `pending` 的总数：
-100 条积压里最老的一条只有 5 秒，那是正常吞吐；2 条积压但最老的一条卡了半小时，那是故障。
+1. **看年龄不看条数。** 100 条积压里最老的一条只有 5 秒，那是正常吞吐；
+   2 条积压但最老的一条卡了半小时，那是故障。告警阈值一律打在
+   `netbpm_outbox_oldest_pending_age_seconds` 上。
+2. **`backlog_stale` 必须一起告警。** 观测式 Gauge 读的是缓存快照：
+   进程死了、采样停了，数字会停在最后一次的结果上 —— 而「积压 0 条」恰好长得和
+   「一切正常」一模一样。`stale=1` 是在说「不知道」，没有它，积压告警会在最需要它的时候沉默。

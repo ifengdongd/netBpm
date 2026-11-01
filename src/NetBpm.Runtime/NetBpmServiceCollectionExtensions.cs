@@ -130,6 +130,82 @@ public static class NetBpmServiceCollectionExtensions
     }
 
     /// <summary>
+    /// 注册 outbox 积压采样（<c>netbpm.outbox.pending</c> / <c>dead_letter</c> /
+    /// <c>oldest_pending_age</c> / <c>backlog_stale</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 积压此前只有端点数据（<c>GET /admin/v1/events/stats</c>），Prometheus 抓不到，
+    /// 于是「发布链路断了」只能靠人去看板页面上刷。这个采样器把同一组数接进 Meter。
+    /// </para>
+    /// <para>
+    /// 跟着 <see cref="AddNetBpm"/>（<c>EnableOutbox</c> 打开时）自动挂上；
+    /// 手工拼装宿主的场景可以单独调用本方法覆盖参数。
+    /// </para>
+    /// </remarks>
+    public static IServiceCollection AddNetBpmOutboxMetrics(
+        this IServiceCollection services,
+        Action<Hosting.OutboxBacklogMetricsOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var options = services.AddOptions<Hosting.OutboxBacklogMetricsOptions>();
+
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        services.AddHostedService<Hosting.OutboxBacklogMetricsService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// 注册 outbox 积压采样，参数从 <c>NetBpm:Outbox:Metrics</c> 读取
+    /// （<c>Enabled</c> / <c>IntervalSeconds</c> / <c>StartupDelaySeconds</c>）。
+    /// </summary>
+    public static IServiceCollection AddNetBpmOutboxMetrics(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return services.AddNetBpmOutboxMetrics(
+            options => ConfigureOutboxMetrics(options, configuration));
+    }
+
+    /// <summary>
+    /// 从 <c>NetBpm:Outbox:Metrics</c> 读积压采样参数；没有配置段时保持代码默认值。
+    /// </summary>
+    private static void ConfigureOutboxMetrics(
+        Hosting.OutboxBacklogMetricsOptions options,
+        IConfiguration? configuration)
+    {
+        var section = configuration?.GetSection("NetBpm:Outbox:Metrics");
+
+        if (section is null)
+        {
+            return;
+        }
+
+        if (bool.TryParse(section["Enabled"], out var enabled))
+        {
+            options.Enabled = enabled;
+        }
+
+        if (int.TryParse(section["IntervalSeconds"], out var intervalSeconds) && intervalSeconds > 0)
+        {
+            options.Interval = TimeSpan.FromSeconds(intervalSeconds);
+        }
+
+        if (int.TryParse(section["StartupDelaySeconds"], out var delaySeconds) && delaySeconds >= 0)
+        {
+            options.StartupDelay = TimeSpan.FromSeconds(delaySeconds);
+        }
+    }
+
+    /// <summary>
     /// 注册外部任务巡检（<c>external_task.no_worker</c> / <c>external_task.dead_letter</c> 告警）。
     /// </summary>
     /// <remarks>
@@ -426,6 +502,14 @@ public static class NetBpmServiceCollectionExtensions
         {
             services.AddSingleton<IEventOutbox>(
                 provider => provider.GetRequiredService<IEventOutboxStore>());
+
+            // 积压指标：outbox 开着才有人往表里写，才有积压可看。
+            // IConfiguration 用 GetService 拿（单测宿主常常不注册配置），缺了就走默认值。
+            services.AddOptions<Hosting.OutboxBacklogMetricsOptions>()
+                .Configure<IServiceProvider>((metrics, provider) =>
+                    ConfigureOutboxMetrics(metrics, provider.GetService<IConfiguration>()));
+
+            services.AddHostedService<Hosting.OutboxBacklogMetricsService>();
         }
 
         // ── 外部任务（activiti:topic）：独立部署下执行 serviceTask 的唯一手段 ──

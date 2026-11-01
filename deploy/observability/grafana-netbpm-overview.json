@@ -1,7 +1,7 @@
 {
   "uid": "netbpm-overview",
   "title": "NetBpm / 平台总览",
-  "description": "引擎命令、作业与 outbox、外部任务告警、事件投递、管理面拒绝。数据源：Prometheus（指标由 OpenTelemetry 导出，需用 OTLP 接收端或 otel-collector 的 prometheus exporter 落地）。",
+  "description": "引擎命令、作业与 outbox（含积压）、外部任务告警、事件投递、管理面拒绝。数据源：Prometheus（指标由 OpenTelemetry 导出，需用 OTLP 接收端或 otel-collector 的 prometheus exporter 落地）。",
   "tags": ["netbpm"],
   "timezone": "browser",
   "refresh": "30s",
@@ -126,10 +126,52 @@
       "fillOpacity": 10
     },
     {
+      "type": "timeseries",
+      "title": "outbox 积压（条数）",
+      "description": "netbpm_outbox_pending / netbpm_outbox_dead_letter / netbpm_outbox_backlog_stale。条数高不一定有问题（可能只是瞬时洪峰），真正该盯的是右边的「最老一条的年龄」。backlog_stale=1 表示采样已停 —— 此时 pending 停在最后一次的结果上，别把它当现状。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "netbpm_outbox_pending",
+          "legendFormat": "pending"
+        },
+        {
+          "refId": "B",
+          "expr": "netbpm_outbox_dead_letter",
+          "legendFormat": "dead_letter"
+        },
+        {
+          "refId": "C",
+          "expr": "netbpm_outbox_backlog_stale",
+          "legendFormat": "采样已停（stale）"
+        }
+      ],
+      "unit": "short",
+      "fillOpacity": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "outbox 最老一条的年龄（秒）",
+      "description": "netbpm_outbox_oldest_pending_age_seconds —— 积压里最该盯的数：100 条积压里最老的一条只有 5 秒是正常吞吐，2 条但最老的一条卡了半小时是故障。告警阈值 900s（page）/ 120s（ticket）。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "netbpm_outbox_oldest_pending_age_seconds",
+          "legendFormat": "oldest_pending_age"
+        }
+      ],
+      "unit": "s",
+      "fillOpacity": 10
+    },
+    {
       "type": "row",
       "title": "外部任务与事件",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
       "panels": []
     },
     {
@@ -137,7 +179,7 @@
       "title": "外部任务告警（按告警码）",
       "description": "netbpm.external_task.alert（Prometheus 里为 netbpm_external_task_alert_total），标签 code / tenant。no_worker = 没人来领，dead_letter = 重试耗尽。",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 },
       "targets": [
         {
           "refId": "A",
@@ -153,7 +195,7 @@
       "title": "事件投递成功率",
       "description": "netbpm_event_delivery，标签 subscription / result。SLO：success 占比 ≥ 99%。",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 },
       "targets": [
         {
           "refId": "A",
@@ -183,7 +225,7 @@
       "type": "row",
       "title": "管理面",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
       "panels": []
     },
     {
@@ -191,7 +233,7 @@
       "title": "授权拒绝（按 scope）",
       "description": "netbpm_admin_authorization_denied。突增通常是接入方配错 scope；持续低频则可能是有人在扫接口。",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
       "targets": [
         {
           "refId": "A",
@@ -207,7 +249,7 @@
       "title": "旧面写入被拒",
       "description": "netbpm_platform_surface_denied。注册客户端仍在 /api/** 做业务写入；已封存面，应迁到 /workflow/v1。",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
       "targets": [
         {
           "refId": "A",
@@ -223,7 +265,7 @@
       "title": "管理审计留痕（按成功 / 失败）",
       "description": "netbpm.admin.audit.recorded（Prometheus 里为 netbpm_admin_audit_recorded_total），标签 netbpm.audit.success / netbpm.admin.action。success=false 意味着有管理动作没留下痕迹——审计库满了或写失败，比「动作失败」更隐蔽。",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
       "targets": [
         {
           "refId": "A",
