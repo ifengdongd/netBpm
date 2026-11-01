@@ -15,9 +15,9 @@ namespace NetBpm.Rest.Endpoints;
 /// 接入方永远拿不到第一把密钥。
 /// </para>
 /// <para>
-/// 放在 <c>/api/admin/**</c> 而不是 <c>/admin/v1/**</c>：这一版复用既有的错误体与鉴权口径
-/// （见 <see cref="AdminAuthorization"/>），等 <c>Platform.Api</c> 落地时整组迁过去并换 RFC 9457。
-/// 路径现在改两次没有价值，调用方只有运维脚本。
+/// ⚠️ <b>已被 <c>/admin/v1/tenants</c> 与 <c>/admin/v1/clients</c> 取代</b>
+/// （<see cref="AdminClientEndpoints"/>）：那一组用 RFC 9457 错误体、逐条判 scope、写动作全部进审计。
+/// 本组保留只为既有运维脚本；新接入不要用。
 /// </para>
 /// <para>
 /// 三条硬约束：
@@ -29,8 +29,14 @@ namespace NetBpm.Rest.Endpoints;
 /// </remarks>
 public static class ClientAdminEndpoints
 {
+    /// <summary>旧接入管理面的废弃文案（替代物必须写清楚，否则读的人只知道「别用」）。</summary>
+    internal const string DeprecatedMessage =
+        "旧接入管理面（/api/admin）。改用 /admin/v1/tenants 与 /admin/v1/clients："
+        + "错误体是 RFC 9457（按 code 分支），租户边界与 scope 口径与业务面一致，写动作全部进管理审计。";
+
     /// <summary>注册端点。</summary>
     /// <param name="endpoints">端点构建器。</param>
+    [Obsolete(DeprecatedMessage)]
     public static IEndpointRouteBuilder MapClientAdminEndpoints(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -436,31 +442,13 @@ public static class ClientAdminEndpoints
             $"当前主体缺少 scope '{scope}'，无法{action}；持有 '{TaskScopes.Admin}' 可覆盖全部管理动作。");
     }
 
-    /// <summary>租户可见性：凭据绑定了租户时只能看/改自己租户的数据。</summary>
+    /// <summary>租户可见性（实现见 <see cref="TenantScopes.IsVisible"/>，两处口径必须一致）。</summary>
     internal static bool IsVisible(RequestContext context, string tenantId) =>
-        context.EffectiveTenantId is not { } scoped
-        || string.Equals(scoped, tenantId, StringComparison.Ordinal);
+        TenantScopes.IsVisible(context, tenantId);
 
-    /// <summary>列表的租户过滤：显式参数不得越出凭据所属租户。</summary>
-    internal static string? ResolveTenantScope(RequestContext context, string? requested)
-    {
-        if (context.EffectiveTenantId is not { } scoped)
-        {
-            return string.IsNullOrWhiteSpace(requested) ? null : requested.Trim();
-        }
-
-        if (string.IsNullOrWhiteSpace(requested))
-        {
-            return scoped;
-        }
-
-        if (!string.Equals(scoped, requested.Trim(), StringComparison.Ordinal))
-        {
-            throw new ForbiddenException($"无权查看租户 '{requested}' 的客户端。");
-        }
-
-        return scoped;
-    }
+    /// <summary>列表的租户过滤（实现见 <see cref="TenantScopes.Resolve"/>）。</summary>
+    internal static string? ResolveTenantScope(RequestContext context, string? requested) =>
+        TenantScopes.Resolve(context, requested, "客户端");
 
     private static async Task RecordFailureAsync(
         RequestContext context,

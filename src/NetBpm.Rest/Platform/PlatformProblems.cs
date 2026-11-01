@@ -107,4 +107,34 @@ public static class PlatformProblems
             "实例不存在",
             StatusCodes.Status404NotFound,
             $"实例 '{instanceId}' 不存在，或当前调用方未被授权查看它。");
+
+    /// <summary>404：接入客户端不存在，或对当前调用方不可见。</summary>
+    /// <param name="http">当前请求。</param>
+    /// <param name="context">身份上下文。</param>
+    /// <param name="clientId">客户端 id。</param>
+    /// <remarks>
+    /// 跨租户同样用这个响应：管理端的「看不到」与「不存在」不必区分，
+    /// 区分开就等于给了一个枚举别的租户客户端 id 的接口。
+    /// </remarks>
+    public static IResult ClientNotFound(HttpContext http, RequestContext context, string clientId) =>
+        Create(
+            http,
+            context,
+            ErrorCodes.ClientNotFound,
+            "客户端不存在",
+            StatusCodes.Status404NotFound,
+            $"客户端 '{clientId}' 不存在，或不属于当前凭据的租户。");
+
+    /// <summary>404：租户不存在。</summary>
+    /// <param name="http">当前请求。</param>
+    /// <param name="context">身份上下文。</param>
+    /// <param name="tenantId">租户 id。</param>
+    public static IResult TenantNotFound(HttpContext http, RequestContext context, string tenantId) =>
+        Create(
+            http,
+            context,
+            ErrorCodes.TenantNotFound,
+            "租户不存在",
+            StatusCodes.Status404NotFound,
+            $"租户 '{tenantId}' 不存在。注册客户端前必须先登记租户。");
 }

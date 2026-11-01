@@ -316,8 +316,14 @@ public static class NetBpmHost
         app.MapInstanceEndpoints();
 
         // 平台接入管理（租户 / 客户端）：两个宿主都要有，否则「在哪发密钥」取决于部署形态
+#pragma warning disable CS0618 // 旧面仍在服务既有运维脚本，新接入走 /admin/v1
+        // 旧面：/api/admin 的租户与客户端（错误体与鉴权是过渡形态），新接入走下面的 /admin/v1
         app.MapClientAdminEndpoints();
 
+        // 管理面：租户与接入客户端（RFC 9457 + workflow:admin:client + 审计）
+        app.MapAdminClientEndpoints();
+
+#pragma warning restore CS0618
         // 管理面：流程目录覆盖行（精修名片）。与业务面的只读目录分开鉴权与错误体
         app.MapAdminProcessCatalogEndpoints();
         app.MapAdminDictionaryEndpoints();

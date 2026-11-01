@@ -144,6 +144,15 @@ public static class ErrorCodes
     /// <summary>试图停用当前凭据所属租户（停用后无法自行恢复）。<c>400</c></summary>
     public const string TenantSelfSuspend = "tenant.self_suspend_forbidden";
 
+    /// <summary>
+    /// 凭据绑定的租户与目标的租户不同，<b>写操作</b>被拒。<c>403</c>
+    /// <para>
+    /// 与 <see cref="TenantMismatch"/> 分工：读操作跨租户按不存在（404，不泄露存在性），
+    /// 写操作的租户就在请求里、调用方本来就知道它存在，再假装「不存在」只会让人以为自己拼错了 id。
+    /// </para>
+    /// </summary>
+    public const string TenantForbidden = "tenant.forbidden";
+
     /// <summary>注册客户端时缺少系统名称。<c>400</c></summary>
     public const string ClientNameRequired = "client.name_required";
 
