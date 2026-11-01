@@ -65,6 +65,9 @@ public static class PlatformSecurityExtensions
                 : new InMemoryClientRegistry(tenants, options, clock);
         });
 
+        // 同一实例的只读投影：配额总览只被注入 IClientDirectory，从类型上就轮换不了别人密钥
+        services.AddSingleton<IClientDirectory>(provider => provider.GetRequiredService<IClientRegistry>());
+
         return services;
     }
 

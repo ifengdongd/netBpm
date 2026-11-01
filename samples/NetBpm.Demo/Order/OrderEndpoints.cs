@@ -33,6 +33,7 @@ public static class OrderEndpoints
         // 流程通用端点（提交审批走这里：POST /api/order/tasks/{taskId}/submit）。
         // 注意：直接 POST /api/order/instances 发起流程不会建订单行，委托回写状态时会失败 ——
         // 业务入口请走 POST /api/order/bills（提交申请）。
+#pragma warning disable CS0618 // 演示宿主：旧面迁移期示例（见 LeaveEndpoints 的说明）
         group.MapWorkflowEndpoints(string.Empty, new WorkflowEndpointOptions
         {
             ProcessKey = _ => ConstField.OrderProcessKey,
@@ -42,6 +43,7 @@ public static class OrderEndpoints
             // 生产宿主必须在这里校验管理 scope。
             AuthorizeAdminAction = (_, _, _) => ValueTask.FromResult(true),
         });
+#pragma warning restore CS0618
 
         // ─── 订单业务（与流程引擎无关的 CRUD 视角） ───
         group.MapPost("/bills", CreateAsync);                              // 提交申请：建订单（status=1）并发起流程

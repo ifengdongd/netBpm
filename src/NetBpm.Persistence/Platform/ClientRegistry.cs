@@ -85,6 +85,28 @@ public sealed record ClientAuthenticationResult(
 }
 
 /// <summary>
+/// 客户端只读视图（配额总览这类读端点用）。
+/// </summary>
+/// <remarks>
+/// 与 <see cref="ITenantDirectory"/> 同一思路：只读端点不该因为「要列一下客户端」
+/// 就拿到注册 / 轮换 / 注销的能力。同一个实例的两个接口，从类型上区分能做到什么。
+/// </remarks>
+public interface IClientDirectory
+{
+    /// <summary>按 id 查客户端（不存在返回 <see langword="null"/>）。</summary>
+    /// <param name="clientId">客户端 id。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<ClientDescriptor?> FindAsync(string clientId, CancellationToken ct = default);
+
+    /// <summary>列出客户端；<paramref name="tenantId"/> 为空表示跨租户（管理面）。</summary>
+    /// <param name="tenantId">租户过滤。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<IReadOnlyList<ClientDescriptor>> ListAsync(
+        string? tenantId = null,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// 接入客户端注册表：签发密钥、鉴权、轮换、流程白名单。
 /// </summary>
 /// <remarks>
@@ -99,7 +121,7 @@ public sealed record ClientAuthenticationResult(
 /// ② 状态非 <see cref="ClientStatus.Active"/> 的客户端一律鉴权失败，即使密钥本身正确。
 /// </para>
 /// </remarks>
-public interface IClientRegistry
+public interface IClientRegistry : IClientDirectory
 {
     /// <summary>注册一个新客户端并签发首个密钥。</summary>
     /// <param name="request">注册请求。</param>
@@ -112,18 +134,6 @@ public interface IClientRegistry
     ValueTask<IssuedClientSecret> RegisterAsync(
         RegisterClientRequest request,
         bool allowPrivilegedScopes = false,
-        CancellationToken ct = default);
-
-    /// <summary>按 id 查客户端（不存在返回 <see langword="null"/>）。</summary>
-    /// <param name="clientId">客户端 id。</param>
-    /// <param name="ct">取消令牌。</param>
-    ValueTask<ClientDescriptor?> FindAsync(string clientId, CancellationToken ct = default);
-
-    /// <summary>列出客户端；<paramref name="tenantId"/> 为空表示跨租户（管理面）。</summary>
-    /// <param name="tenantId">租户过滤。</param>
-    /// <param name="ct">取消令牌。</param>
-    ValueTask<IReadOnlyList<ClientDescriptor>> ListAsync(
-        string? tenantId = null,
         CancellationToken ct = default);
 
     /// <summary>

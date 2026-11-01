@@ -37,6 +37,7 @@ public delegate ValueTask<bool> WorkflowAdminActionAuthorizer(
 ///   <item><description>错误响应的形状在 <see cref="ErrorResponseFactory"/>，状态码映射保持统一。</description></item>
 /// </list>
 /// </remarks>
+[Obsolete(Deprecation.Message)]
 public sealed class WorkflowEndpointOptions
 {
     /// <summary>当前生效的流程 key（发起流程、查看流程定义时用）。通常来自宿主的启动引导器常量。</summary>
@@ -49,9 +50,16 @@ public sealed class WorkflowEndpointOptions
     public Func<IServiceProvider, StartWorkflowRequest, StartWorkflowRequest>? TransformStartRequest { get; init; }
 
     /// <summary>实例视图的业务化加工（可选）：返回值直接作为响应体。</summary>
+    /// <remarks>
+    /// 🔑 <b>返回值是 <c>object?</c>，这正是本属性被废弃的原因</b>：响应形状由宿主任意决定，
+    /// 契约无法声明，SDK 无法生成。平台面把「业务化」外置成目录覆盖行（<c>pageUrls</c> / <c>labels</c>），
+    /// 响应形状因此可以固定。迁移期的宿主可继续用。
+    /// </remarks>
+    [Obsolete("Decorator 让响应形状由宿主任意决定，SDK 与契约都无从生成。改用平台面 /workflow/v1 + 目录覆盖行（/admin/v1/processes 的 pageUrls / labels）。")]
     public Func<IServiceProvider, WorkflowInstanceView, ValueTask<object?>>? DecorateInstanceView { get; init; }
 
     /// <summary>实例摘要（列表行）的业务化加工（可选）：返回值直接作为响应体。</summary>
+    [Obsolete("同 DecorateInstanceView：列表行的人员姓名这类联查应由读模型补充，而不是换掉整个响应形状。")]
     public Func<IServiceProvider, WorkflowInstanceSummary, ValueTask<object?>>? DecorateInstanceSummary { get; init; }
 
     /// <summary>

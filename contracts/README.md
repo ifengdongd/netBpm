@@ -28,13 +28,18 @@ contracts/
 | 收 | 不收 |
 |---|---|
 | `/workflow/v1/**`（业务面，22 条路径） | `/api/**`（引擎原语直通面，标了 experimental，随引擎演进） |
-| `components.schemas`（被业务面引用的模型） | `/admin/v1/**`（管理面刚落地写路径，等形状稳定后再纳入） |
+| `components.schemas`（整份，见下） | `/admin/v1/**` 的 paths（管理面是运营配置面，不承诺向后兼容） |
 | `security` / `info`（固定 `title` + `version: v1`） | 程序集版本号、`servers`（每次构建都变，属于噪声） |
 
-`components.schemas` 目前**整份**收进快照（120 个），其中包括 `/api/**` 与管理面的模型。
+`components.schemas` 目前**整份**收进快照（129 个），其中包括 `/api/**` 与管理面的模型。
 这是有意的取舍：按可达性收窄能得到更小的快照，但会给 `ContractSnapshotTests` 再养一份
 「schema 闭包」算法，与 SDK 生成器里的那份重复。**新增组件不算破坏**（见 §四），
 所以新端点的模型会先缺席、下次刷新快照时一起进来——缺席不影响任何调用方。
+
+⚠️ 别把「管理面模型出现在 `components` 里」读成「管理面被承诺了」：`paths` 不收 `/admin/v1`，
+管理面的形状随时可改。它出现在这里只是因为 .NET 的 OpenAPI 生成器产出一份**共享**的 `components`，
+逐条裁掉不可达部分要再做一次可达性分析。SDK 生成器就是拿这份快照算闭包的，因此管理面类型
+**不会**进 SDK——两边对「哪些是承诺」的理解一致。
 
 归一化规则写在 `ContractSnapshotTests.Normalize`：只留治理前缀的路径，
 所有对象**递归按键名排序**（数组保持原序，因为 `parameters` 的顺序有语义），

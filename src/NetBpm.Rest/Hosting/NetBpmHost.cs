@@ -321,6 +321,9 @@ public static class NetBpmHost
         // 管理面：流程目录覆盖行（精修名片）。与业务面的只读目录分开鉴权与错误体
         app.MapAdminProcessCatalogEndpoints();
 
+        // 管理面：只读观测（字典 / 审计 / 订阅 / 死信 / 配额）。五个面共用一套鉴权与错误体
+        app.MapAdminReadEndpoints();
+
         // 事件订阅管理（M13）：与客户端注册同属接入配置，放同一组路径与鉴权口径下
         app.MapEventSubscriptionEndpoints();
 

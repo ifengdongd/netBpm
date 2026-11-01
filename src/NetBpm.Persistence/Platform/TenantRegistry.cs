@@ -48,6 +48,14 @@ public interface ITenantDirectory
     /// <param name="tenantId">租户 id。</param>
     /// <param name="ct">取消令牌。</param>
     ValueTask<TenantDescriptor?> FindAsync(string tenantId, CancellationToken ct = default);
+
+    /// <summary>全部租户（按 id 排序）。</summary>
+    /// <remarks>
+    /// 放在只读接口上而非写接口：配额总览要列全部租户，但它不该因此拿到
+    /// <c>EnsureAsync</c> / <c>SetStatusAsync</c>（能改租户状态的依赖不该出现在读端点上）。
+    /// </remarks>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<IReadOnlyList<TenantDescriptor>> ListAsync(CancellationToken ct = default);
 }
 
 /// <summary>租户注册表（管理面与首次部署引导使用）。</summary>
@@ -62,10 +70,6 @@ public interface ITenantRegistry : ITenantDirectory
     /// <param name="registration">登记信息。</param>
     /// <param name="ct">取消令牌。</param>
     ValueTask<TenantDescriptor> EnsureAsync(TenantRegistration registration, CancellationToken ct = default);
-
-    /// <summary>全部租户（按 id 排序）。</summary>
-    /// <param name="ct">取消令牌。</param>
-    ValueTask<IReadOnlyList<TenantDescriptor>> ListAsync(CancellationToken ct = default);
 
     /// <summary>改状态；租户不存在返回 <see langword="false"/>。</summary>
     /// <param name="tenantId">租户 id。</param>

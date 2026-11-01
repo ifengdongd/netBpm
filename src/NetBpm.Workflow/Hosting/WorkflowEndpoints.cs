@@ -34,8 +34,11 @@ namespace NetBpm.Workflow;
 /// </list>
 /// </para>
 /// </remarks>
+[Obsolete(Deprecation.Message)]
 public static class WorkflowEndpoints
 {
+#pragma warning disable CS0618 // 旧面内部互相引用（本类与 WorkflowEndpointOptions 一起废弃）
+
     /// <summary>
     /// 把通用流程端点映射到 <paramref name="pattern"/> 路由组下。宿主决定挂在哪个前缀
     /// （如 <c>/api/leave</c> 或 <c>/api/workflow</c>），路由约定保持一致。
@@ -636,4 +639,5 @@ public static class WorkflowEndpoints
     /// <summary>输入不合法 → 400，并把字段级明细一起回给前端。</summary>
     private static IResult Invalid(WorkflowValidationException exception, WorkflowEndpointOptions options) =>
         Results.BadRequest(options.Error(exception.Message, exception.Errors));
+#pragma warning restore CS0618
 }

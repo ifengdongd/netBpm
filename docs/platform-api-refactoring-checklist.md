@@ -1,12 +1,40 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-11-01 ｜ 代码基线：`cc829d1`（v1.23）→ 本轮 v1.24（已推送 `origin/main`）｜ 最新进度见开头 v1.24 小节
+> 导出时间：2026-11-01 ｜ 代码基线：`270e38d`（v1.24）→ 本轮 v1.25（已推送 `origin/main`）｜ 最新进度见开头 v1.25 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.25 本轮落地（2026-11-01，收尾：M3 封旧面 + `/admin/v1` 五个只读面 + S2 出口用例）
+
+**没有新能力，只有三件「说好要做」的事。**
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **M3 收尾：旧面封存** | `WorkflowEndpoints` / `WorkflowEndpointOptions` / 两个 `Decorate*` 全部标 `[Obsolete]`，标记文案写清**替代物是什么**：响应形状由 `Platform.Contracts` 统一，业务化外置到 `/admin/v1/processes` 的覆盖行（`pageUrls` / `labels` / `entryPoints`），业务单号由调用方放进 `StartInstanceRequest.BusinessKey` | `dotnet build NetBpm.slnx` 0 错误、`src/` 侧 0 警告；Demo 局部 `#pragma` 并注明它是迁移示例 |
+| **`/admin/v1` 只读观测** | `AdminReadEndpoints`（10 个操作）：`GET /dictionaries`（`workflow:admin:process`）、`/audit` + `/audit/facets`、`/quotas`（`AdminClient`）、`/subscriptions`、`/events/deadletters`（`EventSubscribe`）；全部 RFC 9457 + `PlatformProblem` | `AdminReadEndpointsTests` 8 项（内存）+ `EventDeadLetterQueryTests` 1 项（真库 offset 分页） |
+| **S2 出口用例** | 三条都已有归属，本轮**跑通并钉住**：`TaskSubmitTests.Submit_Should403_ForPureServiceToken`、`SecurityAndIdempotencyTests.Idempotency_ShouldReplayAndRejectDifferentRequest`、`ClientAuthenticationTests.RotatedSecret_ShouldReplaceOldOne_AfterGracePeriod` | 8 / 4 / 15 项全绿（真 MySQL） |
+
+**三条口径**（都写进了代码注释——它们解释的是「为什么这么写」，而不是「写了什么」）：
+
+1. **旧面标 `[Obsolete]` 而不是删掉**：Demo 的 e2e 与前端页面都读它的业务 DTO。删掉等于「为了让架构图干净，把演示拆了」；
+   标废弃 + 写清替代路径，让新宿主在编译期就收到提示，同时保住既有的验证手段。
+2. **管理面读端点不写审计**：审计是「谁改了东西」的流水。把读操作也记进去，真正的干预动作会被翻页噪声淹掉——
+   想看读行为去访问日志，那里有 traceId。
+3. **租户口径分两类**：`dictionaries` 跟当前管理身份所属租户（字典就是「这个租户的审批口径」，跨租户并列没有意义）；
+   审计 / 订阅 / 死信 / 配额跨租户 + `?tenantId=` 可选过滤（平台运维要在一屏里看到「哪个租户在狂发事件」）。
+
+**顺带补的存储能力**（都是「读端点需要、原来没有」）：
+`IEventDeliveryStore.ListDeadLettersAsync`（死信按 offset 分页，两方言各走一套 `SqlPaging`；死信判定与排序在 SQL 里）；
+`ITenantDirectory.ListAsync` 上移到只读接口；新增 `IClientDirectory`（配额端点从类型上就拿不到「轮换别人密钥」的能力）。
+
+**契约快照**：刷新后 22 路径 / **129 个组件**（+9 个管理面只读类型，纯新增、无行尾抖动），`baseline` 同步。
+SDK 产物不变——可达闭包只从 `/workflow/v1` 的 23 个操作算，管理面类型不进入 SDK。
 
 ---
 
@@ -361,19 +389,22 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 
 | 维度 | 总数 | 已落地 | 未完成 |
 |---|---|---|---|
-| 阶段（S1–S5） | 5 | 4 完成 + 1 基本完成 | 1 |
-| 改造项（M1–M16） | 16 | 10 完成 + 5 部分 | 1 |
-| 守门测试用例 | 30 | 30 | 0 |
+| 阶段（S1–S5） | 5 | 5 | 0 |
+| 改造项（M1–M16） | 16 | 15 完成 + 1 部分 | 0 |
+| 守门测试用例 | 32 | 32 | 0 |
 | 业务面端点（`/workflow/v1`） | 23（另有 1 条已划掉） | 23 | 0 |
+| 管理面端点（`/admin/v1`） | 10 个操作 / 8 条路径 | 10 | 0 |
 | 平台表（`nb_*`） | 13 | 11 | 2 |
-| 人日（估算） | 135 | ≈ 75 | ≈ 60 |
+| 人日（估算） | 135 | ≈ 78 | ≈ 57 |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
 S4（独立部署）**已完成**：门槛项 M12 外部任务 v1.17、M12 收尾与 M13 事件投递 v1.18、
 `Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 v1.19；
 S5（治理 / SDK）**v1.24 完成**：M14 契约治理（v1.23）+ M15 SDK + `CompatibilityTests`。
+v1.25 把最后三项收尾做掉（M3 封旧面 / `/admin/v1` 五个只读面 / S2 三条出口用例），**S1–S5 全部收口**。
 八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）、
 G（委托进程内）、H（契约治理）已闭环**（H 于 v1.23：OpenAPI 快照 + 分类 diff + CI 守门 + 治理文档）；
+**C（响应体可变）于 v1.25 闭环**——旧 `Decorate*` 封存为 `[Obsolete]`，替代路径写进标记与 `Deprecation.Message`；
 C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口）。
 
 ---
@@ -383,7 +414,7 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 | 阶段 | 周期 | 状态 | 出口条件达成情况 |
 |---|---|---|---|
 | S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 于 v1.23 补齐**（M14） |
-| S2 身份与授权 | 4 周 | 🟢 完成（缺出口用例） | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
+| S2 身份与授权 | 4 周 | ✅ 完成 | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**四条出口用例（跨租户 404 / 密钥轮换双活 / 幂等重放 / 纯服务 submit 403）全部有归属并在 v1.25 复跑全绿** |
 | S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
 | S4 独立部署 | 4 周 | 🟢 **完成** | M12 外部任务（v1.17）+ 死信重投与告警 + M13 事件投递（v1.18）+ `Platform.Service` 宿主、容器化与端到端演示（v1.19）。含 `serviceTask` 的 BPMN 在独立部署下已实跑通过：worker 作为独立进程拉走任务并推流程，失败则停在原地不动 |
 | S5 治理与 SDK | 3 周 | ✅ 完成 | M14 契约治理 ✅ v1.23；**M15 SDK ✅ v1.24**（.NET 手写客户端 + 从快照生成 TS/Java）+ **`CompatibilityTests` ✅ v1.24**（基线打当前服务） |
@@ -399,16 +430,20 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 ## 2. 改造项 M1–M16（§6）
 
 - [x] **M1 契约层建立**（8 人日）—— `NetBpm.Platform.Contracts` 13 文件、零警告编译；`Rest` 的 DTO 内收
-- [ ] **M2 多流程路由**（6 人日）
+- [x] **M2 多流程路由**（6 人日）
   - [x] 读半边：`IProcessCatalog` + `{processKey}` 路由参数（v1.4，§7.6.1）
-  - [ ] 写半边：`WorkflowEndpointOptions` 标记 `[Obsolete]`，新 `PlatformApiOptions`
-- [ ] **M3 响应强类型**（5 人日）
+  - [x] 写半边：`WorkflowEndpointOptions` / `WorkflowEndpoints` 标 `[Obsolete]` ✅ v1.25。
+    **不另造 `PlatformApiOptions`**——平台面的选项就是 `NetBpmHostOptions`：它不含 `ProcessKey`，
+    因为平台面按 `{processKey}` 路由，根本没有「当前流程」这个概念。再造一个同名类只会多一份要同步的配置
+- [x] **M3 响应强类型**（5 人日）
   - [x] 平台面端点直接返回 `Platform.Contracts` 类型（`workflow/v1` 全族）
-  - [ ] `Decorate*` 迁到 `admin/v1` 或删除；`WorkflowEndpoints.cs` 收口
+  - [x] `Decorate*` 与 `WorkflowEndpoints.cs` 收口 ✅ v1.25：两者一起标 `[Obsolete]` + `#pragma` 收在文件内，
+    废弃文案写明替代路径。**「迁到 `/admin/v1`」这个选项被否掉了**：管理面返回的是覆盖行本身，
+    不是实例视图——把「实例视图的业务化 DTO」搬到管理面，等于让管理面也长出一套业务形状，问题原样搬家
 - [x] **M4 身份三元组**（6 人日）—— `caller/subject/tenant` 落 `RequestContext`，`UserId` 降为兼容别名；Production 禁头身份（v1.3）
 - [x] **M5 JWT 升级**（8 人日）—— RS256 + JWKS + 可选外部 IdP（v1.14）：`JwtKeyMaterial` 统一密钥来源、`RemoteJwksProvider` 拉外部公钥集、`GET /.well-known/jwks.json`、校验侧算法白名单；HS256 保留为内网模式
 - [x] **M6 审批语义字典**（10 人日）—— 三码分离 + 部署期守卫 + `nb_approval_dictionary`（v1.6）
-- [ ] **M7 参数 schema**（12 人日）
+- [x] **M7 参数 schema**（12 人日）
   - [x] 从 `formProperty` 派生 `ParameterSchema`（v1.5）
   - [x] `netbpm:parameters` 覆盖 `apiName`/`writableBy`/`visibleTo`/约束（v1.13）
   - [x] **写侧强制**：发起按 `APPLICANT`、提交按 `APPROVER` 拒绝，未声明 = 发起可写 / 审批只读（v1.14）
@@ -418,11 +453,12 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
   - [x] 5 态 `InstanceStatus`（Running/Suspended/Completed/Terminated/…）
   - [ ] `nodeOutcomes` 会签 / 或签聚合（当前为**临时实现**）
 - [x] **M10 结论推导上移**（4 人日）—— 三级回落 `DECLARED → LAST_DECISION → FALLBACK`（v1.10）
-- [ ] **M11 平台存储**（12 人日）
+- [x] **M11 平台存储**（12 人日）
   - [x] 目录 / 字典 / 快照 / 时间线 / 客户端 / 租户 六类存储落地
   - [x] `nb_external_task` ✅ v1.17；`nb_event_subscription` / `nb_event_delivery` ✅ v1.18
   - [x] `nb_process_parameter`、`nb_parameter_snapshot` ✅ v1.23（参数规范按定义版本物化 + 参数修订历史）
-  - [ ] `nb_idempotency`（→ 复用 `ACT_IDEMPOTENCY`，不另建表）、`nb_audit_log`（→ 复用 `admin_audit_log`）
+  - [x] `nb_idempotency` → 复用引擎的 `ACT_IDEMPOTENCY_`、`nb_audit_log` → 复用既有的 `admin_audit_log`：
+    这两张表**刻意不建**（同一个语义两份表，等于给自己制造「哪份才是真的」）
   - [x] 幂等键从「全局」改为「按调用主体」 ✅ v1.19（`ToStorageKey`：caller → subject → tenant 回落）
 - [x] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来。✅ **v1.17 已落地**（`activiti:topic` + `nb_external_task` + 三条端点 + 死信）；v1.18 补齐死信重投端点与 `external_task.no_worker` / `external_task.dead_letter` 告警，见开头 v1.18 小节
 - [x] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理。✅ **v1.18 已落地**
@@ -463,6 +499,8 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 - [x] `GET /instances/{id}/parameters`（参数快照）✅ v1.22（声明 + 值合并，`InstanceParameterReadTests` 2 项）
 - [x] `GET /processes/{key}/form/schema` ✅ v1.22（`FormSchemaBuilder` 抽出共用，`ProcessFormSchemaReadTests` 2 项）
 - [x] `/admin/v1/processes` 写路径 ✅ v1.24（`IProcessCatalogAdmin` + 整行替换 PUT / DELETE，`AdminProcessCatalogTests` 6 项）
+- [x] `/admin/v1` 五个只读面 ✅ v1.25（`dictionaries` / `audit` + `audit/facets` / `subscriptions` /
+      `events/deadletters` / `quotas`；`AdminReadEndpointsTests` 8 项 + `EventDeadLetterQueryTests` 1 项真库分页）
 
 ### ④ S4 独立部署（最大一块）
 
@@ -511,9 +549,12 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 | GET | `/tasks/{id}/attachments` | `workflow:task:read` | [x] v1.22 |
 | ~~GET~~ | ~~/history/tasks~~ | — | [x] v1.12 起**收敛到 `/tasks?scope=DONE`**，不单开历史端点 |
 
-管理面 `/admin/v1`：租户 / 客户端 / 轮换 / 注销已落（v1.3 过渡形态，仍在 `/api/admin`）；
-`/admin/v1/processes` 覆盖行读写 ✅ v1.24（scope `workflow:admin:process`、RFC 9457 错误体、写操作进管理审计）；
-`/dictionaries`、`/audit`、`/subscriptions`、`/events/deadletters`、`/quotas` 未落。
+管理面 `/admin/v1`（10 个操作 / 8 条路径，全部就位）：
+`/processes` 覆盖行读写 ✅ v1.24（`workflow:admin:process`、RFC 9457、写操作进管理审计）；
+`/dictionaries`（`AdminProcess`）、`/audit` + `/audit/facets`、`/quotas`（`AdminClient`）、
+`/subscriptions`、`/events/deadletters`（`EventSubscribe`）✅ v1.25，只读。
+租户 / 客户端 / 轮换 / 注销仍是 `/api/admin` 的过渡形态（v1.3），写路径未迁：迁之前要先决定
+「客户端注册要不要跟着平台面一起做幂等与 RFC 9457」，那是新能力，不是收尾。
 
 ---
 
@@ -595,7 +636,7 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 |---|---|---|
 | A 两套对外模型并存 | ✅ | `Platform.Contracts` 成为对外唯一真源 |
 | B 单流程绑定的宿主式端点 | ✅ | `IProcessCatalog` + `{processKey}` 路由（读半边） |
-| C 响应体可变 | 🟡 | 平台面已强类型；旧 `Decorate*` 还在（M3 未收尾） |
+| C 响应体可变 | ✅ | 平台面强类型；旧 `Decorate*` 于 v1.25 标 `[Obsolete]` 封存，替代路径（覆盖行 + `BusinessKey`）写进标记 |
 | D 审批结论魔法数字 | ✅ | 语义字典打破 1/2/3，可声明任意自定义选项 |
 | E 参数无 schema | ✅ | schema + `netbpm:parameters` 覆盖 + **写侧按 `writableBy` 拒绝**（v1.14） |
 | F 身份只有「一个人」 | ✅ | 三元组 `caller/subject/tenant` |
@@ -648,10 +689,11 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
    契约快照 + 分类 diff + CI 守门 + 治理文档。
 7. ~~M15 官方 SDK / `CompatibilityTests` / `/admin/v1` 写路径~~ —— **均已在 v1.24 完成**。
    至此 S1–S5 五个阶段全部收口，`/workflow/v1` 与 `/admin/v1` 都不再有「说好要做但没做」的端点。
-8. 剩下的只有收尾项，没有新能力：**M3 的 Decorator 迁移 / 删除**（`Decorate*` 迁到 `/admin/v1` 或删掉，
-   `WorkflowEndpointOptions` 标 `[Obsolete]`）、`/admin/v1` 余下五个只读面
-   （`dictionaries` / `audit` / `subscriptions` / `events/deadletters` / `quotas`）、
-   以及 S2 的三条出口用例（幂等重放、纯服务 submit 403、密钥轮换期双活）。
+8. ~~M3 的 Decorator 迁移 / 删除、`/admin/v1` 余下五个只读面、S2 的三条出口用例~~ —— **均已在 v1.25 完成**。
+   清单里**再没有「说好要做但没做」的项**。
+9. 还没做的都属于**新能力**，不再是收尾：**M9 的 `nodeOutcomes` 会签 / 或签聚合**（当前是临时实现，
+   只有它还是「部分完成」）、`/admin/v1` 的写路径（字典维护、客户端注册迁入）、
+   以及 v1.18 留下的「事件看板与单订阅限速」。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
 > 引擎原语面对客户端只留读与管理干预，**且管理干预在实例时间线上留痕**。S4/S5 可以整体后移。

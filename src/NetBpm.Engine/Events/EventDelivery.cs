@@ -62,6 +62,28 @@ public sealed class EventDelivery
 }
 
 /// <summary>
+/// 死信投递的查询条件（管理面 <c>GET /admin/v1/events/deadletters</c>）。
+/// </summary>
+/// <remarks>
+/// 只能按租户 / 订阅两个维度过滤：死信的用法是「谁挂了我去看看」，
+/// 而不是按事件时间做分析（那件事该在日志里做，死信表只保留到重投或清理）。
+/// </remarks>
+/// <param name="TenantId">租户过滤；<see langword="null"/> 表示跨租户（仅管理面）。</param>
+/// <param name="SubscriptionId">订阅过滤。</param>
+/// <param name="FirstResult">跳过条数。</param>
+/// <param name="MaxResults">页大小（调用方负责夹取上限）。</param>
+public sealed record EventDeadLetterQuery(
+    string? TenantId = null,
+    string? SubscriptionId = null,
+    int FirstResult = 0,
+    int MaxResults = 20);
+
+/// <summary>死信分页结果。</summary>
+/// <param name="Items">当前页（按更新时间倒序）。</param>
+/// <param name="Total">满足条件的总数。</param>
+public sealed record EventDeadLetterPage(IReadOnlyList<EventDelivery> Items, int Total);
+
+/// <summary>
 /// 投递存储。
 /// </summary>
 public interface IEventDeliveryStore
@@ -99,6 +121,20 @@ public interface IEventDeliveryStore
 
     /// <summary>事件被删除时一并清理投递记录。</summary>
     ValueTask<int> DeleteByEventAsync(string eventId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 列死信（只返回 <see cref="EventDeliveryStatus.DeadLetter"/>，按更新时间倒序）。
+    /// </summary>
+    /// <remarks>
+    /// 单独一个方法而不是「<c>FindByEvent</c> 加个状态参数」：死信的读法是「翻一遍所有挂掉的」，
+    /// 没有具体事件 id 可给；而按事件查的场景要看到「这条事件三个订阅各自的进展」，
+    /// 包含未终结的那些。两个查询的过滤条件与排序都不同，硬合成一个只会让两边都别扭。
+    /// </remarks>
+    /// <param name="query">查询条件。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<EventDeadLetterPage> ListDeadLettersAsync(
+        EventDeadLetterQuery query,
+        CancellationToken ct = default);
 }
 
 /// <summary>单进程投递存储（内存宿主 / 单元测试）。</summary>
@@ -234,5 +270,31 @@ public sealed class InMemoryEventDeliveryStore : IEventDeliveryStore
         }
 
         return ValueTask.FromResult(keys.Count);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<EventDeadLetterPage> ListDeadLettersAsync(
+        EventDeadLetterQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var matched = _deliveries.Values
+            .Where(item => string.Equals(item.Status, EventDeliveryStatus.DeadLetter, StringComparison.Ordinal))
+            .Where(item => query.TenantId is null
+                || string.Equals(item.TenantId, query.TenantId, StringComparison.Ordinal))
+            .Where(item => query.SubscriptionId is null
+                || string.Equals(item.SubscriptionId, query.SubscriptionId, StringComparison.Ordinal))
+            .ToList();
+
+        var items = matched
+            .OrderByDescending(item => item.UpdatedAt)
+            .ThenBy(item => item.EventId, StringComparer.Ordinal)
+            .ThenBy(item => item.SubscriptionId, StringComparer.Ordinal)
+            .Skip(Math.Max(0, query.FirstResult))
+            .Take(Math.Max(0, query.MaxResults))
+            .ToList();
+
+        return ValueTask.FromResult(new EventDeadLetterPage(items, matched.Count));
     }
 }

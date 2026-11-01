@@ -1392,6 +1392,287 @@
   },
   "components": {
     "schemas": {
+      "AdminAuditActionCount": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "count": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "count"
+        ],
+        "type": "object"
+      },
+      "AdminAuditEntryView": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "authMode": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "processInstanceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "targetType": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "actor",
+          "authMode",
+          "action",
+          "targetType",
+          "targetId",
+          "processInstanceId",
+          "detail",
+          "success",
+          "error",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "AdminAuditFacetsView": {
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "actors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditActionCount"
+            },
+            "type": "array"
+          },
+          "targetTypes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "actions",
+          "targetTypes",
+          "actors",
+          "counts"
+        ],
+        "type": "object"
+      },
+      "AdminAuditPageView": {
+        "properties": {
+          "first": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditEntryView"
+            },
+            "type": "array"
+          },
+          "max": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "total": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "first",
+          "max"
+        ],
+        "type": "object"
+      },
+      "AdminDeadLetterPageView": {
+        "properties": {
+          "first": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EventDeliveryView"
+            },
+            "type": "array"
+          },
+          "max": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "total": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "first",
+          "max"
+        ],
+        "type": "object"
+      },
+      "ApprovalDictionaryEntryView": {
+        "properties": {
+          "allowedTargetNodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nodeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "outcomeClass": {
+            "$ref": "#/components/schemas/ApprovalOutcomeClass"
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "requiresComment": {
+            "type": "boolean"
+          },
+          "requiresTargetNode": {
+            "type": "boolean"
+          },
+          "semantic": {
+            "$ref": "#/components/schemas/ApprovalSemantic"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "processKey",
+          "nodeId",
+          "optionId",
+          "semantic",
+          "outcomeClass",
+          "label",
+          "requiresComment",
+          "requiresTargetNode",
+          "allowedTargetNodes",
+          "attributes",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "ApprovalOption": {
         "properties": {
           "allowedTargetNodes": {
@@ -1789,6 +2070,60 @@
           "allowedProcessKeys",
           "quotaPerMinute",
           "createdAt",
+          "secretExpiresAt"
+        ],
+        "type": "object"
+      },
+      "ClientQuotaView": {
+        "properties": {
+          "allowedProcessKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quotaPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secretExpiresAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "clientId",
+          "name",
+          "status",
+          "quotaPerMinute",
+          "scopes",
+          "allowedProcessKeys",
           "secretExpiresAt"
         ],
         "type": "object"
@@ -5090,6 +5425,40 @@
         ],
         "type": "object"
       },
+      "QuotaOverviewView": {
+        "properties": {
+          "clients": {
+            "items": {
+              "$ref": "#/components/schemas/ClientQuotaView"
+            },
+            "type": "array"
+          },
+          "defaultPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "rateLimitEnabled": {
+            "type": "boolean"
+          },
+          "tenants": {
+            "items": {
+              "$ref": "#/components/schemas/TenantQuotaView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tenants",
+          "clients",
+          "rateLimitEnabled",
+          "defaultPerMinute"
+        ],
+        "type": "object"
+      },
       "RegisterClientRequest": {
         "properties": {
           "allowedProcessKeys": {
@@ -5956,6 +6325,48 @@
           "options",
           "form",
           "currentUserCanSubmit"
+        ],
+        "type": "object"
+      },
+      "TenantQuotaView": {
+        "properties": {
+          "clientCount": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quotaPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "name",
+          "status",
+          "quotaPerMinute",
+          "clientCount",
+          "createdAt"
         ],
         "type": "object"
       },

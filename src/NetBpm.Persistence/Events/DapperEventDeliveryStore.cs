@@ -207,14 +207,66 @@ public sealed class DapperEventDeliveryStore : IEventDeliveryStore
 
     /// <inheritdoc />
     public async ValueTask<int> DeleteByEventAsync(string eventId, CancellationToken ct = default)
-    {
-        using var lease = _sessions.Acquire();
+    {        using var lease = _sessions.Acquire();
 
         return await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
             "delete from nb_event_delivery where event_id = @eventId",
             new { eventId },
             lease.Session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<EventDeadLetterPage> ListDeadLettersAsync(
+        EventDeadLetterQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        using var lease = _sessions.Acquire();
+
+        var parameters = new DynamicParameters();
+        var conditions = new List<string>(3) { $"status = '{EventDeliveryStatus.DeadLetter}'" };
+
+        if (!string.IsNullOrEmpty(query.TenantId))
+        {
+            conditions.Add("tenant_id = @tenantId");
+            parameters.Add("tenantId", query.TenantId);
+        }
+
+        if (!string.IsNullOrEmpty(query.SubscriptionId))
+        {
+            conditions.Add("subscription_id = @subscriptionId");
+            parameters.Add("subscriptionId", query.SubscriptionId);
+        }
+
+        var where = "where " + string.Join(" and ", conditions);
+
+        var total = await lease.Session.Connection.ExecuteScalarAsync<int>(new CommandDefinition(
+            $"select count(*) from nb_event_delivery {where}",
+            parameters,
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (total == 0)
+        {
+            return new EventDeadLetterPage([], 0);
+        }
+
+        var paging = SqlPaging.Build(
+            lease.Session.DatabaseType,
+            query.FirstResult,
+            query.MaxResults,
+            parameters);
+
+        var rows = await lease.Session.Connection.QueryAsync(new CommandDefinition(
+            $"select {Columns} from nb_event_delivery {where} "
+            + $"order by updated_at desc, event_id, subscription_id{paging}",
+            parameters,
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return new EventDeadLetterPage([.. rows.Select(row => Map((IDictionary<string, object?>)row))], total);
     }
 
     private static EventDelivery Map(IDictionary<string, object?> row) => new()

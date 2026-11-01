@@ -27,6 +27,11 @@ public static class LeaveEndpoints
 
         // 流程通用的端点：发起 / 实例列表 / 实例详情 / 历史 / 待办 / 提交 / 流程定义。
         // 路由与既有 Demo、e2e 测试保持一致（挂在 /api/leave 前缀下）。
+        //
+        // ⚠️ 这一组是**旧面**（/api/** 过渡形态），已标 [Obsolete]：Demo 的 e2e 与前端页面
+        // 都还在读这里的业务 DTO，所以保留它当「迁移示例」。新宿主不要照抄 —— 平台面
+        // /workflow/v1 的响应是强类型，业务页面地址由 /admin/v1/processes 的覆盖行声明。
+#pragma warning disable CS0618 // 演示宿主：旧面迁移期示例
         group.MapWorkflowEndpoints(string.Empty, new WorkflowEndpointOptions
         {
             ProcessKey = _ => ConstField.LeaveProcessKey,
@@ -46,6 +51,7 @@ public static class LeaveEndpoints
             // 生产宿主必须在这里校验管理 scope（如 netbpm.admin.task.moderate / instance.jump）。
             AuthorizeAdminAction = (_, _, _) => ValueTask.FromResult(true),
         });
+#pragma warning restore CS0618
 
         // 业务数据核对入口（请假业务自有，与流程引擎无关）：
         // 落点自述 + 全部业务数据，方便打开核对。只依赖 IWorkflowStoreInspector。
