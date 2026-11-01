@@ -34,6 +34,13 @@ public sealed class AdminDictionaryEndpointTests
         PlatformScopes.ProcessRead,
     ];
 
+    /// <summary>
+    /// 写路径 + 审计核对用的凭据：<c>/admin/v1/audit</c> 额外要求 <c>workflow:admin:audit:read</c>
+    /// （读端刻意不借用 <c>admin:client</c>：能签发密钥不等于该看合规流水）。
+    /// </summary>
+    private static string[] AdminScopesWithAudit =>
+        [.. AdminScopes, PlatformScopes.AdminAuditRead];
+
     [Fact]
     public async Task Declared_ShouldListOptionsPerNode()
     {
@@ -346,7 +353,7 @@ public sealed class AdminDictionaryEndpointTests
         await ReadEndpointHarness.DeployAsync(host);
 
         using var client = host.CreateClient();
-        var secret = await ReadEndpointHarness.RegisterAsync(client, "oa-admin", AdminScopes);
+        var secret = await ReadEndpointHarness.RegisterAsync(client, "oa-admin", AdminScopesWithAudit);
 
         using var put = await PutAsync(client, secret, "1", new
         {

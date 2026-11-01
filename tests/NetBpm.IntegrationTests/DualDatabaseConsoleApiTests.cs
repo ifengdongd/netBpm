@@ -430,5 +430,9 @@ internal sealed class DualDatabaseAdminFactory : WebApplicationFactory<AdminHost
         builder.UseSetting("NetBpm:AdminTenantId", "1");
         builder.UseSetting("NetBpm:Timer:Enabled", "false");
         builder.UseSetting("NetBpm:Admin:RateLimit:Enabled", "false");
+
+        // 与 AdminEngineFactory 同一姿态：清掉 Development 的 dev JWT 密钥，否则匿名请求恒 401
+        builder.UseSetting("NetBpm:Security:Jwt:SigningKey", string.Empty);
+        builder.UseSetting("NetBpm:Security:RequireCredential", "false");
     }
 }
