@@ -1,12 +1,33 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-11-01 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.21 小节
+> 导出时间：2026-11-01 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.22 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.22 本轮落地（2026-11-01，§3③ 四个读形态端点）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **`GET /tasks/{id}/attachments`** | 复用 `IApprovalSnapshot`：附件引用在提交时随表单快照一起冻住，这里只回放 `attachments` | `TaskAttachmentReadTests`（2 项：未提交 → 404；提交后 → 原样回放） |
+| **`GET /instances/{id}/diagram.svg`** | 新增 `IInstanceDiagram`：着色数据源是 `ACT_HI_ACTINST`（不是待办——待办只有用户任务，网关 / 服务任务处会「断线」）；可见性走实例读模型 | `InstanceDiagramReadTests`（3 项：内存宿主降级 / 真 MySQL 验「走过+当前」双色 / 未知实例 404） |
+| **`GET /instances/{id}/parameters`** | `IInstanceCatalog.GetParametersAsync`：把值**接到声明上**（标签 / 类型 / 约束 / 谁能写）；`visibleTo` 与实例详情共用 `ComputeHidden` 一份实现 | `InstanceParameterReadTests`（2 项：已声明+已填、已声明未填、未声明补行、排序） |
+| **`GET /processes/{key}/form/schema`** | `IProcessCatalog.GetFormSchemaAsync(processKey, version?)`：逐 userTask 派生 `FormSchema`，复用新抽出的 `FormSchemaBuilder` | `ProcessFormSchemaReadTests`（2 项：字段列表 + `approvalResult` 不出现 / 未知流程 404） |
+| **`FormSchemaBuilder` 抽取** | 表单字段派生从 `TaskCatalog` 私有方法里抽出（`activiti:formProperty` → `FormField`），待办详情与流程级表单共用一份规则 | `TaskCatalogTests` 5 项回归全绿 |
+
+**四个端点的共同取舍：**
+
+- **「没有」一律 404，不给 200 + 空对象。** 附件没有快照 = 没提交过；表单没有字段 = 这个环节不该出现。
+  回空对象会让调用方把「不存在」渲染成「存在但是空的」，而这两种状态在审批页上的含义完全不同。
+- **读端点不新增 scope。** 三个读实例 / 待办的走 `instance:read` / `task:read`，
+  流程级的走 `process:read`；数据级可见性由读模型决定（实例图跟着实例走、参数跟着 `visibleTo` 走）。
+- **参数面板单独存在的理由**是「声明 + 值」的合并：只给值（详情页已带）调用方还得自己拉一次参数规范
+  再按 `apiName` 对齐；只给声明则拿不到当前值。两者拼好之后，参数面板才是一个直接可渲染的响应。
 
 ---
 
@@ -271,8 +292,8 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 |---|---|---|---|
 | 阶段（S1–S5） | 5 | 2 完成 + 1 基本完成 | 2 |
 | 改造项（M1–M16） | 16 | 8 完成 + 5 部分 | 3 |
-| 守门测试用例 | 30 | 25 | 5 |
-| 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 18 | 4 |
+| 守门测试用例 | 30 | 29 | 1 |
+| 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 22 | 0 |
 | 平台表（`nb_*`） | 13 | 9 | 4 |
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
@@ -362,10 +383,10 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] `POST /instances/{id}/terminate` ✅ v1.21（原因必填 + 乐观并发 + 落时间线，`InstanceTerminationTests` 5 项）
 - [x] `POST /tasks/{id}/claim` / `unclaim` / `transfer` ✅ v1.21（三个动作都落时间线，`TaskAssignmentTests` 8 项）
 - [x] **前置规矩**：跳转 / 终止 / 变量直写写时间线条目 ✅ v1.21（新增 `INSTANCE_JUMPED` kind；文档点名的「唯一有授权没记录」的口子已补）
-- [ ] `GET /tasks/{id}/attachments`（只存引用，不做存储）
-- [ ] `GET /instances/{id}/diagram.svg`（高亮流转状态图）
-- [ ] `GET /instances/{id}/parameters`（参数快照）
-- [ ] `GET /processes/{key}/form/schema`
+- [x] `GET /tasks/{id}/attachments`（只存引用，不做存储）✅ v1.22（复用表单快照，`TaskAttachmentReadTests` 2 项）
+- [x] `GET /instances/{id}/diagram.svg`（高亮流转状态图）✅ v1.22（`IInstanceDiagram`，`InstanceDiagramReadTests` 3 项含真库）
+- [x] `GET /instances/{id}/parameters`（参数快照）✅ v1.22（声明 + 值合并，`InstanceParameterReadTests` 2 项）
+- [x] `GET /processes/{key}/form/schema` ✅ v1.22（`FormSchemaBuilder` 抽出共用，`ProcessFormSchemaReadTests` 2 项）
 - [ ] `/admin/v1/processes` 写路径（`IProcessCatalogStore` 目前无写方法）
 
 ### ④ S4 独立部署（最大一块）
@@ -396,13 +417,13 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | GET | `/processes/{key}/versions` | 同上 | [x] v1.4 |
 | GET | `/processes/{key}/diagram.svg` | 同上 | [x] v1.4 |
 | GET | `/processes/{key}/parameters/schema` | 同上 | [x] v1.5 |
-| GET | `/processes/{key}/form/schema` | 同上 | [ ] |
+| GET | `/processes/{key}/form/schema` | 同上 | [x] v1.22 |
 | POST | `/instances` | `workflow:instance:start` | [x] v1.9（幂等） |
 | GET | `/instances` | `workflow:instance:read` | [x] v1.11（cursor） |
 | GET | `/instances/{id}` | 同上 | [x] v1.8 |
 | GET | `/instances/{id}/history` | `workflow:history:read` | [x] v1.10 |
-| GET | `/instances/{id}/diagram.svg` | `workflow:instance:read` | [ ] |
-| GET | `/instances/{id}/parameters` | 同上 | [ ] |
+| GET | `/instances/{id}/diagram.svg` | `workflow:instance:read` | [x] v1.22 |
+| GET | `/instances/{id}/parameters` | 同上 | [x] v1.22 |
 | POST | `/instances/{id}/terminate` | `workflow:instance:terminate` | [x] v1.21 |
 | GET | `/tasks`（`scope=MINE\|CLAIMED\|ALL`；`DONE` 为已办，另需 `history:read`） | `workflow:task:read` | [x] v1.7 / v1.12 |
 | GET | `/tasks/{id}` | 同上 | [x] v1.7 |
@@ -411,7 +432,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | POST | `/tasks/{id}/claim` | `workflow:task:assign` | [x] v1.21 |
 | POST | `/tasks/{id}/unclaim` | 同上 | [x] v1.21 |
 | POST | `/tasks/{id}/transfer` | 同上 | [x] v1.21 |
-| GET | `/tasks/{id}/attachments` | `workflow:task:read` | [ ] |
+| GET | `/tasks/{id}/attachments` | `workflow:task:read` | [x] v1.22 |
 | ~~GET~~ | ~~/history/tasks~~ | — | [x] v1.12 起**收敛到 `/tasks?scope=DONE`**，不单开历史端点 |
 
 管理面 `/admin/v1`：租户 / 客户端 / 轮换 / 注销已落（v1.3 过渡形态）；`/processes`、`/dictionaries`、`/audit`、`/subscriptions`、`/events/deadletters`、`/quotas` 未落。
@@ -542,9 +563,11 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
    ~~继续 S4 的话，下一步是 `Platform.Service` 容器化 + 端到端演示~~ —— **已在 v1.19 完成并实跑**。
 4. ~~回头补 M11 的两张平台表与 Redis 版全局配额~~ —— **全局配额已在 v1.20 完成**（真 Redis 实跑 + 启动自检）；
    ~~§3 ③ 的前置规矩~~ —— **审计断档已在 v1.21 补上**（跳转 / 终止 / 变量直写都写时间线）。
-5. 剩下的选项是 **S5（M14 契约治理 / M15 SDK）**、M11 的 `nb_process_parameter` / `nb_parameter_snapshot` 两张表，
-   或 §3 ③ 剩下的四个**读形态**端点（`attachments` / 实例 `diagram.svg` / `parameters` / `form/schema`）。
-6. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
+5. ~~§3 ③ 剩下的四个读形态端点~~ —— **已在 v1.22 完成**（`attachments` / 实例 `diagram.svg` / `parameters` / `form/schema`）。
+   至此 `/workflow/v1` 的 22 个端点上表全绿，**业务面没有未落地项**。
+6. 剩下的只有：**S5（M14 契约治理 / M15 SDK）**、M11 的 `nb_process_parameter` / `nb_parameter_snapshot`
+   两张表、`/admin/v1` 的管理面写路径（`IProcessCatalogStore` 目前无写方法）。
+7. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
 > 引擎原语面对客户端只留读与管理干预，**且管理干预在实例时间线上留痕**。S4/S5 可以整体后移。
