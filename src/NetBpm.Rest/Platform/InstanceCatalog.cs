@@ -96,6 +96,8 @@ public sealed class InstanceCatalog : IInstanceCatalog
     private readonly IProcessCatalog _processCatalog;
     private readonly IInstanceParticipation _participation;
     private readonly IParameterSnapshotStore _parameterSnapshots;
+    private readonly IApprovalTimelineStore _timeline;
+    private readonly INodeOutcomeAggregator _outcomes;
     private readonly ILogger<InstanceCatalog> _logger;
 
     /// <summary>构造。</summary>
@@ -106,6 +108,8 @@ public sealed class InstanceCatalog : IInstanceCatalog
     /// <param name="processCatalog">流程目录（参数规范：<c>visibleTo</c> 的依据）。</param>
     /// <param name="participation">参与者索引（判定这位真人是申请人还是审批人）。</param>
     /// <param name="parameterSnapshots">参数修订历史（<c>nb_parameter_snapshot</c>：回答「谁在第几步改了什么」）。</param>
+    /// <param name="timeline">审批时间线（环节聚合的输入：谁在哪一步投了什么票）。</param>
+    /// <param name="outcomes">环节聚合（会签 / 或签口径与审批记录页共用同一份实现）。</param>
     /// <param name="logger">日志。</param>
     public InstanceCatalog(
         IProcessEngine engine,
@@ -115,6 +119,8 @@ public sealed class InstanceCatalog : IInstanceCatalog
         IProcessCatalog processCatalog,
         IInstanceParticipation participation,
         IParameterSnapshotStore parameterSnapshots,
+        IApprovalTimelineStore timeline,
+        INodeOutcomeAggregator outcomes,
         ILogger<InstanceCatalog> logger)
     {
         ArgumentNullException.ThrowIfNull(engine);
@@ -124,6 +130,8 @@ public sealed class InstanceCatalog : IInstanceCatalog
         ArgumentNullException.ThrowIfNull(processCatalog);
         ArgumentNullException.ThrowIfNull(participation);
         ArgumentNullException.ThrowIfNull(parameterSnapshots);
+        ArgumentNullException.ThrowIfNull(timeline);
+        ArgumentNullException.ThrowIfNull(outcomes);
         ArgumentNullException.ThrowIfNull(logger);
 
         _engine = engine;
@@ -133,6 +141,8 @@ public sealed class InstanceCatalog : IInstanceCatalog
         _processCatalog = processCatalog;
         _participation = participation;
         _parameterSnapshots = parameterSnapshots;
+        _timeline = timeline;
+        _outcomes = outcomes;
         _logger = logger;
     }
 
@@ -209,7 +219,15 @@ public sealed class InstanceCatalog : IInstanceCatalog
                 startedBy,
                 context,
                 ct).ConfigureAwait(false),
-            NodeOutcomes: [],
+            // 环节聚合读整单时间线（不受分页影响），与审批记录页同一份口径
+            NodeOutcomes: await _outcomes
+                .ComputeAsync(
+                    instanceId,
+                    processDefinitionId,
+                    await _timeline.ListAsync(instanceId, 0, NodeOutcomeAggregator.MaxEntries, ct).ConfigureAwait(false),
+                    tasks,
+                    ct)
+                .ConfigureAwait(false),
             Conclusion: InstanceReadRules.ResolveConclusion(status, variables));
     }
 

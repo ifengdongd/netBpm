@@ -24,6 +24,10 @@ public static class ApprovalTimelineServiceExtensions
                 ? new DapperApprovalTimelineStore(provider.GetRequiredService<IDbConnectionFactory>())
                 : new InMemoryApprovalTimelineStore());
 
+        // 环节聚合读的是时间线条目，跟时间线一起注册；它是无状态的（只有流程定义缓存），用 Singleton。
+        // 注册顺序无所谓，但必须早于任何依赖它的读模型解析 —— 容器解析时才校验，这里只是写明意图。
+        services.AddSingleton<INodeOutcomeAggregator, NodeOutcomeAggregator>();
+
         services.AddScoped<IApprovalTimeline, ApprovalTimeline>();
 
         return services;

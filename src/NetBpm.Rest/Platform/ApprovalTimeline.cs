@@ -93,11 +93,12 @@ public sealed class ApprovalTimeline : IApprovalTimeline
     private const int MaxPageSize = 200;
 
     /// <summary>环节聚合读取的条目上限：聚合是「整单视角」，不能只算当前页。</summary>
-    private const int MaxAggregateEntries = 1000;
+    private const int MaxAggregateEntries = NodeOutcomeAggregator.MaxEntries;
 
     private readonly IApprovalTimelineStore _store;
     private readonly IInstanceCatalog _instanceCatalog;
     private readonly IInstanceParticipation _participation;
+    private readonly INodeOutcomeAggregator _outcomes;
     private readonly IProcessEngine _engine;
     private readonly ILogger<ApprovalTimeline> _logger;
 
@@ -105,24 +106,28 @@ public sealed class ApprovalTimeline : IApprovalTimeline
     /// <param name="store">时间线存储。</param>
     /// <param name="instanceCatalog">实例读模型（状态、起止时间、结论的唯一来源）。</param>
     /// <param name="participation">参与者索引（判定这位真人跟本单有没有关系）。</param>
+    /// <param name="outcomes">环节聚合（会签 / 或签口径的唯一实现，与实例详情共用）。</param>
     /// <param name="engine">引擎（历史回填读 <c>ACT_HI_ACTINST</c>）。</param>
     /// <param name="logger">日志。</param>
     public ApprovalTimeline(
         IApprovalTimelineStore store,
         IInstanceCatalog instanceCatalog,
         IInstanceParticipation participation,
+        INodeOutcomeAggregator outcomes,
         IProcessEngine engine,
         ILogger<ApprovalTimeline> logger)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(instanceCatalog);
         ArgumentNullException.ThrowIfNull(participation);
+        ArgumentNullException.ThrowIfNull(outcomes);
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
         _instanceCatalog = instanceCatalog;
         _participation = participation;
+        _outcomes = outcomes;
         _engine = engine;
         _logger = logger;
     }
@@ -246,7 +251,9 @@ public sealed class ApprovalTimeline : IApprovalTimeline
                 : null,
             Entries: entries,
             NextCursor: nextCursor,
-            NodeOutcomes: BuildNodeOutcomes(aggregate, instance.Tasks),
+            NodeOutcomes: await _outcomes
+                .ComputeAsync(instanceId, instance.ProcessDefinitionId, aggregate, instance.Tasks, ct)
+                .ConfigureAwait(false),
             Conclusion: instance.Conclusion);
     }
 
@@ -391,67 +398,5 @@ public sealed class ApprovalTimeline : IApprovalTimeline
                 context,
                 ct).ConfigureAwait(false);
         }
-    }
-
-    /// <summary>
-    /// 按环节聚合已完成的审批（「3 人 2 通过 1 拒绝」这件事的标准表达）。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 聚合口径目前是<b>保守实现</b>：同一环节出现多条完成记录按会签（<see cref="NodeOutcomeAggregation.AllApproved"/>）算，
-    /// 单条按 <see cref="NodeOutcomeAggregation.Single"/>。
-    /// BPMN 的多实例配置（<c>multiInstanceLoopCharacteristics</c>）尚未进平台模型，
-    /// 等那部分解析出来再改成「按定义声明」——现在先保证数字对得上，别把口径猜错当成事实输出。
-    /// </para>
-    /// <para>
-    /// <c>pending</c> 来自实例当前的待办：一个会签环节「3 人里还有 1 人没批」，
-    /// 只看已完成条目会得出「已通过」，那是错的。
-    /// </para>
-    /// </remarks>
-    private static IReadOnlyList<NodeOutcome> BuildNodeOutcomes(
-        IReadOnlyList<TimelineEntry> entries,
-        IReadOnlyList<TaskView> currentTasks)
-    {
-        var completed = entries
-            .Where(entry => entry.Kind == TimelineEntryKind.TaskCompleted && entry.ActivityId is { Length: > 0 })
-            .ToArray();
-
-        if (completed.Length == 0)
-        {
-            return [];
-        }
-
-        var pendingByActivity = currentTasks
-            .Where(task => task.ActivityId is { Length: > 0 })
-            .GroupBy(task => task.ActivityId!, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-
-        return
-        [
-            .. completed
-                .GroupBy(entry => entry.ActivityId!, StringComparer.Ordinal)
-                .Select(group =>
-                {
-                    var positive = group.Count(entry => entry.Semantic == ApprovalSemantic.Approve);
-                    var negative = group.Count(entry => entry.Semantic is ApprovalSemantic.Reject or ApprovalSemantic.Return);
-                    var pending = pendingByActivity.GetValueOrDefault(group.Key);
-
-                    // 只有「全都批完且没有一条否定」才算该环节通过；有未办的就还不算
-                    var satisfied = pending == 0 && negative == 0 && positive > 0;
-
-                    return new NodeOutcome(
-                        ActivityId: group.Key,
-                        ActivityName: group.Last().ActivityName,
-                        Aggregation: group.Count() > 1
-                            ? NodeOutcomeAggregation.AllApproved
-                            : NodeOutcomeAggregation.Single,
-                        Satisfied: satisfied,
-                        Total: group.Count() + pending,
-                        Positive: positive,
-                        Negative: negative,
-                        Pending: pending,
-                        DecidedAt: satisfied ? group.Max(entry => entry.OccurredAt) : null);
-                }),
-        ];
     }
 }
