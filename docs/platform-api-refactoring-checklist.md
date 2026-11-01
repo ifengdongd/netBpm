@@ -282,9 +282,10 @@ v1.19 把幂等键按调用主体收窄后，这个键在 dave 的命名空间�
 4. **租户必须收窄**：`ExternalTaskFetchRequest.TenantId` 非空即过滤，跨租户按 404（不是 403）处理。
    A 租户的 worker 领到 B 租户的活，等于把别人的活干在别人的流程上。
 
-**仍未做（M12 之外的 S4 项）：** 管理端「死信重投」端点（`IExternalTaskBroker` 已有 `RetryDeadLetterAsync`，
-缺 HTTP 入口）、外部任务的指标与告警（无 worker 领取时 `external_task.no_worker` 尚未落地）、
-`Platform.Service` 容器化与端到端演示流程。
+**~~仍未做（M12 之外的 S4 项）~~ —— 三项后来都落地了**，此处保留是为了不让「看清单的人」以为还欠着：
+~~管理端「死信重投」端点~~（`POST /api/runtime/external-tasks/{taskId}/retry` ✅ v1.18，`ExternalTaskDeadLetterRetryTests` 4 项）、
+~~无 worker 领取时的告警~~（`external_task.no_worker` / `external_task.dead_letter` ✅ v1.18）、
+~~`Platform.Service` 容器化与端到端演示~~（✅ v1.19，已实跑）。
 
 ---
 
