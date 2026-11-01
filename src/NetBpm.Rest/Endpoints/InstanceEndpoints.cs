@@ -42,6 +42,15 @@ public static class InstanceEndpoints
             .Produces<HistoryView>()
             .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
 
+        group.MapGet("/instances/{instanceId}/parameters", ParametersAsync)
+            .Produces<InstanceParameterView>()
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        // 流转状态图直接给 SVG：浏览器 / <img> 就能显示，调用方不必引入 BPMN 渲染库
+        group.MapGet("/instances/{instanceId}/diagram.svg", DiagramAsync)
+            .Produces<string>(StatusCodes.Status200OK, "image/svg+xml")
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
         group.MapPost("/instances", StartAsync)
             .Produces<StartInstanceResult>(StatusCodes.Status201Created)
             .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
@@ -237,6 +246,65 @@ public static class InstanceEndpoints
         return view is null
             ? PlatformProblems.InstanceNotFound(http, context, instanceId)
             : Results.Ok(view);
+    }
+
+    /// <summary>
+    /// 实例的参数面板：<b>参数声明 + 当前值</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <c>GET /instances/{id}</c> 里的 <c>parameters</c> 是同一份数据的两种视角：
+    /// 那里只给值（详情页顺带带着），这里把值接到声明上（标签、类型、约束、谁能写），
+    /// 调用方拿到就能直接渲染参数面板，不必再拉一次流程参数规范自己对齐。
+    /// </para>
+    /// <para>
+    /// <b>不满足 <c>visibleTo</c> 的参数整条消失</b>（不是返回空值）：可见性口径与实例详情同一条代码路径。
+    /// 同时带上 <c>revision</c>，让调用方写回参数时能用同一套乐观并发。
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> ParametersAsync(
+        string instanceId,
+        HttpContext http,
+        RequestContext context,
+        IInstanceCatalog catalog,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.InstanceRead))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.InstanceRead);
+        }
+
+        var view = await catalog.GetParametersAsync(instanceId, context, ct).ConfigureAwait(false);
+
+        return view is null
+            ? PlatformProblems.InstanceNotFound(http, context, instanceId)
+            : Results.Ok(view);
+    }
+
+    /// <summary>
+    /// 实例的<b>流转状态图</b>（SVG）：走过的节点与连线标红，当前停留的环节加粗。
+    /// </summary>
+    /// <remarks>
+    /// 与 <c>GET /processes/{key}/diagram.svg</c> 的区别是「定义的样子」与「这张单据走到哪了」：
+    /// 同一个流程的两张单据会给出两张不同的图。可见性走实例读模型——能看见实例才能看见它的图。
+    /// </remarks>
+    private static async Task<IResult> DiagramAsync(
+        string instanceId,
+        HttpContext http,
+        RequestContext context,
+        IInstanceDiagram diagram,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.InstanceRead))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.InstanceRead);
+        }
+
+        var svg = await diagram.RenderAsync(instanceId, context, ct).ConfigureAwait(false);
+
+        return svg is null
+            ? PlatformProblems.InstanceNotFound(http, context, instanceId)
+            : Results.Content(svg, "image/svg+xml");
     }
 
     private static async Task<IResult> StartAsync(

@@ -177,6 +177,9 @@ public static class NetBpmHost
         // 平台业务面：表单快照（提交时把「字段定义 + 值」一起冻住，历史页按当时定义渲染）
         builder.Services.AddNetBpmApprovalSnapshot();
 
+        // 平台业务面：实例流转状态图（走过的节点 / 连线标红，当前环节加粗）
+        builder.Services.AddNetBpmInstanceDiagram();
+
         builder.Services.AddHostedService<AdminAuditCleanupService>();
         builder.Services.AddHostedService<AdminArchiveCleanupService>();
 

@@ -106,3 +106,39 @@ public sealed record FormSnapshot(
     string? ActorId = null,
     string? OptionId = null,
     IReadOnlyList<AttachmentRef>? Attachments = null);
+
+/// <summary>
+/// 流程级表单规范——一个流程定义下<b>所有环节</b>的表单字段（<c>GET /processes/{key}/form/schema</c>）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 与 <see cref="FormSnapshot"/> 的分工：快照回答「这一次提交当时填了什么」（历史页），
+/// 本契约回答「这个流程会让人填什么」（接入方开发期、发起页预渲染、表单迁移对拍）。
+/// </para>
+/// <para>
+/// 只含<b>审批环节</b>的字段：发起时填的东西走<b>参数</b>（<c>param.*</c>，见
+/// <see cref="ParameterSchema"/>），不是 <c>activiti:formProperty</c>。两者的生命周期也不同——
+/// 参数随实例走（每次提交产生新 revision），表单随定义走（一次审批一屏）。
+/// </para>
+/// <para>
+/// 也不含审批按钮：审批可选项由审批语义字典按租户 + 环节解析（<see cref="TaskView.Options"/>），
+/// 属于语义层不属于表单声明。<c>approvalResult</c> 因此不在这里出现——
+/// 把它当字段渲染出来，会诱导调用方做成「下拉框里选结论」。
+/// </para>
+/// <para>
+/// 返回的是<b>定义版本</b>维度的一份：同一个 key 不同版本可能字段不同，
+/// 所以带 <see cref="DefinitionVersion"/>，调用方缓存时不能只按 key 缓存。
+/// </para>
+/// </remarks>
+/// <param name="ProcessKey">流程 key。</param>
+/// <param name="ProcessDefinitionId">定义 id（含版本指纹）。</param>
+/// <param name="DefinitionVersion">定义版本号。</param>
+/// <param name="Activities">
+/// 各环节的表单（已按 BPMN 书写顺序）。<b>没有字段的环节不出现</b>——
+/// 空对象集合会让调用方以为「这些环节有表单但是空的」。
+/// </param>
+public sealed record ProcessFormSchema(
+    string ProcessKey,
+    string ProcessDefinitionId,
+    int DefinitionVersion,
+    IReadOnlyList<FormSchema> Activities);

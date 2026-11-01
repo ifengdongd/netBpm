@@ -702,7 +702,8 @@ public sealed class TaskCatalog : ITaskCatalog
                 optionIds,
                 ct).ConfigureAwait(false);
 
-        var form = BuildForm(userTask);
+        // 字段派生规则与流程级表单规范（/processes/{key}/form/schema）共用一份
+        var form = FormSchemaBuilder.BuildFields(userTask);
 
         return new TaskView(
             TaskId: task.Id,
@@ -735,64 +736,6 @@ public sealed class TaskCatalog : ITaskCatalog
                 .Where(value => !string.IsNullOrWhiteSpace(value.Id))
                 .Select(value => (value.Id!, value.Name))];
     }
-
-    /// <summary>从 BPMN formProperty 派生表单字段（审批选项字段除外，它走 options）。</summary>
-    private static List<FormField>? BuildForm(UserTask? userTask)
-    {
-        var properties = userTask?.FormProperties
-            .Where(property => !string.Equals(
-                property.Id, ApprovalResults.FormPropertyId, StringComparison.Ordinal))
-            .ToList();
-
-        if (properties is null || properties.Count == 0)
-        {
-            return null;
-        }
-
-        var fields = new List<FormField>(properties.Count);
-
-        for (var index = 0; index < properties.Count; index++)
-        {
-            var property = properties[index];
-            fields.Add(BuildField(property, index));
-        }
-
-        return fields;
-    }
-
-    /// <summary>单个表单字段：<c>formProperty</c> → <see cref="FormField"/>。</summary>
-    private static FormField BuildField(FormProperty property, int sortOrder)
-    {
-        var type = MapFieldType(property.Type);
-        IReadOnlyList<FormOption>? options = type == FormFieldType.Enum
-            ? property.Values.Select(value => new FormOption(value.Id ?? string.Empty, value.Name)).ToList()
-            : null;
-
-        return new FormField(
-            FieldId: property.Id ?? string.Empty,
-            Label: property.Name,
-            Type: type,
-            Required: property.Required ?? false,
-            ReadOnly: property.Writable == false,
-            DefaultValue: property.Default,
-            Options: options,
-            Placeholder: null,
-            SortOrder: sortOrder);
-    }
-
-    /// <summary>类型映射：BPMN 的 <c>type</c> 字符串 → <see cref="FormFieldType"/>。</summary>
-    private static FormFieldType MapFieldType(string? type) => (type ?? "string").ToUpperInvariant() switch
-    {
-        "LONG" or "INTEGER" or "INT" or "SHORT" => FormFieldType.Long,
-        "DOUBLE" or "FLOAT" or "NUMBER" => FormFieldType.Decimal,
-        "BOOLEAN" => FormFieldType.Boolean,
-        "DATE" => FormFieldType.Date,
-        "DATETIME" or "DATE_TIME" => FormFieldType.DateTime,
-        "ENUM" => FormFieldType.Enum,
-        "FILE" => FormFieldType.File,
-        "TEXT" or "TEXTAREA" => FormFieldType.Text,
-        _ => FormFieldType.String,
-    };
 
     /// <summary>
     /// 当前主体能否办理：必须有个真人主体，且是办理人、候选用户，或候选组命中。

@@ -53,6 +53,10 @@ public static class ProcessCatalogEndpoints
             .Produces<ParameterSchema>()
             .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
 
+        group.MapGet("/processes/{processKey}/form/schema", GetFormSchemaAsync)
+            .Produces<ProcessFormSchema>()
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
         // 流程图直接给 SVG：浏览器 / <img> 就能显示，调用方不必为了画一张图引入 BPMN 渲染库
         group.MapGet("/processes/{processKey}/diagram.svg", GetDiagramAsync)
             .Produces<string>(StatusCodes.Status200OK, "image/svg+xml")
@@ -208,6 +212,39 @@ public static class ProcessCatalogEndpoints
         }
 
         var schema = await catalog.GetParameterSchemaAsync(processKey, context, ct).ConfigureAwait(false);
+
+        return schema is null
+            ? PlatformProblems.ProcessNotFound(http, context, processKey)
+            : Results.Ok(schema);
+    }
+
+    /// <summary>
+    /// 流程各环节的<b>表单规范</b>（<c>?version=</c> 指定历史版本，缺省取当前生效版本）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <c>/processes/{key}/parameters/schema</c> 并列但回答不同问题：参数是<b>单据的数据</b>
+    /// （单号、金额、天数），表单是<b>审批页的输入项</b>（意见、附件、部门）。
+    /// </para>
+    /// <para>
+    /// 不带 <c>activiti:formProperty</c> 的环节<b>不出现</b>：空字段集合会被读成
+    /// 「这个环节有表单但是空的」，从而渲染出一个什么都没有的审批页。
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> GetFormSchemaAsync(
+        string processKey,
+        int? version,
+        HttpContext http,
+        RequestContext context,
+        IProcessCatalog catalog,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.ProcessRead))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.ProcessRead);
+        }
+
+        var schema = await catalog.GetFormSchemaAsync(processKey, version, context, ct).ConfigureAwait(false);
 
         return schema is null
             ? PlatformProblems.ProcessNotFound(http, context, processKey)

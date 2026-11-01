@@ -48,6 +48,10 @@ public static class TaskEndpoints
             .Produces<FormSnapshot>()
             .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
 
+        group.MapGet("/tasks/{taskId}/attachments", AttachmentsAsync)
+            .Produces<IReadOnlyList<AttachmentRef>>()
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
         group.MapPost("/tasks/{taskId}/submit", SubmitAsync)
             .Produces<SubmitTaskResult>()
             .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
@@ -195,6 +199,41 @@ public static class TaskEndpoints
         return snapshot is null
             ? PlatformProblems.TaskNotFound(http, context, taskId)
             : Results.Ok(snapshot);
+    }
+
+    /// <summary>
+    /// 取某个任务<b>提交时附带的附件引用</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 平台<b>不做附件存储</b>：本体留在调用方的对象存储里，这里只回放当时提交的
+    /// <see cref="AttachmentRef"/>（名称 / URL / 大小 / 摘要）。它证明的是
+    /// 「这一步提交了哪些材料」，而不是「这些材料现在还在不在」——
+    /// URL 该由调用方带时效签名，过期是正常状态，不是这张单据的问题。
+    /// </para>
+    /// <para>
+    /// 与 <c>/tasks/{id}/form</c> 同口径：<b>没有快照的任务按不存在处理</b>（404）。
+    /// 没提交过就没有「当时的材料」这回事；回 200 + 空数组会让调用方以为
+    /// 「提交过、只是没传附件」。
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> AttachmentsAsync(
+        string taskId,
+        HttpContext http,
+        RequestContext context,
+        IApprovalSnapshot snapshots,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.TaskRead))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.TaskRead);
+        }
+
+        var snapshot = await snapshots.FindAsync(taskId, context, ct).ConfigureAwait(false);
+
+        return snapshot is null
+            ? PlatformProblems.TaskNotFound(http, context, taskId)
+            : Results.Ok(snapshot.Attachments ?? []);
     }
 
     private static async Task<IResult> SubmitAsync(

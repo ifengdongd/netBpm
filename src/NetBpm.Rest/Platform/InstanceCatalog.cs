@@ -34,6 +34,23 @@ public interface IInstanceCatalog
         string instanceId,
         RequestContext context,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 查实例的参数面板：<b>参数声明 + 当前值</b>（<c>GET /instances/{id}/parameters</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 放在实例读模型里而不是另起一个服务，是因为 <c>visibleTo</c> 的判定
+    /// （视角角色 → 隐藏集合）只在这里有一份实现。参数面板若自己再算一遍，
+    /// 迟早会漏掉「同一个变量有两种叫法」这类细节，于是换个名字就能看见。
+    /// 不存在 / 未授权返回 <see langword="null"/>，与 <see cref="FindAsync"/> 同口径。
+    /// </remarks>
+    /// <param name="instanceId">流程实例 id。</param>
+    /// <param name="context">调用方身份。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<InstanceParameterView?> GetParametersAsync(
+        string instanceId,
+        RequestContext context,
+        CancellationToken ct = default);
 }
 
 /// <inheritdoc />
@@ -168,6 +185,105 @@ public sealed class InstanceCatalog : IInstanceCatalog
                 ct).ConfigureAwait(false),
             NodeOutcomes: [],
             Conclusion: InstanceReadRules.ResolveConclusion(status, variables));
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<InstanceParameterView?> GetParametersAsync(
+        string instanceId,
+        RequestContext context,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var view = await FindAsync(instanceId, context, ct).ConfigureAwait(false);
+
+        if (view is null)
+        {
+            return null;
+        }
+
+        var declared = await TryLoadSchemaAsync(view.ProcessKey, context, ct).ConfigureAwait(false);
+        var roles = await ResolveViewerRolesAsync(instanceId, view.StartedBy, context, ct).ConfigureAwait(false);
+        var hidden = declared is null ? [] : ComputeHidden(declared, roles);
+
+        // 值已经过一次 visibleTo 过滤（在 BuildParameterSnapshotAsync 里），这里只负责
+        // 「把声明接上去」以及「补上没声明但确实存在的变量」
+        var values = view.Parameters.Values;
+        var rows = new List<InstanceParameter>(values.Count);
+        var emitted = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var definition in declared?.Parameters ?? [])
+        {
+            var variableKey = string.IsNullOrWhiteSpace(definition.VariableName)
+                ? null
+                : ParameterApiPrefix + definition.VariableName;
+
+            if (hidden.Contains(definition.ApiName) || (variableKey is not null && hidden.Contains(variableKey)))
+            {
+                continue;
+            }
+
+            string? value = null;
+
+            if (variableKey is not null && values.TryGetValue(variableKey, out var byVariable))
+            {
+                value = byVariable;
+                emitted.Add(variableKey);
+            }
+            else if (values.TryGetValue(definition.ApiName, out var byApiName))
+            {
+                value = byApiName;
+            }
+
+            emitted.Add(definition.ApiName);
+
+            // 声明了但还没填的参数也要出现：调用方要据此渲染一个空输入框，
+            // 而不是等它被写过之后才在面板上冒出来。
+            rows.Add(new InstanceParameter(
+                ApiName: definition.ApiName,
+                VariableName: definition.VariableName,
+                DisplayName: definition.DisplayName,
+                Type: definition.Type,
+                Required: definition.Required,
+                Value: value,
+                Description: definition.Description,
+                Constraints: definition.Constraints,
+                WritableBy: definition.WritableBy,
+                SortOrder: definition.SortOrder,
+                Declared: true));
+        }
+
+        foreach (var (name, value) in values.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (emitted.Contains(name))
+            {
+                continue;
+            }
+
+            rows.Add(new InstanceParameter(
+                ApiName: name,
+                VariableName: name.StartsWith(ParameterApiPrefix, StringComparison.Ordinal)
+                    ? name[ParameterApiPrefix.Length..]
+                    : name,
+                DisplayName: null,
+                Type: ParameterType.String,
+                Required: false,
+                Value: value,
+                Description: null,
+                Constraints: null,
+                WritableBy: null,
+                SortOrder: int.MaxValue,
+                Declared: false));
+        }
+
+        return new InstanceParameterView(
+            InstanceId: instanceId,
+            ProcessKey: view.ProcessKey,
+            ProcessDefinitionId: view.ProcessDefinitionId,
+            SchemaVersion: declared?.Version ?? 0,
+            Revision: view.Revision,
+            Parameters: rows);
     }
 
     /// <summary>解析流程定义（拿 key / 名称 / 版本）；失败时降级为按定义 id 解析 key。</summary>
@@ -313,16 +429,23 @@ public sealed class InstanceCatalog : IInstanceCatalog
             return [];
         }
 
-        var restricted = declared.Parameters
-            .Where(parameter => parameter.VisibleTo is { Count: > 0 })
-            .ToList();
-
-        if (restricted.Count == 0)
-        {
-            return [];
-        }
-
         var roles = await ResolveViewerRolesAsync(instanceId, startedBy, context, ct).ConfigureAwait(false);
+
+        return ComputeHidden(declared, roles);
+    }
+
+    /// <summary>
+    /// 按 <c>visibleTo</c> 与视角角色算出「本次看不到哪些参数」。
+    /// </summary>
+    /// <remarks>
+    /// 抽成静态方法是因为它有<b>两个</b>调用点：实例详情（过滤值）与参数面板
+    /// （<c>GET /instances/{id}/parameters</c>，连声明一起过滤）。口径只能有一份——
+    /// 两处各算一遍，迟早会有一处忘记处理「同一个变量有两种叫法」这个别名问题。
+    /// </remarks>
+    /// <param name="declared">参数规范。</param>
+    /// <param name="roles">视角角色集合；<see langword="null"/> 表示不受限（管理视角 / 纯服务令牌）。</param>
+    private static HashSet<string> ComputeHidden(ParameterSchema declared, HashSet<string>? roles)
+    {
         var hidden = new HashSet<string>(StringComparer.Ordinal);
 
         // null = 不受限制（管理视角 / 纯服务令牌）：它们的可见性不是「角色里有没有这一条」的问题
@@ -331,9 +454,14 @@ public sealed class InstanceCatalog : IInstanceCatalog
             return hidden;
         }
 
-        foreach (var parameter in restricted)
+        foreach (var parameter in declared.Parameters)
         {
-            if (parameter.VisibleTo!.Any(role => roles.Contains(role)))
+            if (parameter.VisibleTo is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            if (parameter.VisibleTo.Any(role => roles.Contains(role)))
             {
                 continue;
             }
@@ -406,7 +534,6 @@ public sealed class InstanceCatalog : IInstanceCatalog
         {
             roles.Add(ParameterRoleApplicant);
         }
-
 
         // ④ 审批人 / 候选人：走参与者索引（它已经把历史与运行态三个来源合好了）
         var relationship = await _participation

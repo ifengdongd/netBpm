@@ -93,6 +93,24 @@ public interface IProcessCatalog
         int? version,
         RequestContext context,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 各环节的表单规范（当前版本或指定版本）。未授权 / 不存在返回 <see langword="null"/>。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="GetParameterSchemaAsync"/> 并列但回答不同问题：参数是<b>业务单据的数据</b>
+    /// （单号、金额、天数），表单是<b>审批页的输入项</b>（意见、附件、部门）。两者都从
+    /// <c>activiti:formProperty</c> 派生，但一套给发起/写回用，一套给渲染用。
+    /// </remarks>
+    /// <param name="processKey">流程 key。</param>
+    /// <param name="version">版本号；为空表示当前生效版本。</param>
+    /// <param name="context">调用方身份。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<ProcessFormSchema?> GetFormSchemaAsync(
+        string processKey,
+        int? version,
+        RequestContext context,
+        CancellationToken ct = default);
 }
 
 /// <inheritdoc />
@@ -318,6 +336,64 @@ public sealed class ProcessCatalog : IProcessCatalog
         var xml = await ReadXmlAsync(target.Id, ct).ConfigureAwait(false);
 
         return string.IsNullOrEmpty(xml) ? null : BpmnDiagramSvgRenderer.RenderSvg(xml, DiagramHighlight.None);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<ProcessFormSchema?> GetFormSchemaAsync(
+        string processKey,
+        int? version,
+        RequestContext context,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+        ArgumentNullException.ThrowIfNull(context);
+
+        DeployedProcessDefinition? target;
+
+        if (version is { } wanted)
+        {
+            var versions = await LoadVersionsAsync(processKey, context, ct).ConfigureAwait(false);
+            target = versions.FirstOrDefault(definition => definition.Version == wanted);
+        }
+        else
+        {
+            target = (await FindCurrentAsync(processKey, context, ct).ConfigureAwait(false))?.Definition;
+        }
+
+        if (target is null)
+        {
+            return null;
+        }
+
+        var model = await _engine.GetBpmnModelAsync(target.Id, ct).ConfigureAwait(false);
+        var process = model?.GetMainProcess();
+
+        if (process is null)
+        {
+            // 定义在、但解析不出主流程（XML 缺 bpmn:process）：给空规范而不是 404 ——
+            // 「这个流程没有表单」与「这个流程不存在」是两件事，调用方要能区分。
+            return new ProcessFormSchema(processKey, target.Id, target.Version, []);
+        }
+
+        var activities = new List<FormSchema>();
+
+        // 只收用户任务：本引擎的表单属性挂在 <c>Activity</c> 上（<c>activiti:formProperty</c>），
+        // 而发起时填的东西走的是<b>参数</b>（param.*，见 GetParameterSchemaAsync），
+        // 不是开始事件的表单属性。两者混在一起会让「发起页」与「审批页」的字段来源分不清。
+        foreach (var userTask in process.FindFlowElementsOfType<UserTask>())
+        {
+            var fields = FormSchemaBuilder.BuildFields(userTask);
+
+            // 没字段的环节不出现：空字段集合会被读成「这个环节有表单但是空的」
+            if (fields is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            activities.Add(new FormSchema(processKey, userTask.Id, fields));
+        }
+
+        return new ProcessFormSchema(processKey, target.Id, target.Version, activities);
     }
 
     // ─────────────────────────── 载入与合并 ───────────────────────────

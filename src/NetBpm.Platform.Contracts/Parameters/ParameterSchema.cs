@@ -125,3 +125,68 @@ public sealed record ParameterSnapshot(
     IReadOnlyDictionary<string, string?> Values,
     DateTimeOffset? UpdatedAt,
     string? UpdatedBy);
+
+/// <summary>
+/// 实例参数视图——一个实例的<b>参数声明 + 当前值</b>（<c>GET /instances/{id}/parameters</c>）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 与 <see cref="InstanceView.Parameters"/> 的分工：那里只给值（详情页顺带带着），
+/// 这里把值<b>接到声明上</b>——标签、类型、约束、谁能写，调用方据此直接渲染参数面板，
+/// 不必再拉一次 <c>/processes/{key}/parameters/schema</c> 然后自己按 apiName 对齐。
+/// </para>
+/// <para>
+/// <b>值已经过 <c>visibleTo</c> 过滤</b>（与实例详情同一条路径）：不满足可见角色的参数
+/// 整条消失，而不是给个空值。声明里不能看的那些也不出现在 <see cref="Parameters"/> 里，
+/// 否则「有这个字段但值为空」本身就是一次泄露。
+/// </para>
+/// <para>
+/// 带 <see cref="Revision"/> 是为了让调用方写回参数时能用同一套乐观并发
+/// （与 <c>ExpectedRevision</c> 同源），避免「看着旧值改、覆盖别人刚写的新值」。
+/// </para>
+/// </remarks>
+/// <param name="InstanceId">实例 id。</param>
+/// <param name="ProcessKey">流程 key。</param>
+/// <param name="ProcessDefinitionId">实例所停的定义 id（可能不是当前生效版本）。</param>
+/// <param name="SchemaVersion">参数规范版本；该流程未声明参数时为 0。</param>
+/// <param name="Revision">实例修订号（写回参数时的乐观并发依据）。</param>
+/// <param name="Parameters">参数行（先按声明顺序，再按名称补上未声明的）。</param>
+public sealed record InstanceParameterView(
+    string InstanceId,
+    string ProcessKey,
+    string? ProcessDefinitionId,
+    int SchemaVersion,
+    long Revision,
+    IReadOnlyList<InstanceParameter> Parameters);
+
+/// <summary>
+/// 参数面板的一行：声明（可能没有）+ 当前值。
+/// </summary>
+/// <remarks>
+/// <see cref="Declared"/> 为 <see langword="false"/> 的行是<b>引擎里存在但规范里没声明</b>的变量
+/// （历史遗留、管理面直写、老 BPMN 的裸变量）。它们必须出现：审计要看到「这张单上有哪些参数」，
+/// 只列声明就等于对未声明的那部分失明。
+/// </remarks>
+/// <param name="ApiName">对外参数名（<c>param.{name}</c>）。</param>
+/// <param name="VariableName">镜像的流程变量名（裸名）。</param>
+/// <param name="DisplayName">显示名（未声明时为 <see langword="null"/>，调用方退化用 <see cref="ApiName"/>）。</param>
+/// <param name="Type">类型（未声明时按字符串）。</param>
+/// <param name="Required">发起时是否必填。</param>
+/// <param name="Value">当前值（字符串形式，与传输格式一致）。</param>
+/// <param name="Description">说明。</param>
+/// <param name="Constraints">取值约束。</param>
+/// <param name="WritableBy">允许写入的角色；<see langword="null"/> 表示发起时可写、之后只读。</param>
+/// <param name="SortOrder">渲染顺序。</param>
+/// <param name="Declared">是否在参数规范里声明过。</param>
+public sealed record InstanceParameter(
+    string ApiName,
+    string? VariableName,
+    string? DisplayName,
+    ParameterType Type,
+    bool Required,
+    string? Value,
+    string? Description,
+    ParameterConstraints? Constraints,
+    IReadOnlyList<string>? WritableBy,
+    int SortOrder,
+    bool Declared);
