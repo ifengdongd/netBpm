@@ -21,6 +21,7 @@ public record TimelineEntry(
         TimelineEntryKind kind,
         String occurredAt,
         String optionId,
+        Integer round,
         ApprovalSemantic semantic,
         Long sequence,
         String targetNodeId,

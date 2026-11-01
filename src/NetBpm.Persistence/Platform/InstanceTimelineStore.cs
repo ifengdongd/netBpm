@@ -80,19 +80,31 @@ public sealed class DapperApprovalTimelineStore : IApprovalTimelineStore
         + "activity_name as ActivityName, task_id as TaskId, actor_id as ActorId, "
         + "actor_caller_id as ActorCallerId, option_id as OptionId, semantic as SemanticText, "
         + "comment_text as Comment, target_node_id as TargetNodeId, "
-        + "form_snapshot_task_id as FormSnapshotTaskId, occurred_at as OccurredAt";
+        + "form_snapshot_task_id as FormSnapshotTaskId, round_no as RoundNo, occurred_at as OccurredAt";
 
     private const string InsertSql =
         "insert into nb_instance_timeline "
         + "(process_instance_id, seq, tenant_id, kind, activity_id, activity_name, task_id, "
         + "actor_id, actor_caller_id, option_id, semantic, comment_text, target_node_id, "
-        + "form_snapshot_task_id, payload_json, occurred_at) "
+        + "form_snapshot_task_id, round_no, payload_json, occurred_at) "
         + "values (@instanceId, @seq, @tenantId, @kind, @activityId, @activityName, @taskId, "
         + "@actorId, @actorCallerId, @optionId, @semantic, @comment, @targetNodeId, "
-        + "@formSnapshotTaskId, null, @occurredAt)";
+        + "@formSnapshotTaskId, @roundNo, null, @occurredAt)";
 
-    private const string MaxSeqSql =
-        "select coalesce(max(seq), 0) from nb_instance_timeline where process_instance_id = @instanceId";
+    /// <summary>
+    /// 一次取齐「下一个序号」与「该环节上一轮的位置 / 轮次」，用来定轮次。
+    /// </summary>
+    /// <remarks>
+    /// 三个标量放同一条 select：它们本来就都要读这张表，分成三条语句只会多两次往返，
+    /// 还会让三次读取之间出现「别人刚插了一条」的窗口（序号与轮次对不上）。
+    /// </remarks>
+    private const string NextPositionSql =
+        "select "
+        + "coalesce((select max(seq) from nb_instance_timeline where process_instance_id = @instanceId), 0) as MaxSeq, "
+        + "coalesce((select max(seq) from nb_instance_timeline where process_instance_id = @instanceId "
+        + "and activity_id = @activityId), 0) as LastSeq, "
+        + "coalesce((select max(round_no) from nb_instance_timeline where process_instance_id = @instanceId "
+        + "and activity_id = @activityId), 0) as LastRound";
 
     /// <summary>唯一键冲突时的重试次数（并发追加同一实例）。</summary>
     private const int MaxAppendAttempts = 5;
@@ -119,30 +131,29 @@ public sealed class DapperApprovalTimelineStore : IApprovalTimelineStore
 
         await using var connection = _connections.CreateConnection();
 
+        // 跳转类条目自己没有 activity_id（进的是 target_node_id），但「即将重新进入哪个环节」
+        // 正是定轮次需要的信息，否则跳回同一节点会被算成同一轮
+        var activityId = TimelineRoundRules.EffectiveActivity(entry);
+
         for (var attempt = 1; ; attempt++)
         {
-            var seq = await connection
-                .ExecuteScalarAsync<long>(new CommandDefinition(
-                    MaxSeqSql,
-                    new { instanceId = entry.InstanceId },
+            var position = await connection
+                .QuerySingleAsync<Position>(new CommandDefinition(
+                    NextPositionSql,
+                    new { instanceId = entry.InstanceId, activityId },
                     cancellationToken: ct))
                 .ConfigureAwait(false);
 
-            var next = new TimelineEntry(
-                Sequence: seq + 1,
-                InstanceId: entry.InstanceId,
-                Kind: entry.Kind,
-                ActivityId: entry.ActivityId,
-                ActivityName: entry.ActivityName,
-                TaskId: entry.TaskId,
-                ActorId: entry.ActorId,
-                ActorCallerId: entry.ActorCallerId,
-                OptionId: entry.OptionId,
-                Semantic: entry.Semantic,
-                Comment: entry.Comment,
-                TargetNodeId: entry.TargetNodeId,
-                FormSnapshotTaskId: entry.FormSnapshotTaskId,
-                OccurredAt: entry.OccurredAt);
+            var next = entry with
+            {
+                Sequence = position.MaxSeq + 1,
+                Round = TimelineRoundRules.Resolve(
+                    activityId,
+                    entry.Kind,
+                    position.MaxSeq,
+                    position.LastSeq,
+                    position.LastRound),
+            };
 
             try
             {
@@ -164,6 +175,7 @@ public sealed class DapperApprovalTimelineStore : IApprovalTimelineStore
                         comment = next.Comment,
                         targetNodeId = next.TargetNodeId,
                         formSnapshotTaskId = next.FormSnapshotTaskId,
+                        roundNo = next.Round,
                         // 时间列统一按 UTC 写入（datetime(3) 不存时区）
                         occurredAt = next.OccurredAt.UtcDateTime,
                     },
@@ -269,7 +281,8 @@ public sealed class DapperApprovalTimelineStore : IApprovalTimelineStore
             Comment: row.Comment,
             TargetNodeId: row.TargetNodeId,
             FormSnapshotTaskId: row.FormSnapshotTaskId,
-            OccurredAt: PlatformTimestamps.ToOffset(row.OccurredAt));
+            OccurredAt: PlatformTimestamps.ToOffset(row.OccurredAt),
+            Round: row.RoundNo);
 
     /// <summary>Dapper 行（属性名与 SQL 别名一致）。</summary>
     private sealed class Row
@@ -300,7 +313,22 @@ public sealed class DapperApprovalTimelineStore : IApprovalTimelineStore
 
         public string? FormSnapshotTaskId { get; set; }
 
+        public int RoundNo { get; set; }
+
         public DateTime OccurredAt { get; set; }
+    }
+
+    /// <summary>下一次追加的位置信息（见 <see cref="NextPositionSql"/>）。</summary>
+    private sealed class Position
+    {
+        /// <summary>该实例当前最大序号（0 = 还没有任何条目）。</summary>
+        public long MaxSeq { get; set; }
+
+        /// <summary>目标环节上一条条目的序号（0 = 这个环节还没出现过）。</summary>
+        public long LastSeq { get; set; }
+
+        /// <summary>目标环节已有的最大轮次（0 = 老数据 / 还没出现过）。</summary>
+        public int LastRound { get; set; }
     }
 }
 
@@ -332,7 +360,43 @@ public sealed class InMemoryApprovalTimelineStore : IApprovalTimelineStore
                 _entries[entry.InstanceId] = list;
             }
 
-            var appended = entry with { Sequence = list.Count == 0 ? 1 : list[^1].Sequence + 1 };
+            var activityId = TimelineRoundRules.EffectiveActivity(entry);
+            var lastSeq = 0L;
+            var lastRound = 0;
+
+            if (activityId is { Length: > 0 })
+            {
+                // 与数据库版同口径：取该环节上一条的序号与最大轮次
+                for (var index = list.Count - 1; index >= 0; index--)
+                {
+                    if (!string.Equals(list[index].ActivityId, activityId, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    lastSeq = list[index].Sequence;
+                    lastRound = list[index].Round;
+                    break;
+                }
+
+                // 最大轮次可能与「最后一条」不同（轮次单调递增，但中间可能有老数据行），取两者最大值
+                foreach (var item in list)
+                {
+                    if (string.Equals(item.ActivityId, activityId, StringComparison.Ordinal))
+                    {
+                        lastRound = Math.Max(lastRound, item.Round);
+                    }
+                }
+            }
+
+            var maxSeq = list.Count == 0 ? 0 : list[^1].Sequence;
+
+            var appended = entry with
+            {
+                Sequence = maxSeq + 1,
+                Round = TimelineRoundRules.Resolve(activityId, entry.Kind, maxSeq, lastSeq, lastRound),
+            };
+
             list.Add(appended);
 
             return ValueTask.FromResult(appended);
@@ -395,6 +459,76 @@ public sealed class InMemoryApprovalTimelineStore : IApprovalTimelineStore
 
             return ValueTask.FromResult(result);
         }
+    }
+}
+
+/// <summary>
+/// 时间线「轮次」的推导规则（写入时定稿，读取端不再猜）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>为什么必须写时定</b>：读端只能看条目连不连续。正常退回是「A、B、A」——断开可判；
+/// 但管理干预「跳回当前节点」是「A、JUMPED、A」，在只看完成条目的视角里 A、A 是<b>连着的</b>，
+/// 必然把两轮并成一轮，于是「第 1 轮 1 人同意 + 第 2 轮 2 人同意」被算成「3 人同意」。
+/// </para>
+/// <para>
+/// 判定规则（针对「本条目标环节」这一维度）：
+/// <list type="number">
+///   <item><description>该环节从没出现过 → 第 1 轮；</description></item>
+///   <item><description>本条是<b>重新进入标记</b>（<c>TASK_CREATED</c> / <c>INSTANCE_JUMPED</c>）
+///     → 上一轮 +1；</description></item>
+///   <item><description>该环节上一条之后又插入了别的条目（走过别的节点才回到这里）→ 上一轮 +1；</description></item>
+///   <item><description>其余情况（同一轮里的第二、三个人）→ 沿用上一轮。</description></item>
+/// </list>
+/// 第 3 条正是「一个会签环节 3 个人各批一次」与「退回后重批」的区分点：
+/// 前者条目之间没有别人的记录，后者一定夹着退回动作或别的节点。
+/// </para>
+/// <para>
+/// 老数据（本能力上线前写入）的轮次是 0，规则里统一按「沿用」处理：不猜、不补写，
+/// 由读端认出 0 之后走连续段近似（见 <c>NodeOutcomeAggregator</c>）。
+/// </para>
+/// </remarks>
+internal static class TimelineRoundRules
+{
+    /// <summary>本条目的「目标环节」：跳转类没有 <c>activity_id</c>，它的目标是 <c>target_node_id</c>。</summary>
+    internal static string? EffectiveActivity(TimelineEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return string.IsNullOrEmpty(entry.ActivityId) && entry.Kind == TimelineEntryKind.InstanceJumped
+            ? entry.TargetNodeId
+            : entry.ActivityId;
+    }
+
+    /// <summary>算出本条条目应落的轮次（<c>0</c> = 与环节无关的条目，如发起 / 结束）。</summary>
+    /// <param name="activityId">目标环节（<see cref="EffectiveActivity"/> 的结果）。</param>
+    /// <param name="kind">条目类型。</param>
+    /// <param name="maxSeq">该实例当前最大序号。</param>
+    /// <param name="lastSeq">目标环节上一条条目的序号（0 = 还没出现过）。</param>
+    /// <param name="lastRound">目标环节已有的最大轮次（0 = 老数据 / 还没出现过）。</param>
+    internal static int Resolve(
+        string? activityId,
+        TimelineEntryKind kind,
+        long maxSeq,
+        long lastSeq,
+        int lastRound)
+    {
+        if (string.IsNullOrEmpty(activityId))
+        {
+            return 0;
+        }
+
+        if (lastSeq == 0)
+        {
+            return 1;
+        }
+
+        if (kind is TimelineEntryKind.TaskCreated or TimelineEntryKind.InstanceJumped)
+        {
+            return lastRound + 1;
+        }
+
+        return maxSeq > lastSeq ? lastRound + 1 : lastRound;
     }
 }
 

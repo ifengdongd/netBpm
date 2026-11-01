@@ -84,6 +84,12 @@ public static class AdminReadEndpoints
             .Produces<AdminDeadLetterPageView>()
             .Produces<PlatformProblem>(StatusCodes.Status403Forbidden);
 
+        // 看板：outbox 积压 + 每订阅投递结果分布（聚合在库里 group by，不取回全表再算）
+        group.MapGet("/events/stats", GetEventStatsAsync)
+            .Produces<AdminEventStatsView>()
+            .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
+            .Produces<PlatformProblem>(StatusCodes.Status403Forbidden);
+
         // 配额：租户默认值 + 客户端实际值，一次取回两层
         group.MapGet("/quotas", GetQuotasAsync)
             .Produces<QuotaOverviewView>()
@@ -307,6 +313,125 @@ public static class AdminReadEndpoints
             pageSize));
     }
 
+    // ─────────────────────────── 事件看板 ───────────────────────────
+
+    private static async Task<IResult> GetEventStatsAsync(
+        string? tenantId,
+        string? subscriptionId,
+        string? since,
+        int? max,
+        HttpContext http,
+        RequestContext context,
+        IEventOutboxStore outbox,
+        IEventSubscriptionStore subscriptions,
+        IEventDeliveryStore deliveries,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
+
+        if (!TryReadInstant(since, "since", out var sinceUtc, out var problem))
+        {
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestMalformed,
+                "since 不合法",
+                StatusCodes.Status400BadRequest,
+                problem);
+        }
+
+        var tenant = Trimmed(tenantId);
+        var subscription = Trimmed(subscriptionId);
+        var cap = Math.Clamp(max ?? 100, 1, MaxSubscriptionCount);
+
+        // 积压看两条「会卡住」的：还没发出去的、已经判死的。
+        // 不加 published 的计数 —— 那张表发完即删，统计「历史发了多少」既没意义又全表扫
+        var pending = await outbox
+            .CountAsync(new OutboxQuery(Published: false, DeadLetter: false, TenantId: tenant), ct)
+            .ConfigureAwait(false);
+
+        var deadLetters = await outbox
+            .CountAsync(new OutboxQuery(Published: false, DeadLetter: true, TenantId: tenant), ct)
+            .ConfigureAwait(false);
+
+        // 最老的一条待发布事件：积压「多少条」看不出「卡了多久」，两个数一起才有判断力
+        var oldest = await outbox
+            .FindAsync(new OutboxQuery(Published: false, DeadLetter: false, MaxResults: 1, TenantId: tenant), ct)
+            .ConfigureAwait(false);
+
+        var stats = await deliveries
+            .GetStatsAsync(new EventDeliveryStatsQuery(tenant, subscription, sinceUtc), ct)
+            .ConfigureAwait(false);
+
+        var bySubscription = stats.ToDictionary(item => item.SubscriptionId, StringComparer.Ordinal);
+
+        var known = await subscriptions
+            .FindAsync(new EventSubscriptionQuery(tenant, null, cap), ct)
+            .ConfigureAwait(false);
+
+        var rows = new List<AdminSubscriptionStatsView>();
+
+        foreach (var item in known)
+        {
+            if (subscription is not null && !string.Equals(item.Id, subscription, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            rows.Add(BuildSubscriptionStats(
+                item.Id,
+                item.Name,
+                item.TenantId,
+                item.MaxPerMinute,
+                item.Enabled,
+                bySubscription.TryGetValue(item.Id, out var found) ? found : null));
+        }
+
+        // 投递记录里的订阅已经不在列表里（被删了，或超出 cap）：仍然要露出来，
+        // 否则「有个订阅挂着几十条死信」会因为它的配置被删而从此看不见
+        var listed = rows.Select(row => row.SubscriptionId).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var item in stats.Where(item => !listed.Contains(item.SubscriptionId)))
+        {
+            rows.Add(BuildSubscriptionStats(null, null, item.TenantId, null, null, item));
+        }
+
+        return Results.Ok(new AdminEventStatsView(
+            sinceUtc is { } instant ? AsUtc(instant) : null,
+            new AdminOutboxBacklogView(
+                pending,
+                deadLetters,
+                oldest.Count > 0 && oldest[0].CreateTime != default ? AsUtc(oldest[0].CreateTime) : null),
+            [.. rows
+                .OrderByDescending(row => row.DeadLetter)
+                .ThenByDescending(row => row.Failed)
+                .ThenBy(row => row.SubscriptionId, StringComparer.Ordinal)]));
+    }
+
+    private static AdminSubscriptionStatsView BuildSubscriptionStats(
+        string? subscriptionId,
+        string? name,
+        string tenantId,
+        int? maxPerMinute,
+        bool? enabled,
+        EventDeliveryStats? stats) =>
+        new(
+            subscriptionId ?? stats?.SubscriptionId ?? string.Empty,
+            name,
+            tenantId,
+            maxPerMinute,
+            enabled,
+            stats?.Total ?? 0,
+            stats?.Pending ?? 0,
+            stats?.Delivered ?? 0,
+            stats?.Failed ?? 0,
+            stats?.DeadLetter ?? 0,
+            stats?.LastDeliveredAt,
+            stats?.LastFailureAt);
+
     // ─────────────────────────── 配额 ───────────────────────────
 
     private static async Task<IResult> GetQuotasAsync(
@@ -414,3 +539,63 @@ public sealed record AdminDeadLetterPageView(
     int Total,
     int First,
     int Max);
+
+/// <summary>
+/// 事件看板（<c>GET /admin/v1/events/stats</c>）。
+/// </summary>
+/// <param name="Since">统计起点（回显请求值；<see langword="null"/> = 全量）。</param>
+/// <param name="Outbox">outbox 侧的积压。</param>
+/// <param name="Subscriptions">每订阅的投递结果分布（死信多的排前面）。</param>
+public sealed record AdminEventStatsView(
+    DateTimeOffset? Since,
+    AdminOutboxBacklogView Outbox,
+    IReadOnlyList<AdminSubscriptionStatsView> Subscriptions);
+
+/// <summary>outbox 积压。</summary>
+/// <remarks>
+/// 只看「还没发出去」和「已经判死」两类：已发布的行发完即删，
+/// 统计「历史上发了多少」既要全表扫又没有判断价值。
+/// </remarks>
+/// <param name="Pending">待发布（含正在退避的）。</param>
+/// <param name="DeadLetter">已判死（需人工重投）。</param>
+/// <param name="OldestPendingAt">最老一条待发布事件的创建时间；<see langword="null"/> = 没有积压。</param>
+public sealed record AdminOutboxBacklogView(int Pending, int DeadLetter, DateTimeOffset? OldestPendingAt);
+
+/// <summary>单订阅的投递结果分布。</summary>
+/// <remarks>
+/// <para>
+/// 🔑 <see cref="Failed"/> 与 <see cref="DeadLetter"/> 分开：前者还有重试额度（会自愈），
+/// 后者已经停投（要人管）。合成一个「失败数」会让看板失去行动指向。
+/// </para>
+/// <para>
+/// <see cref="Name"/> / <see cref="Enabled"/> / <see cref="MaxPerMinute"/> 为
+/// <see langword="null"/> 表示订阅配置已经不在了（被删或超出本页上限），
+/// 但投递记录还在——这类行恰恰要看，否则「配置删了、死信留一堆」的情况永远发现不了。
+/// </para>
+/// </remarks>
+/// <param name="SubscriptionId">订阅 id。</param>
+/// <param name="Name">订阅名（配置已删则为 <see langword="null"/>）。</param>
+/// <param name="TenantId">租户。</param>
+/// <param name="MaxPerMinute">每分钟上限（0 = 不限）。</param>
+/// <param name="Enabled">是否启用。</param>
+/// <param name="Total">投递记录数（= 事件数 × 命中的订阅数）。</param>
+/// <param name="Pending">尚未投成（没试过 / 退避中 / 被限速推迟）。</param>
+/// <param name="Delivered">已成功。</param>
+/// <param name="Failed">失败但还有重试额度。</param>
+/// <param name="DeadLetter">已进死信。</param>
+/// <param name="LastDeliveredAt">最近一次成功时间。</param>
+/// <param name="LastFailureAt">最近一次失败时间（含死信）。</param>
+public sealed record AdminSubscriptionStatsView(
+    string SubscriptionId,
+    string? Name,
+    string TenantId,
+    int? MaxPerMinute,
+    bool? Enabled,
+    int Total,
+    int Pending,
+    int Delivered,
+    int Failed,
+    int DeadLetter,
+    DateTimeOffset? LastDeliveredAt,
+    DateTimeOffset? LastFailureAt);
+

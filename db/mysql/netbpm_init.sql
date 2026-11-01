@@ -1868,6 +1868,7 @@ create table if not exists nb_instance_timeline (
     semantic varchar(32) comment '审批语义（写入时按字典定稿；NULL = 该条目不表达审批意见）',
     comment_text varchar(2000) comment '审批意见 / 说明（对外名 comment）',
     target_node_id varchar(255) comment '目标节点（退回 / 转办类动作）',
+    round_no int not null default 0 comment '该环节的第几轮（1 起）；0 = 本能力上线前的老数据（轮次未知，读端按连续段近似）',
     form_snapshot_task_id varchar(64) comment '表单快照任务 id；非空时调用方可再拉 /tasks/{id}/form 取当时的字段定义',
     payload_json mediumtext comment '附加载荷（JSON 对象）：保留尚未建模的字段，避免为一个新字段改表',
     occurred_at datetime(3) not null comment '发生时间（UTC）',
@@ -2035,6 +2036,7 @@ create table if not exists nb_event_subscription (
     headers_json mediumtext comment '附加静态请求头（JSON 对象；网关鉴权 / 路由标记）',
     enabled tinyint not null default 1 comment '是否启用；停用保留记录便于恢复',
     max_attempts int not null default 5 comment '单条订阅最大投递尝试次数，超出进死信',
+    max_per_minute int not null default 0 comment '单订阅每分钟最多投递次数；0 = 不限（超限是推迟不是失败，不消耗尝试次数）',
     created_at datetime(3) not null comment '创建时间（UTC）',
     updated_at datetime(3) not null comment '更新时间（UTC）',
     primary key (id),
@@ -2219,6 +2221,22 @@ set @ddl = (select if(count(*) = 0,
         'alter table ACT_RU_TIMER_JOB add column LOCK_EXP_TIME_ datetime(3)',
         'select 1')
     from information_schema.columns where table_schema = database() and table_name = 'ACT_RU_TIMER_JOB' and column_name = 'LOCK_EXP_TIME_');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'alter table nb_event_subscription add column max_per_minute int not null default 0 comment ''单订阅每分钟最多投递次数；0 = 不限（超限是推迟不是失败，不消耗尝试次数）''',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'nb_event_subscription' and column_name = 'max_per_minute');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'alter table nb_instance_timeline add column round_no int not null default 0 comment ''该环节的第几轮（1 起）；0 = 本能力上线前的老数据''',
+        'select 1')
+    from information_schema.columns where table_schema = database() and table_name = 'nb_instance_timeline' and column_name = 'round_no');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;

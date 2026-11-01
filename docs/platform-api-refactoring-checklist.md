@@ -1,12 +1,62 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-11-01 ｜ 代码基线：`46e92de`（v1.25）→ 本轮 v1.26｜ 最新进度见开头 v1.26 小节
+> 导出时间：2026-11-01 ｜ 代码基线：`a0c1903`（v1.26 收尾）→ 本轮 v1.27｜ 最新进度见开头 v1.27 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.27 本轮落地（2026-11-01，v1.26 §10 剩下的三项「新能力」）
+
+**清单 §10 第 10 条列的三件事全部落地**：管理面两条写路径、事件看板与单订阅限速、时间线轮次字段。
+至此 `/admin/v1` 不再有「只能看不能改」的角落，重办节点的聚合也不再是近似。
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **字典维护写路径**（`81673bd`） | `PUT/DELETE /admin/v1/dictionaries/{processKey}/options/{optionId}` + `GET .../declared`：写入前先解析流程定义，`nodeId` / `optionId` / 目标节点必须真的在定义里存在；`outcomeClass` 由语义推导；写完整条租户的字典缓存立刻失效 | `AdminDictionaryEndpointTests` 12 项（写后即时生效 / `createdAt` 不重置 / `CLOSED` 422 / 未声明选项 422 / 未知节点 422 / 审计）+ `ApprovalDictionaryStoreDatabaseTests` 1 项（真库：空串↔`null` 往返、覆盖写不重置时间） |
+| **客户端注册迁入**（`a0c1903`） | `/admin/v1/tenants`（GET/PUT/状态）与 `/admin/v1/clients`（GET/GET id/POST/PATCH/rotate/DELETE）共 9 个操作：RFC 9457 错误体、注册表异常翻译成 404/422、租户边界分读/写两种语义、全部进审计；旧 `MapClientAdminEndpoints` 标 `[Obsolete]` 但保留 | `AdminClientEndpointTests` 12 项（密钥只此一次 + 201 Location、高危 scope 未确认 422、轮换宽限期、吊销幂等、跨租户读 404 / 写 403、缺 scope 403） |
+| **事件看板** | `GET /admin/v1/events/stats`：outbox 积压（待发 / 死信 / 最老一条的创建时间）+ 每订阅的 `delivered / failed / deadLetter / pending` 分布；聚合在库里 `group by subscription_id`，不把投递表整个取回 | `AdminReadEndpointsTests` 3 项（内存：分组与排序、孤儿订阅露出来、积压与最老时间、`since` 解析错误 400）+ `EventSubscriptionDatabaseTests.Delivery_Stats_*`（真 MySQL：`sum(case when ...)` 分组、时间窗、单订阅过滤） |
+| **单订阅限速** | `nb_event_subscription.max_per_minute`（0 = 不限，上限 6000）：`CloudEventOutboxHandler` 在「已投成 / 已判死」之后判配额，超限时把投递记录**推迟**（`MarkDeferredAsync`：只改 `next_attempt_at`）并让整条事件本轮推迟；`OutboxPublisherService` 新增 `DeferAsync` 分支，只顺延 `NEXT_ATTEMPT_` | `CloudEventTests` 4 项（固定窗口重置、被限速不涨尝试次数、失败优先于推迟、`DeferAsync` 不动次数）+ 订阅端点往返 1 项 |
+| **时间线轮次** | `nb_instance_timeline.round_no` + `TimelineEntry.Round` / `NodeOutcome.Round`：写入端按「环节 + 是否重新进入」定稿轮次，`NodeOutcomeAggregator` 改成按 `(activityId, round)` 精确分组 | `TimelineRoundTests` 4 项（内存版同轮不涨 / 走别的节点再回来算下一轮 / 跳回同节点算下一轮、真库往返、两轮各自成账、老数据退回连续段） |
+
+**五条口径**（都写进了代码注释，理由是它们各自能挡住一种具体误判）：
+
+1. **字典写路径必须按流程定义校验**。字典按 `optionId` 配，解析时只按 BPMN 里的 `activiti:value` 逐项查——
+   写进定义里不存在的 `optionId` 永远不会被读到，属于「配好了但不工作」，比完全没配更难发现。所以写入直接 422。
+2. **`outcomeClass` 由语义推导，不接受请求体**。否则允许「语义是通过、口径是负向」，通过率报表没人敢用。
+3. **租户边界分读写**：跨租户**读**按不存在（404，不泄露存在性），跨租户**写**按禁止（403 `tenant.forbidden`）——
+   写操作的租户就在请求里，调用方本来就知道它存在。
+4. **限速是推迟而不是失败**。这一点必须**在 outbox 层实现**：退避序列是 5/10/20/40 秒、上限 5 次，
+   一次限速风暴能在 75 秒内把一批完全健康的事件全推成死信；死信是「需要人工介入」的信号，被自己的限速灌满之后没人会认真看。
+   同时被限速的投递**不消耗尝试次数**，否则订阅方只是回得慢一点就被推进死信。
+5. **轮次必须写时定稿**。读端只能看条目连不连续，而「管理干预跳回当前节点」在时间线上是
+   `A 完成 → JUMPED → A 完成`——两条完成记录**紧挨着**，按连续段切分必然把两轮并成一轮，
+   于是「第 1 轮 1 票 + 第 2 轮 2 票、还差 1 人」被算成「3 人 3 票、已通过」，结论直接反了。
+   判定规则：该环节没出现过 → 1；本条是重新进入标记（`TASK_CREATED` / `INSTANCE_JUMPED`）→ 上一轮 +1；
+   该环节上一条之后又插了别的条目 → 上一轮 +1；其余（同一轮里的第二、三个人）→ 沿用。
+   老数据轮次为 0，整单退回连续段近似——一半按轮次一半按连续性混算比两种都单独用更容易出错。
+
+**顺带修掉的两个真问题**（都属于「新列在老库上不会自己长出来」）：
+
+- `create table if not exists` 对**已存在**的表不会补列。两处新列（`max_per_minute` / `round_no`）都补进脚本 ⑥ 节
+  的幂等 `alter`，否则老库升级后一句 `select` 就 500。`RenderAddColumn` 是既有机制，逻辑是「查 `information_schema` / `sys.columns`，缺了才加」。
+- `.editorconfig` 要求 CRLF，而生成器对部分多行种子串写的是 LF：生成后需要归一化行尾，diff 才是纯新增（本次两处新列共 +23 行，无行尾噪声）。
+
+**已知限制**（都不打算在本轮改）：
+
+- 单订阅限速是**进程内固定窗口**：多副本时实际总配额 = 副本数 × `max_per_minute`。对「别把订阅方打爆」这个目的仍然有效，
+  但它不是精确的全局配额；要精确就得让计数器跨进程共享（Redis），这一层没有引入该依赖。接口 `IEventDeliveryThrottle` 留了替换点。
+- 同一环节的并行分支交错时，轮次仍会落到同一轮（写入端只看「有没有走过别的条目」）。真并行重入同一节点属于罕见形态，
+  按轮次分账的收益远小于实现复杂度。
+- 签发密钥**不做幂等**：平台面幂等键会把首次响应体存进 `ACT_IDEMPOTENCY`，而这里响应体含明文密钥——
+  为了一次重试拿到同一密钥就把明文落进另一张表，直接破坏「只存摘要、只出现一次」。丢响应的恢复动作是 `/rotate`。
+
+**契约快照**：22 路径 / 23 操作不变，`components.schemas` 133 → **136**（+3 个看板视图）。
+`TimelineEntry.round` / `NodeOutcome.round` 是**可选新增字段**（快照 diff 判为「兼容」），SDK 产物同步重新生成（TS `round?: number`、Java 加 getter）。
 
 ---
 
@@ -36,8 +86,9 @@
 **顺带消掉一个结构问题**：`ApprovalTimeline` 与 `InstanceCatalog` 互为数据源，谁也不能调对方；
 聚合抽成不依赖两者的独立服务后，两处共用一份实现——「同一单在详情页和审批记录页人数不一样」这类问题从结构上消失。
 
-**已知限制**（写进代码注释）：同一节点被重办（退回后再走一遍）按「时间线上连续段」分成两轮、各自成账，同一 `activityId` 会出现两次；
-并行分支交错时同节点的条目可能被切成两段——那需要时间线带「轮次」字段才能彻底解决，暂不改契约形状。
+**已知限制**（v1.26 当时写下的，**已在 v1.27 解决**）：同一节点被重办（退回后再走一遍）原本按「时间线上连续段」分成两轮，
+同一 `activityId` 会出现两次；「跳回同一节点」这种条目紧挨着的场景会被并成一轮。v1.27 给时间线加了「轮次」字段，
+写入端定稿、读端按 `(activityId, round)` 精确分组，见开头 v1.27 小节。
 
 **契约快照**：不变（`NodeOutcome` 字段未动，`nodeOutcomes` 本就是数组）。SDK 产物不变。
 
@@ -427,7 +478,7 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 改造项（M1–M16） | 16 | 16 | 0 |
 | 守门测试用例 | 38 | 38 | 0 |
 | 业务面端点（`/workflow/v1`） | 23（另有 1 条已划掉） | 23 | 0 |
-| 管理面端点（`/admin/v1`） | 10 个操作 / 8 条路径 | 10 | 0 |
+| 管理面端点（`/admin/v1`） | 23 个操作 / 17 条路径 | 23 | 0 |
 | 平台表（`nb_*`） | 13 | 11 | 2 |
 | 人日（估算） | 135 | ≈ 78 | ≈ 57 |
 
@@ -499,7 +550,8 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
   - [x] 幂等键从「全局」改为「按调用主体」 ✅ v1.19（`ToStorageKey`：caller → subject → tenant 回落）
 - [x] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来。✅ **v1.17 已落地**（`activiti:topic` + `nb_external_task` + 三条端点 + 死信）；v1.18 补齐死信重投端点与 `external_task.no_worker` / `external_task.dead_letter` 告警，见开头 v1.18 小节
 - [x] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理。✅ **v1.18 已落地**
-  （`CloudEvent` + HMAC 签名、`CloudEventOutboxHandler`、`nb_event_subscription` / `nb_event_delivery`、订阅管理端点）；剩余：看板与单订阅限速，见开头 v1.18 小节
+  （`CloudEvent` + HMAC 签名、`CloudEventOutboxHandler`、`nb_event_subscription` / `nb_event_delivery`、订阅管理端点）；
+  看板与单订阅限速 ✅ **v1.27**（`GET /admin/v1/events/stats` + `max_per_minute`，超限是推迟不是失败），见开头 v1.27 小节
 - [x] **M14 契约治理**（6 人日）—— OpenAPI 快照 + CI diff。**S5 的前置**。✅ v1.23：`contracts/openapi/workflow-v1.json`（22 路径 / 23 操作）+ `OpenApiContractDiff` 破坏性/兼容分类 + CI `contract-governance` job + `contracts/README.md` 治理口径
 - [x] **M15 官方 SDK**（10 人日）—— ✅ v1.24：`src/NetBpm.Platform.Client`（.NET，23 个业务操作 + 4 个覆盖行操作，错误统一成 `NetBpmApiException`）
   + `tools/NetBpm.SdkGen` 从快照生成 `sdk/typescript` 与 `sdk/java`（可达闭包 120 → 49 个类型），`SdkGenerationTests` 守一致性
@@ -538,6 +590,9 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 - [x] `/admin/v1/processes` 写路径 ✅ v1.24（`IProcessCatalogAdmin` + 整行替换 PUT / DELETE，`AdminProcessCatalogTests` 6 项）
 - [x] `/admin/v1` 五个只读面 ✅ v1.25（`dictionaries` / `audit` + `audit/facets` / `subscriptions` /
       `events/deadletters` / `quotas`；`AdminReadEndpointsTests` 8 项 + `EventDeadLetterQueryTests` 1 项真库分页）
+- [x] `/admin/v1` 管理面写路径 ✅ v1.27：字典维护（`declared` + `PUT`/`DELETE options/{optionId}`，
+      `AdminDictionaryEndpointTests` 12 项 + 真库往返 1 项）、租户与客户端注册迁入（9 个操作，
+      `AdminClientEndpointTests` 12 项）、事件看板（`events/stats`，`AdminReadEndpointsTests` 3 项 + 真库分组 1 项）
 
 ### ④ S4 独立部署（最大一块）
 
@@ -586,12 +641,11 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 | GET | `/tasks/{id}/attachments` | `workflow:task:read` | [x] v1.22 |
 | ~~GET~~ | ~~/history/tasks~~ | — | [x] v1.12 起**收敛到 `/tasks?scope=DONE`**，不单开历史端点 |
 
-管理面 `/admin/v1`（10 个操作 / 8 条路径，全部就位）：
+管理面 `/admin/v1`（23 个操作 / 17 条路径，全部就位）：
 `/processes` 覆盖行读写 ✅ v1.24（`workflow:admin:process`、RFC 9457、写操作进管理审计）；
-`/dictionaries`（`AdminProcess`）、`/audit` + `/audit/facets`、`/quotas`（`AdminClient`）、
-`/subscriptions`、`/events/deadletters`（`EventSubscribe`）✅ v1.25，只读。
-租户 / 客户端 / 轮换 / 注销仍是 `/api/admin` 的过渡形态（v1.3），写路径未迁：迁之前要先决定
-「客户端注册要不要跟着平台面一起做幂等与 RFC 9457」，那是新能力，不是收尾。
+`/dictionaries` 读 + `/dictionaries/{key}/declared` + `/dictionaries/{key}/options/{optionId}` 读写 ✅ v1.27（写前按流程定义校验）；
+`/audit` + `/audit/facets`、`/quotas`（`AdminClient`）、`/subscriptions`、`/events/deadletters`、`/events/stats`（`EventSubscribe`）只读；
+`/tenants` 与 `/clients`（登记 / 注册 / 改 / 轮换 / 吊销）✅ v1.27 迁入，旧 `/api/admin` 那套保留并标 `[Obsolete]`。
 
 ---
 
@@ -622,10 +676,12 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 - [x] `SdkGenerationTests` ✅ v1.24 —— `sdk/` 产物等于「用当前快照重新生成一遍」（纯度足够，可以逐字节比对）
 
 **语义层**
-- [ ] `DecisionVocabularyTests` —— 部分被 `TaskSubmitTests` 覆盖；**会签聚合 `ALL_APPROVED` 未测**
+- [x] `DecisionVocabularyTests` ✅ v1.26 —— 语义 → 选项的映射由 `ApprovalVocabularyTests` 守；
+  **会签 / 或签 / 多数通过的聚合口径**由 `NodeOutcomeAggregationTests` 6 项（真库 + 引擎历史）覆盖
 - [x] `SubmitValidationTests` ✅（`TaskSubmitTests`）
 - [x] `InstanceConclusionTests` ✅
-- [x] `TimelineTests` ✅（`ApprovalTimelineTests`）
+- [x] `TimelineTests` ✅（`ApprovalTimelineTests`）；**轮次字段**由 `TimelineRoundTests` 4 项守
+  （内存 / 真库两套实现同口径、跳回同节点算下一轮、老数据退回连续段近似）
 - [x] `ParameterSchemaTests` ✅（`InstanceStartTests` + `ParameterOverridesTests`）
 - [x] `InstanceListTests` ✅
 - [x] `InstanceListCompletedTests` ✅
@@ -729,9 +785,10 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 8. ~~M3 的 Decorator 迁移 / 删除、`/admin/v1` 余下五个只读面、S2 的三条出口用例~~ —— **均已在 v1.25 完成**。
    清单里**再没有「说好要做但没做」的项**。
 9. ~~M9 的 `nodeOutcomes` 会签 / 或签聚合~~ —— **已在 v1.26 完成**，M1–M16 十六项全部完成。
-10. 还没做的都属于**新能力**，不再是收尾：`/admin/v1` 的字典维护与客户端注册迁入（迁之前要先决定
-    「客户端注册要不要跟着平台面一起做幂等与 RFC 9457」）、v1.18 留下的「事件看板与单订阅限速」，
-    以及时间线带「轮次」字段（把重办节点的聚合从「连续段近似」改成精确分组）。
+10. ~~还没做的都属于**新能力**~~ —— **全部在 v1.27 落地**：`/admin/v1` 的字典维护与客户端注册迁入（客户端注册跟着平台面一起做了
+    幂等与 RFC 9457 的统一错误体）、v1.18 留下的「事件看板与单订阅限速」、以及时间线带「轮次」字段
+    （重办节点的聚合从「连续段近似」改成精确分组）。
+    **清单至此再没有未完成项**——往后的工作都是新增能力或外部集成，不再是「说好要做但没做」。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
 > 引擎原语面对客户端只留读与管理干预，**且管理干预在实例时间线上留痕**。S4/S5 可以整体后移。

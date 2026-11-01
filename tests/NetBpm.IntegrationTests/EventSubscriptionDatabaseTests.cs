@@ -50,6 +50,7 @@ public sealed class EventSubscriptionDatabaseTests : IClassFixture<RestEngineFac
                 EndpointUrl = "https://erp.test/hook",
                 Headers = new Dictionary<string, string>(StringComparer.Ordinal) { ["X-Gateway"] = "gw-1" },
                 MaxAttempts = 3,
+                MaxPerMinute = 60,
             },
             Ct);
 
@@ -66,6 +67,9 @@ public sealed class EventSubscriptionDatabaseTests : IClassFixture<RestEngineFac
             Assert.Equal("def-1", read.ProcessDefinitionId);
             Assert.Equal("gw-1", read.Headers["X-Gateway"]);
             Assert.Equal(3, read.MaxAttempts);
+
+            // 单订阅限速的上限也要能存能取：只写在模型里、列没落库的话限速永远不生效
+            Assert.Equal(60, read.MaxPerMinute);
             Assert.True(read.Enabled);
 
             // 按租户 + 启用状态过滤
@@ -81,8 +85,13 @@ public sealed class EventSubscriptionDatabaseTests : IClassFixture<RestEngineFac
             Assert.False((await store.FindByIdAsync(created.Id, Ct))!.Enabled);
 
             read.Name = "改过名字";
+            read.MaxPerMinute = 0;   // 0 = 不限，也要能写回
             Assert.True(await store.UpdateAsync(read, Ct));
-            Assert.Equal("改过名字", (await store.FindByIdAsync(created.Id, Ct))!.Name);
+
+            var updated = await store.FindByIdAsync(created.Id, Ct);
+
+            Assert.Equal("改过名字", updated!.Name);
+            Assert.Equal(0, updated.MaxPerMinute);
         }
         finally
         {
@@ -156,6 +165,108 @@ public sealed class EventSubscriptionDatabaseTests : IClassFixture<RestEngineFac
         {
             await subscriptions.DeleteAsync(subscription.Id, Ct);
             await deliveries.DeleteByEventAsync("evt-db-1", Ct);
+        }
+    }
+
+    [Fact]
+    public async Task Delivery_Stats_ShouldGroupBySubscription_AndSeparateDeadLetter()
+    {
+        SkipUnlessReady();
+
+        var subscriptions = _factory.Services.GetRequiredService<IEventSubscriptionStore>();
+        var deliveries = _factory.Services.GetRequiredService<IEventDeliveryStore>();
+
+        // 平台表不清库：用独立租户把本用例的行圈起来，否则别的用例留下的投递会混进统计
+        var tenant = $"stats-{Guid.NewGuid():N}";
+
+        var healthy = await subscriptions.CreateAsync(
+            new EventSubscription
+            {
+                TenantId = tenant,
+                Name = "健康的",
+                EndpointUrl = "https://ok.test/hook",
+                MaxPerMinute = 30,
+            },
+            Ct);
+
+        var broken = await subscriptions.CreateAsync(
+            new EventSubscription
+            {
+                TenantId = tenant,
+                Name = "挂掉的",
+                EndpointUrl = "https://bad.test/hook",
+            },
+            Ct);
+
+        var now = DateTime.UtcNow;
+        var eventIds = new[] { "evt-stats-ok", "evt-stats-retry", "evt-stats-held", "evt-stats-dead" };
+
+        try
+        {
+            await deliveries.GetOrCreateAsync("evt-stats-ok", healthy.Id, tenant, Ct);
+            await deliveries.MarkDeliveredAsync("evt-stats-ok", healthy.Id, now, Ct);
+
+            // 有额度内的失败
+            await deliveries.GetOrCreateAsync("evt-stats-retry", healthy.Id, tenant, Ct);
+            await deliveries.MarkFailureAsync(
+                "evt-stats-retry", healthy.Id, "超时", now, now.AddSeconds(5), 5, Ct);
+
+            // 被限速推迟的那条：尝试次数必须还是 0，状态仍是 PENDING
+            await deliveries.GetOrCreateAsync("evt-stats-held", healthy.Id, tenant, Ct);
+            await deliveries.MarkDeferredAsync(
+                "evt-stats-held", healthy.Id, now.AddSeconds(30), now, Ct);
+
+            var held = await deliveries.FindAsync("evt-stats-held", healthy.Id, Ct);
+
+            Assert.Equal(0, held!.Attempts);
+            Assert.Equal(EventDeliveryStatus.Pending, held.Status);
+            Assert.Null(held.LastError);
+            Assert.NotNull(held.NextAttemptAt);
+
+            // 已停投的一条
+            await deliveries.GetOrCreateAsync("evt-stats-dead", broken.Id, tenant, Ct);
+            await deliveries.MarkFailureAsync("evt-stats-dead", broken.Id, "500", now, null, 1, Ct);
+
+            var stats = await deliveries.GetStatsAsync(new EventDeliveryStatsQuery(tenant), Ct);
+
+            Assert.Equal(2, stats.Count);
+
+            var healthyStats = stats.Single(item => item.SubscriptionId == healthy.Id);
+
+            // 聚合在库里 group by：三条记录分到三种状态，各数各的
+            Assert.Equal(3, healthyStats.Total);
+            Assert.Equal(1, healthyStats.Delivered);
+            Assert.Equal(1, healthyStats.Failed);
+            Assert.Equal(1, healthyStats.Pending);
+            Assert.Equal(0, healthyStats.DeadLetter);
+            Assert.Equal(tenant, healthyStats.TenantId);
+            Assert.NotNull(healthyStats.LastDeliveredAt);
+            Assert.NotNull(healthyStats.LastFailureAt);
+
+            var brokenStats = stats.Single(item => item.SubscriptionId == broken.Id);
+
+            Assert.Equal(1, brokenStats.DeadLetter);
+            Assert.Equal(0, brokenStats.Failed);
+
+            // 时间窗过滤：全是「未来才创建」的记录 → 一条都不该算进来
+            Assert.Empty(await deliveries.GetStatsAsync(
+                new EventDeliveryStatsQuery(tenant, null, DateTime.UtcNow.AddDays(1)), Ct));
+
+            // 单订阅过滤
+            var narrowed = await deliveries.GetStatsAsync(
+                new EventDeliveryStatsQuery(tenant, broken.Id), Ct);
+
+            Assert.Equal(broken.Id, Assert.Single(narrowed).SubscriptionId);
+        }
+        finally
+        {
+            foreach (var eventId in eventIds)
+            {
+                await deliveries.DeleteByEventAsync(eventId, Ct);
+            }
+
+            await subscriptions.DeleteAsync(healthy.Id, Ct);
+            await subscriptions.DeleteAsync(broken.Id, Ct);
         }
     }
 

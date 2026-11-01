@@ -97,7 +97,7 @@ public sealed class NodeOutcomeAggregator : INodeOutcomeAggregator
 
         // 同一节点的条目在时间线上是连续的；断开说明这个节点被重办过（退回 / 跳转后再走一遍），
         // 那是两轮审批，人数不能相加 —— 分成两段各自成账。
-        var segments = SplitIntoSegments(completed);
+        var segments = GroupIntoRounds(completed);
 
         var process = await ResolveProcessAsync(processDefinitionId, ct).ConfigureAwait(false);
         var instanceRowCounts = await CountInstanceRowsAsync(instanceId, process, ct).ConfigureAwait(false);
@@ -174,7 +174,8 @@ public sealed class NodeOutcomeAggregator : INodeOutcomeAggregator
             // 「未办理」= 应办 - 已投。或签提前结束时剩余人的任务已被引擎删除，
             // 他们确实没投过票 —— 这不能记成 0（那会让「3 人里 1 人批了就通过」看起来像全票通过）。
             Pending: Math.Max(0, total - positive - negative),
-            DecidedAt: satisfied ? approvals[required - 1].OccurredAt : null);
+            DecidedAt: satisfied ? approvals[required - 1].OccurredAt : null,
+            Round: segment[0].Round);
     }
 
     /// <summary>按「同一节点的连续条目」切段（同节点被重办时会产生多段）。</summary>
@@ -195,6 +196,37 @@ public sealed class NodeOutcomeAggregator : INodeOutcomeAggregator
         }
 
         return segments;
+    }
+
+    /// <summary>
+    /// 按「环节 + 轮次」精确分组；老数据（轮次为 0）退回「连续段」近似。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔑 轮次由写入端定稿（见 <c>TimelineRoundRules</c>），读端只按它分组。
+    /// 靠连续性猜的致命场景是「管理干预跳回当前节点」：时间线上是
+    /// <c>A 完成 → JUMPED → A 完成</c>，只看完成条目就是 <c>A、A</c> 连着 ——
+    /// 两轮审批会被并成一轮，结论从「第 2 轮 1 人同意、还差 1 人」变成「已通过」。
+    /// </para>
+    /// <para>
+    /// 整单里只要有一条完成条目没有轮次（本能力上线前写入的老实例），就整体退回连续段近似：
+    /// 一半按轮次一半按连续性混算，比两种都单独用更容易出错，也更难解释。
+    /// </para>
+    /// </remarks>
+    private static List<List<TimelineEntry>> GroupIntoRounds(IReadOnlyList<TimelineEntry> completed)
+    {
+        if (completed.Any(entry => entry.Round <= 0))
+        {
+            return SplitIntoSegments(completed);
+        }
+
+        return
+        [
+            .. completed
+                .GroupBy(entry => (entry.ActivityId, entry.Round))
+                .Select(group => group.OrderBy(entry => entry.Sequence).ToList())
+                .OrderBy(segment => segment[0].Sequence),
+        ];
     }
 
     /// <summary>

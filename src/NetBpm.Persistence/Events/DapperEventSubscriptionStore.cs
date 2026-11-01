@@ -17,7 +17,7 @@ public sealed class DapperEventSubscriptionStore : IEventSubscriptionStore
 {
     private const string Columns =
         "id, tenant_id, name, event_types, process_definition_id, endpoint_url, secret, headers_json,"
-        + " enabled, max_attempts, created_at, updated_at";
+        + " enabled, max_attempts, max_per_minute, created_at, updated_at";
 
     private readonly IDbSessionProvider _sessions;
 
@@ -57,7 +57,7 @@ public sealed class DapperEventSubscriptionStore : IEventSubscriptionStore
                  ({Columns})
              values
                  (@id, @tenantId, @name, @eventTypes, @processDefinitionId, @endpointUrl, @secret, @headers,
-                  @enabled, @maxAttempts, @createdAt, @updatedAt)
+                  @enabled, @maxAttempts, @maxPerMinute, @createdAt, @updatedAt)
              """,
             ToParameters(subscription),
             lease.Session.Transaction,
@@ -154,6 +154,7 @@ public sealed class DapperEventSubscriptionStore : IEventSubscriptionStore
                    headers_json = @headers,
                    enabled = @enabled,
                    max_attempts = @maxAttempts,
+                   max_per_minute = @maxPerMinute,
                    created_at = @createdAt,
                    updated_at = @updatedAt
              where id = @id
@@ -211,6 +212,7 @@ public sealed class DapperEventSubscriptionStore : IEventSubscriptionStore
             : null,
         enabled = subscription.Enabled ? 1 : 0,
         maxAttempts = subscription.MaxAttempts > 0 ? subscription.MaxAttempts : 5,
+        maxPerMinute = subscription.MaxPerMinute > 0 ? subscription.MaxPerMinute : 0,
         createdAt = subscription.CreatedAt,
         updatedAt = subscription.UpdatedAt,
     };
@@ -227,6 +229,7 @@ public sealed class DapperEventSubscriptionStore : IEventSubscriptionStore
         Headers = ParseHeaders(Text(row, "headers_json")),
         Enabled = (Number(row, "enabled") ?? 0) != 0,
         MaxAttempts = Number(row, "max_attempts") ?? 5,
+        MaxPerMinute = Number(row, "max_per_minute") ?? 0,
         CreatedAt = Date(row, "created_at"),
         UpdatedAt = Date(row, "updated_at"),
     };

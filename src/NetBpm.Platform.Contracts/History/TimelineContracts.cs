@@ -90,6 +90,15 @@ public enum TimelineEntryKind
 /// 该条记录对应的表单快照任务 id；不为空时调用方可再拉 <c>/tasks/{id}/form</c> 取当时的字段定义。
 /// </param>
 /// <param name="OccurredAt">发生时间。</param>
+/// <param name="Round">
+/// 该环节的第几轮（<b>1 起</b>；<c>0</c> 表示「本能力上线前的老数据，轮次未知」）。
+/// <para>
+/// 退回 / 驳回 / 管理干预跳回同一个环节时，这个环节会被重办，人数不能跨轮相加——
+/// 「第 1 轮 3 人里 1 人同意」与「第 2 轮 2 人全同意」是两笔账。
+/// 轮次由写入端确定，不由读端猜：读端只能看「条目连不连续」，
+/// 而「跳回同一节点」这种场景在时间线上是<b>连着的</b>，靠连续性猜必然把两轮并成一轮。
+/// </para>
+/// </param>
 public sealed record TimelineEntry(
     long Sequence,
     string InstanceId,
@@ -104,7 +113,8 @@ public sealed record TimelineEntry(
     string? Comment,
     string? TargetNodeId,
     string? FormSnapshotTaskId,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    int Round = 0);
 
 /// <summary>
 /// 审批历史视图（一个实例的完整时间线）。

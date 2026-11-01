@@ -76,6 +76,29 @@ public static class OutboxRetry
 }
 
 /// <summary>
+/// 本次发布「现在不做、稍后再做」——<b>这不是失败</b>，不消耗尝试次数、不进死信。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 唯一的使用场景是<b>单订阅限速</b>：订阅方配额用完了，事件本身没有任何问题，
+/// 只是现在不该发。若把它当成普通失败往上抛，退避序列是 5/10/20/40 秒、上限 5 次，
+/// 一次限速风暴能在 75 秒内把一批完全健康的事件全推成死信 ——
+/// 死信是「需要人工介入」的信号，被自己的限速灌满之后就没人会认真看了。
+/// </para>
+/// <para>
+/// 发布器捕获此异常后走 <see cref="IEventOutboxStore.DeferAsync"/>：只改 <c>NEXT_ATTEMPT_</c>。
+/// </para>
+/// </remarks>
+/// <param name="retryAfter">多久以后再试。</param>
+/// <param name="reason">给人看的说明（写日志用，<b>不</b>写进 <c>LAST_ERROR_</c>）。</param>
+public sealed class OutboxDeferredException(TimeSpan retryAfter, string reason)
+    : Exception(reason)
+{
+    /// <summary>多久以后再试。</summary>
+    public TimeSpan RetryAfter { get; } = retryAfter > TimeSpan.Zero ? retryAfter : TimeSpan.FromSeconds(1);
+}
+
+/// <summary>
 /// 事件写入端口：由引擎在命令事务内调用。
 /// <para>实现必须使用<b>当前命令的会话/事务</b>，不能另开连接，否则失去事务性。</para>
 /// </summary>
@@ -155,6 +178,17 @@ public interface IEventOutboxStore : IEventOutbox
 
     /// <summary>人工重试死信事件（复位尝试次数 / 清除死信）。</summary>
     ValueTask<bool> RetryAsync(string eventId, DateTime nowUtc, CancellationToken ct = default);
+
+    /// <summary>
+    /// 推迟发布：只把下次尝试时间顺延，<b>不动</b>尝试次数、<b>不置</b>死信、<b>不写</b>错误信息。
+    /// </summary>
+    /// <remarks>
+    /// 专门给 <see cref="OutboxDeferredException"/> 用（限速挡下的事件）。与
+    /// <see cref="MarkFailureAsync"/> 的区别就在「算不算一次失败」：
+    /// 一次限速如果算失败，5 次退避之内（约 75 秒）就能把一批健康事件全推成死信。
+    /// </remarks>
+    /// <returns>事件存在且未发布返回 <see langword="true"/>。</returns>
+    ValueTask<bool> DeferAsync(string eventId, DateTime nextAttemptUtc, CancellationToken ct = default);
 
     /// <summary>删除事件（人工确认不再投递）。</summary>
     ValueTask<bool> DeleteAsync(string eventId, CancellationToken ct = default);
@@ -315,6 +349,24 @@ public sealed class InMemoryEventOutbox : IEventOutboxStore
             item.PublishAttempts = 0;
             item.LastError = null;
             item.NextAttemptTime = nowUtc;
+        }
+
+        return ValueTask.FromResult(true);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DeferAsync(string eventId, DateTime nextAttemptUtc, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventId);
+
+        if (!_events.TryGetValue(eventId, out var item) || item.Published)
+        {
+            return ValueTask.FromResult(false);
+        }
+
+        lock (item)
+        {
+            item.NextAttemptTime = nextAttemptUtc;
         }
 
         return ValueTask.FromResult(true);

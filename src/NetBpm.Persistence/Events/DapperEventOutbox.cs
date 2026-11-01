@@ -221,6 +221,27 @@ public sealed class DapperEventOutbox : IEventOutboxStore
     }
 
     /// <inheritdoc />
+    public async ValueTask<bool> DeferAsync(
+        string eventId,
+        DateTime nextAttemptUtc,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventId);
+
+        using var lease = _sessions.Acquire();
+
+        // 只动 NEXT_ATTEMPT_：PUBLISH_ATTEMPTS_ / DEAD_LETTER_ / LAST_ERROR_ 一律不碰，
+        // 否则「被限速」会在几次退避之内变成「死信」——那是要人工介入的信号，不该被自己灌满
+        var rows = await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
+            DeferSql,
+            new { id = eventId, nextAttempt = nextAttemptUtc },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows == 1;
+    }
+
+    /// <inheritdoc />
     public async ValueTask<bool> DeleteAsync(string eventId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(eventId);
@@ -354,6 +375,12 @@ public sealed class DapperEventOutbox : IEventOutboxStore
         update ACT_EVT_OUTBOX
         set DEAD_LETTER_ = 0, PUBLISH_ATTEMPTS_ = 0, LAST_ERROR_ = null, NEXT_ATTEMPT_ = @now
         where ID_ = @id and DEAD_LETTER_ = 1
+        """;
+
+    private const string DeferSql = """
+        update ACT_EVT_OUTBOX
+        set NEXT_ATTEMPT_ = @nextAttempt
+        where ID_ = @id and PUBLISHED_ = 0 and DEAD_LETTER_ = 0
         """;
 
     private const string DeleteSql = "delete from ACT_EVT_OUTBOX where ID_ = @id";

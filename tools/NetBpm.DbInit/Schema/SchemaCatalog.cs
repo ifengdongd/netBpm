@@ -1026,6 +1026,10 @@ internal static class SchemaCatalog
                 comment: "审批语义（写入时按字典定稿；NULL = 该条目不表达审批意见）"),
             C("comment_text", ColType.Varchar, 2000, comment: "审批意见 / 说明（对外名 comment）"),
             C("target_node_id", ColType.Varchar, 255, comment: "目标节点（退回 / 转办类动作）"),
+            // 列名用 round_no 而不是 round：ROUND 是两种方言的内置函数名，当列名虽合法但很容易
+            // 在函数调用场景里被解析歧义；对外 JSON 名仍是 round。
+            C("round_no", ColType.Int, nullable: false, def: "0",
+                comment: "该环节的第几轮（1 起）；0 = 本能力上线前的老数据（轮次未知，读端按连续段近似）"),
             C("form_snapshot_task_id", ColType.Varchar, 64,
                 comment: "表单快照任务 id；非空时调用方可再拉 /tasks/{id}/form 取当时的字段定义"),
             C("payload_json", ColType.MediumText,
@@ -1222,6 +1226,8 @@ internal static class SchemaCatalog
             C("headers_json", ColType.MediumText, comment: "附加静态请求头（JSON 对象；网关鉴权 / 路由标记）"),
             C("enabled", ColType.TinyInt, nullable: false, def: "1", comment: "是否启用；停用保留记录便于恢复"),
             C("max_attempts", ColType.Int, nullable: false, def: "5", comment: "单条订阅最大投递尝试次数，超出进死信"),
+            C("max_per_minute", ColType.Int, nullable: false, def: "0",
+                comment: "单订阅每分钟最多投递次数；0 = 不限（超限是推迟不是失败，不消耗尝试次数）"),
             C("created_at", ColType.DateTime3, nullable: false, comment: "创建时间（UTC）"),
             C("updated_at", ColType.DateTime3, nullable: false, comment: "更新时间（UTC）"),
         ],

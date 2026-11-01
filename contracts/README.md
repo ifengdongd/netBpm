@@ -31,7 +31,7 @@ contracts/
 | `components.schemas`（整份，见下） | `/admin/v1/**` 的 paths（管理面是运营配置面，不承诺向后兼容） |
 | `security` / `info`（固定 `title` + `version: v1`） | 程序集版本号、`servers`（每次构建都变，属于噪声） |
 
-`components.schemas` 目前**整份**收进快照（133 个），其中包括 `/api/**` 与管理面的模型。
+`components.schemas` 目前**整份**收进快照（136 个），其中包括 `/api/**` 与管理面的模型。
 这是有意的取舍：按可达性收窄能得到更小的快照，但会给 `ContractSnapshotTests` 再养一份
 「schema 闭包」算法，与 SDK 生成器里的那份重复。**新增组件不算破坏**（见 §四），
 所以新端点的模型会先缺席、下次刷新快照时一起进来——缺席不影响任何调用方。

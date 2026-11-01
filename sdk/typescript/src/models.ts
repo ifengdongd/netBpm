@@ -313,6 +313,7 @@ export interface NodeOutcome {
   negative: number;
   pending: number;
   positive: number;
+  round?: number;
   satisfied: boolean;
   total: number;
 }
@@ -632,6 +633,7 @@ export interface TimelineEntry {
   kind: TimelineEntryKind;
   occurredAt: string;
   optionId: string | null;
+  round?: number;
   semantic: ApprovalSemantic | null;
   sequence: number;
   targetNodeId: string | null;

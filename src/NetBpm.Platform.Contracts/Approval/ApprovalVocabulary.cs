@@ -144,6 +144,14 @@ public enum NodeOutcomeAggregation
 /// <param name="Negative">不同意人数。</param>
 /// <param name="Pending">尚未办理人数。</param>
 /// <param name="DecidedAt">环节达成结论的时间；未完成为 <see langword="null"/>。</param>
+/// <param name="Round">
+/// 这是该节点的第几轮（<b>1 起</b>；<c>0</c> = 老数据，轮次未知）。
+/// <para>
+/// 同一个 <see cref="ActivityId"/> 在结果里出现多次不是重复，而是「退回 / 跳转后重办了」：
+/// 每轮单独成账，人数不能跨轮相加。调用方要按 <see cref="Round"/> 区分，
+/// 否则「第 1 轮 1 票 + 第 2 轮 2 票」会被误读成「3 人 3 票」。
+/// </para>
+/// </param>
 public sealed record NodeOutcome(
     string ActivityId,
     string? ActivityName,
@@ -153,7 +161,8 @@ public sealed record NodeOutcome(
     int Positive,
     int Negative,
     int Pending,
-    DateTimeOffset? DecidedAt);
+    DateTimeOffset? DecidedAt,
+    int Round = 0);
 
 /// <summary>
 /// 节点级审批选项集——按节点给出「这里能点哪几个按钮」。

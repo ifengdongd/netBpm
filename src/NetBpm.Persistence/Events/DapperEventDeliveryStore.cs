@@ -179,6 +179,30 @@ public sealed class DapperEventDeliveryStore : IEventDeliveryStore
     }
 
     /// <inheritdoc />
+    public async ValueTask MarkDeferredAsync(
+        string eventId,
+        string subscriptionId,
+        DateTime nextAttemptUtc,
+        DateTime nowUtc,
+        CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+
+        // 只改 next_attempt_at / updated_at：attempts 不动（被限速不算一次尝试），
+        // status 不动（这条还没投成，只是现在轮不到它），last_error 也不动（别把上次真实原因冲掉）
+        await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
+            """
+            update nb_event_delivery
+               set next_attempt_at = @nextAttempt,
+                   updated_at = @now
+             where event_id = @eventId and subscription_id = @subscriptionId
+            """,
+            new { eventId, subscriptionId, nextAttempt = nextAttemptUtc, now = nowUtc },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async ValueTask<bool> RetryAsync(
         string eventId,
         string subscriptionId,
@@ -268,6 +292,83 @@ public sealed class DapperEventDeliveryStore : IEventDeliveryStore
 
         return new EventDeadLetterPage([.. rows.Select(row => Map((IDictionary<string, object?>)row))], total);
     }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<EventDeliveryStats>> GetStatsAsync(
+        EventDeliveryStatsQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        using var lease = _sessions.Acquire();
+
+        var parameters = new DynamicParameters();
+        var conditions = new List<string>(3);
+
+        if (!string.IsNullOrEmpty(query.TenantId))
+        {
+            conditions.Add("tenant_id = @tenantId");
+            parameters.Add("tenantId", query.TenantId);
+        }
+
+        if (!string.IsNullOrEmpty(query.SubscriptionId))
+        {
+            conditions.Add("subscription_id = @subscriptionId");
+            parameters.Add("subscriptionId", query.SubscriptionId);
+        }
+
+        if (query.SinceUtc is { } since)
+        {
+            conditions.Add("created_at >= @since");
+            parameters.Add("since", since);
+        }
+
+        var where = conditions.Count > 0 ? " where " + string.Join(" and ", conditions) : string.Empty;
+
+        // 聚合交给数据库：投递表是按天长的，全量取回再算会随运行时间慢慢变成一次事故。
+        // sum(case when ...) 两个方言都支持（不像 bool 聚合函数那样有方言差异）。
+        var rows = await lease.Session.Connection.QueryAsync(new CommandDefinition(
+            $"""
+             select subscription_id,
+                    max(tenant_id) as tenant_id,
+                    count(*) as total_count,
+                    sum(case when status = '{EventDeliveryStatus.Pending}' then 1 else 0 end) as pending_count,
+                    sum(case when status = '{EventDeliveryStatus.Delivered}' then 1 else 0 end) as delivered_count,
+                    sum(case when status = '{EventDeliveryStatus.Failed}' then 1 else 0 end) as failed_count,
+                    sum(case when status = '{EventDeliveryStatus.DeadLetter}' then 1 else 0 end) as dead_letter_count,
+                    max(delivered_at) as last_delivered_at,
+                    max(case when status in ('{EventDeliveryStatus.Failed}', '{EventDeliveryStatus.DeadLetter}')
+                             then updated_at else null end) as last_failure_at
+               from nb_event_delivery{where}
+              group by subscription_id
+              order by subscription_id
+             """,
+            parameters,
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return
+        [
+            .. rows.Select(row =>
+            {
+                var values = (IDictionary<string, object?>)row;
+
+                return new EventDeliveryStats(
+                    Text(values, "subscription_id") ?? string.Empty,
+                    Text(values, "tenant_id") ?? "default",
+                    Number(values, "total_count") ?? 0,
+                    Number(values, "pending_count") ?? 0,
+                    Number(values, "delivered_count") ?? 0,
+                    Number(values, "failed_count") ?? 0,
+                    Number(values, "dead_letter_count") ?? 0,
+                    AsOffset(NullableDate(values, "last_delivered_at")),
+                    AsOffset(NullableDate(values, "last_failure_at")));
+            }),
+        ];
+    }
+
+    private static DateTimeOffset? AsOffset(DateTime? value) =>
+        value is { } actual ? new DateTimeOffset(DateTime.SpecifyKind(actual, DateTimeKind.Utc)) : null;
 
     private static EventDelivery Map(IDictionary<string, object?> row) => new()
     {

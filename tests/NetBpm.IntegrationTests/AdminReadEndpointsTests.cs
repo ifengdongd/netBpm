@@ -257,6 +257,182 @@ public sealed class AdminReadEndpointsTests
     }
 
     [Fact]
+    public async Task EventStats_ShouldGroupBySubscriptionAndSplitFailureFromDeadLetter()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        var subscriptions = host.Services.GetRequiredService<IEventSubscriptionStore>();
+        var deliveries = host.Services.GetRequiredService<IEventDeliveryStore>();
+
+        var alive = await subscriptions.CreateAsync(
+            new EventSubscription { TenantId = "default", Name = "活着的", MaxPerMinute = 120 });
+        var dead = await subscriptions.CreateAsync(
+            new EventSubscription { TenantId = "default", Name = "挂着的" });
+
+        // 从来没投过任何事件的订阅：看板上必须出现，且全是 0
+        // （「最近一条都没投」本身就是需要被看到的状态，不该直接消失）
+        await subscriptions.CreateAsync(new EventSubscription { TenantId = "default", Name = "从没投过" });
+
+        var now = DateTime.UtcNow;
+
+        await deliveries.GetOrCreateAsync("evt-ok", alive.Id, "default");
+        await deliveries.MarkDeliveredAsync("evt-ok", alive.Id, now);
+
+        // 还有重试额度的失败：会自愈，不需要人管
+        await deliveries.GetOrCreateAsync("evt-retry", alive.Id, "default");
+        await deliveries.MarkFailureAsync("evt-retry", alive.Id, "超时", now, now.AddSeconds(5), maxAttempts: 5);
+
+        // 已停投的两条：要人重投
+        foreach (var eventId in new[] { "evt-dead-1", "evt-dead-2" })
+        {
+            await deliveries.GetOrCreateAsync(eventId, dead.Id, "default");
+            await deliveries.MarkFailureAsync(eventId, dead.Id, "500 网关错误", now, null, maxAttempts: 1);
+        }
+
+        // 订阅配置已经被删掉、投递记录还在的分支（「配置删了、死信留一堆」）
+        await deliveries.GetOrCreateAsync("evt-orphan", "sub-removed", "default");
+        await deliveries.MarkFailureAsync("evt-orphan", "sub-removed", "404 地址不存在", now, null, maxAttempts: 1);
+
+        using var client = host.CreateClient();
+        var secret = await ReadEndpointHarness.RegisterAsync(
+            client,
+            "event-ops",
+            [PlatformScopes.EventSubscribe]);
+
+        using var response = await ReadEndpointHarness.GetAsync(client, "/admin/v1/events/stats", secret);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await ReadEndpointHarness.ReadJsonAsync(response);
+
+        Assert.Equal(4, body.GetProperty("subscriptions").GetArrayLength());
+
+        var rows = body.GetProperty("subscriptions").EnumerateArray().ToList();
+
+        // 排序按「急的先看」：死信多的排前面
+        Assert.Equal("挂着的", rows[0].GetProperty("name").GetString());
+        Assert.Equal(2, rows[0].GetProperty("deadLetter").GetInt32());
+        Assert.Equal(2, rows[0].GetProperty("total").GetInt32());
+
+        var aliveRow = rows.Single(row => row.GetProperty("name").GetString() == "活着的");
+
+        Assert.Equal(2, aliveRow.GetProperty("total").GetInt32());
+        Assert.Equal(1, aliveRow.GetProperty("delivered").GetInt32());
+
+        // 🔑 有额度内的失败与死信必须分开：一个是「会自愈」，一个是「停投了」
+        Assert.Equal(1, aliveRow.GetProperty("failed").GetInt32());
+        Assert.Equal(0, aliveRow.GetProperty("deadLetter").GetInt32());
+        Assert.Equal(120, aliveRow.GetProperty("maxPerMinute").GetInt32());
+
+        var idle = rows.Single(row => row.GetProperty("name").GetString() == "从没投过");
+
+        Assert.Equal(0, idle.GetProperty("total").GetInt32());
+        Assert.True(idle.GetProperty("enabled").GetBoolean());
+
+        var orphan = rows.Single(row => row.GetProperty("subscriptionId").GetString() == "sub-removed");
+
+        // 配置不在了但要露出来：name 为 null 就是「这条记录没有对应订阅」
+        Assert.Equal(JsonValueKind.Null, orphan.GetProperty("name").ValueKind);
+        Assert.Equal(1, orphan.GetProperty("deadLetter").GetInt32());
+
+        // 时间窗在未来的极端值：同样是「全是 0」而不是报错
+        using var empty = await ReadEndpointHarness.GetAsync(
+            client,
+            $"/admin/v1/events/stats?since={Uri.EscapeDataString(DateTime.UtcNow.AddDays(1).ToString("O"))}",
+            secret);
+
+        var emptyBody = await ReadEndpointHarness.ReadJsonAsync(empty);
+
+        Assert.All(
+            emptyBody.GetProperty("subscriptions").EnumerateArray(),
+            row => Assert.Equal(0, row.GetProperty("total").GetInt32()));
+    }
+
+    [Fact]
+    public async Task EventStats_ShouldReportOutboxBacklog()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        var outbox = host.Services.GetRequiredService<IEventOutboxStore>();
+        var now = DateTime.UtcNow;
+
+        // 一条积压 3 分钟的、一条已经判死的
+        await outbox.EnqueueAsync(new OutboxEvent
+        {
+            Id = "ob-pending",
+            EventType = "PROCESS_STARTED",
+            ProcessInstanceId = "inst-backlog",
+            TenantId = "default",
+            Payload = "{}",
+            CreateTime = now.AddMinutes(-3),
+        });
+
+        await outbox.EnqueueAsync(new OutboxEvent
+        {
+            Id = "ob-dead",
+            EventType = "PROCESS_STARTED",
+            ProcessInstanceId = "inst-backlog",
+            TenantId = "default",
+            Payload = "{}",
+            CreateTime = now.AddMinutes(-1),
+        });
+
+        for (var attempt = 1; attempt <= OutboxRetry.DefaultMaxAttempts; attempt++)
+        {
+            await outbox.MarkFailureAsync("ob-dead", "订阅方 500", now, now.AddSeconds(attempt));
+        }
+
+        using var client = host.CreateClient();
+        var secret = await ReadEndpointHarness.RegisterAsync(
+            client,
+            "event-ops",
+            [PlatformScopes.EventSubscribe]);
+
+        using var response = await ReadEndpointHarness.GetAsync(client, "/admin/v1/events/stats", secret);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var backlog = (await ReadEndpointHarness.ReadJsonAsync(response)).GetProperty("outbox");
+
+        Assert.Equal(1, backlog.GetProperty("pending").GetInt32());
+        Assert.Equal(1, backlog.GetProperty("deadLetter").GetInt32());
+
+        // 「积压多少条」看不出「卡了多久」：最老一条的创建时间要一并给出
+        var oldest = backlog.GetProperty("oldestPendingAt").GetDateTimeOffset();
+
+        Assert.True(
+            now.AddMinutes(-4) < oldest && oldest < now,
+            $"oldestPendingAt 应为那条 3 分钟前的事件，实际 {oldest:O}。");
+    }
+
+    [Fact]
+    public async Task EventStats_ShouldRejectUnparseableSince()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        using var client = host.CreateClient();
+        var secret = await ReadEndpointHarness.RegisterAsync(
+            client,
+            "event-ops",
+            [PlatformScopes.EventSubscribe]);
+
+        using var response = await ReadEndpointHarness.GetAsync(
+            client,
+            "/admin/v1/events/stats?since=昨天",
+            secret);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var problem = await ReadEndpointHarness.ReadJsonAsync(response);
+
+        // 静默忽略解析不了的时间窗，调用方会以为「统计的就是这一小时」
+        Assert.Equal(ErrorCodes.RequestMalformed, problem.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Quotas_ShouldExposeTenantAndClientLevels()
     {
         using var host = ReadEndpointHarness.BuildHost();
@@ -321,6 +497,7 @@ public sealed class AdminReadEndpointsTests
             ("/admin/v1/audit", PlatformScopes.AdminClient),
             ("/admin/v1/subscriptions", PlatformScopes.EventSubscribe),
             ("/admin/v1/events/deadletters", PlatformScopes.EventSubscribe),
+            ("/admin/v1/events/stats", PlatformScopes.EventSubscribe),
             ("/admin/v1/quotas", PlatformScopes.AdminClient),
         })
         {

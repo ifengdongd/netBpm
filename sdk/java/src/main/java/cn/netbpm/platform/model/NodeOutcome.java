@@ -18,6 +18,7 @@ public record NodeOutcome(
         Integer negative,
         Integer pending,
         Integer positive,
+        Integer round,
         Boolean satisfied,
         Integer total
 ) {

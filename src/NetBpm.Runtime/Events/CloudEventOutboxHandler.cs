@@ -47,6 +47,7 @@ public sealed class CloudEventOutboxHandler : IOutboxEventHandler
     private readonly IEventSubscriptionStore _subscriptions;
     private readonly IEventDeliveryStore _deliveries;
     private readonly IEventDeliveryTransport _transport;
+    private readonly IEventDeliveryThrottle _throttle;
     private readonly IEnumerable<IAlertSink> _sinks;
     private readonly EventDeliveryOptions _options;
     private readonly ILogger<CloudEventOutboxHandler> _logger;
@@ -57,7 +58,8 @@ public sealed class CloudEventOutboxHandler : IOutboxEventHandler
         IEventDeliveryTransport transport,
         IOptions<EventDeliveryOptions> options,
         ILogger<CloudEventOutboxHandler> logger,
-        IEnumerable<IAlertSink>? sinks = null)
+        IEnumerable<IAlertSink>? sinks = null,
+        IEventDeliveryThrottle? throttle = null)
     {
         ArgumentNullException.ThrowIfNull(subscriptions);
         ArgumentNullException.ThrowIfNull(deliveries);
@@ -71,6 +73,7 @@ public sealed class CloudEventOutboxHandler : IOutboxEventHandler
         _options = options.Value;
         _logger = logger;
         _sinks = sinks ?? [];
+        _throttle = throttle ?? new InMemoryEventDeliveryThrottle();
     }
 
     /// <inheritdoc />
@@ -95,25 +98,50 @@ public sealed class CloudEventOutboxHandler : IOutboxEventHandler
 
         var body = CloudEventSerializer.Serialize(CloudEventSerializer.Create(outboxEvent, _options.SourcePrefix));
         var failures = new List<string>();
+        TimeSpan? deferFor = null;
 
         foreach (var subscription in matched)
         {
-            var failure = await DeliverOneAsync(outboxEvent, subscription, tenantId, body, ct).ConfigureAwait(false);
+            var attempt = await DeliverOneAsync(outboxEvent, subscription, tenantId, body, ct).ConfigureAwait(false);
 
-            if (failure is not null)
+            if (attempt.Failure is { } failure)
             {
                 failures.Add(failure);
+            }
+
+            if (attempt.DeferFor is { } wait && (deferFor is null || wait > deferFor))
+            {
+                deferFor = wait;
             }
         }
 
         if (failures.Count > 0)
         {
-            // 抛出去让 outbox 退避重投；已成功的订阅靠投递记录跳过，不会重复打扰
+            // 抛出去让 outbox 退避重投；已成功的订阅靠投递记录跳过，不会重复打扰。
+            // 同时有「失败」与「被限速」时失败优先：那是真的出问题了，不该被推迟掩盖掉
             throw new EventDeliveryException(outboxEvent.Id, failures);
+        }
+
+        if (deferFor is { } delay)
+        {
+            // 限速挡下：告诉发布器「现在不做」，由它只改 NEXT_ATTEMPT_（不涨尝试次数、不进死信）
+            throw new OutboxDeferredException(delay, $"订阅配额已用尽，事件 {outboxEvent.Id} 推迟投递。");
         }
     }
 
-    private async ValueTask<string?> DeliverOneAsync(
+    /// <summary>一次投递的结果：三种互斥结局（成功 / 失败 / 推迟）用一个形状表达。</summary>
+    /// <param name="Failure">失败原因；成功或推迟时为 <see langword="null"/>。</param>
+    /// <param name="DeferFor">被限速时的建议等待时长；其余情况为 <see langword="null"/>。</param>
+    private readonly record struct DeliveryAttempt(string? Failure, TimeSpan? DeferFor)
+    {
+        public static DeliveryAttempt Done => new(null, null);
+
+        public static DeliveryAttempt Failed(string reason) => new(reason, null);
+
+        public static DeliveryAttempt Deferred(TimeSpan wait) => new(null, wait);
+    }
+
+    private async ValueTask<DeliveryAttempt> DeliverOneAsync(
         OutboxEvent outboxEvent,
         EventSubscription subscription,
         string tenantId,
@@ -127,14 +155,39 @@ public sealed class CloudEventOutboxHandler : IOutboxEventHandler
 
         if (string.Equals(delivery.Status, EventDeliveryStatus.Delivered, StringComparison.Ordinal))
         {
-            return null;
+            return DeliveryAttempt.Done;
         }
 
         if (string.Equals(delivery.Status, EventDeliveryStatus.DeadLetter, StringComparison.Ordinal))
         {
             // 已经判死：不再尝试，但必须让事件留在未发布状态（否则事件被静默丢弃，
             // 运维根本不知道有一条事件没送出去）—— 因此算作失败返回
-            return $"订阅 '{subscription.Name}' 的投递已进入死信：{delivery.LastError}";
+            return DeliveryAttempt.Failed($"订阅 '{subscription.Name}' 的投递已进入死信：{delivery.LastError}");
+        }
+
+        // 单订阅限速：放在「已投成 / 已判死」之后 —— 那两种根本不发请求，不该占用配额。
+        // 超限时把投递记录的时间往后挪（不动尝试次数），并让整个事件本轮推迟。
+        if (!await _throttle.TryAcquireAsync(subscription.Id, subscription.MaxPerMinute, ct).ConfigureAwait(false))
+        {
+            var wait = UntilNextMinuteWindow(now);
+
+            await _deliveries
+                .MarkDeferredAsync(outboxEvent.Id, subscription.Id, now + wait, now, ct)
+                .ConfigureAwait(false);
+
+            EngineDiagnostics.EventDeliveries.Add(
+                1,
+                new KeyValuePair<string, object?>("subscription", subscription.Id),
+                new KeyValuePair<string, object?>("result", "deferred"));
+
+            _logger.LogDebug(
+                "订阅 '{SubscriptionName}' 达到上限 {MaxPerMinute} 条/分钟，事件 {EventId} 推迟到 {RetryAt:O}。",
+                subscription.Name,
+                subscription.MaxPerMinute,
+                outboxEvent.Id,
+                now + wait);
+
+            return DeliveryAttempt.Deferred(wait);
         }
 
         // 🔑 这里刻意<b>不</b>做订阅级退避：退避节奏由 outbox 统一管（事件级 NEXT_ATTEMPT_）。
@@ -179,7 +232,7 @@ public sealed class CloudEventOutboxHandler : IOutboxEventHandler
                 outboxEvent.EventType,
                 subscription.Name);
 
-            return null;
+            return DeliveryAttempt.Done;
         }
 
         var attempts = delivery.Attempts + 1;
@@ -215,7 +268,21 @@ public sealed class CloudEventOutboxHandler : IOutboxEventHandler
             attempts,
             maxAttempts);
 
-        return $"订阅 '{subscription.Name}' 投递失败：{outcome.Error}";
+        return DeliveryAttempt.Failed($"订阅 '{subscription.Name}' 投递失败：{outcome.Error}");
+    }
+
+    /// <summary>
+    /// 距离下一个 UTC 分钟整点多远（固定窗口的边界）。
+    /// </summary>
+    /// <remarks>
+    /// 下限 1 秒、上限 60 秒：正好落在边界上时（余数为 0）不能返回 0，
+    /// 那会让发布器「立刻重试 → 又被挡 → 再立刻重试」空转一整轮。
+    /// </remarks>
+    private static TimeSpan UntilNextMinuteWindow(DateTime nowUtc)
+    {
+        var seconds = new DateTimeOffset(nowUtc).ToUnixTimeSeconds();
+        var remaining = 60 - (seconds % 60);
+        return TimeSpan.FromSeconds(Math.Clamp(remaining, 1, 60));
     }
 
     private async ValueTask RaiseDeadLetterAlertAsync(

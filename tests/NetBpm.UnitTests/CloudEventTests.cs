@@ -247,6 +247,138 @@ public sealed class CloudEventTests
         Assert.Empty(transport.Requests);
     }
 
+    [Fact]
+    public async Task Throttle_ShouldRejectOverLimit_AndResetOnNextWindow()
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 11, 1, 12, 0, 10, TimeSpan.Zero));
+        var throttle = new InMemoryEventDeliveryThrottle(clock);
+
+        // 上限 2：前两次放行，第三次挡下
+        Assert.True(await throttle.TryAcquireAsync("sub-1", 2, Ct));
+        Assert.True(await throttle.TryAcquireAsync("sub-1", 2, Ct));
+        Assert.False(await throttle.TryAcquireAsync("sub-1", 2, Ct));
+
+        // 0 / 负数 = 不限：不占配额也不算超限
+        Assert.True(await throttle.TryAcquireAsync("sub-2", 0, Ct));
+
+        // 分区是订阅：另一个订阅不受影响
+        Assert.True(await throttle.TryAcquireAsync("sub-3", 2, Ct));
+
+        // 跨到下个窗口自动重置（固定窗口，不记住上一分钟用掉多少）
+        clock.Advance(TimeSpan.FromSeconds(55));
+
+        Assert.True(await throttle.TryAcquireAsync("sub-1", 2, Ct));
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldDefer_WithoutConsumingAttempts_WhenOverQuota()
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 11, 1, 12, 0, 10, TimeSpan.Zero));
+        var transport = new FakeTransport();
+        var handler = BuildHandler(
+            transport,
+            out var subscriptions,
+            out var deliveries,
+            out _,
+            new InMemoryEventDeliveryThrottle(clock));
+
+        var subscription = await subscriptions.CreateAsync(
+            new EventSubscription { TenantId = "acme", Name = "限速的", MaxPerMinute = 1 },
+            Ct);
+
+        // 第一条：配额内，正常投递
+        await handler.HandleAsync(Event("TASK_CREATED", null, id: "evt-1"), Ct);
+
+        // 第二条：同一分钟超限 → 抛「推迟」而不是「失败」
+        var deferred = await Assert.ThrowsAsync<OutboxDeferredException>(
+            () => handler.HandleAsync(Event("TASK_CREATED", null, id: "evt-2"), Ct).AsTask());
+
+        Assert.InRange(deferred.RetryAfter, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(60));
+
+        // 只有第一条真的发了请求：被限速的一条不该在订阅方那边留下痕迹
+        Assert.Single(transport.Requests);
+
+        var held = await deliveries.FindAsync("evt-2", subscription.Id, Ct);
+
+        Assert.NotNull(held);
+
+        // 🔑 被限速不算一次尝试：尝试次数仍是 0、状态仍是 PENDING
+        // 否则订阅方只是回得慢一点，几次限速就能把它推进死信
+        Assert.Equal(0, held!.Attempts);
+        Assert.Equal(EventDeliveryStatus.Pending, held.Status);
+        Assert.NotNull(held.NextAttemptAt);
+        Assert.Null(held.LastError);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ShouldReportFailure_WhenOneFailsWhileAnotherIsThrottled()
+    {
+        var clock = new TestClock(new DateTimeOffset(2026, 11, 1, 12, 0, 10, TimeSpan.Zero));
+        var transport = new FakeTransport { FailForUrlsContaining = "broken.test" };
+        var handler = BuildHandler(
+            transport,
+            out var subscriptions,
+            out _,
+            out _,
+            new InMemoryEventDeliveryThrottle(clock));
+
+        // 已用掉配额的订阅（先投一条把配额吃满）
+        await subscriptions.CreateAsync(
+            new EventSubscription
+            {
+                TenantId = "acme",
+                Name = "限速的",
+                EndpointUrl = "https://throttled.test/hook",
+                MaxPerMinute = 1,
+            },
+            Ct);
+
+        await handler.HandleAsync(Event("TASK_CREATED", null, id: "evt-warmup"), Ct);
+
+        await subscriptions.CreateAsync(
+            new EventSubscription
+            {
+                TenantId = "acme",
+                Name = "挂掉的",
+                EndpointUrl = "https://broken.test/hook",
+            },
+            Ct);
+
+        // 一个真失败 + 一个被限速：失败优先 —— 推迟不该把真问题掩盖掉
+        var failure = await Assert.ThrowsAsync<EventDeliveryException>(
+            () => handler.HandleAsync(Event("TASK_CREATED", null, id: "evt-2"), Ct).AsTask());
+
+        Assert.Contains("挂掉的", Assert.Single(failure.Failures), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DeferAsync_ShouldOnlyMoveNextAttempt()
+    {
+        var outbox = new InMemoryEventOutbox();
+        var outboxEvent = Event("TASK_CREATED", null);
+        await outbox.EnqueueAsync(outboxEvent, Ct);
+
+        // 先失败两次（额度 5 次），再被限速推迟
+        await outbox.MarkFailureAsync("evt-1", "挂了一次", DateTime.UtcNow, DateTime.UtcNow.AddSeconds(5), Ct);
+        await outbox.MarkFailureAsync("evt-1", "又挂一次", DateTime.UtcNow, DateTime.UtcNow.AddSeconds(10), Ct);
+
+        var deferredUntil = DateTime.UtcNow.AddMinutes(1);
+        var moved = await outbox.DeferAsync("evt-1", deferredUntil, Ct);
+
+        Assert.True(moved);
+
+        var stored = await outbox.FindAsync(new OutboxQuery(), Ct);
+
+        Assert.Equal(2, Assert.Single(stored).PublishAttempts);   // 推迟不涨次数
+        Assert.False(stored[0].DeadLetter);
+        Assert.Equal(deferredUntil, stored[0].NextAttemptTime);
+
+        // 已发布的事件不该被推迟（它已经不需要再发了）
+        outboxEvent.Published = true;
+
+        Assert.False(await outbox.DeferAsync("evt-1", deferredUntil, Ct));
+    }
+
     private static CloudEventOutboxHandler BuildHandler(
         FakeTransport transport,
         out IEventSubscriptionStore subscriptions,
@@ -259,7 +391,8 @@ public sealed class CloudEventTests
         FakeTransport transport,
         out IEventSubscriptionStore subscriptions,
         out IEventDeliveryStore deliveries,
-        out InMemoryAlertSink alerts)
+        out InMemoryAlertSink alerts,
+        IEventDeliveryThrottle? throttle = null)
     {
         subscriptions = new InMemoryEventSubscriptionStore();
         deliveries = new InMemoryEventDeliveryStore();
@@ -271,17 +404,19 @@ public sealed class CloudEventTests
             transport,
             Microsoft.Extensions.Options.Options.Create(new EventDeliveryOptions()),
             NullLogger<CloudEventOutboxHandler>.Instance,
-            [alerts]);
+            [alerts],
+            throttle);
     }
 
     private static OutboxEvent Event(
         string eventType,
         string? payload,
         string tenantId = "acme",
-        string? definitionId = "def-1") =>
+        string? definitionId = "def-1",
+        string id = "evt-1") =>
         new()
         {
-            Id = "evt-1",
+            Id = id,
             EventType = eventType,
             EntityId = "inst-1",
             ProcessInstanceId = "inst-1",
@@ -292,6 +427,16 @@ public sealed class CloudEventTests
             Payload = payload,
             CreateTime = new DateTime(2026, 10, 31, 12, 0, 0, DateTimeKind.Utc),
         };
+
+    /// <summary>可手动推进的时钟（固定窗口的边界要能精确控制，否则用例会在整分钟时刻偶发）。</summary>
+    private sealed class TestClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset _now = start;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        internal void Advance(TimeSpan delta) => _now = _now.Add(delta);
+    }
 
     private sealed class FakeTransport : IEventDeliveryTransport
     {

@@ -308,6 +308,26 @@ internal static class SqlGenerator
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "LOCK_OWNER_", "varchar(64)", "nvarchar(64)"));
         lines.AddRange(RenderAddColumn(dialect, "ACT_RU_TIMER_JOB", "LOCK_EXP_TIME_", "datetime(3)", "datetime"));
 
+        // 0014：事件订阅补「单订阅每分钟上限」。
+        // 平台表同样是 create table if not exists —— 老库里表已存在，新列不会自己长出来，
+        // 而 Dapper 的 select/insert 已经带上了这一列，不补就是「升级后订阅列表 500」。
+        lines.AddRange(RenderAddColumn(
+            dialect,
+            "nb_event_subscription",
+            "max_per_minute",
+            "int not null default 0 comment '单订阅每分钟最多投递次数；0 = 不限（超限是推迟不是失败，不消耗尝试次数）'",
+            "int not null constraint df_nb_event_subscription_max_per_minute default (0)"));
+
+        // 0015：时间线补「轮次」。老库不补则读端一句 select 就会 500（列不在），
+        // 而它恰恰是「重办节点的会签人数」能不能算对的前提。
+        lines.AddRange(RenderAddColumn(
+            dialect,
+            "nb_instance_timeline",
+            "round_no",
+            "int not null default 0 comment '该环节的第几轮（1 起）；0 = 本能力上线前的老数据'",
+            "int not null constraint df_nb_instance_timeline_round_no default (0)"));
+
+
         // 索引必须排在补列之后：老库缺列时先建索引会报 Key column ... doesn't exist
         lines.AddRange(RenderEngineIndex(
             new TableIndexDef("ACT_RU_JOB", "ACT_IDX_JOB_LOCK_EXP", ["LOCK_EXP_TIME_"]),

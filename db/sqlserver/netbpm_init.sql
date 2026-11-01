@@ -1421,6 +1421,7 @@ if object_id(N'nb_instance_timeline', N'U') is null
     semantic nvarchar(32),
     comment_text nvarchar(2000),
     target_node_id nvarchar(255),
+    round_no int not null constraint df_nb_instance_timeline_round_no default (0),
     form_snapshot_task_id nvarchar(64),
     payload_json nvarchar(max),
     occurred_at datetime not null,
@@ -1550,6 +1551,7 @@ if object_id(N'nb_event_subscription', N'U') is null
     headers_json nvarchar(max),
     enabled tinyint not null constraint df_nb_event_subscription_enabled default (1),
     max_attempts int not null constraint df_nb_event_subscription_max_attempts default (5),
+    max_per_minute int not null constraint df_nb_event_subscription_max_per_minute default (0),
     created_at datetime not null,
     updated_at datetime not null,
     constraint pk_nb_event_subscription primary key clustered (id)
@@ -1653,6 +1655,14 @@ go
 
 if not exists (select 1 from sys.columns where object_id = object_id('ACT_RU_TIMER_JOB') and name = 'LOCK_EXP_TIME_')
     alter table ACT_RU_TIMER_JOB add LOCK_EXP_TIME_ datetime;
+go
+
+if not exists (select 1 from sys.columns where object_id = object_id('nb_event_subscription') and name = 'max_per_minute')
+    alter table nb_event_subscription add max_per_minute int not null constraint df_nb_event_subscription_max_per_minute default (0);
+go
+
+if not exists (select 1 from sys.columns where object_id = object_id('nb_instance_timeline') and name = 'round_no')
+    alter table nb_instance_timeline add round_no int not null constraint df_nb_instance_timeline_round_no default (0);
 go
 
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_JOB_LOCK_EXP' and object_id = object_id('ACT_RU_JOB'))
@@ -4433,6 +4443,15 @@ if exists (select 1 from sys.columns
         @level2type = N'COLUMN', @level2name = N'target_node_id';
 go
 if exists (select 1 from sys.columns
+    where object_id = object_id('nb_instance_timeline') and name = N'round_no')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_instance_timeline') and c.name = N'round_no')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'该环节的第几轮（1 起）；0 = 本能力上线前的老数据（轮次未知，读端按连续段近似）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_instance_timeline',
+        @level2type = N'COLUMN', @level2name = N'round_no';
+go
+if exists (select 1 from sys.columns
     where object_id = object_id('nb_instance_timeline') and name = N'form_snapshot_task_id')
     and not exists (select 1 from sys.extended_properties ep
         join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
@@ -5151,6 +5170,15 @@ if exists (select 1 from sys.columns
     exec sp_addextendedproperty @name = N'MS_Description', @value = N'单条订阅最大投递尝试次数，超出进死信',
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
         @level2type = N'COLUMN', @level2name = N'max_attempts';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_event_subscription') and name = N'max_per_minute')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_event_subscription') and c.name = N'max_per_minute')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'单订阅每分钟最多投递次数；0 = 不限（超限是推迟不是失败，不消耗尝试次数）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_event_subscription',
+        @level2type = N'COLUMN', @level2name = N'max_per_minute';
 go
 if exists (select 1 from sys.columns
     where object_id = object_id('nb_event_subscription') and name = N'created_at')

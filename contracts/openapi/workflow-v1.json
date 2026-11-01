@@ -1600,6 +1600,165 @@
         ],
         "type": "object"
       },
+      "AdminEventStatsView": {
+        "properties": {
+          "outbox": {
+            "$ref": "#/components/schemas/AdminOutboxBacklogView"
+          },
+          "since": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSubscriptionStatsView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "since",
+          "outbox",
+          "subscriptions"
+        ],
+        "type": "object"
+      },
+      "AdminOutboxBacklogView": {
+        "properties": {
+          "deadLetter": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "oldestPendingAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pending": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "pending",
+          "deadLetter",
+          "oldestPendingAt"
+        ],
+        "type": "object"
+      },
+      "AdminSubscriptionStatsView": {
+        "properties": {
+          "deadLetter": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "delivered": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "enabled": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "failed": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "lastDeliveredAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastFailureAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "maxPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pending": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "subscriptionId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "total": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "subscriptionId",
+          "name",
+          "tenantId",
+          "maxPerMinute",
+          "enabled",
+          "total",
+          "pending",
+          "delivered",
+          "failed",
+          "deadLetter",
+          "lastDeliveredAt",
+          "lastFailureAt"
+        ],
+        "type": "object"
+      },
       "ApprovalDictionaryEntryView": {
         "properties": {
           "allowedTargetNodes": {
@@ -2268,6 +2427,15 @@
               "string"
             ]
           },
+          "maxPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -2903,6 +3071,14 @@
               "string"
             ]
           },
+          "maxPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -2933,6 +3109,7 @@
           "headers",
           "enabled",
           "maxAttempts",
+          "maxPerMinute",
           "createdAt",
           "updatedAt"
         ],
@@ -4571,6 +4748,15 @@
             ]
           },
           "positive": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "round": {
+            "default": 0,
             "format": "int32",
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
@@ -6601,6 +6787,15 @@
               "string"
             ]
           },
+          "round": {
+            "default": 0,
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
           "semantic": {
             "oneOf": [
               {
@@ -6776,6 +6971,15 @@
             ]
           },
           "maxAttempts": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "maxPerMinute": {
             "format": "int32",
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [

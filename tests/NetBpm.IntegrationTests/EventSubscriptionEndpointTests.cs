@@ -195,6 +195,50 @@ public sealed class EventSubscriptionEndpointTests
             builder.UseSetting("NetBpm:Security:Tenants:Default", DefaultTenant);
         });
 
+    [Fact]
+    public async Task MaxPerMinute_ShouldRoundTrip_AndBeClearableWithZero()
+    {
+        using var host = BuildHost();
+        using var client = host.CreateClient();
+
+        var secret = await RegisterAsync(client, "sub-throttle", [PlatformScopes.EventSubscribe]);
+
+        using var created = await client.SendAsync(
+            Json(HttpMethod.Post, "/api/admin/event-subscriptions", secret, new
+            {
+                name = "限速的订阅",
+                endpointUrl = "https://slow.test/hook",
+                maxPerMinute = 120,
+            }),
+            Ct);
+
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        using var createdJson = JsonDocument.Parse(await created.Content.ReadAsStringAsync(Ct));
+
+        var subscriptionId = createdJson.RootElement
+            .GetProperty("subscription").GetProperty("id").GetString()!;
+
+        Assert.Equal(
+            120,
+            createdJson.RootElement.GetProperty("subscription").GetProperty("maxPerMinute").GetInt32());
+
+        // 显式传 0 = 取消限速：判 null 而不是判 > 0，否则配错之后就再也改不回来
+        using var cleared = await client.SendAsync(
+            Json(
+                new HttpMethod("PATCH"),
+                $"/api/admin/event-subscriptions/{subscriptionId}",
+                secret,
+                new { maxPerMinute = 0 }),
+            Ct);
+
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+
+        using var clearedJson = JsonDocument.Parse(await cleared.Content.ReadAsStringAsync(Ct));
+
+        Assert.Equal(0, clearedJson.RootElement.GetProperty("maxPerMinute").GetInt32());
+    }
+
     private static async Task<string> CreateAsync(
         HttpClient client,
         string secret,

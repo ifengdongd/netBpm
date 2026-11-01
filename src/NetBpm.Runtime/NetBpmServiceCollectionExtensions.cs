@@ -174,6 +174,10 @@ public static class NetBpmServiceCollectionExtensions
             options.Configure(configure);
         }
 
+        // 单订阅节流（max_per_minute）：默认进程内固定窗口。
+        // 想换成跨副本共享的计数器（Redis），把这一行换掉即可，投递器只认接口
+        services.TryAddSingleton<IEventDeliveryThrottle, InMemoryEventDeliveryThrottle>();
+
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IOutboxEventHandler, CloudEventOutboxHandler>());
 

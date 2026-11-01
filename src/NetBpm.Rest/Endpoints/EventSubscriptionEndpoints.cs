@@ -131,6 +131,7 @@ public static class EventSubscriptionEndpoints
             Headers = request.Headers ?? new Dictionary<string, string>(StringComparer.Ordinal),
             Enabled = request.Enabled ?? true,
             MaxAttempts = request.MaxAttempts is > 0 ? Math.Min(request.MaxAttempts.Value, 20) : 5,
+            MaxPerMinute = NormalizePerMinute(request.MaxPerMinute),
         };
 
         var created = await store.CreateAsync(subscription, ct).ConfigureAwait(false);
@@ -222,6 +223,13 @@ public static class EventSubscriptionEndpoints
         if (request.MaxAttempts is > 0)
         {
             existing.MaxAttempts = Math.Min(request.MaxAttempts.Value, 20);
+        }
+
+        // 显式传 0 是「取消限速」这个有效指令，因此判 null 而不是判 > 0：
+        // 否则一旦配错上限就再也改不回来，只能直接改库
+        if (request.MaxPerMinute is { } perMinute)
+        {
+            existing.MaxPerMinute = NormalizePerMinute(perMinute);
         }
 
         await store.UpdateAsync(existing, ct).ConfigureAwait(false);
@@ -385,6 +393,16 @@ public static class EventSubscriptionEndpoints
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray() ?? [];
 
+    /// <summary>
+    /// 每分钟上限的夹取：<c>&lt;= 0</c> 归一到 0（不限），正数封顶 6000（100 条/秒）。
+    /// </summary>
+    /// <remarks>
+    /// 上限存在的意义是挡住「手滑多打两个零」：配成 100000 会让限速形同虚设，
+    /// 而配错的限速比没配更危险 —— 运维以为自己在保护订阅方，实际什么都没保护。
+    /// </remarks>
+    private static int NormalizePerMinute(int? perMinute) =>
+        perMinute is > 0 ? Math.Min(perMinute.Value, 6000) : 0;
+
     private static void EnsureAdmin(RequestContext context, string scope, string action) =>
         ClientAdminEndpoints.EnsureAdmin(context, scope, action);
 }
@@ -399,6 +417,7 @@ public static class EventSubscriptionEndpoints
 /// <param name="Headers">附加静态请求头。</param>
 /// <param name="Enabled">是否启用（默认 true）。</param>
 /// <param name="MaxAttempts">最大投递尝试次数（默认 5，上限 20）。</param>
+/// <param name="MaxPerMinute">每分钟最多投递次数（默认 0 = 不限，上限 6000）。超限是推迟不是失败。</param>
 public sealed record CreateEventSubscriptionRequest(
     string Name,
     string EndpointUrl,
@@ -408,7 +427,8 @@ public sealed record CreateEventSubscriptionRequest(
     string? Secret = null,
     IDictionary<string, string>? Headers = null,
     bool? Enabled = null,
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    int? MaxPerMinute = null);
 
 /// <summary>更新订阅的请求（<b>不含 secret</b> —— 换密钥走 <c>/rotate</c>）。</summary>
 /// <param name="Name">订阅名。</param>
@@ -418,6 +438,7 @@ public sealed record CreateEventSubscriptionRequest(
 /// <param name="Headers">附加静态请求头。</param>
 /// <param name="Enabled">是否启用。</param>
 /// <param name="MaxAttempts">最大投递尝试次数。</param>
+/// <param name="MaxPerMinute">每分钟最多投递次数；显式传 0 = 取消限速。</param>
 public sealed record UpdateEventSubscriptionRequest(
     string? Name = null,
     IReadOnlyList<string>? EventTypes = null,
@@ -425,7 +446,8 @@ public sealed record UpdateEventSubscriptionRequest(
     string? EndpointUrl = null,
     IDictionary<string, string>? Headers = null,
     bool? Enabled = null,
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    int? MaxPerMinute = null);
 
 /// <summary>
 /// 订阅视图。<b>不含明文密钥</b> —— 只有 <see cref="SecretPreview"/>。
@@ -440,6 +462,7 @@ public sealed record UpdateEventSubscriptionRequest(
 /// <param name="Headers">附加静态请求头。</param>
 /// <param name="Enabled">是否启用。</param>
 /// <param name="MaxAttempts">最大投递尝试次数。</param>
+/// <param name="MaxPerMinute">每分钟最多投递次数（0 = 不限）。</param>
 /// <param name="CreatedAt">创建时间。</param>
 /// <param name="UpdatedAt">更新时间。</param>
 public sealed record EventSubscriptionView(
@@ -453,6 +476,7 @@ public sealed record EventSubscriptionView(
     IReadOnlyDictionary<string, string> Headers,
     bool Enabled,
     int MaxAttempts,
+    int MaxPerMinute,
     DateTime CreatedAt,
     DateTime UpdatedAt)
 {
@@ -468,6 +492,7 @@ public sealed record EventSubscriptionView(
         new Dictionary<string, string>(subscription.Headers, StringComparer.Ordinal),
         subscription.Enabled,
         subscription.MaxAttempts,
+        subscription.MaxPerMinute,
         subscription.CreatedAt,
         subscription.UpdatedAt);
 }

@@ -55,6 +55,16 @@ public sealed class EventSubscription
     /// <summary>单条订阅的最大投递尝试次数（超出进死信，默认 5）。</summary>
     public int MaxAttempts { get; set; } = 5;
 
+    /// <summary>
+    /// 单条订阅每分钟最多投递次数；<c>0</c>（默认）= 不限。
+    /// <para>
+    /// <b>超限是推迟，不是失败</b>：被限速挡下的投递只把下次尝试时间往后挪，
+    /// 不消耗 <see cref="MaxAttempts"/> 的额度，也不改投递状态。
+    /// 否则订阅方只是回得慢一点、被限速几次，就会被推进死信。
+    /// </para>
+    /// </summary>
+    public int MaxPerMinute { get; set; }
+
     /// <summary>创建时间（UTC）。</summary>
     public DateTime CreatedAt { get; set; }
 

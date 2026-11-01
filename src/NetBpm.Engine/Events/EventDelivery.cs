@@ -84,6 +84,53 @@ public sealed record EventDeadLetterQuery(
 public sealed record EventDeadLetterPage(IReadOnlyList<EventDelivery> Items, int Total);
 
 /// <summary>
+/// 投递统计的查询条件（管理面 <c>GET /admin/v1/events/stats</c>）。
+/// </summary>
+/// <param name="TenantId">租户过滤；<see langword="null"/> 表示跨租户（仅管理面）。</param>
+/// <param name="SubscriptionId">订阅过滤；为空表示全部订阅。</param>
+/// <param name="SinceUtc">
+/// 只统计这段时间之后<b>创建</b>的投递记录；为空表示全量。
+/// 看板要的是「最近一小时有没有异常」，不是「开天辟地以来的成功率」——后者被历史稀释得没有意义。
+/// </param>
+public sealed record EventDeliveryStatsQuery(
+    string? TenantId = null,
+    string? SubscriptionId = null,
+    DateTime? SinceUtc = null);
+
+/// <summary>
+/// 一个订阅的投递统计。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 计数按「投递记录」而不是「事件」：同一条事件对三个订阅就是三条记录，
+/// 这正是运维要看的粒度（「ERP 那个订阅挂得多，归档那个一直好」）。
+/// </para>
+/// <para>
+/// <see cref="Failed"/> 是<b>还在重试额度内</b>的失败，<see cref="DeadLetter"/> 是已经停投的——
+/// 两个数分开，否则「失败了 20 次」与「有 20 条永不重试」看起来一样。
+/// </para>
+/// </remarks>
+/// <param name="SubscriptionId">订阅 id。</param>
+/// <param name="TenantId">租户。</param>
+/// <param name="Total">投递记录总数。</param>
+/// <param name="Pending">尚未投递成功（没试过 / 退避中）。</param>
+/// <param name="Delivered">已成功。</param>
+/// <param name="Failed">失败但还有重试额度。</param>
+/// <param name="DeadLetter">已进死信。</param>
+/// <param name="LastDeliveredAt">最近一次成功投递时间。</param>
+/// <param name="LastFailureAt">最近一次失败时间（含死信）。</param>
+public sealed record EventDeliveryStats(
+    string SubscriptionId,
+    string TenantId,
+    int Total,
+    int Pending,
+    int Delivered,
+    int Failed,
+    int DeadLetter,
+    DateTimeOffset? LastDeliveredAt,
+    DateTimeOffset? LastFailureAt);
+
+/// <summary>
 /// 投递存储。
 /// </summary>
 public interface IEventDeliveryStore
@@ -116,6 +163,22 @@ public interface IEventDeliveryStore
         int maxAttempts,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// 推迟本次投递：只把下次尝试时间往后挪，<b>不动</b>尝试次数、<b>不改</b>状态、不留失败原因。
+    /// </summary>
+    /// <remarks>
+    /// 存在的理由只有一个：<b>被限速挡下不是失败</b>。若走 <see cref="MarkFailureAsync"/>，
+    /// 订阅方只是回得慢一点、被限速几次，就会把 <c>MaxAttempts</c> 用完推进死信 ——
+    /// 而它一次都没真的失败过。状态保持原样（<see cref="EventDeliveryStatus.Pending"/> 或
+    /// <see cref="EventDeliveryStatus.Failed"/>），语义是「这条还没投成，只是现在轮不到它」。
+    /// </remarks>
+    ValueTask MarkDeferredAsync(
+        string eventId,
+        string subscriptionId,
+        DateTime nextAttemptUtc,
+        DateTime nowUtc,
+        CancellationToken ct = default);
+
     /// <summary>人工重投死信投递（复位尝试次数与状态）。</summary>
     ValueTask<bool> RetryAsync(string eventId, string subscriptionId, DateTime nowUtc, CancellationToken ct = default);
 
@@ -134,6 +197,19 @@ public interface IEventDeliveryStore
     /// <param name="ct">取消令牌。</param>
     ValueTask<EventDeadLetterPage> ListDeadLettersAsync(
         EventDeadLetterQuery query,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 按订阅统计投递结果（看板）。
+    /// </summary>
+    /// <remarks>
+    /// 聚合放在存储层（<c>group by subscription_id</c>）而不是取回全表再算：
+    /// 投递表是按天增长的，全量取回会随运行时间慢慢变成一次事故。
+    /// </remarks>
+    /// <param name="query">查询条件。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<IReadOnlyList<EventDeliveryStats>> GetStatsAsync(
+        EventDeliveryStatsQuery query,
         CancellationToken ct = default);
 }
 
@@ -239,6 +315,24 @@ public sealed class InMemoryEventDeliveryStore : IEventDeliveryStore
     }
 
     /// <inheritdoc />
+    public ValueTask MarkDeferredAsync(
+        string eventId,
+        string subscriptionId,
+        DateTime nextAttemptUtc,
+        DateTime nowUtc,
+        CancellationToken ct = default)
+    {
+        if (_deliveries.TryGetValue(Key(eventId, subscriptionId), out var item))
+        {
+            // 刻意不动 Status / Attempts / LastError：被限速不是失败，也不该把上次真实失败的原因冲掉
+            item.NextAttemptAt = nextAttemptUtc;
+            item.UpdatedAt = nowUtc;
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public ValueTask<bool> RetryAsync(string eventId, string subscriptionId, DateTime nowUtc, CancellationToken ct = default)
     {
         if (!_deliveries.TryGetValue(Key(eventId, subscriptionId), out var item)
@@ -297,4 +391,42 @@ public sealed class InMemoryEventDeliveryStore : IEventDeliveryStore
 
         return ValueTask.FromResult(new EventDeadLetterPage(items, matched.Count));
     }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<EventDeliveryStats>> GetStatsAsync(
+        EventDeliveryStatsQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        IReadOnlyList<EventDeliveryStats> stats =
+        [
+            .. _deliveries.Values
+                .Where(item => query.TenantId is null
+                    || string.Equals(item.TenantId, query.TenantId, StringComparison.Ordinal))
+                .Where(item => query.SubscriptionId is null
+                    || string.Equals(item.SubscriptionId, query.SubscriptionId, StringComparison.Ordinal))
+                .Where(item => query.SinceUtc is not { } since || item.CreatedAt >= since)
+                .GroupBy(item => item.SubscriptionId, StringComparer.Ordinal)
+                .Select(group => new EventDeliveryStats(
+                    group.Key,
+                    group.Select(item => item.TenantId).FirstOrDefault() ?? "default",
+                    group.Count(),
+                    group.Count(item => string.Equals(item.Status, EventDeliveryStatus.Pending, StringComparison.Ordinal)),
+                    group.Count(item => string.Equals(item.Status, EventDeliveryStatus.Delivered, StringComparison.Ordinal)),
+                    group.Count(item => string.Equals(item.Status, EventDeliveryStatus.Failed, StringComparison.Ordinal)),
+                    group.Count(item => string.Equals(item.Status, EventDeliveryStatus.DeadLetter, StringComparison.Ordinal)),
+                    AsOffset(group.Max(item => item.DeliveredAt)),
+                    AsOffset(group
+                        .Where(item => string.Equals(item.Status, EventDeliveryStatus.Failed, StringComparison.Ordinal)
+                            || string.Equals(item.Status, EventDeliveryStatus.DeadLetter, StringComparison.Ordinal))
+                        .Max(item => (DateTime?)item.UpdatedAt))))
+                .OrderBy(item => item.SubscriptionId, StringComparer.Ordinal),
+        ];
+
+        return ValueTask.FromResult(stats);
+    }
+
+    private static DateTimeOffset? AsOffset(DateTime? value) =>
+        value is { } actual ? new DateTimeOffset(DateTime.SpecifyKind(actual, DateTimeKind.Utc)) : null;
 }

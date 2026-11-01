@@ -141,6 +141,30 @@ public sealed class OutboxPublisherService : BackgroundService
         {
             throw;
         }
+        catch (OutboxDeferredException deferred)
+        {
+            // 限速挡下：不是失败，只把下次尝试时间往后挪，尝试次数与死信标记都不动。
+            // 放在通用 catch 之前 —— 顺序反了就会被当成普通失败，5 次退避内直接推进死信。
+            var retryAt = DateTime.UtcNow + deferred.RetryAfter;
+
+            try
+            {
+                await _store.DeferAsync(outboxEvent.Id, retryAt, ct).ConfigureAwait(false);
+            }
+            catch (Exception deferException)
+            {
+                _logger.LogError(deferException, "推迟 outbox 事件 {EventId} 时出错。", outboxEvent.Id);
+            }
+
+            _logger.LogDebug(
+                "outbox 事件 {EventId}（{EventType}）本轮推迟到 {RetryAt:O}：{Reason}",
+                outboxEvent.Id,
+                outboxEvent.EventType,
+                retryAt,
+                deferred.Message);
+
+            return false;
+        }
         catch (Exception exception)
         {
             var nextAttempt = DateTime.UtcNow + OutboxRetry.Backoff(outboxEvent.PublishAttempts + 1);
