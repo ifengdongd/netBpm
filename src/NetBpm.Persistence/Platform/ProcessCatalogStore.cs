@@ -55,9 +55,9 @@ public sealed record ProcessCatalogEntry(
 /// </summary>
 /// <remarks>
 /// <para>
-/// 只读接口：目录的<b>写</b>路径属于管理面（<c>/admin/v1/processes</c>），
-/// 与被鉴权的公共读路径不是同一件事，等管理面落地时再加
-/// <c>UpsertAsync</c>——现在写一个没人调用的写方法只会得到一段未经验证的代码。
+/// 读写都在这里，但写路径只由管理面（<c>/admin/v1/processes</c>）调用：
+/// 公共读路径（<c>/workflow/v1/processes</c>）永远只读，否则一个拿 `workflow:process:read`
+/// 的接入方就能改别人看到的名片。
 /// </para>
 /// <para>
 /// 表不存在时不应让目录整体失败：见 <c>ProcessCatalog</c> 的容错处理。老库可能还没跑补表脚本。
@@ -80,6 +80,25 @@ public interface IProcessCatalogStore
         string tenantId,
         string processKey,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 写入覆盖行（存在则整行替换，不存在则插入）。
+    /// </summary>
+    /// <remarks>
+    /// <b>整行替换</b>而不是逐字段合并：覆盖行的每个字段都独立地表达「覆盖 / 跟随 BPMN」，
+    /// 逐字段合并会让「把某个字段改回跟随 BPMN」这件事无法表达（PATCH 语义的经典空洞）。
+    /// <see cref="ProcessCatalogEntry.CreatedAt"/> 保留首次写入的值，<see cref="ProcessCatalogEntry.UpdatedAt"/>
+    /// 由存储决定。
+    /// </remarks>
+    /// <param name="entry">覆盖行。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<ProcessCatalogEntry> UpsertAsync(ProcessCatalogEntry entry, CancellationToken ct = default);
+
+    /// <summary>删除覆盖行（之后该流程的名片全部回到 BPMN 派生）。不存在返回 <see langword="false"/>。</summary>
+    /// <param name="tenantId">租户。</param>
+    /// <param name="processKey">流程 key。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<bool> DeleteAsync(string tenantId, string processKey, CancellationToken ct = default);
 }
 
 /// <summary>JSON 列的读写口径（键一律 camelCase，与对外契约一致）。</summary>
@@ -115,6 +134,24 @@ public sealed class DapperProcessCatalogStore : IProcessCatalogStore
         "entry_points_json as EntryPointsJson, status as StatusText, sort_order as SortOrder, " +
         "labels_json as LabelsJson, parameter_schema_version as ParameterSchemaVersion, " +
         "created_at as CreatedAt, updated_at as UpdatedAt";
+
+    private const string InsertSql =
+        "insert into nb_process_catalog "
+        + "(tenant_id, process_key, name, category, description, icon, page_urls_json, entry_points_json, "
+        + "status, sort_order, labels_json, parameter_schema_version, created_at, updated_at) "
+        + "values (@TenantId, @ProcessKey, @Name, @Category, @Description, @Icon, @PageUrlsJson, @EntryPointsJson, "
+        + "@Status, @SortOrder, @LabelsJson, @ParameterSchemaVersion, @CreatedAt, @UpdatedAt)";
+
+    // 更新不动 created_at：它是「这条覆盖行第一次出现」的证据，不该被后续编辑改写
+    private const string UpdateSql =
+        "update nb_process_catalog set name = @Name, category = @Category, description = @Description, "
+        + "icon = @Icon, page_urls_json = @PageUrlsJson, entry_points_json = @EntryPointsJson, "
+        + "status = @Status, sort_order = @SortOrder, labels_json = @LabelsJson, "
+        + "parameter_schema_version = @ParameterSchemaVersion, updated_at = @UpdatedAt "
+        + "where tenant_id = @TenantId and process_key = @ProcessKey";
+
+    private const string DeleteSql =
+        "delete from nb_process_catalog where tenant_id = @tenantId and process_key = @processKey";
 
     private readonly IDbConnectionFactory _connections;
 
@@ -171,6 +208,86 @@ public sealed class DapperProcessCatalogStore : IProcessCatalogStore
             .ConfigureAwait(false);
 
         return row is null ? null : ToEntry(row);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<ProcessCatalogEntry> UpsertAsync(
+        ProcessCatalogEntry entry,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entry.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entry.ProcessKey);
+
+        var now = DateTime.UtcNow;
+
+        await using var connection = _connections.CreateConnection();
+        await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        // 先读再写（同一事务内）：created_at 只在首次写入时落，之后保持不变。
+        // 不用「update 影响 0 行就 insert」是因为两个方言的 upsert 语法不一样
+        // （MySQL on duplicate key / SQL Server merge），而这只是一行数据，多一次 select 不值得为它分方言。
+        var createdAt = await connection
+            .ExecuteScalarAsync<DateTime?>(new CommandDefinition(
+                "select created_at from nb_process_catalog where tenant_id = @tenantId and process_key = @processKey",
+                new { tenantId = entry.TenantId, processKey = entry.ProcessKey },
+                transaction,
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var parameters = new
+        {
+            entry.TenantId,
+            entry.ProcessKey,
+            entry.Name,
+            entry.Category,
+            entry.Description,
+            entry.Icon,
+            PageUrlsJson = ProcessCatalogJson.Write(entry.PageUrls),
+            EntryPointsJson = ProcessCatalogJson.Write(entry.EntryPoints),
+            Status = entry.Status is { } status ? ProcessStatusText.ToText(status) : null,
+            entry.SortOrder,
+            LabelsJson = ProcessCatalogJson.Write(entry.Labels),
+            entry.ParameterSchemaVersion,
+            CreatedAt = createdAt ?? now,
+            UpdatedAt = now,
+        };
+
+        var affected = await connection
+            .ExecuteAsync(new CommandDefinition(UpdateSql, parameters, transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        if (affected == 0)
+        {
+            await connection
+                .ExecuteAsync(new CommandDefinition(InsertSql, parameters, transaction, cancellationToken: ct))
+                .ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+        return entry with { CreatedAt = PlatformTimestamps.ToOffset(parameters.CreatedAt), UpdatedAt = PlatformTimestamps.ToOffset(now) };
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> DeleteAsync(
+        string tenantId,
+        string processKey,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+
+        await using var connection = _connections.CreateConnection();
+
+        var affected = await connection
+            .ExecuteAsync(new CommandDefinition(
+                DeleteSql,
+                new { tenantId, processKey },
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        return affected > 0;
     }
 
     private static ProcessCatalogEntry ToEntry(Row row) => new(
@@ -277,6 +394,34 @@ public sealed class InMemoryProcessCatalogStore : IProcessCatalogStore
         ArgumentNullException.ThrowIfNull(entry);
 
         _entries[(entry.TenantId, entry.ProcessKey)] = entry;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<ProcessCatalogEntry> UpsertAsync(ProcessCatalogEntry entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entry.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entry.ProcessKey);
+
+        var key = (entry.TenantId, entry.ProcessKey);
+        var now = DateTimeOffset.UtcNow;
+
+        // 与 Dapper 版同口径：created_at 只在首次写入时定，updated_at 每次刷新
+        var createdAt = _entries.TryGetValue(key, out var existing) ? existing.CreatedAt : now;
+        var stored = entry with { CreatedAt = createdAt, UpdatedAt = now };
+
+        _entries[key] = stored;
+
+        return ValueTask.FromResult(stored);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DeleteAsync(string tenantId, string processKey, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+
+        return ValueTask.FromResult(_entries.TryRemove((tenantId, processKey), out _));
     }
 }
 

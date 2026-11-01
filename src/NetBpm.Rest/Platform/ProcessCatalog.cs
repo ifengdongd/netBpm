@@ -131,7 +131,7 @@ public interface IProcessCatalog
 }
 
 /// <inheritdoc />
-public sealed class ProcessCatalog : IProcessCatalog
+public sealed partial class ProcessCatalog : IProcessCatalog, IProcessCatalogAdmin
 {
     private const int DefaultLimit = 20;
     private const int MaxLimit = 100;

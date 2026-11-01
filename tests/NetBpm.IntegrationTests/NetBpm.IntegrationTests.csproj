@@ -11,6 +11,8 @@
     <ProjectReference Include="..\..\src\NetBpm.Persistence\NetBpm.Persistence.csproj" />
     <ProjectReference Include="..\..\src\NetBpm.Rest\NetBpm.Rest.csproj" />
     <ProjectReference Include="..\..\src\NetBpm.Runtime\NetBpm.Runtime.csproj" />
+    <!-- M15：用官方 SDK 打真实宿主（等价于「接入方按 SDK 写的代码」） -->
+    <ProjectReference Include="..\..\src\NetBpm.Platform.Client\NetBpm.Platform.Client.csproj" />
     <!-- 管理端宿主有独立的 Program，用别名避免与 Rest 宿主冲突 -->
     <ProjectReference Include="..\..\src\NetBpm.Admin\NetBpm.Admin.csproj">
       <Aliases>AdminHost</Aliases>

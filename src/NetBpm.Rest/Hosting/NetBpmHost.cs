@@ -318,6 +318,9 @@ public static class NetBpmHost
         // 平台接入管理（租户 / 客户端）：两个宿主都要有，否则「在哪发密钥」取决于部署形态
         app.MapClientAdminEndpoints();
 
+        // 管理面：流程目录覆盖行（精修名片）。与业务面的只读目录分开鉴权与错误体
+        app.MapAdminProcessCatalogEndpoints();
+
         // 事件订阅管理（M13）：与客户端注册同属接入配置，放同一组路径与鉴权口径下
         app.MapEventSubscriptionEndpoints();
 

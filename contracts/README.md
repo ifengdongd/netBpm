@@ -5,8 +5,10 @@
 
 ```
 contracts/
-└── openapi/
-    └── workflow-v1.json     # /workflow/v1 业务面的 OpenAPI 3.x 快照
+├── openapi/
+│   └── workflow-v1.json     # /workflow/v1 业务面的 OpenAPI 3.x 快照（当前实现）
+└── baseline/
+    └── workflow-v1.json     # 上一个发版承诺过的同一份快照（CompatibilityTests 拿它打当前服务）
 ```
 
 ## 一、为什么要有一份快照
@@ -26,8 +28,13 @@ contracts/
 | 收 | 不收 |
 |---|---|
 | `/workflow/v1/**`（业务面，22 条路径） | `/api/**`（引擎原语直通面，标了 experimental，随引擎演进） |
-| `components.schemas`（被业务面引用的模型） | `/admin/v1/**`（过渡形态，写路径尚未定型） |
+| `components.schemas`（被业务面引用的模型） | `/admin/v1/**`（管理面刚落地写路径，等形状稳定后再纳入） |
 | `security` / `info`（固定 `title` + `version: v1`） | 程序集版本号、`servers`（每次构建都变，属于噪声） |
+
+`components.schemas` 目前**整份**收进快照（120 个），其中包括 `/api/**` 与管理面的模型。
+这是有意的取舍：按可达性收窄能得到更小的快照，但会给 `ContractSnapshotTests` 再养一份
+「schema 闭包」算法，与 SDK 生成器里的那份重复。**新增组件不算破坏**（见 §四），
+所以新端点的模型会先缺席、下次刷新快照时一起进来——缺席不影响任何调用方。
 
 归一化规则写在 `ContractSnapshotTests.Normalize`：只留治理前缀的路径，
 所有对象**递归按键名排序**（数组保持原序，因为 `parameters` 的顺序有语义），
@@ -87,12 +94,38 @@ NETBPM_UPDATE_CONTRACTS=1 dotnet run --project tests/NetBpm.IntegrationTests \
 |---|---|
 | `ContractSnapshotTests.Contract_ShouldMatchCommittedSnapshot` | 快照与实现的一致性；差异按严重程度分类输出 |
 | `ContractSnapshotTests.Snapshot_ShouldCoverBusinessSurface` | 快照必须真的守着东西：业务面 ≥ 20 条路径、每条都在快照里、且不含 `/api/**`（防止过滤逻辑放宽后快照悄悄「空心化」） |
-| `.github/workflows/ci.yml` 的 `contract-governance` job | 上面两项在每次 push / PR 上跑；单独成 job，红了能一眼看出是「契约」而不是「编译」 |
+| `CompatibilityTests.Baseline_ShouldStillBeServed` | 基线里的每条路径/方法仍在（**运行时**验证，不看声明） |
+| `CompatibilityTests.Responses_ShouldStillMatchBaselineSchema` | 真实响应体仍符合基线 schema（19 项 probe，覆盖目录/发起/实例/待办/提交/表单/参数/终止） |
+| `SdkGenerationTests.Products_ShouldMatchSnapshot` | `sdk/` 下的 TS/Java 产物等于「用当前快照重新生成一遍」 |
+| `.github/workflows/ci.yml` 的 `contract-governance` job | 以上四项在每次 push / PR 上跑；单独成 job，红了能一眼看出是「契约」而不是「编译」 |
 | `ContractDiff.cs` | 差异的严重程度判定（纯函数，可单测） |
 
-## 六、与后续工作的关系
+## 六、基线（`baseline/`）怎么维护
 
-- **M15 官方 SDK** 依赖这份快照：SDK 的模型代码从这里生成，
-  兼容性才有唯一依据（否则「上一版 SDK 打新服务」这条验收没有判据）。
-- `CompatibilityTests`（§9 契约层，尚未落地）会拿**上一版生成的 SDK** 打**当前服务**，
-  它是这份快照的运行时补充：快照管「声明变了没」，它管「声明没变但行为变了没」。
+快照（`openapi/`）回答「现在承诺什么」，基线（`baseline/`）回答「上一个发版承诺了什么」。
+两者平时**内容相同**，差别只在更新的时机：
+
+```bash
+# 发版时：把当时已评审通过的快照复制成新的基线
+cp contracts/openapi/workflow-v1.json contracts/baseline/workflow-v1.json
+```
+
+规则只有两条：
+
+1. **只在发版时更新基线**。基线一改，「上一版 SDK 打当前服务」这条判据就自动变弱——
+   把基线和快照一起刷新，测试永远绿，等于没测。
+2. **禁止为了让 `CompatibilityTests` 变绿而改基线**。它红了通常意味着真有一处不兼容，
+   先看是哪个 probe 失败、响应体差在哪，再决定「修实现」还是「按 §四 走 v2」。
+
+为什么需要两份额外的文档：快照是**静态**比对（声明变了没），基线是**动态**比对
+（声明没变、但行为变了没）。后者能抓到前者注定抓不到的东西——
+例如字段类型没变、但历史单据上的那个字段开始返回 `null`。
+
+## 七、与后续工作的关系
+
+- **M15 官方 SDK** 依赖这份快照：`sdk/typescript` 与 `sdk/java` 的模型全部由
+  `tools/NetBpm.SdkGen` 从这里生成（`SdkGenerationTests` 守一致性）。.NET SDK
+  （`src/NetBpm.Platform.Client`）不生成而是引用 `NetBpm.Platform.Contracts`——
+  那正是产出这份快照的同一份类型定义，再生成一遍就成两份真源了。
+- `CompatibilityTests` 已落地（§五）：它拿**上一版基线**打**当前服务**，
+  与快照互补——快照管「声明变了没」，它管「声明没变但行为变了没」。

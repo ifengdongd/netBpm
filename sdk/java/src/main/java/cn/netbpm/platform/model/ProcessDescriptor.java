@@ -1,0 +1,32 @@
+package cn.netbpm.platform.model;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * {@code ProcessDescriptor}。
+ *
+ * <p>本文件由 {@code tools/NetBpm.SdkGen} 从 {@code contracts/openapi/workflow-v1.json}（OpenAPI 3.1.1）
+ * 生成，请勿手改。重新生成：{@code dotnet run --project tools/NetBpm.SdkGen}</p>
+ */
+// 未知字段直接忽略：/workflow/v1 只增字段，忽略未知字段是契约对客户端的要求。
+@JsonIgnoreProperties(ignoreUnknown = true)
+public record ProcessDescriptor(
+        Boolean canStart,
+        ProcessCapabilities capabilities,
+        String category,
+        String definitionChecksum,
+        Integer deployedVersion,
+        String description,
+        List<ProcessEntryPoint> entryPoints,
+        String icon,
+        Map<String, String> labels,
+        String name,
+        Map<String, String> pageUrls,
+        Integer parameterSchemaVersion,
+        String processKey,
+        ProcessStatus status
+) {
+}

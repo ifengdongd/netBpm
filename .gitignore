@@ -38,6 +38,10 @@ samples/NetBpm.Demo/wwwroot/diagrams/
 .playwright-cli/
 .tools/
 
+# 生成的 SDK 的本地构建产物（产物本身入库，构建输出不入库）
+sdk/java/target/
+sdk/typescript/dist/
+
 # Local credentials (never commit)
 # Gitee 私人令牌，供 credential.helper=store 读取：git config --local credential.helper "store --file .gittoken"
 .gittoken

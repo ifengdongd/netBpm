@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NetBpm.SdkGen</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    生成器只读 contracts/openapi/workflow-v1.json（已提交的快照），因此不引用任何 NetBpm 程序集：
+    它必须能被「只有快照、没有编译器内部类型」的环境跑起来，否则生成的 SDK 就不是快照的函数了。
+  -->
+
+</Project>

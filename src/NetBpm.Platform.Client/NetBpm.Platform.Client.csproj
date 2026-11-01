@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.Platform.Client</RootNamespace>
+    <AssemblyName>NetBpm.Platform.Client</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <Description>NetBpm 平台官方 .NET 客户端：/workflow/v1 与 /admin/v1 的类型化封装（模型直接复用 NetBpm.Platform.Contracts）</Description>
+  </PropertyGroup>
+
+  <!--
+    M15：官方 SDK 的 .NET 部分【不生成代码】，直接引用契约工程。
+    理由：契约工程已经在同一个仓库、同一个构建里，生成的 DTO 只会得到一份会和真源分叉的副本；
+    需要生成的是仓库外的语言（TS / Java），它们没法引用程序集，见 tools/NetBpm.SdkGen。
+
+    刻意只依赖契约工程：SDK 一旦引用 Runtime / Rest，接入方就会被迫拉进整个引擎依赖树，
+    「一个 HTTP 客户端」变成「半套服务端」。§2.2 的依赖铁律同样适用于它。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\NetBpm.Platform.Contracts\NetBpm.Platform.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

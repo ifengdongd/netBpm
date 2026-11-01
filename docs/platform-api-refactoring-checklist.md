@@ -1,12 +1,38 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-11-01 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.23 小节
+> 导出时间：2026-11-01 ｜ 代码基线：`cc829d1`（v1.23）→ 本轮 v1.24（已推送 `origin/main`）｜ 最新进度见开头 v1.24 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.24 本轮落地（2026-11-01，M15 官方 SDK + CompatibilityTests + `/admin/v1` 写路径）
+
+**S5 治理与 SDK 收口**：本轮把 §3 ⑤ 剩下的三件事一起做完——SDK、兼容性用例、管理面写路径。
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **.NET SDK** | `src/NetBpm.Platform.Client`：一层 `PlatformTransport`（拼 URL / 挂身份头 / 非 2xx → `NetBpmApiException` / 2xx 空体与坏 JSON 也转异常）+ 四个资源客户端（`instances` / `processes` / `tasks` / `admin.processes`），覆盖 23 个业务操作 + 4 个覆盖行操作；三个列表提供 `EnumerateAsync` 自动跟游标 | `NetBpm.UnitTests.PlatformClientTests` 10 项（假 handler：查询串词汇 / 身份头 / 令牌每请求刷新 / Problem→异常 / 非 RFC 9457 保留原文 / 游标分页 / 路径转义） |
+| **端到端闭环** | `PlatformClientEndToEndTests` 3 项：目录→参数→表单→SVG→发起（**幂等重放不重复开单**）→参数与修订→待办→提交→附件→时间线→终止 | 真 MySQL + 内存宿主 |
+| **SDK 生成器** | `tools/NetBpm.SdkGen`：读 `contracts/openapi/workflow-v1.json`，从 23 个被治理操作算**可达 schema 闭包**（120 → 49），生成 `sdk/typescript`（`models.ts` + `client.ts` + 工程骨架）与 `sdk/java`（49 个 record / enum + `pom.xml`）；产物入库 | `SdkGenerationTests` 5 项：产物与重新生成一致 / 23 个操作全覆盖且方法名来自命名表 / 闭包只含可达类型 / 生成可重复 / Java 侧全覆盖；本地另有 `tsc --noEmit` 与 `mvn compile` 验证语法 |
+| **兼容性基线** | `contracts/baseline/workflow-v1.json`（发版时从快照复制）+ `CompatibilityTests` 2 项：基线每条路径/方法仍在（运行时探测）、19 项 probe 的真实响应仍符合基线 schema | 内存宿主，无需数据库；已进 CI |
+| **`/admin/v1` 写路径** | `IProcessCatalogAdmin`（与只读 `IProcessCatalog` 同一 `ProcessCatalog` 实例，只多出写接口）+ 四个端点 `GET/PUT/DELETE /admin/v1/processes[/{key}]`。**PUT 是整行替换**（`null` = 回到 BPMN 派生），空覆盖 422 `catalog.override_empty`，key 打错 404 `process.not_found`、没精修过 404 `catalog.override_not_found`；每次写入进管理审计，明细只记**改了哪些字段**（不记值：业务页面地址可能带内部域名） | `AdminProcessCatalogTests` 6 项（含「第二次 PUT 只给 category → name 回 null」的整行替换语义、审计明细、scope 403） |
+
+**为什么 PUT 是整行替换而不是逐字段合并：** 管理端要表达的是「这条流程的名片就长这样」。
+逐字段合并表达不出「把 `sortOrder` 改回 0」与「没给 `sortOrder`」的区别，也表达不出
+「把业务页面地址清空」——于是「清空」只能靠传空字符串，而那又和「没配」混成一个值。
+整行替换 + `null` 表示「跟随 BPMN 派生」，再用 `DELETE` 表达「整条不要了」，
+语义没有重叠；代价是调用方要传全量，但这本来就是管理端一个表单提交的事。
+
+**顺带修掉一个真 bug：`Idempotency-Key` 在平台面一直被忽略。** 幂等中间件原先只挂 `/api`，
+`/workflow/v1` 带 `Idempotency-Key` 会静默失效——端到端用例里表现为「同键重放真的多开了一张单」。
+中间件现在覆盖 `/api` + `/workflow/v1` + `/admin/v1`，平台面错误体改回 RFC 9457，
+并新增 `idempotency.in_flight`（与 `idempotency.key_reused` 分开：前者「稍后用同键重试」，
+后者「这个键属于别的请求」）。
 
 ---
 
@@ -335,19 +361,20 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 
 | 维度 | 总数 | 已落地 | 未完成 |
 |---|---|---|---|
-| 阶段（S1–S5） | 5 | 2 完成 + 1 基本完成 | 2 |
-| 改造项（M1–M16） | 16 | 8 完成 + 5 部分 | 3 |
-| 守门测试用例 | 30 | 29 | 1 |
+| 阶段（S1–S5） | 5 | 4 完成 + 1 基本完成 | 1 |
+| 改造项（M1–M16） | 16 | 10 完成 + 5 部分 | 1 |
+| 守门测试用例 | 30 | 30 | 0 |
 | 业务面端点（`/workflow/v1`） | 23（另有 1 条已划掉） | 23 | 0 |
 | 平台表（`nb_*`） | 13 | 11 | 2 |
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
 S4（独立部署）**已完成**：门槛项 M12 外部任务 v1.17、M12 收尾与 M13 事件投递 v1.18、
-`Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 v1.19；S5（治理/SDK）未动。
+`Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 v1.19；
+S5（治理 / SDK）**v1.24 完成**：M14 契约治理（v1.23）+ M15 SDK + `CompatibilityTests`。
 八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）、
 G（委托进程内）、H（契约治理）已闭环**（H 于 v1.23：OpenAPI 快照 + 分类 diff + CI 守门 + 治理文档）；
-C（响应强类型）只差 M3 的 Decorator 收尾。
+C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口）。
 
 ---
 
@@ -359,13 +386,13 @@ C（响应强类型）只差 M3 的 Decorator 收尾。
 | S2 身份与授权 | 4 周 | 🟢 完成（缺出口用例） | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
 | S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
 | S4 独立部署 | 4 周 | 🟢 **完成** | M12 外部任务（v1.17）+ 死信重投与告警 + M13 事件投递（v1.18）+ `Platform.Service` 宿主、容器化与端到端演示（v1.19）。含 `serviceTask` 的 BPMN 在独立部署下已实跑通过：worker 作为独立进程拉走任务并推流程，失败则停在原地不动 |
-| S5 治理与 SDK | 3 周 | 🟡 进行中 | M14 契约治理 ✅ v1.23（快照 + 分类 diff + CI + 口径文档）；剩 **M15 SDK** 与 `CompatibilityTests` |
+| S5 治理与 SDK | 3 周 | ✅ 完成 | M14 契约治理 ✅ v1.23；**M15 SDK ✅ v1.24**（.NET 手写客户端 + 从快照生成 TS/Java）+ **`CompatibilityTests` ✅ v1.24**（基线打当前服务） |
 
 - [x] S1 契约与骨架
 - [ ] S2 身份与授权（剩余见 §3 第 ② 组；RS256 已闭环）
 - [x] S3 业务标准
 - [x] S4 独立部署
-- [ ] S5 治理与 SDK（M14 已完成，剩 M15）
+- [x] S5 治理与 SDK（M14 v1.23 + M15 v1.24 + `CompatibilityTests` v1.24）
 
 ---
 
@@ -401,7 +428,8 @@ C（响应强类型）只差 M3 的 Decorator 收尾。
 - [x] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理。✅ **v1.18 已落地**
   （`CloudEvent` + HMAC 签名、`CloudEventOutboxHandler`、`nb_event_subscription` / `nb_event_delivery`、订阅管理端点）；剩余：看板与单订阅限速，见开头 v1.18 小节
 - [x] **M14 契约治理**（6 人日）—— OpenAPI 快照 + CI diff。**S5 的前置**。✅ v1.23：`contracts/openapi/workflow-v1.json`（22 路径 / 23 操作）+ `OpenApiContractDiff` 破坏性/兼容分类 + CI `contract-governance` job + `contracts/README.md` 治理口径
-- [ ] **M15 官方 SDK**（10 人日）—— `NetBpm.Platform.Client`（.NET）+ 生成 Java/TS
+- [x] **M15 官方 SDK**（10 人日）—— ✅ v1.24：`src/NetBpm.Platform.Client`（.NET，23 个业务操作 + 4 个覆盖行操作，错误统一成 `NetBpmApiException`）
+  + `tools/NetBpm.SdkGen` 从快照生成 `sdk/typescript` 与 `sdk/java`（可达闭包 120 → 49 个类型），`SdkGenerationTests` 守一致性
 - [x] **M16 客户端注册与隔离**（10 人日）—— `nb_api_client` + `IClientRegistry` + 认证中间件改造、密钥轮换、流程白名单、按 client 配额（v1.3 / v1.4）
 
 ---
@@ -434,7 +462,7 @@ C（响应强类型）只差 M3 的 Decorator 收尾。
 - [x] `GET /instances/{id}/diagram.svg`（高亮流转状态图）✅ v1.22（`IInstanceDiagram`，`InstanceDiagramReadTests` 3 项含真库）
 - [x] `GET /instances/{id}/parameters`（参数快照）✅ v1.22（声明 + 值合并，`InstanceParameterReadTests` 2 项）
 - [x] `GET /processes/{key}/form/schema` ✅ v1.22（`FormSchemaBuilder` 抽出共用，`ProcessFormSchemaReadTests` 2 项）
-- [ ] `/admin/v1/processes` 写路径（`IProcessCatalogStore` 目前无写方法）
+- [x] `/admin/v1/processes` 写路径 ✅ v1.24（`IProcessCatalogAdmin` + 整行替换 PUT / DELETE，`AdminProcessCatalogTests` 6 项）
 
 ### ④ S4 独立部署（最大一块）
 
@@ -448,7 +476,7 @@ C（响应强类型）只差 M3 的 Decorator 收尾。
 ### ⑤ S5 治理与 SDK
 
 - [x] M14 契约治理：OpenAPI 快照 + CI diff ✅ v1.23（`contracts/` 目录 + `contract-governance` job + 治理文档）
-- [ ] M15 官方 SDK：.NET 优先，再生成 TS / Java
+- [x] M15 官方 SDK ✅ v1.24（.NET `Platform.Client` + `tools/NetBpm.SdkGen` → `sdk/typescript`、`sdk/java`）
 - [ ] M3 收尾：Decorator 迁移 / 删除，`WorkflowEndpointOptions` 标 `[Obsolete]`
 - [ ] 配额与限流看板、审计、SLO、迁移与接入文档（Runbook）
 
@@ -483,7 +511,9 @@ C（响应强类型）只差 M3 的 Decorator 收尾。
 | GET | `/tasks/{id}/attachments` | `workflow:task:read` | [x] v1.22 |
 | ~~GET~~ | ~~/history/tasks~~ | — | [x] v1.12 起**收敛到 `/tasks?scope=DONE`**，不单开历史端点 |
 
-管理面 `/admin/v1`：租户 / 客户端 / 轮换 / 注销已落（v1.3 过渡形态）；`/processes`、`/dictionaries`、`/audit`、`/subscriptions`、`/events/deadletters`、`/quotas` 未落。
+管理面 `/admin/v1`：租户 / 客户端 / 轮换 / 注销已落（v1.3 过渡形态，仍在 `/api/admin`）；
+`/admin/v1/processes` 覆盖行读写 ✅ v1.24（scope `workflow:admin:process`、RFC 9457 错误体、写操作进管理审计）；
+`/dictionaries`、`/audit`、`/subscriptions`、`/events/deadletters`、`/quotas` 未落。
 
 ---
 
@@ -510,7 +540,8 @@ C（响应强类型）只差 M3 的 Decorator 收尾。
 **契约层**
 - [x] `ContractSnapshotTests` ✅ v1.23 —— 提交的 `contracts/openapi/workflow-v1.json` 与代码生成结果一致（归一化后比对，差异按破坏性 / 兼容分类；另有用例防快照「空心化」）
 - [x] `ContractSerializationTests` ✅（`PlatformContractTests`）
-- [ ] `CompatibilityTests` —— 上一版 SDK 打新服务全部端点通过
+- [x] `CompatibilityTests` ✅ v1.24 —— 拿 `contracts/baseline/`（上一版承诺）打当前服务：每条路径/方法仍在（运行时探测）+ 19 项 probe 的响应结构仍符合基线 schema。与快照互补：快照管「声明变了没」，它管「声明没变但行为变了没」
+- [x] `SdkGenerationTests` ✅ v1.24 —— `sdk/` 产物等于「用当前快照重新生成一遍」（纯度足够，可以逐字节比对）
 
 **语义层**
 - [ ] `DecisionVocabularyTests` —— 部分被 `TaskSubmitTests` 覆盖；**会签聚合 `ALL_APPROVED` 未测**
@@ -615,9 +646,12 @@ C（响应强类型）只差 M3 的 Decorator 收尾。
    至此 `/workflow/v1` 的 22 个端点上表全绿，**业务面没有未落地项**。
 6. ~~M11 的两张表~~ / ~~M14 契约治理~~ —— **均已在 v1.23 完成**：参数规范按定义版本物化 + 参数修订历史，
    契约快照 + 分类 diff + CI 守门 + 治理文档。
-7. 剩下的只有：**M15 官方 SDK**（前置的 M14 已就绪，SDK 模型可直接从快照生成）、
-   `CompatibilityTests`（拿上一版 SDK 打当前服务）、`/admin/v1` 的管理面写路径
-   （`IProcessCatalogStore` 目前无写方法）、以及 M3 / M9 的收尾项。
+7. ~~M15 官方 SDK / `CompatibilityTests` / `/admin/v1` 写路径~~ —— **均已在 v1.24 完成**。
+   至此 S1–S5 五个阶段全部收口，`/workflow/v1` 与 `/admin/v1` 都不再有「说好要做但没做」的端点。
+8. 剩下的只有收尾项，没有新能力：**M3 的 Decorator 迁移 / 删除**（`Decorate*` 迁到 `/admin/v1` 或删掉，
+   `WorkflowEndpointOptions` 标 `[Obsolete]`）、`/admin/v1` 余下五个只读面
+   （`dictionaries` / `audit` / `subscriptions` / `events/deadletters` / `quotas`）、
+   以及 S2 的三条出口用例（幂等重放、纯服务 submit 403、密钥轮换期双活）。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
 > 引擎原语面对客户端只留读与管理干预，**且管理干预在实例时间线上留痕**。S4/S5 可以整体后移。

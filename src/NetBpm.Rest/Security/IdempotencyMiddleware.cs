@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using NetBpm.Persistence.Idempotency;
+using NetBpm.Platform.Contracts;
 
 namespace NetBpm.Rest.Security;
 
@@ -10,6 +12,11 @@ namespace NetBpm.Rest.Security;
 /// 只对改变状态的请求生效（POST / PUT / PATCH / DELETE），且仅在显式提供幂等键时介入，
 /// 因此对既有调用方零影响。存储由 <see cref="IIdempotencyStore"/> 决定：
 /// 单进程用内存，数据库宿主用 <c>ACT_IDEMPOTENCY</c>（跨实例）。
+/// </para>
+/// <para>
+/// 覆盖范围是<b>所有写入口</b>：<c>/api/**</c>（引擎原语面）、<c>/workflow/v1</c>（业务面）、
+/// <c>/admin/v1</c>（管理面）。业务面的发起 / 提交尤其依赖它——
+/// 「网络超时了，到底开没开单」这个问题只能靠同键重试回答。
 /// </para>
 /// <para>
 /// 语义：
@@ -38,6 +45,9 @@ public sealed class IdempotencyMiddleware
     private const int MaxStorageKeyLength = 120;
 
     private const int MaxCachedResponseBytes = 1024 * 1024;
+
+    /// <summary>问题体的序列化口径（camelCase，与端点里 <c>Results.Json</c> 一致）。</summary>
+    private static readonly JsonSerializerOptions ProblemJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan Retention = TimeSpan.FromHours(24);
 
     private readonly RequestDelegate _next;
@@ -70,7 +80,11 @@ public sealed class IdempotencyMiddleware
 
         if (key.Length > MaxKeyLength)
         {
-            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, $"Idempotency-Key 最长 {MaxKeyLength} 个字符。")
+            await WriteErrorAsync(
+                context,
+                StatusCodes.Status400BadRequest,
+                $"Idempotency-Key 最长 {MaxKeyLength} 个字符。",
+                ErrorCodes.RequestMalformed)
                 .ConfigureAwait(false);
 
             return;
@@ -118,7 +132,11 @@ public sealed class IdempotencyMiddleware
                 return;
             }
 
-            await WriteErrorAsync(context, StatusCodes.Status409Conflict, "幂等键正在处理中，请稍后重试。")
+            await WriteErrorAsync(
+                context,
+                StatusCodes.Status409Conflict,
+                "幂等键正在处理中，请稍后重试。",
+                ErrorCodes.IdempotencyInFlight)
                 .ConfigureAwait(false);
 
             return;
@@ -203,7 +221,8 @@ public sealed class IdempotencyMiddleware
             await WriteErrorAsync(
                 context,
                 StatusCodes.Status409Conflict,
-                "该 Idempotency-Key 已用于另一个请求（方法 / 路径 / 请求体不同）。");
+                "该 Idempotency-Key 已用于另一个请求（方法 / 路径 / 请求体不同）。",
+                ErrorCodes.IdempotencyKeyReused);
 
             return;
         }
@@ -213,7 +232,8 @@ public sealed class IdempotencyMiddleware
             await WriteErrorAsync(
                 context,
                 StatusCodes.Status409Conflict,
-                "相同 Idempotency-Key 的请求正在处理中，请稍后重试。");
+                "相同 Idempotency-Key 的请求正在处理中，请稍后重试。",
+                ErrorCodes.IdempotencyInFlight);
 
             return;
         }
@@ -284,9 +304,39 @@ public sealed class IdempotencyMiddleware
         return $"{ns[..MaxNamespaceLength]}~{digest}";
     }
 
-    private static async Task WriteErrorAsync(HttpContext context, int statusCode, string message)
+    /// <summary>
+    /// 错误体形状按<b>路径</b>选：平台面必须回 RFC 9457，否则 SDK 解析不出错误码，
+    /// 调用方只能看到「409 加一段 JSON」。
+    /// </summary>
+    private static async Task WriteErrorAsync(
+        HttpContext context,
+        int statusCode,
+        string message,
+        string platformCode)
     {
         context.Response.StatusCode = statusCode;
+
+        if (IsPlatformSurface(context.Request.Path))
+        {
+            context.Response.ContentType = "application/problem+json";
+
+            var problem = PlatformProblem.Create(
+                platformCode,
+                statusCode == StatusCodes.Status409Conflict ? "幂等键冲突" : "请求不合法",
+                statusCode,
+                message) with
+            {
+                Instance = context.Request.Path.Value,
+                TraceId = context.TraceIdentifier,
+            };
+
+            await context.Response
+                .WriteAsJsonAsync(problem, ProblemJsonOptions, context.RequestAborted)
+                .ConfigureAwait(false);
+
+            return;
+        }
+
         context.Response.ContentType = "application/json; charset=utf-8";
 
         await context.Response
@@ -297,12 +347,18 @@ public sealed class IdempotencyMiddleware
     }
 
     private static bool ShouldHandle(HttpRequest request) =>
-        request.Path.StartsWithSegments("/api")
+        IsPlatformSurface(request.Path)
         && !string.IsNullOrWhiteSpace(request.Headers[HeaderName].ToString())
         && (HttpMethods.IsPost(request.Method)
             || HttpMethods.IsPut(request.Method)
             || HttpMethods.IsPatch(request.Method)
             || HttpMethods.IsDelete(request.Method));
+
+    /// <summary>是否属于「写入口」：引擎原语面 + 平台业务面 + 平台管理面。</summary>
+    private static bool IsPlatformSurface(PathString path) =>
+        path.StartsWithSegments("/api")
+        || path.StartsWithSegments("/workflow/v1")
+        || path.StartsWithSegments("/admin/v1");
 
     private static async Task<string> ComputeRequestHashAsync(
         HttpRequest request,

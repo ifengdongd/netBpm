@@ -1,0 +1,6408 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "NetBpm Platform API",
+    "version": "v1"
+  },
+  "paths": {
+    "/workflow/v1/instances": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "processKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "businessKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startedBy",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "involvedUser",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startedFrom",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startedTo",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CursorPageOfInstanceSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartInstanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartInstanceResult"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      }
+    },
+    "/workflow/v1/instances/{instanceId}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      }
+    },
+    "/workflow/v1/instances/{instanceId}/diagram.svg": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      }
+    },
+    "/workflow/v1/instances/{instanceId}/history": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "afterSequence",
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      }
+    },
+    "/workflow/v1/instances/{instanceId}/parameters": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceParameterView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      }
+    },
+    "/workflow/v1/instances/{instanceId}/parameters/history": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ParameterSnapshot"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      }
+    },
+    "/workflow/v1/instances/{instanceId}/terminate": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instanceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminateInstanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "tags": [
+          "workflow-instances"
+        ]
+      }
+    },
+    "/workflow/v1/processes": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CursorPageOfProcessDescriptor"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "tags": [
+          "workflow-catalog"
+        ]
+      }
+    },
+    "/workflow/v1/processes/{processKey}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "processKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessDescriptor"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-catalog"
+        ]
+      }
+    },
+    "/workflow/v1/processes/{processKey}/definition": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "processKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "includeXml",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessDefinitionInfo"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-catalog"
+        ]
+      }
+    },
+    "/workflow/v1/processes/{processKey}/diagram.svg": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "processKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-catalog"
+        ]
+      }
+    },
+    "/workflow/v1/processes/{processKey}/form/schema": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "processKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessFormSchema"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-catalog"
+        ]
+      }
+    },
+    "/workflow/v1/processes/{processKey}/parameters/schema": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "processKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParameterSchema"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-catalog"
+        ]
+      }
+    },
+    "/workflow/v1/processes/{processKey}/versions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "processKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProcessVersionInfo"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-catalog"
+        ]
+      }
+    },
+    "/workflow/v1/tasks": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "processKey",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "activityId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overdueOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CursorPageOfTaskSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    },
+    "/workflow/v1/tasks/{taskId}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    },
+    "/workflow/v1/tasks/{taskId}/attachments": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AttachmentRef"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    },
+    "/workflow/v1/tasks/{taskId}/claim": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ClaimTaskRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    },
+    "/workflow/v1/tasks/{taskId}/form": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormSnapshot"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    },
+    "/workflow/v1/tasks/{taskId}/submit": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitTaskResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    },
+    "/workflow/v1/tasks/{taskId}/transfer": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    },
+    "/workflow/v1/tasks/{taskId}/unclaim": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "tags": [
+          "workflow-tasks"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApprovalOption": {
+        "properties": {
+          "allowedTargetNodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "commentPrompt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "outcomeClass": {
+            "$ref": "#/components/schemas/ApprovalOutcomeClass"
+          },
+          "requiresComment": {
+            "type": "boolean"
+          },
+          "requiresTargetNode": {
+            "type": "boolean"
+          },
+          "semantic": {
+            "$ref": "#/components/schemas/ApprovalSemantic"
+          }
+        },
+        "required": [
+          "optionId",
+          "label",
+          "semantic",
+          "outcomeClass",
+          "requiresComment",
+          "requiresTargetNode",
+          "allowedTargetNodes",
+          "commentPrompt",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "ApprovalOutcomeClass": {
+        "enum": [
+          "POSITIVE",
+          "NEGATIVE",
+          "NEUTRAL"
+        ]
+      },
+      "ApprovalSemantic": {
+        "enum": [
+          "APPROVE",
+          "REJECT",
+          "RETURN",
+          "DELEGATE",
+          "CUSTOM",
+          "CLOSED"
+        ]
+      },
+      "AttachmentRef": {
+        "properties": {
+          "contentType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "size": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "type": "object"
+      },
+      "BatchCompleteTasksRequest": {
+        "properties": {
+          "taskIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "variables": {
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "BatchDeleteInstancesRequest": {
+        "properties": {
+          "deleteReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processInstanceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "BatchInstanceSuspensionRequest": {
+        "properties": {
+          "processInstanceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "BatchItemResult": {
+        "properties": {
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "success",
+          "error"
+        ],
+        "type": "object"
+      },
+      "BatchMigrateInstancesRequest": {
+        "properties": {
+          "activityMappings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "processInstanceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetProcessDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "BatchResultResponse": {
+        "properties": {
+          "failed": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchItemResult"
+            },
+            "type": "array"
+          },
+          "succeeded": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "total": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "items"
+        ],
+        "type": "object"
+      },
+      "BatchTaskAssigneeRequest": {
+        "properties": {
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "taskIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "BatchTaskDueDateRequest": {
+        "properties": {
+          "clearDueDate": {
+            "default": false,
+            "type": "boolean"
+          },
+          "dueDate": {},
+          "taskIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "CancelActivityRequest": {
+        "properties": {
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ClaimTaskRequest": {
+        "properties": {
+          "expectedRevision": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "unclaim": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "userId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ClientDescriptor": {
+        "properties": {
+          "allowedProcessKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "isUsable": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quotaPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secretExpiresAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ClientStatus"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientId",
+          "name",
+          "tenantId",
+          "status",
+          "scopes",
+          "allowedProcessKeys",
+          "quotaPerMinute",
+          "createdAt",
+          "secretExpiresAt"
+        ],
+        "type": "object"
+      },
+      "ClientStatus": {
+        "enum": [
+          "PENDING",
+          "ACTIVE",
+          "SUSPENDED",
+          "REVOKED"
+        ]
+      },
+      "CompleteExternalTaskRequest": {
+        "properties": {
+          "variables": {
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "workerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workerId"
+        ],
+        "type": "object"
+      },
+      "CompleteTaskRequest": {
+        "properties": {
+          "expectedRevision": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "variables": {
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ConclusionSource": {
+        "enum": [
+          "DECLARED",
+          "LAST_DECISION",
+          "FALLBACK"
+        ]
+      },
+      "CreateEventSubscriptionRequest": {
+        "properties": {
+          "enabled": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "endpointUrl": {
+            "type": "string"
+          },
+          "eventTypes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "maxAttempts": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secret": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "endpointUrl"
+        ],
+        "type": "object"
+      },
+      "CreatedEventSubscription": {
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/EventSubscriptionView"
+          }
+        },
+        "required": [
+          "subscription",
+          "secret"
+        ],
+        "type": "object"
+      },
+      "CurrentIdentity": {
+        "properties": {
+          "authMode": {
+            "type": "string"
+          },
+          "caller": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "callerName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "canSubmitApproval": {
+            "default": true,
+            "type": "boolean"
+          },
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "requestId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "subject": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "user": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "user",
+          "tenant",
+          "authMode",
+          "scopes",
+          "isAdmin"
+        ],
+        "type": "object"
+      },
+      "CursorPageOfInstanceSummary": {
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceSummary"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "hasMore"
+        ],
+        "type": "object"
+      },
+      "CursorPageOfProcessDescriptor": {
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessDescriptor"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "hasMore"
+        ],
+        "type": "object"
+      },
+      "CursorPageOfTaskSummary": {
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskSummary"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "hasMore"
+        ],
+        "type": "object"
+      },
+      "Decision": {
+        "properties": {
+          "comment": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "decidedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "optionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "semantic": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApprovalSemantic"
+              }
+            ]
+          }
+        },
+        "required": [
+          "optionId",
+          "semantic",
+          "comment",
+          "decidedAt"
+        ],
+        "type": "object"
+      },
+      "DelegateTaskRequest": {
+        "properties": {
+          "userId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "DeployResponse": {
+        "properties": {
+          "deploymentId": {
+            "type": "string"
+          },
+          "deploymentName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processDefinitionKey": {
+            "type": "string"
+          },
+          "resourceName": {
+            "type": "string"
+          },
+          "skipped": {
+            "default": false,
+            "type": "boolean"
+          },
+          "version": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "processDefinitionId",
+          "processDefinitionKey",
+          "version",
+          "deploymentId",
+          "resourceName"
+        ],
+        "type": "object"
+      },
+      "DeploymentDefinitionResponse": {
+        "properties": {
+          "isSuspended": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "resourceName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "processDefinitionId",
+          "key",
+          "name",
+          "version",
+          "resourceName",
+          "isSuspended"
+        ],
+        "type": "object"
+      },
+      "DeploymentResourceResponse": {
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "processDefinitionId"
+        ],
+        "type": "object"
+      },
+      "DeploymentSummaryResponse": {
+        "properties": {
+          "definitionCount": {
+            "default": 0,
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "definitions": {
+            "items": {
+              "$ref": "#/components/schemas/DeploymentDefinitionResponse"
+            },
+            "type": "array"
+          },
+          "deployTime": {
+            "format": "date-time"
+          },
+          "deploymentId": {
+            "type": "string"
+          },
+          "latestVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "suspendedCount": {
+            "default": 0,
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "deploymentId",
+          "name",
+          "deployTime",
+          "tenantId",
+          "definitions"
+        ],
+        "type": "object"
+      },
+      "DiagramResponse": {
+        "properties": {
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/HistoricActivityResponse"
+            },
+            "type": "array"
+          },
+          "bpmnXml": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isRunning": {
+            "type": "boolean"
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processInstanceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "processInstanceId",
+          "processDefinitionId",
+          "bpmnXml",
+          "isRunning",
+          "activities"
+        ],
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "code": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "EventDeliveryView": {
+        "properties": {
+          "attempts": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "format": "date-time"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nextAttemptAt": {
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subscriptionId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "eventId",
+          "subscriptionId",
+          "tenantId",
+          "status",
+          "attempts",
+          "lastError",
+          "nextAttemptAt",
+          "createdAt",
+          "updatedAt",
+          "deliveredAt"
+        ],
+        "type": "object"
+      },
+      "EventSubscriptionView": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpointUrl": {
+            "type": "string"
+          },
+          "eventTypes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "maxAttempts": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secretPreview": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "name",
+          "eventTypes",
+          "processDefinitionId",
+          "endpointUrl",
+          "secretPreview",
+          "headers",
+          "enabled",
+          "maxAttempts",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ExternalTaskResponse": {
+        "properties": {
+          "activityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "completedAt": {
+            "format": "date-time"
+          },
+          "createdAt": {
+            "format": "date-time"
+          },
+          "errorDetails": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "errorMessage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "executionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "lockExpiresAt": {
+            "format": "date-time"
+          },
+          "nextDueAt": {
+            "format": "date-time"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "priority": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processInstanceId": {
+            "type": "string"
+          },
+          "retries": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "topic": {
+            "type": "string"
+          },
+          "workerId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "processInstanceId",
+          "executionId",
+          "processDefinitionId",
+          "processDefinitionKey",
+          "activityId",
+          "activityName",
+          "topic",
+          "tenantId",
+          "businessKey",
+          "payload",
+          "priority",
+          "retries",
+          "status",
+          "workerId",
+          "lockExpiresAt",
+          "nextDueAt",
+          "errorMessage",
+          "errorDetails",
+          "createdAt",
+          "completedAt"
+        ],
+        "type": "object"
+      },
+      "FailExternalTaskRequest": {
+        "properties": {
+          "errorDetails": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "errorMessage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "retries": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "retryAfter": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "workerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workerId"
+        ],
+        "type": "object"
+      },
+      "FetchExternalTasksRequest": {
+        "properties": {
+          "lockDurationMs": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "maxTasks": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "waitSeconds": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "workerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workerId"
+        ],
+        "type": "object"
+      },
+      "FormField": {
+        "properties": {
+          "defaultValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fieldId": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/FormOption"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "placeholder": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "readOnly": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/FormFieldType"
+          }
+        },
+        "required": [
+          "fieldId",
+          "label",
+          "type",
+          "required",
+          "readOnly",
+          "defaultValue",
+          "options",
+          "placeholder",
+          "sortOrder"
+        ],
+        "type": "object"
+      },
+      "FormFieldType": {
+        "enum": [
+          "STRING",
+          "TEXT",
+          "LONG",
+          "DECIMAL",
+          "BOOLEAN",
+          "DATE",
+          "DATE_TIME",
+          "ENUM",
+          "FILE"
+        ]
+      },
+      "FormMetadataResponse": {
+        "properties": {
+          "activityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formProperties": {
+            "items": {
+              "$ref": "#/components/schemas/FormPropertyResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "formKey",
+          "activityId",
+          "activityName",
+          "formProperties"
+        ],
+        "type": "object"
+      },
+      "FormOption": {
+        "properties": {
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "type": "object"
+      },
+      "FormPropertyResponse": {
+        "properties": {
+          "datePattern": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "default": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expression": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "readable": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "required": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/FormPropertyValueResponse"
+            },
+            "type": "array"
+          },
+          "variable": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "writable": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "variable",
+          "expression",
+          "default",
+          "datePattern",
+          "required",
+          "readable",
+          "writable",
+          "values"
+        ],
+        "type": "object"
+      },
+      "FormPropertyValueResponse": {
+        "properties": {
+          "id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "FormSchema": {
+        "properties": {
+          "activityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FormField"
+            },
+            "type": "array"
+          },
+          "processKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "processKey",
+          "activityId",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "FormSnapshot": {
+        "properties": {
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actorId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentRef"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "capturedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "definitionVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "instanceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "optionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "schema": {
+            "$ref": "#/components/schemas/FormSchema"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "taskId",
+          "definitionVersion",
+          "schema",
+          "values",
+          "capturedAt"
+        ],
+        "type": "object"
+      },
+      "HistoricActivityResponse": {
+        "properties": {
+          "activityId": {
+            "type": "string"
+          },
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "activityType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endTime": {
+            "format": "date-time"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "startTime": {
+            "format": "date-time"
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "activityId",
+          "activityName",
+          "activityType",
+          "taskId",
+          "assignee",
+          "startTime",
+          "endTime",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "HistoricProcessInstanceResponse": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deleteReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "durationInMillis": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "endActivityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endTime": {
+            "format": "date-time"
+          },
+          "isRunning": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processInstanceId": {
+            "type": "string"
+          },
+          "startActivityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startTime": {
+            "format": "date-time"
+          },
+          "startUserId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "processInstanceId",
+          "businessKey",
+          "processDefinitionId",
+          "name",
+          "startUserId",
+          "startActivityId",
+          "endActivityId",
+          "startTime",
+          "endTime",
+          "durationInMillis",
+          "deleteReason",
+          "isRunning"
+        ],
+        "type": "object"
+      },
+      "HistoricTaskResponse": {
+        "properties": {
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deleteReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "durationInMillis": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "endTime": {
+            "format": "date-time"
+          },
+          "formKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "owner": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "priority": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processInstanceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startTime": {
+            "format": "date-time"
+          },
+          "taskDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "taskDefinitionKey",
+          "processInstanceId",
+          "processDefinitionId",
+          "name",
+          "assignee",
+          "owner",
+          "priority",
+          "formKey",
+          "startTime",
+          "endTime",
+          "durationInMillis",
+          "deleteReason"
+        ],
+        "type": "object"
+      },
+      "HistoricVariableResponse": {
+        "properties": {
+          "createTime": {
+            "format": "date-time"
+          },
+          "executionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastUpdatedTime": {
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {}
+        },
+        "required": [
+          "name",
+          "type",
+          "value",
+          "executionId",
+          "taskId",
+          "createTime",
+          "lastUpdatedTime"
+        ],
+        "type": "object"
+      },
+      "HistoryView": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "conclusion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InstanceConclusion"
+              }
+            ]
+          },
+          "durationInMilliseconds": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            },
+            "type": "array"
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nodeOutcomes": {
+            "items": {
+              "$ref": "#/components/schemas/NodeOutcome"
+            },
+            "type": "array"
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/InstanceStatus"
+          }
+        },
+        "required": [
+          "instanceId",
+          "processKey",
+          "businessKey",
+          "status",
+          "startedAt",
+          "startedBy",
+          "endedAt",
+          "durationInMilliseconds",
+          "entries",
+          "nextCursor",
+          "nodeOutcomes",
+          "conclusion"
+        ],
+        "type": "object"
+      },
+      "IdentityLinkResponse": {
+        "properties": {
+          "groupId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processInstanceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "type": {
+            "type": "string"
+          },
+          "userId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "userId",
+          "groupId",
+          "taskId",
+          "processInstanceId"
+        ],
+        "type": "object"
+      },
+      "InstanceConclusion": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "semantic": {
+            "$ref": "#/components/schemas/ApprovalSemantic"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConclusionSource"
+          }
+        },
+        "required": [
+          "semantic",
+          "optionId",
+          "label",
+          "source"
+        ],
+        "type": "object"
+      },
+      "InstanceParameter": {
+        "properties": {
+          "apiName": {
+            "type": "string"
+          },
+          "constraints": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ParameterConstraints"
+              }
+            ]
+          },
+          "declared": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ParameterType"
+          },
+          "value": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "variableName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "writableBy": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "apiName",
+          "variableName",
+          "displayName",
+          "type",
+          "required",
+          "value",
+          "description",
+          "constraints",
+          "writableBy",
+          "sortOrder",
+          "declared"
+        ],
+        "type": "object"
+      },
+      "InstanceParameterView": {
+        "properties": {
+          "instanceId": {
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceParameter"
+            },
+            "type": "array"
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "schemaVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "instanceId",
+          "processKey",
+          "processDefinitionId",
+          "schemaVersion",
+          "revision",
+          "parameters"
+        ],
+        "type": "object"
+      },
+      "InstanceStatus": {
+        "enum": [
+          "RUNNING",
+          "COMPLETED",
+          "TERMINATED",
+          "SUSPENDED",
+          "FAILED"
+        ]
+      },
+      "InstanceSummary": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "conclusion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InstanceConclusion"
+              }
+            ]
+          },
+          "currentActivityIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "currentAssignees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "myRoles": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipationRole"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/InstanceStatus"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "instanceId",
+          "processKey",
+          "businessKey",
+          "title",
+          "status",
+          "startedAt",
+          "startedBy",
+          "endedAt",
+          "currentActivityIds",
+          "currentAssignees",
+          "conclusion"
+        ],
+        "type": "object"
+      },
+      "InstanceView": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "conclusion": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InstanceConclusion"
+              }
+            ]
+          },
+          "currentActivityIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "definitionVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "nodeOutcomes": {
+            "items": {
+              "$ref": "#/components/schemas/NodeOutcome"
+            },
+            "type": "array"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/ParameterSnapshot"
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/InstanceStatus"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskView"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "instanceId",
+          "processKey",
+          "processDefinitionId",
+          "definitionVersion",
+          "businessKey",
+          "title",
+          "status",
+          "startedAt",
+          "startedBy",
+          "endedAt",
+          "currentActivityIds",
+          "revision",
+          "tasks",
+          "parameters",
+          "nodeOutcomes",
+          "conclusion"
+        ],
+        "type": "object"
+      },
+      "IssuedClientSecret": {
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "previousSecretValidUntil": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secretExpiresAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientId",
+          "clientSecret",
+          "secretExpiresAt",
+          "previousSecretValidUntil"
+        ],
+        "type": "object"
+      },
+      "IssuedEventSubscriptionSecret": {
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "subscriptionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subscriptionId",
+          "secret"
+        ],
+        "type": "object"
+      },
+      "JsonElement": {},
+      "JumpProcessInstanceRequest": {
+        "properties": {
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetActivityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "type": "object"
+      },
+      "LoginResponse": {
+        "properties": {
+          "displayName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expiresAt": {
+            "format": "date-time"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tenant": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expiresAt",
+          "user",
+          "displayName",
+          "tenant",
+          "scopes"
+        ],
+        "type": "object"
+      },
+      "MigrateProcessInstanceRequest": {
+        "properties": {
+          "activityMappings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "targetProcessDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validateOnly": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "MigrationActivityResponse": {
+        "properties": {
+          "executionCount": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "fromActivityId": {
+            "type": "string"
+          },
+          "recreateTask": {
+            "type": "boolean"
+          },
+          "toActivityId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromActivityId",
+          "toActivityId",
+          "executionCount",
+          "recreateTask"
+        ],
+        "type": "object"
+      },
+      "MigrationPlanResponse": {
+        "properties": {
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationActivityResponse"
+            },
+            "type": "array"
+          },
+          "applied": {
+            "type": "boolean"
+          },
+          "processInstanceId": {
+            "type": "string"
+          },
+          "sourceProcessDefinitionId": {
+            "type": "string"
+          },
+          "targetProcessDefinitionId": {
+            "type": "string"
+          },
+          "tasksToCancel": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "processInstanceId",
+          "sourceProcessDefinitionId",
+          "targetProcessDefinitionId",
+          "activities",
+          "tasksToCancel",
+          "warnings",
+          "applied"
+        ],
+        "type": "object"
+      },
+      "MigrationRecordResponse": {
+        "properties": {
+          "activityMappings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "migratedAt": {
+            "format": "date-time"
+          },
+          "processInstanceId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceProcessDefinitionId": {
+            "type": "string"
+          },
+          "targetProcessDefinitionId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "processInstanceId",
+          "sourceProcessDefinitionId",
+          "targetProcessDefinitionId",
+          "activityMappings",
+          "reason",
+          "userId",
+          "migratedAt"
+        ],
+        "type": "object"
+      },
+      "NodeOutcome": {
+        "properties": {
+          "activityId": {
+            "type": "string"
+          },
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "aggregation": {
+            "$ref": "#/components/schemas/NodeOutcomeAggregation"
+          },
+          "decidedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "negative": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "pending": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "positive": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "satisfied": {
+            "type": "boolean"
+          },
+          "total": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "activityId",
+          "activityName",
+          "aggregation",
+          "satisfied",
+          "total",
+          "positive",
+          "negative",
+          "pending",
+          "decidedAt"
+        ],
+        "type": "object"
+      },
+      "NodeOutcomeAggregation": {
+        "enum": [
+          "SINGLE",
+          "ALL_APPROVED",
+          "ANY_APPROVED",
+          "MAJORITY"
+        ]
+      },
+      "ParameterConstraints": {
+        "properties": {
+          "enumValues": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "maxLength": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "maximum": {
+            "format": "double",
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ]
+          },
+          "minLength": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "minimum": {
+            "format": "double",
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ]
+          },
+          "pattern": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "minLength",
+          "maxLength",
+          "minimum",
+          "maximum",
+          "pattern",
+          "enumValues"
+        ],
+        "type": "object"
+      },
+      "ParameterDefinition": {
+        "properties": {
+          "apiName": {
+            "type": "string"
+          },
+          "constraints": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ParameterConstraints"
+              }
+            ]
+          },
+          "defaultValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ParameterType"
+          },
+          "variableName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "visibleTo": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "writableBy": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "apiName",
+          "variableName",
+          "displayName",
+          "type",
+          "required",
+          "defaultValue",
+          "description",
+          "constraints",
+          "writableBy",
+          "visibleTo",
+          "sortOrder"
+        ],
+        "type": "object"
+      },
+      "ParameterSchema": {
+        "properties": {
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ParameterDefinition"
+            },
+            "type": "array"
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "reservedPrefixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "processKey",
+          "version",
+          "parameters",
+          "reservedPrefixes"
+        ],
+        "type": "object"
+      },
+      "ParameterSnapshot": {
+        "properties": {
+          "instanceId": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "instanceId",
+          "revision",
+          "values",
+          "updatedAt",
+          "updatedBy"
+        ],
+        "type": "object"
+      },
+      "ParameterType": {
+        "enum": [
+          "STRING",
+          "LONG",
+          "DECIMAL",
+          "BOOLEAN",
+          "DATE",
+          "DATE_TIME",
+          "ENUM",
+          "JSON"
+        ]
+      },
+      "ParticipationRole": {
+        "enum": [
+          "STARTER",
+          "APPROVER",
+          "CANDIDATE",
+          "PARTICIPANT"
+        ]
+      },
+      "PlatformFieldError": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "PlatformProblem": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformFieldError"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "instance": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "traceId",
+          "errors"
+        ],
+        "type": "object"
+      },
+      "ProcessCapabilities": {
+        "properties": {
+          "canReadDefinition": {
+            "type": "boolean"
+          },
+          "canReadDiagram": {
+            "type": "boolean"
+          },
+          "canStart": {
+            "type": "boolean"
+          },
+          "hasFormSchema": {
+            "type": "boolean"
+          },
+          "hasParameterSchema": {
+            "type": "boolean"
+          },
+          "supportedSemantics": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalSemantic"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "canStart",
+          "canReadDefinition",
+          "canReadDiagram",
+          "hasParameterSchema",
+          "hasFormSchema",
+          "supportedSemantics"
+        ],
+        "type": "object"
+      },
+      "ProcessCatalogOverride": {
+        "properties": {
+          "category": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entryPoints": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessEntryPoint"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "icon": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pageUrls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "parameterSchemaVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProcessStatus"
+              }
+            ]
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "processKey",
+          "name",
+          "category",
+          "description",
+          "icon",
+          "pageUrls",
+          "entryPoints",
+          "status",
+          "sortOrder",
+          "labels",
+          "parameterSchemaVersion",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ProcessCatalogOverrideRequest": {
+        "properties": {
+          "category": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entryPoints": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessEntryPoint"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "hasAnyOverride": {
+            "type": "boolean"
+          },
+          "icon": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pageUrls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "parameterSchemaVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "sortOrder": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProcessStatus"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProcessDefinitionInfo": {
+        "properties": {
+          "checksum": {
+            "type": "string"
+          },
+          "deployedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "suspended": {
+            "type": "boolean"
+          },
+          "version": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "xml": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "processKey",
+          "processDefinitionId",
+          "version",
+          "checksum",
+          "deployedAt",
+          "suspended",
+          "xml"
+        ],
+        "type": "object"
+      },
+      "ProcessDefinitionResponse": {
+        "properties": {
+          "deployTime": {
+            "format": "date-time"
+          },
+          "deploymentId": {
+            "type": "string"
+          },
+          "isSuspended": {
+            "default": false,
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "processDefinitionId",
+          "key",
+          "name",
+          "version",
+          "deploymentId",
+          "tenantId",
+          "deployTime"
+        ],
+        "type": "object"
+      },
+      "ProcessDescriptor": {
+        "properties": {
+          "canStart": {
+            "type": "boolean"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ProcessCapabilities"
+          },
+          "category": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "definitionChecksum": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "deployedVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entryPoints": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessEntryPoint"
+            },
+            "type": "array"
+          },
+          "icon": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "pageUrls": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "parameterSchemaVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProcessStatus"
+          }
+        },
+        "required": [
+          "processKey",
+          "name",
+          "category",
+          "description",
+          "icon",
+          "pageUrls",
+          "status",
+          "deployedVersion",
+          "definitionChecksum",
+          "parameterSchemaVersion",
+          "entryPoints",
+          "labels",
+          "capabilities"
+        ],
+        "type": "object"
+      },
+      "ProcessEntryPoint": {
+        "properties": {
+          "defaultParameters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startActivityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "startActivityId",
+          "defaultParameters"
+        ],
+        "type": "object"
+      },
+      "ProcessFormSchema": {
+        "properties": {
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/FormSchema"
+            },
+            "type": "array"
+          },
+          "definitionVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "processKey",
+          "processDefinitionId",
+          "definitionVersion",
+          "activities"
+        ],
+        "type": "object"
+      },
+      "ProcessInstanceResponse": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "children": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isSuspended": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processInstanceId": {
+            "type": "string"
+          },
+          "startTime": {
+            "format": "date-time"
+          },
+          "startUserId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "processInstanceId",
+          "processDefinitionId",
+          "processDefinitionKey",
+          "businessKey",
+          "name",
+          "startUserId",
+          "startTime",
+          "isActive",
+          "isSuspended",
+          "tenantId",
+          "children"
+        ],
+        "type": "object"
+      },
+      "ProcessStatus": {
+        "enum": [
+          "DRAFT",
+          "ACTIVE",
+          "SUSPENDED",
+          "RETIRED"
+        ]
+      },
+      "ProcessVersionInfo": {
+        "properties": {
+          "checksum": {
+            "type": "string"
+          },
+          "deployedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isCurrent": {
+            "type": "boolean"
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "suspended": {
+            "type": "boolean"
+          },
+          "version": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "processDefinitionId",
+          "checksum",
+          "deployedAt",
+          "suspended",
+          "isCurrent"
+        ],
+        "type": "object"
+      },
+      "RegisterClientRequest": {
+        "properties": {
+          "allowedProcessKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "quotaPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secretValidDays": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tenantId",
+          "scopes"
+        ],
+        "type": "object"
+      },
+      "RegisterTenantRequest": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "quotaPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "RetryExternalTaskRequest": {
+        "properties": {
+          "retries": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SetAssigneeRequest": {
+        "properties": {
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SetTenantStatusRequest": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "active"
+        ],
+        "type": "object"
+      },
+      "StartBeforeActivityRequest": {
+        "properties": {
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "StartInstanceRequest": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entryPointKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "processKey"
+        ],
+        "type": "object"
+      },
+      "StartInstanceResult": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InstanceView"
+              }
+            ]
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "processKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instanceId",
+          "processKey",
+          "businessKey",
+          "instance"
+        ],
+        "type": "object"
+      },
+      "StartProcessInstanceRequest": {
+        "properties": {
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startUserId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "variables": {
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "StartProcessInstanceResponse": {
+        "properties": {
+          "processInstanceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "processInstanceId"
+        ],
+        "type": "object"
+      },
+      "SubmitTaskRequest": {
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentRef"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "comment": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expectedRevision": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "formValues": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "semantic": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApprovalSemantic"
+              }
+            ]
+          },
+          "targetNodeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "optionId"
+        ],
+        "type": "object"
+      },
+      "SubmitTaskResult": {
+        "properties": {
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "instance": {
+            "$ref": "#/components/schemas/InstanceView"
+          },
+          "nextTasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskView"
+            },
+            "type": "array"
+          },
+          "timelineDelta": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "instance",
+          "nextTasks",
+          "timelineDelta",
+          "events"
+        ],
+        "type": "object"
+      },
+      "TaskCandidateRequest": {
+        "properties": {
+          "groupId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "TaskDetailResponse": {
+        "properties": {
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "category": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "claimTime": {
+            "format": "date-time"
+          },
+          "createTime": {
+            "format": "date-time"
+          },
+          "delegationState": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dueDate": {
+            "format": "date-time"
+          },
+          "executionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "identityLinks": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityLinkResponse"
+            },
+            "type": "array"
+          },
+          "isSuspended": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "owner": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "priority": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processInstanceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "revision": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "taskDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "taskDefinitionKey",
+          "assignee",
+          "owner",
+          "processInstanceId",
+          "processDefinitionId",
+          "processDefinitionKey",
+          "executionId",
+          "businessKey",
+          "formKey",
+          "category",
+          "priority",
+          "revision",
+          "createTime",
+          "dueDate",
+          "claimTime",
+          "tenantId",
+          "isSuspended",
+          "delegationState",
+          "identityLinks"
+        ],
+        "type": "object"
+      },
+      "TaskResponse": {
+        "properties": {
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "claimTime": {
+            "format": "date-time"
+          },
+          "createTime": {
+            "format": "date-time"
+          },
+          "dueDate": {
+            "format": "date-time"
+          },
+          "executionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "owner": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "priority": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "processDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processInstanceId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "revision": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "taskDefinitionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "taskDefinitionKey",
+          "assignee",
+          "owner",
+          "processInstanceId",
+          "processDefinitionKey",
+          "executionId",
+          "formKey",
+          "priority",
+          "revision",
+          "createTime",
+          "dueDate",
+          "claimTime"
+        ],
+        "type": "object"
+      },
+      "TaskStatsResponse": {
+        "properties": {
+          "byDefinition": {
+            "additionalProperties": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "type": "object"
+          },
+          "dueToday": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "overdue": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "total": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "total",
+          "overdue",
+          "dueToday",
+          "byDefinition"
+        ],
+        "type": "object"
+      },
+      "TaskSummary": {
+        "properties": {
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "businessKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "completedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "decision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Decision"
+              }
+            ]
+          },
+          "dueAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entryUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "processKey": {
+            "type": "string"
+          },
+          "processName": {
+            "type": "string"
+          },
+          "startedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "taskId",
+          "instanceId",
+          "processKey",
+          "processName",
+          "businessKey",
+          "title",
+          "activityName",
+          "assignee",
+          "createdAt",
+          "dueAt",
+          "startedBy",
+          "summary",
+          "entryUrl"
+        ],
+        "type": "object"
+      },
+      "TaskView": {
+        "properties": {
+          "activityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "assignee": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "candidateGroups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "candidateUsers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "currentUserCanSubmit": {
+            "type": "boolean"
+          },
+          "definitionVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "dueAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "form": {
+            "items": {
+              "$ref": "#/components/schemas/FormField"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalOption"
+            },
+            "type": "array"
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "taskId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "instanceId",
+          "activityId",
+          "activityName",
+          "assignee",
+          "candidateUsers",
+          "candidateGroups",
+          "createdAt",
+          "dueAt",
+          "options",
+          "form",
+          "currentUserCanSubmit"
+        ],
+        "type": "object"
+      },
+      "TenantView": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quotaPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenantId",
+          "name",
+          "active",
+          "quotaPerMinute",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "TerminateInstanceRequest": {
+        "properties": {
+          "expectedRevision": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "TimelineEntry": {
+        "properties": {
+          "activityId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actorCallerId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actorId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "comment": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formSnapshotTaskId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TimelineEntryKind"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "optionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "semantic": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApprovalSemantic"
+              }
+            ]
+          },
+          "sequence": {
+            "format": "int64",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "targetNodeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "sequence",
+          "instanceId",
+          "kind",
+          "activityId",
+          "activityName",
+          "taskId",
+          "actorId",
+          "actorCallerId",
+          "optionId",
+          "semantic",
+          "comment",
+          "targetNodeId",
+          "formSnapshotTaskId",
+          "occurredAt"
+        ],
+        "type": "object"
+      },
+      "TimelineEntryKind": {
+        "enum": [
+          "INSTANCE_STARTED",
+          "TASK_CREATED",
+          "TASK_COMPLETED",
+          "TASK_CLAIMED",
+          "TASK_UNCLAIMED",
+          "TASK_TRANSFERRED",
+          "INSTANCE_SUSPENDED",
+          "INSTANCE_RESUMED",
+          "INSTANCE_TERMINATED",
+          "INSTANCE_COMPLETED",
+          "COMMENT",
+          "PARAMETERS_UPDATED",
+          "INSTANCE_JUMPED"
+        ]
+      },
+      "TransferTaskRequest": {
+        "properties": {
+          "assignee": {
+            "type": "string"
+          },
+          "comment": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "assignee"
+        ],
+        "type": "object"
+      },
+      "UnlockExternalTaskRequest": {
+        "properties": {
+          "workerId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workerId"
+        ],
+        "type": "object"
+      },
+      "UpdateClientRequest": {
+        "properties": {
+          "allowedProcessKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "quotaPerMinute": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ClientStatus"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateEventSubscriptionRequest": {
+        "properties": {
+          "enabled": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "endpointUrl": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventTypes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "maxAttempts": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "processDefinitionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateTaskRequest": {
+        "properties": {
+          "category": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "clearDescription": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "clearDueDate": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dueDate": {},
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "owner": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "priority": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UserGroupResponse": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "type": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "elementId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "elementType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isError": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ValidationSeverity"
+          }
+        },
+        "required": [
+          "rule",
+          "elementId",
+          "elementType",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ValidationResponse": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array"
+          },
+          "isValid": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "errors",
+          "warnings"
+        ],
+        "type": "object"
+      },
+      "ValidationSeverity": {
+        "default": 1,
+        "type": "integer"
+      }
+    }
+  }
+}

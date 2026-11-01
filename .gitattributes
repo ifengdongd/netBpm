@@ -3,3 +3,7 @@
 #   bash: ./xxx.sh: /usr/bin/env: bad interpreter
 # runtime-demo 这类脚本在 CI（Linux runner）上也会因此起不来。
 *.sh text eol=lf
+
+# 生成产物按 CRLF 原样入库：生成器写的是 CRLF，SdkGenerationTests 也比对字节；
+# 若交给 git 自动转换，Linux runner 上检出的是 LF，测试会误报「产物不一致」。
+sdk/** text eol=crlf

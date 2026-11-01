@@ -692,6 +692,12 @@ public static class AdminAuditActions
 
     /// <summary>修改租户状态（停用会让其下全部客户端鉴权失败）。</summary>
     public const string TenantStatusChange = "tenant.status_change";
+
+    /// <summary>登记 / 精修流程目录的覆盖行（展示名、分类、业务页面地址、显式状态）。</summary>
+    public const string ProcessCatalogUpsert = "process_catalog.upsert";
+
+    /// <summary>删除流程目录覆盖行（名片回到 BPMN 派生）。</summary>
+    public const string ProcessCatalogDelete = "process_catalog.delete";
 }
 
 /// <summary>审计目标类型常量。</summary>
@@ -735,4 +741,7 @@ public static class AdminAuditTargets
 
     /// <summary>租户（nb_tenant）。</summary>
     public const string Tenant = "tenant";
+
+    /// <summary>流程目录覆盖行（nb_process_catalog）。</summary>
+    public const string ProcessCatalog = "process_catalog";
 }

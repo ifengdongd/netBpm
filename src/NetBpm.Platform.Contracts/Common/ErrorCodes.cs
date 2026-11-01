@@ -93,6 +93,15 @@ public static class ErrorCodes
     /// <summary>幂等键被复用但请求体不同。<c>409</c></summary>
     public const string IdempotencyKeyReused = "idempotency.key_reused";
 
+    /// <summary>
+    /// 相同幂等键的首次请求仍在处理中。<c>409</c>
+    /// <para>
+    /// 与 <see cref="IdempotencyKeyReused"/> 分开：这里是「稍后可以用同一个键重试」，
+    /// 那里是「这个键已经属于别的请求，换一个或用原来的请求」。合成一个码会让调用方做错决定。
+    /// </para>
+    /// </summary>
+    public const string IdempotencyInFlight = "idempotency.in_flight";
+
     /// <summary>EL 表达式求值失败。<c>500</c></summary>
     public const string EngineExpressionError = "engine.expression_error";
 
@@ -140,4 +149,22 @@ public static class ErrorCodes
 
     /// <summary>需要请求体但收到空（或 JSON 为空对象）。<c>400</c></summary>
     public const string RequestBodyRequired = "request.body_required";
+
+    /// <summary>
+    /// 目录覆盖请求里没有任何覆盖字段。<c>422</c>
+    /// <para>
+    /// 空覆盖与「没有覆盖行」在合并结果上等价，允许它只会往表里堆一行什么都不做的记录；
+    /// 要清除覆盖应使用 <c>DELETE</c>。
+    /// </para>
+    /// </summary>
+    public const string CatalogOverrideEmpty = "catalog.override_empty";
+
+    /// <summary>
+    /// 流程存在，但没有目录覆盖行。<c>404</c>
+    /// <para>
+    /// 与 <see cref="ProcessNotFound"/> 分开：前者是「key 打错了」，后者是「没精修过，PUT 一次即可」。
+    /// 合成一个码会让管理端把「打错 key」也当成「建一条就行」。
+    /// </para>
+    /// </summary>
+    public const string CatalogOverrideNotFound = "catalog.override_not_found";
 }

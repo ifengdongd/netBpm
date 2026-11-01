@@ -15,6 +15,8 @@
     <Project Path="src/NetBpm.Workflow/NetBpm.Workflow.csproj" />
     <!-- 平台对外契约（不引用任何引擎工程，见 docs/platform-api-refactoring-plan.md §2.2） -->
     <Project Path="src/NetBpm.Platform.Contracts/NetBpm.Platform.Contracts.csproj" />
+    <!-- M15 官方 SDK：只依赖契约工程（不引用引擎，见 §2.2 依赖铁律） -->
+    <Project Path="src/NetBpm.Platform.Client/NetBpm.Platform.Client.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetBpm.UnitTests/NetBpm.UnitTests.csproj" />
@@ -29,6 +31,8 @@
   <Folder Name="/tools/">
     <Project Path="tools/NetBpm.DbMigrate/NetBpm.DbMigrate.csproj" />
     <Project Path="tools/NetBpm.DbInit/NetBpm.DbInit.csproj" />
+    <!-- M15：从 OpenAPI 快照生成 TS / Java 模型（产物在 sdk/，由 SdkGenerationTests 守门） -->
+    <Project Path="tools/NetBpm.SdkGen/NetBpm.SdkGen.csproj" />
     <!-- §9.3：自建语料必须由脚本生成（放在 tests/corpus/generator 便于语料与生成器同处一地） -->
     <Project Path="tests/corpus/generator/NetBpm.CorpusGenerator.csproj" />
     <!-- §9.3：现成语料（Activiti 测试资源）由导入器收录，脚本自动生成 -->
