@@ -1673,6 +1673,56 @@
         ],
         "type": "object"
       },
+      "ApprovalDictionaryUpsertRequest": {
+        "properties": {
+          "allowedTargetNodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nodeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "requiresComment": {
+            "default": false,
+            "type": "boolean"
+          },
+          "requiresTargetNode": {
+            "default": false,
+            "type": "boolean"
+          },
+          "semantic": {
+            "$ref": "#/components/schemas/ApprovalSemantic"
+          }
+        },
+        "required": [
+          "nodeId",
+          "semantic"
+        ],
+        "type": "object"
+      },
       "ApprovalOption": {
         "properties": {
           "allowedTargetNodes": {
@@ -2437,6 +2487,80 @@
           "semantic",
           "comment",
           "decidedAt"
+        ],
+        "type": "object"
+      },
+      "DeclaredApprovalOption": {
+        "properties": {
+          "name": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId",
+          "name"
+        ],
+        "type": "object"
+      },
+      "DeclaredApprovalOptionsView": {
+        "properties": {
+          "definitionVersion": {
+            "format": "int32",
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ]
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/DeclaredNodeApprovalOptions"
+            },
+            "type": "array"
+          },
+          "processDefinitionId": {
+            "type": "string"
+          },
+          "processKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "processKey",
+          "processDefinitionId",
+          "definitionVersion",
+          "nodes"
+        ],
+        "type": "object"
+      },
+      "DeclaredNodeApprovalOptions": {
+        "properties": {
+          "activityId": {
+            "type": "string"
+          },
+          "activityName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/DeclaredApprovalOption"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "activityId",
+          "activityName",
+          "options"
         ],
         "type": "object"
       },

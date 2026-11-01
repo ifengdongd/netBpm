@@ -1388,7 +1388,7 @@ if object_id(N'nb_approval_dictionary', N'U') is null
     create table nb_approval_dictionary (
     tenant_id nvarchar(64) not null,
     process_key nvarchar(255) not null,
-    node_id nvarchar(255),
+    node_id nvarchar(255) not null constraint df_nb_approval_dictionary_node_id default (''),
     option_id nvarchar(128) not null,
     semantic nvarchar(32) not null,
     outcome_class nvarchar(16) not null,
@@ -4212,7 +4212,7 @@ if exists (select 1 from sys.columns
     and not exists (select 1 from sys.extended_properties ep
         join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
         where ep.name = N'MS_Description' and ep.major_id = object_id('nb_approval_dictionary') and c.name = N'node_id')
-    exec sp_addextendedproperty @name = N'MS_Description', @value = N'环节 id（BPMN userTask/@id）；NULL = 流程级默认',
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'环节 id（BPMN userTask/@id）；空串 = 流程级默认（主键列不能为 NULL）',
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_approval_dictionary',
         @level2type = N'COLUMN', @level2name = N'node_id';
 go

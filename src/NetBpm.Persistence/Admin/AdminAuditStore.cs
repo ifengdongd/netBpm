@@ -698,6 +698,12 @@ public static class AdminAuditActions
 
     /// <summary>删除流程目录覆盖行（名片回到 BPMN 派生）。</summary>
     public const string ProcessCatalogDelete = "process_catalog.delete";
+
+    /// <summary>写入 / 覆盖审批语义字典（选项 → 语义的映射）。</summary>
+    public const string DictionaryUpsert = "dictionary.upsert";
+
+    /// <summary>删除审批语义字典的一条映射（该选项回落默认字典）。</summary>
+    public const string DictionaryDelete = "dictionary.delete";
 }
 
 /// <summary>审计目标类型常量。</summary>
@@ -744,4 +750,7 @@ public static class AdminAuditTargets
 
     /// <summary>流程目录覆盖行（nb_process_catalog）。</summary>
     public const string ProcessCatalog = "process_catalog";
+
+    /// <summary>审批语义字典（nb_approval_dictionary）。</summary>
+    public const string ApprovalDictionary = "approval_dictionary";
 }

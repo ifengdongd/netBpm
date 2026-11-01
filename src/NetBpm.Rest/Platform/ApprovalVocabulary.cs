@@ -149,7 +149,7 @@ public sealed class ApprovalVocabulary : IApprovalVocabulary
             return [];
         }
 
-        var cacheKey = "netbpm:vocabulary:" + tenantId + ":" + processKey;
+        var cacheKey = ApprovalVocabularyCache.Key(tenantId, processKey);
 
         if (_cache.TryGetValue(cacheKey, out IReadOnlyList<ApprovalDictionaryEntry>? cached)
             && cached is not null)
@@ -208,5 +208,37 @@ public sealed class ApprovalVocabulary : IApprovalVocabulary
             AllowedTargetNodes: entry?.AllowedTargetNodes,
             CommentPrompt: null,
             Attributes: entry?.Attributes);
+    }
+}
+
+/// <summary>
+/// 字典缓存的键与失效入口。
+/// </summary>
+/// <remarks>
+/// 写路径（<see cref="ApprovalDictionaryAdmin"/>）与读路径必须用<b>同一个</b>键构造函数：
+/// 两边各拼一份字符串，改了一边忘了另一边，表现是「写完不生效」——
+/// 那是最容易被当成缓存 bug 而查错方向的一类问题。
+/// </remarks>
+internal static class ApprovalVocabularyCache
+{
+    private const string Prefix = "netbpm:vocabulary:";
+
+    /// <summary>缓存键（租户 + 流程；节点维度不参与，一次取回整流程的声明）。</summary>
+    /// <param name="tenantId">租户。</param>
+    /// <param name="processKey">流程 key。</param>
+    internal static string Key(string tenantId, string processKey) => Prefix + tenantId + ":" + processKey;
+
+    /// <summary>让某流程的声明缓存立即失效（写路径调用）。</summary>
+    /// <param name="cache">缓存实例。</param>
+    /// <param name="tenantId">租户；为空时不做事（解析时也不会查库）。</param>
+    /// <param name="processKey">流程 key。</param>
+    internal static void Invalidate(IMemoryCache cache, string? tenantId, string processKey)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return;
+        }
+
+        cache.Remove(Key(tenantId, processKey));
     }
 }

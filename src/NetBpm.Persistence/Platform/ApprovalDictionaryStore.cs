@@ -52,9 +52,18 @@ public sealed record ApprovalDictionaryEntry(
 /// 审批语义字典的存储（表 <c>nb_approval_dictionary</c>）。
 /// </summary>
 /// <remarks>
-/// 只读接口：字典的<b>写</b>路径属于管理面（<c>/admin/v1/dictionaries</c>），
-/// 等管理面落地时再加 <c>UpsertAsync</c>。表不存在时调用方（<c>IApprovalVocabulary</c>）
-/// 降级为「只用默认字典」，不阻断流程解析。
+/// <para>
+/// 读路径给 <c>IApprovalVocabulary</c>（解析审批语义），写路径给管理面
+/// （<c>PUT /admin/v1/dictionaries/{processKey}/options/{optionId}</c>）。
+/// 表不存在时读调用方降级为「只用默认字典」，不阻断流程解析。
+/// </para>
+/// <para>
+/// 🔑 <b>「流程级默认」在库里是空串，不是 NULL</b>。主键含 <c>node_id</c>，
+/// 而 MySQL / SQL Server 的主键列都不允许 NULL（MySQL 会静默改成 NOT NULL，
+/// SQL Server 直接建表失败），所以「不限定环节」只能落成 <c>''</c>。
+/// 对外形态仍然是 <see langword="null"/>（见 <see cref="ApprovalDictionaryEntry.NodeId"/>），
+/// 空串只在存储边界出现。
+/// </para>
 /// </remarks>
 public interface IApprovalDictionaryStore
 {
@@ -65,6 +74,34 @@ public interface IApprovalDictionaryStore
     ValueTask<IReadOnlyList<ApprovalDictionaryEntry>> ListAsync(
         string tenantId,
         string processKey,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 新增或覆盖一条映射（按「租户 + 流程 + 环节 + 选项」定位）。
+    /// </summary>
+    /// <remarks>
+    /// 定位键与主键一致，因此重复写同一行是<b>覆盖</b>而不是新增——
+    /// 字典的语义是「这个选项算什么」，同一位置不可能有两个答案。
+    /// <c>created_at</c> 只有首次写入时落，之后保持不变（否则「这行是什么时候配的」查不出来）。
+    /// </remarks>
+    /// <param name="entry">映射（<see cref="ApprovalDictionaryEntry.NodeId"/> 为空表示流程级默认）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>落库后的形态（补齐时间戳）。</returns>
+    ValueTask<ApprovalDictionaryEntry> UpsertAsync(
+        ApprovalDictionaryEntry entry,
+        CancellationToken ct = default);
+
+    /// <summary>删除一条映射；不存在返回 <see langword="false"/>。</summary>
+    /// <param name="tenantId">租户。</param>
+    /// <param name="processKey">流程 key。</param>
+    /// <param name="nodeId">环节 id；为空表示流程级默认。</param>
+    /// <param name="optionId">选项 id。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<bool> DeleteAsync(
+        string tenantId,
+        string processKey,
+        string? nodeId,
+        string optionId,
         CancellationToken ct = default);
 }
 
@@ -134,6 +171,122 @@ public sealed class DapperApprovalDictionaryStore : IApprovalDictionaryStore
         return [.. rows.Select(ToEntry)];
     }
 
+    /// <inheritdoc />
+    public async ValueTask<ApprovalDictionaryEntry> UpsertAsync(
+        ApprovalDictionaryEntry entry,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entry.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entry.ProcessKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entry.OptionId);
+
+        // 「不限定环节」落库是空串（见接口注释：主键列不能为 NULL）
+        var nodeKey = entry.NodeId ?? string.Empty;
+
+        // 列是 datetime(3)：先截到毫秒再写，返回给调用方的时间才与库里回读的一致。
+        // 不截的话「写入返回 07:22:28.7946627、回读 07:22:28.795」，
+        // 调用方拿两边做比较会凭空多出几微秒的差异。
+        var now = DateTime.UtcNow;
+        now = new DateTime(now.Ticks - (now.Ticks % TimeSpan.TicksPerMillisecond), DateTimeKind.Utc);
+
+        await using var connection = _connections.CreateConnection();
+        await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        // 先读再写（同一事务内）：created_at 只在首次写入时落。
+        // 不用方言 upsert 语法（MySQL on duplicate key / SQL Server merge），
+        // 与 nb_process_catalog 同一个理由：一行数据，多一次 select 不值得为它分方言。
+        var createdAt = await connection
+            .ExecuteScalarAsync<DateTime?>(new CommandDefinition(
+                "select created_at from nb_approval_dictionary "
+                + "where tenant_id = @tenantId and process_key = @processKey "
+                + "and node_id = @nodeKey and option_id = @optionId",
+                new { entry.TenantId, entry.ProcessKey, nodeKey, entry.OptionId },
+                transaction,
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        var parameters = new
+        {
+            entry.TenantId,
+            entry.ProcessKey,
+            NodeKey = nodeKey,
+            entry.OptionId,
+            Semantic = SemanticText.ToText(entry.Semantic),
+            OutcomeClass = OutcomeClassText.ToText(entry.OutcomeClass),
+            entry.Label,
+            RequiresComment = entry.RequiresComment ? 1 : 0,
+            RequiresTargetNode = entry.RequiresTargetNode ? 1 : 0,
+            AllowedTargetNodesJson = ApprovalDictionaryJson.Write(entry.AllowedTargetNodes),
+            AttributesJson = ApprovalDictionaryJson.Write(entry.Attributes),
+            CreatedAt = createdAt ?? now,
+            UpdatedAt = now,
+        };
+
+        var affected = await connection
+            .ExecuteAsync(new CommandDefinition(UpdateSql, parameters, transaction, cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        if (affected == 0)
+        {
+            await connection
+                .ExecuteAsync(new CommandDefinition(InsertSql, parameters, transaction, cancellationToken: ct))
+                .ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+
+        return entry with
+        {
+            CreatedAt = ToOffset(parameters.CreatedAt),
+            UpdatedAt = ToOffset(now),
+        };
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<bool> DeleteAsync(
+        string tenantId,
+        string processKey,
+        string? nodeId,
+        string optionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(optionId);
+
+        await using var connection = _connections.CreateConnection();
+
+        var affected = await connection
+            .ExecuteAsync(new CommandDefinition(
+                "delete from nb_approval_dictionary "
+                + "where tenant_id = @tenantId and process_key = @processKey "
+                + "and node_id = @nodeKey and option_id = @optionId",
+                new { tenantId, processKey, nodeKey = nodeId ?? string.Empty, optionId },
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        return affected > 0;
+    }
+
+    private const string UpdateSql =
+        "update nb_approval_dictionary set semantic = @Semantic, outcome_class = @OutcomeClass, "
+        + "label = @Label, requires_comment = @RequiresComment, "
+        + "requires_target_node = @RequiresTargetNode, "
+        + "allowed_target_nodes_json = @AllowedTargetNodesJson, attributes_json = @AttributesJson, "
+        + "updated_at = @UpdatedAt "
+        + "where tenant_id = @TenantId and process_key = @ProcessKey "
+        + "and node_id = @NodeKey and option_id = @OptionId";
+
+    private const string InsertSql =
+        "insert into nb_approval_dictionary "
+        + "(tenant_id, process_key, node_id, option_id, semantic, outcome_class, label, "
+        + "requires_comment, requires_target_node, allowed_target_nodes_json, attributes_json, "
+        + "created_at, updated_at) "
+        + "values (@TenantId, @ProcessKey, @NodeKey, @OptionId, @Semantic, @OutcomeClass, @Label, "
+        + "@RequiresComment, @RequiresTargetNode, @AllowedTargetNodesJson, @AttributesJson, "
+        + "@CreatedAt, @UpdatedAt)";
+
     private static ApprovalDictionaryEntry ToEntry(Row row)
     {
         var semantic = SemanticText.TryParse(row.SemanticText, out var parsed)
@@ -147,7 +300,8 @@ public sealed class DapperApprovalDictionaryStore : IApprovalDictionaryStore
         return new ApprovalDictionaryEntry(
             row.TenantId,
             row.ProcessKey,
-            row.NodeId,
+            // 库里的「流程级默认」是空串（主键列不能为 NULL），对外的形态是 null
+            string.IsNullOrEmpty(row.NodeId) ? null : row.NodeId,
             row.OptionId,
             semantic,
             outcomeClass,
@@ -231,13 +385,42 @@ public sealed class InMemoryApprovalDictionaryStore : IApprovalDictionaryStore
         return ValueTask.FromResult(result);
     }
 
-    /// <summary>登记 / 覆盖一条映射（测试与无库宿主的一次性引导用）。</summary>
-    /// <param name="entry">映射。</param>
-    public void Upsert(ApprovalDictionaryEntry entry)
+    /// <inheritdoc />
+    public ValueTask<ApprovalDictionaryEntry> UpsertAsync(
+        ApprovalDictionaryEntry entry,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
-        _entries[(entry.TenantId, entry.ProcessKey, entry.NodeId, entry.OptionId)] = entry;
+        return ValueTask.FromResult(Upsert(entry));
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DeleteAsync(
+        string tenantId,
+        string processKey,
+        string? nodeId,
+        string optionId,
+        CancellationToken ct = default) =>
+        ValueTask.FromResult(_entries.TryRemove((tenantId, processKey, nodeId, optionId), out _));
+
+    /// <summary>登记 / 覆盖一条映射（测试与无库宿主的一次性引导用）。</summary>
+    /// <param name="entry">映射。</param>
+    /// <returns>落库后的形态（<c>createdAt</c> 保留首次写入的值）。</returns>
+    public ApprovalDictionaryEntry Upsert(ApprovalDictionaryEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var key = (entry.TenantId, entry.ProcessKey, entry.NodeId, entry.OptionId);
+
+        // 与数据库版同口径：created_at 只在首次写入时落，覆盖写保留原值
+        var createdAt = _entries.TryGetValue(key, out var existing) ? existing.CreatedAt : entry.CreatedAt;
+
+        var stored = entry with { CreatedAt = createdAt };
+
+        _entries[key] = stored;
+
+        return stored;
     }
 }
 

@@ -965,7 +965,10 @@ internal static class SchemaCatalog
         [
             C("tenant_id", ColType.Varchar, 64, false, comment: "租户"),
             C("process_key", ColType.Varchar, 255, false, comment: "流程 key（= BPMN process/@id）"),
-            C("node_id", ColType.Varchar, 255, comment: "环节 id（BPMN userTask/@id）；NULL = 流程级默认"),
+            // 主键含本列，而两个方言的主键列都不允许 NULL（MySQL 静默改 NOT NULL、
+            // SQL Server 直接建表失败），所以「流程级默认」用空串表达，不用 NULL。
+            C("node_id", ColType.Varchar, 255, nullable: false, def: "''",
+                comment: "环节 id（BPMN userTask/@id）；空串 = 流程级默认（主键列不能为 NULL）"),
             C("option_id", ColType.Varchar, 128, false, comment: "选项 id（activiti:value/@id）"),
             C("semantic", ColType.Varchar, 32, false,
                 comment: "平台语义 APPROVE/REJECT/RETURN/DELEGATE/CUSTOM（对外 JSON 词汇，不存枚举序号）"),

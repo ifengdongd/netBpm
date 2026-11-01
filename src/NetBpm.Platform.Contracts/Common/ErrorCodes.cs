@@ -167,4 +167,41 @@ public static class ErrorCodes
     /// </para>
     /// </summary>
     public const string CatalogOverrideNotFound = "catalog.override_not_found";
+
+    /// <summary>
+    /// 试图把 <see cref="ApprovalSemantic.Closed"/> 写进字典。<c>422</c>
+    /// <para>
+    /// 该语义只由平台在「结论三级回落」的最后一级产生（流程结束但没有任何审批决定）。
+    /// 允许字典声明它，等于允许人工伪造平台专属结论——审计上就分不清
+    /// 「流程说通过了」与「平台只知道它结束了」。
+    /// </para>
+    /// </summary>
+    public const string DictionarySemanticReserved = "dictionary.semantic_reserved";
+
+    /// <summary>
+    /// 字典请求里的 <c>nodeId</c> 不是该流程定义里的用户任务。<c>422</c>
+    /// <para>
+    /// 按 422 而不是 404：路径上的资源（流程）是存在的，错的是请求体的字段值。
+    /// </para>
+    /// </summary>
+    public const string DictionaryNodeNotFound = "dictionary.node_not_found";
+
+    /// <summary>
+    /// 该选项不在流程定义声明的选项集里。<c>422</c>
+    /// <para>
+    /// 这类配置永远不会被读到（解析时只按 BPMN 声明逐项查字典），属于「配好了但不工作」，
+    /// 比没配更难发现，所以在写入时就拒掉。
+    /// </para>
+    /// </summary>
+    public const string DictionaryOptionNotDeclared = "dictionary.option_not_declared";
+
+    /// <summary>
+    /// <c>allowedTargetNodes</c> 里有流程定义中不存在的节点。<c>422</c>
+    /// </summary>
+    public const string DictionaryTargetNodeUnknown = "dictionary.target_node_unknown";
+
+    /// <summary>
+    /// 要删除的字典行不存在。<c>404</c>
+    /// </summary>
+    public const string DictionaryEntryNotFound = "dictionary.entry_not_found";
 }

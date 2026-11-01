@@ -1831,7 +1831,7 @@ deallocate prepare stmt;
 create table if not exists nb_approval_dictionary (
     tenant_id varchar(64) not null comment '租户',
     process_key varchar(255) not null comment '流程 key（= BPMN process/@id）',
-    node_id varchar(255) comment '环节 id（BPMN userTask/@id）；NULL = 流程级默认',
+    node_id varchar(255) not null default '' comment '环节 id（BPMN userTask/@id）；空串 = 流程级默认（主键列不能为 NULL）',
     option_id varchar(128) not null comment '选项 id（activiti:value/@id）',
     semantic varchar(32) not null comment '平台语义 APPROVE/REJECT/RETURN/DELEGATE/CUSTOM（对外 JSON 词汇，不存枚举序号）',
     outcome_class varchar(16) not null comment '统计口径 POSITIVE/NEGATIVE/NEUTRAL；与 semantic 推导一致时才落非空（冗余便于查询）',
