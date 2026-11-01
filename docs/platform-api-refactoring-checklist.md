@@ -1,7 +1,7 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-11-01 ｜ 代码基线：`a0c1903`（v1.26 收尾）→ 本轮 v1.27｜ 最新进度见开头 v1.27 小节
+> 导出时间：2026-11-01 ｜ 代码基线：`110e0b2`（v1.27）｜ 最新进度见开头 v1.27 小节，**未完成项见 §0.1**
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
@@ -305,8 +305,9 @@ v1.19 把幂等键按调用主体收窄后，这个键在 dave 的命名空间�
   管理员重投 POST /external-tasks/{id}/retry → 204    ✅ 闭环
 ```
 
-**仍未做：** 订阅投递的可观测看板（`netbpm.event.delivery` 指标已埋点，没有面板与告警规则）、
-单个订阅的独立限速（`nb_event_delivery.next_attempt_at` 已留列，当前不参与判定）。
+**~~仍未做~~ → v1.27 已收：** ~~订阅投递的可观测看板~~（`GET /admin/v1/events/stats`：outbox 积压 + 每订阅
+delivered/failed/deadLetter/pending）、~~单个订阅的独立限速~~（`nb_event_subscription.max_per_minute`，超限推迟）。
+仍缺的只是**面板与告警规则**（数据面有、可视化没有），见 §0.1 第 3 项。
 
 ---
 
@@ -339,8 +340,8 @@ v1.19 把幂等键按调用主体收窄后，这个键在 dave 的命名空间�
 **v1.19 已收完这道：** `Platform.Service` 宿主 + 容器化（Dockerfile / compose）+ 一条含 `serviceTask` 的端到端演示，
 并顺手修掉幂等键跨接入方撞车。详见下面 v1.19 小节。
 
-**仍未做（S5 范畴）：** 订阅投递的可观测看板（`netbpm.event.delivery` 指标已埋点，没有面板与告警规则）、
-单个订阅的独立限速（`nb_event_delivery.next_attempt_at` 已留列，当前不参与判定）。
+**~~仍未做（S5 范畴）~~ → v1.27 已收：** ~~订阅投递的可观测看板~~、~~单个订阅的独立限速~~ 两项均已在 v1.27 落地
+（`events/stats` + `max_per_minute`）。剩下的是面板与告警规则，见 §0.1 第 3 项。
 
 ---
 
@@ -476,22 +477,60 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 |---|---|---|---|
 | 阶段（S1–S5） | 5 | 5 | 0 |
 | 改造项（M1–M16） | 16 | 16 | 0 |
-| 守门测试用例 | 38 | 38 | 0 |
+| 守门测试用例（§6 表内 26 项） | 26 | 24 | **2**（`DualModeTests` / `LoadTests`） |
 | 业务面端点（`/workflow/v1`） | 23（另有 1 条已划掉） | 23 | 0 |
 | 管理面端点（`/admin/v1`） | 23 个操作 / 17 条路径 | 23 | 0 |
-| 平台表（`nb_*`） | 13 | 11 | 2 |
-| 人日（估算） | 135 | ≈ 78 | ≈ 57 |
+| 平台表（`nb_*`） | 14（12 已建 + 2 刻意不建） | 12 | 0（2 项是**决定不建**，不是欠账） |
+| 人日（估算，M1–M16） | 135 | 135 | 0（门禁与运维文档不计入这 135） |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
 S4（独立部署）**已完成**：门槛项 M12 外部任务 v1.17、M12 收尾与 M13 事件投递 v1.18、
 `Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 v1.19；
 S5（治理 / SDK）**v1.24 完成**：M14 契约治理（v1.23）+ M15 SDK + `CompatibilityTests`。
 v1.25 把最后三项收尾做掉（M3 封旧面 / `/admin/v1` 五个只读面 / S2 三条出口用例），**S1–S5 全部收口**；
-v1.26 补上 M9 的环节聚合，**M1–M16 十六项全部完成**（不再有「部分完成」）。
-八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）、
-G（委托进程内）、H（契约治理）已闭环**（H 于 v1.23：OpenAPI 快照 + 分类 diff + CI 守门 + 治理文档）；
-**C（响应体可变）于 v1.25 闭环**——旧 `Decorate*` 封存为 `[Obsolete]`，替代路径写进标记与 `Deprecation.Message`；
-C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口）。
+v1.26 补上 M9 的环节聚合，**M1–M16 十六项全部完成**（不再有「部分完成」）；
+v1.27 补齐管理面写路径、事件看板与单订阅限速、时间线轮次，**M1–M16 与 §3 各组的复选框全部转绿**。
+八个硬缺口 **A–H 全部闭环**（H 于 v1.23：OpenAPI 快照 + 分类 diff + CI 守门 + 治理文档；
+**C 于 v1.25**：旧 `Decorate*` 封存为 `[Obsolete]`，替代路径写进标记与 `Deprecation.Message`）。
+
+> **核查结论（v1.27 后）**：M1–M16、五个阶段、两张面（`/workflow/v1` 22 路径 / 23 操作，`/admin/v1` 17 路径 / 23 操作）
+> 与 12 张平台表都已落地。**真正还没做的只剩三件**，都不是 M 项、也不是端点，而是「门禁」与「运维件」——
+> 明细见下面的 [§0.1](#01-未完成项核查v127-之后2026-11-01)。
+
+---
+
+## 0.1 未完成项核查（v1.27 之后，2026-11-01）
+
+**核查方式**：把清单里所有 `[ ]` 与「仍未做」逐条拿到代码里验，而不是只读清单。
+`git` 基线 `110e0b2`。结论：**真正没做的只有下面三件**，其余要么已完成（清单忘了打勾）、
+要么是「决定不建」被误记成欠账。
+
+### 真正未完成（3 项）
+
+| # | 项 | 现状证据 | 缺什么 | 归属 |
+|---|---|---|---|---|
+| 1 | **`DualModeTests`** | `grep -r DualMode tests/ --include=*.cs` 无命中 | 同一个 BPMN 在「嵌入式引擎（`NetBpm.Rest` 直跑）」与「独立服务（`NetBpm.Platform.Service`）」下，时间线 / 实例视图 / `nodeOutcomes` 语义一致。现在的用例几乎都跑在内存宿主（`WebApplicationFactory<Program>`），**没有一条对比两种宿主** | §6 守门测试 |
+| 2 | **`LoadTests`** | `grep -r StressTest tests/` 无命中（也无任何压测工程文件） | 读 p95 < 80ms、写 p95 < 200ms（100 并发，MySQL 5.7）。现有测试全是功能向，**没有一条压过并发或量级** | §6 守门测试 |
+| 3 | **运维件：看板面板 / SLO / Runbook / 迁移手册** | `docs/` 只有接入清单（`integration-checklist.md`，面向引入方）；无限流面板、无 SLO 目标与告警规则、无升级回滚与数据迁移手册 | ① 限流与配额看板（数据面已有 `GET /admin/v1/quotas`、`/events/stats`、OTel meter，缺面板与告警规则）② SLO 目标（接口延迟 / 投递成功率 / 死信率）③ Runbook（告警响应、死信重投、密钥轮换、限流打开）④ 迁移手册（`ACT_*` 老库升级、平台表补列、双跑与回滚） | §3 ⑤ |
+
+**这三件的共同点**：都不新增能力、不碰契约，属于「上线前必须有、开发期感觉不到」的东西。
+其中 1、2 是清单 §9 原本就列了名字的用例，只是从来没写；3 是 §3 ⑤ 唯一剩下的复选框。
+
+### 清单里「看起来未完成、其实已完成」的（本轮已改正勾选）
+
+| 位置 | 原写法 | 事实 |
+|---|---|---|
+| §1 阶段进度 | `- [ ] S2 身份与授权` | 同页表格已写「✅ 完成」，§3 ② 三条出口用例全绿（v1.20/v1.25 复跑）→ 改 `[x]` |
+| §3 ⑤ | `- [ ] M3 收尾：Decorator 迁移 / 删除` | 已于 v1.25 完成：`WorkflowEndpoints` / `WorkflowEndpointOptions` / `DecorateInstanceView` / `DecorateInstanceList` 四处 `[Obsolete]` 都在 → 改 `[x]` |
+| §0 总览 | 缺口「C（响应强类型）只差 M3 收尾（唯一剩下的硬缺口）」 | 与上一行自相矛盾，且 §7 已判 C ✅ → 已改 |
+| §5 平台表 | `nb_idempotency` / `nb_audit_log` 记作 `[ ]` 未完成 | 这两张是**刻意不建**（复用的 `ACT_IDEMPOTENCY_` 与 `admin_audit_log` 已能承载），属于决策不是欠账 → 改标 ⛔ |
+| v1.17 / v1.18 小节 | 「仍未做：订阅投递看板、单订阅独立限速」 | 均于 v1.27 落地（`events/stats` + `max_per_minute`）→ 已加注 |
+
+### 计数修正（原数字与代码不符）
+
+- 守门测试：原写 **38 项全绿**，实际 §6 表内只有 **26 行**（24 绿 / 2 未写）。38 是方案 §9 的原始估算，不是落实条数。
+- 平台表：原写 **13 / 11 已建 / 2 未建**，实际 `SchemaCatalog` 里 **12 张**（`nb_event_delivery` 原先只写在括号里没单独列）。
+- `components.schemas`：120 → 129 → 133 → **136**（v1.27 刷新后的实测值）。
 
 ---
 
@@ -506,7 +545,7 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 | S5 治理与 SDK | 3 周 | ✅ 完成 | M14 契约治理 ✅ v1.23；**M15 SDK ✅ v1.24**（.NET 手写客户端 + 从快照生成 TS/Java）+ **`CompatibilityTests` ✅ v1.24**（基线打当前服务） |
 
 - [x] S1 契约与骨架
-- [ ] S2 身份与授权（剩余见 §3 第 ② 组；RS256 已闭环）
+- [x] S2 身份与授权（RS256 v1.14、引擎面 scope 收口 v1.15、业务写入关闭 v1.16、四条出口用例 v1.20/v1.25 复跑全绿）
 - [x] S3 业务标准
 - [x] S4 独立部署
 - [x] S5 治理与 SDK（M14 v1.23 + M15 v1.24 + `CompatibilityTests` v1.24）
@@ -607,8 +646,12 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 
 - [x] M14 契约治理：OpenAPI 快照 + CI diff ✅ v1.23（`contracts/` 目录 + `contract-governance` job + 治理文档）
 - [x] M15 官方 SDK ✅ v1.24（.NET `Platform.Client` + `tools/NetBpm.SdkGen` → `sdk/typescript`、`sdk/java`）
-- [ ] M3 收尾：Decorator 迁移 / 删除，`WorkflowEndpointOptions` 标 `[Obsolete]`
-- [ ] 配额与限流看板、审计、SLO、迁移与接入文档（Runbook）
+- [x] M3 收尾：Decorator 迁移 / 删除，`WorkflowEndpointOptions` 标 `[Obsolete]` ✅ v1.25
+      （四处 `[Obsolete]`：`WorkflowEndpoints` / `WorkflowEndpointOptions` / `DecorateInstanceView` / `DecorateInstanceList`；
+      **只封不删**，替代路径写进废弃文案）
+- [ ] **运维件（唯一剩下的复选框）**：限流与配额看板面板、SLO 目标与告警规则、升级回滚与数据迁移手册（Runbook）。
+      数据面已经有了（`GET /admin/v1/quotas`、`/events/stats`、OTel meter `netbpm.*`），缺的是面板、阈值与文档。
+      接入向文档在 `docs/integration-checklist.md`，但它面向「引用这个库的开发者」，不是运维手册
 
 ---
 
@@ -660,10 +703,14 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 - [x] `nb_approval_snapshot`
 - [x] `nb_process_parameter` ✅ v1.23（主键含 `definition_version`，旧版本行不删）
 - [x] `nb_parameter_snapshot` ✅ v1.23（append-only，实例内 revision 单调）
-- [ ] `nb_idempotency`（→ 复用 `ACT_IDEMPOTENCY`，不另建表）
+- ⛔ `nb_idempotency`（**刻意不建**：复用引擎的 `ACT_IDEMPOTENCY_`，同一个语义不做两份表）
 - [x] `nb_external_task` ✅ v1.17
-- [x] `nb_event_subscription` ✅ v1.18（配套 `nb_event_delivery` 同批落地）
-- [ ] `nb_audit_log`（→ 复用 `admin_audit_log`，不另建表）
+- [x] `nb_event_subscription` ✅ v1.18
+- [x] `nb_event_delivery` ✅ v1.18（与订阅同批落地；复合主键 + `insert ignore` 幂等）
+- ⛔ `nb_audit_log`（**刻意不建**：复用既有的 `admin_audit_log`）
+
+> 小计：`SchemaCatalog` 里实建 **12 张**；两条 ⛔ 是决策（`nb_idempotency` / `nb_audit_log`），
+> 不是欠账——所以 §0 总览的「未完成」列写 0。
 
 ---
 
@@ -702,9 +749,11 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 - [x] `IdempotencyTests` ✅（`SecurityAndIdempotencyTests` + `IdempotencyNamespaceTests` + `JwtAuthenticationTests`：
       同键同体回放 `Idempotency-Replayed: true` 且只产生一个实例；同键异体 409；键按调用主体收窄）
 - [ ] `DualModeTests` —— 同一 BPMN 在嵌入式与独立服务下 timeline 语义等价
+      （**核实：不存在**。现有用例几乎都跑内存宿主，没有一条对比两种宿主；见 §0.1 第 1 项）
 - [x] `ExternalTaskTests` ✅（`ExternalTaskTests` 7 + `ExternalTaskDatabaseTests` 3 + `ExternalTaskDeadLetterRetryTests` 4：锁过期后被另一 worker 取走 / `retries` 耗尽进死信 / 死信重投）
 - [x] `WebhookTests` ✅（`CloudEventTests` 12 + `EventSubscriptionEndpointTests` 5 + `EventSubscriptionDatabaseTests` 2：HMAC 签名可验证 / 投递按 `eventId` 去重 / 死信可重放）
 - [ ] `LoadTests` —— 读 p95 < 80ms、写 p95 < 200ms（100 并发，MySQL 5.7）
+      （**核实：不存在**。全部测试都是功能向，没有压过并发或量级；见 §0.1 第 2 项）
 
 > v1.14 新增：`ParameterWriteTests`（8 项，`writableBy` 写侧）、`JwtRs256Tests`（5 项，RS256 / JWKS / 算法白名单 / 外部公钥集缓存）。
 >
@@ -788,7 +837,9 @@ C（响应强类型）只差 M3 的 Decorator 收尾（唯一剩下的硬缺口�
 10. ~~还没做的都属于**新能力**~~ —— **全部在 v1.27 落地**：`/admin/v1` 的字典维护与客户端注册迁入（客户端注册跟着平台面一起做了
     幂等与 RFC 9457 的统一错误体）、v1.18 留下的「事件看板与单订阅限速」、以及时间线带「轮次」字段
     （重办节点的聚合从「连续段近似」改成精确分组）。
-    **清单至此再没有未完成项**——往后的工作都是新增能力或外部集成，不再是「说好要做但没做」。
+    **~~清单至此再没有未完成项~~ —— 核查后修正为：M 项与端点都已收口，但还欠三件「门禁 / 运维件」**
+    （`DualModeTests`、`LoadTests`、看板与 SLO / Runbook / 迁移手册），见 **§0.1**。
+    它们不属于任何 M 项，也不改变对外契约；往后的工作要么是这三件，要么是新增能力与外部集成。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
 > 引擎原语面对客户端只留读与管理干预，**且管理干预在实例时间线上留痕**。S4/S5 可以整体后移。
