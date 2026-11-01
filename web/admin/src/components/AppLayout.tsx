@@ -6,8 +6,12 @@ import {
   DashboardOutlined,
   DatabaseOutlined,
   EyeOutlined,
+  KeyOutlined,
   LogoutOutlined,
+  NotificationOutlined,
+  ReadOutlined,
   SafetyCertificateOutlined,
+  ThunderboltOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { Alert, App, Button, Layout, Menu, Space, Tag, Tooltip, Typography } from 'antd';
@@ -33,6 +37,13 @@ const menuItems = [
   { key: '/models', icon: <AppstoreOutlined />, label: '流程模型' },
   { key: '/process-types', icon: <ApartmentOutlined />, label: '流程类型' },
   { key: '/deployments', icon: <CloudServerOutlined />, label: '部署管理' },
+  // 接入管理：租户与客户端注册（/admin/v1），密钥签发只在这里做
+  { key: '/access', icon: <KeyOutlined />, label: '接入管理' },
+  // 审批语义字典：把流程私有 optionId 翻译成平台稳定语义（结论统计的口径在这里定）
+  { key: '/semantics', icon: <ReadOutlined />, label: '审批字典' },
+  // 事件订阅：outbox 投递配置、投递记录与死信重投
+  { key: '/subscriptions', icon: <NotificationOutlined />, label: '事件订阅' },
+  { key: '/quotas', icon: <ThunderboltOutlined />, label: '配额总览' },
   { key: '/monitoring', icon: <EyeOutlined />, label: '实例监控' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
   { key: '/metrics', icon: <DashboardOutlined />, label: '管理指标' },

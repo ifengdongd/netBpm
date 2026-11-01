@@ -75,6 +75,8 @@ public static class AdminClientEndpoints
 
         group.MapPost("/clients", RegisterClientAsync)
             .Accepts<RegisterClientRequest>("application/json")
+            // 响应体含一次性明文密钥：退出幂等缓存（见 NoIdempotencyMetadata）
+            .WithMetadata(new NoIdempotencyMetadata())
             .Produces<IssuedClientSecret>(StatusCodes.Status201Created)
             .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
             .Produces<PlatformProblem>(StatusCodes.Status403Forbidden)
@@ -91,6 +93,8 @@ public static class AdminClientEndpoints
             .Produces<PlatformProblem>(StatusCodes.Status422UnprocessableEntity);
 
         group.MapPost("/clients/{clientId}/rotate", RotateSecretAsync)
+            // 响应体含一次性明文密钥：退出幂等缓存
+            .WithMetadata(new NoIdempotencyMetadata())
             .Produces<IssuedClientSecret>()
             .Produces<PlatformProblem>(StatusCodes.Status403Forbidden)
             .Produces<PlatformProblem>(StatusCodes.Status404NotFound);

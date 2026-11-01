@@ -1037,7 +1037,12 @@ internal static class SchemaCatalog
             C("occurred_at", ColType.DateTime3, nullable: false, comment: "发生时间（UTC）"),
         ],
         ["process_instance_id", "seq"],
-        [new IndexDef("ix_nb_instance_timeline_occurred", ["tenant_id", "occurred_at"])],
+        [
+            new IndexDef("ix_nb_instance_timeline_occurred", ["tenant_id", "occurred_at"]),
+            // 「这批待办各自的结果是什么」按 kind + task_id in (...) 取，再按 seq 排序。
+            // 主键首列是 process_instance_id，谓词里没有它 → 没有这个索引就是全表扫。
+            new IndexDef("ix_nb_instance_timeline_task", ["task_id", "kind"]),
+        ],
         [], [],
         EngineCharset: false);
 
@@ -1080,6 +1085,9 @@ internal static class SchemaCatalog
         ["task_id"],
         [
             new IndexDef("ix_nb_approval_snapshot_instance", ["tenant_id", "process_instance_id"]),
+            // 历史办理页只按 process_instance_id 取（再按 captured_at 排序），
+            // 上面那条以 tenant_id 打头，谓词里没有它就用不上 → 补一条以实例打头的。
+            new IndexDef("ix_nb_approval_snapshot_instance_seq", ["process_instance_id", "captured_at"]),
             // 保留期清理按 captured_at 删（AdminArchiveCleanupService，与历史归档同一切点）。
             // 这张表只增不减且行宽可观，没有这个索引就是每 6 小时全表扫一次。
             new IndexDef("ix_nb_approval_snapshot_captured", ["captured_at"]),
@@ -1163,6 +1171,9 @@ internal static class SchemaCatalog
         [
             // 保留期清理与按租户归档都按时间走
             new IndexDef("ix_nb_parameter_snapshot_updated", ["tenant_id", "updated_at"]),
+            // 保留期清理是 `delete where updated_at < @before`：谓词里没有 tenant_id，
+            // 上面那条带租户前缀的索引用不上，等于每小时扫一次全表。
+            new IndexDef("ix_nb_parameter_snapshot_expiry", ["updated_at"]),
         ],
         [], [],
         EngineCharset: false);
@@ -1258,7 +1269,12 @@ internal static class SchemaCatalog
         ],
         // 复合主键：粒度就是「一条事件 × 一个订阅」，天然幂等，不需要额外唯一索引
         ["event_id", "subscription_id"],
-        [new IndexDef("ix_nb_event_delivery_subscription", ["subscription_id", "status"])],
+        [
+            new IndexDef("ix_nb_event_delivery_subscription", ["subscription_id", "status"]),
+            // 死信列表是「跨订阅、按状态筛、按更新时间倒序」：
+            // 上面那条以 subscription_id 打头，谓词里没有它就退化成全表扫 + 排序。
+            new IndexDef("ix_nb_event_delivery_dead_letter", ["status", "updated_at"]),
+        ],
         [], [],
         EngineCharset: false);
 

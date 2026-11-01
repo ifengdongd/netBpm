@@ -636,11 +636,13 @@ execute stmt;
 deallocate prepare stmt;
 
 
--- ─────────────────────────── ①-3 引擎初值（ACT_GE_PROPERTY：仅在缺失时插入） ───────────────────────────
+-- ─────────────────────────── ①-3 引擎初值（ACT_GE_PROPERTY：仅在缺失时插入，结构版本单独对齐） ───────────────────────────
 
 insert ignore into ACT_GE_PROPERTY (NAME_, VALUE_, REV_) values ('schema.version', '8.1.4', '1');
 insert ignore into ACT_GE_PROPERTY (NAME_, VALUE_, REV_) values ('schema.history', 'create(8.1.4)', '1');
 insert ignore into ACT_GE_PROPERTY (NAME_, VALUE_, REV_) values ('next.dbid', '1', '1');
+-- 结构版本对齐：老库重跑脚本时抬到当前代码期望值（不重置 next.dbid）
+update ACT_GE_PROPERTY set VALUE_ = '8.1.4' where NAME_ = 'schema.version' and VALUE_ <> '8.1.4';
 
 
 -- ─────────────────────────── ② 流程实例业务表 / 流程类型 / 流程模型 ───────────────────────────
@@ -1873,13 +1875,22 @@ create table if not exists nb_instance_timeline (
     payload_json mediumtext comment '附加载荷（JSON 对象）：保留尚未建模的字段，避免为一个新字段改表',
     occurred_at datetime(3) not null comment '发生时间（UTC）',
     primary key (process_instance_id, seq),
-    index ix_nb_instance_timeline_occurred (tenant_id, occurred_at)
+    index ix_nb_instance_timeline_occurred (tenant_id, occurred_at),
+    index ix_nb_instance_timeline_task (task_id, kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='审批记录时间线（append-only）：同一实例内 sequence 单调递增，增量拉取以它为游标';
 
 set @ddl = (select if(count(*) = 0,
         'create index ix_nb_instance_timeline_occurred on nb_instance_timeline (tenant_id, occurred_at)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'nb_instance_timeline' and index_name = 'ix_nb_instance_timeline_occurred');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_instance_timeline_task on nb_instance_timeline (task_id, kind)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_instance_timeline' and index_name = 'ix_nb_instance_timeline_task');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
@@ -1902,6 +1913,7 @@ create table if not exists nb_approval_snapshot (
     captured_at datetime(3) not null comment '定稿时间（UTC）',
     primary key (task_id),
     index ix_nb_approval_snapshot_instance (tenant_id, process_instance_id),
+    index ix_nb_approval_snapshot_instance_seq (process_instance_id, captured_at),
     index ix_nb_approval_snapshot_captured (captured_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='表单快照：提交审批时的字段定义与表单值（键 = task_id，历史页按当时定义渲染）';
 
@@ -1909,6 +1921,14 @@ set @ddl = (select if(count(*) = 0,
         'create index ix_nb_approval_snapshot_instance on nb_approval_snapshot (tenant_id, process_instance_id)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'nb_approval_snapshot' and index_name = 'ix_nb_approval_snapshot_instance');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_approval_snapshot_instance_seq on nb_approval_snapshot (process_instance_id, captured_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_approval_snapshot' and index_name = 'ix_nb_approval_snapshot_instance_seq');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
@@ -1962,13 +1982,22 @@ create table if not exists nb_parameter_snapshot (
     updated_at datetime(3) not null comment '修订时间（UTC）',
     updated_by varchar(255) comment '修订人（令牌 subject）；纯服务令牌产生的修订为空',
     primary key (process_instance_id, revision),
-    index ix_nb_parameter_snapshot_updated (tenant_id, updated_at)
+    index ix_nb_parameter_snapshot_updated (tenant_id, updated_at),
+    index ix_nb_parameter_snapshot_expiry (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='参数修订历史（append-only）：每次参数变化落一版，revision 在实例内单调递增';
 
 set @ddl = (select if(count(*) = 0,
         'create index ix_nb_parameter_snapshot_updated on nb_parameter_snapshot (tenant_id, updated_at)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'nb_parameter_snapshot' and index_name = 'ix_nb_parameter_snapshot_updated');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_parameter_snapshot_expiry on nb_parameter_snapshot (updated_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_parameter_snapshot' and index_name = 'ix_nb_parameter_snapshot_expiry');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
@@ -2063,13 +2092,22 @@ create table if not exists nb_event_delivery (
     updated_at datetime(3) not null comment '更新时间（UTC）',
     delivered_at datetime(3) comment '投递成功时间（UTC）',
     primary key (event_id, subscription_id),
-    index ix_nb_event_delivery_subscription (subscription_id, status)
+    index ix_nb_event_delivery_subscription (subscription_id, status),
+    index ix_nb_event_delivery_dead_letter (status, updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='事件投递：一条 outbox 事件对某个订阅的投递状态（重投时跳过已成功的订阅，避免无谓重发）';
 
 set @ddl = (select if(count(*) = 0,
         'create index ix_nb_event_delivery_subscription on nb_event_delivery (subscription_id, status)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'nb_event_delivery' and index_name = 'ix_nb_event_delivery_subscription');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_event_delivery_dead_letter on nb_event_delivery (status, updated_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_event_delivery' and index_name = 'ix_nb_event_delivery_dead_letter');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;

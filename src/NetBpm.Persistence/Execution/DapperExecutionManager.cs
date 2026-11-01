@@ -614,11 +614,14 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
             ? SqlPaging.Build(session.DatabaseType, filter.FirstResult, take, parameters)
             : SqlPaging.BuildUnlimited(session.DatabaseType, filter.FirstResult, parameters);
 
+        // tie-break 恒为 ID_ 升序（与门面 ApplyPaging / 平台游标的口径一致）：
+        // 两个方向都按「时间 + id 升序」才是同一个全序，否则同刻多条在两种排序下顺序不同，
+        // 分页下推时「各取前 N 条再合并」就不再等于「取全量再排序」。
         var sql = $"""
             select {ExecutionColumns.All}
             from ACT_RU_EXECUTION
             {where}
-            order by START_TIME_ {direction}, ID_ {direction}
+            order by START_TIME_ {direction}, ID_ asc
             {paging}
             """;
 
@@ -683,6 +686,13 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
             // 历史 NULL 已由初始化脚本的 0012 段归一到 ''（ACT_RU_EXECUTION / ACT_HI_* 三张表）。
             conditions.Add("TENANT_ID_ = @tenantId");
             parameters.Add("tenantId", filter.TenantId);
+        }
+
+        if (filter.TenantIds is { Count: > 0 })
+        {
+            // 「本租户 + 全局共享（空租户）」：用 in 而不是 or，否则 TENANT_ID_ 索引基本用不上
+            conditions.Add("TENANT_ID_ in @tenantIds");
+            parameters.Add("tenantIds", filter.TenantIds);
         }
 
         if (filter.IsActive is { } isActive)

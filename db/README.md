@@ -50,6 +50,12 @@ dotnet run --project tools/NetBpm.DbInit -- \
 > ⚠️ 初值（`ACT_GE_PROPERTY` 的 `schema.version` / `schema.history` / `next.dbid`）
 > **只在缺失时插入**：重复执行不会把 `next.dbid` 重置回 1，也就不会造成 id 重用。
 > 想重置 ID 游标要显式 `update ACT_GE_PROPERTY`。
+>
+> 唯一例外是 **`schema.version`**：脚本末尾（①-3 之后）有一条
+> `update ... where NAME_ = 'schema.version' and VALUE_ <> '<当前期望值>'`，
+> 把老库的版本抬到 `DatabaseSchemaChecker.ExpectedSchemaVersion`。
+> 没有这一条，老库重跑脚本不会更新版本，而发布时抬高期望值又会让所有老库启动校验失败
+> （运维看到的现象是「脚本执行成功但服务起不来」）。`next.dbid` / `schema.history` 仍只在缺失时插入。
 
 此前按「脚本编号 + `ACT_GE_SCHEMA_LOG` 校验和」做脚本级增量迁移的机制已移除：
 单文件幂等取代了它。老库里残留的 `ACT_GE_SCHEMA_LOG` 表不再被读写，可手工 `drop table ACT_GE_SCHEMA_LOG;`。

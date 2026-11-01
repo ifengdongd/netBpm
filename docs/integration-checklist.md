@@ -95,7 +95,8 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 
 - 变更类接口支持 `Idempotency-Key`：同键同请求回放首次响应，同键不同请求 409；
   数据库宿主用 `ACT_IDEMPOTENCY` 跨实例去重（内存宿主仅进程内）。
-- 管理动作（转办 / 跳转 / 变量直写）写审计表，可通过 `/api/admin/audit` 回放。
+- 管理动作（转办 / 跳转 / 变量直写）写审计表，可通过 `/admin/v1/audit` 回放
+  （旧的 `/api/admin/audit` 同源、仍可用；平台面要求 `workflow:admin:audit:read`，与 `netbpm.admin.audit.read` 互认）。
 
 ---
 

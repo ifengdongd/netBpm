@@ -56,6 +56,32 @@ public interface ITenantDirectory
     /// </remarks>
     /// <param name="ct">取消令牌。</param>
     ValueTask<IReadOnlyList<TenantDescriptor>> ListAsync(CancellationToken ct = default);
+
+    /// <summary>按 id 升序分页（keyset：只返回 id 严格大于 <paramref name="afterTenantId"/> 的行）。</summary>
+    /// <remarks>
+    /// 配额总览在租户数上千时不能再「全量拉回来再切」：默认实现只是兜底（给测试替身用），
+    /// 真正的库实现走 <c>where id &gt; @after order by id limit</c>，走主键。
+    /// </remarks>
+    /// <param name="afterTenantId">上一页最后一条的租户 id；<see langword="null"/> / 空表示第一页。</param>
+    /// <param name="limit">最多返回条数。</param>
+    /// <param name="ct">取消令牌。</param>
+    async ValueTask<IReadOnlyList<TenantDescriptor>> ListPageAsync(
+        string? afterTenantId,
+        int limit,
+        CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        var all = await ListAsync(ct).ConfigureAwait(false);
+
+        return
+        [
+            .. all
+                .Where(tenant => string.IsNullOrEmpty(afterTenantId)
+                    || string.CompareOrdinal(tenant.TenantId, afterTenantId) > 0)
+                .Take(limit),
+        ];
+    }
 }
 
 /// <summary>租户注册表（管理面与首次部署引导使用）。</summary>
@@ -188,6 +214,35 @@ public sealed class DapperTenantRegistry : ITenantRegistry
 
         var rows = await connection.QueryAsync<TenantRow>(new CommandDefinition(
             $"select {Columns} from nb_tenant order by id",
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return [.. rows.Select(Map)];
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<TenantDescriptor>> ListPageAsync(
+        string? afterTenantId,
+        int limit,
+        CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        await using var connection = _connections.CreateConnection();
+
+        var parameters = new DynamicParameters();
+        var where = string.Empty;
+
+        if (!string.IsNullOrEmpty(afterTenantId))
+        {
+            where = " where id > @after";
+            parameters.Add("after", afterTenantId);
+        }
+
+        var paging = SqlPaging.Build(_connections.DatabaseType, 0, limit, parameters);
+
+        var rows = await connection.QueryAsync<TenantRow>(new CommandDefinition(
+            $"select {Columns} from nb_tenant{where} order by id{paging}",
+            parameters,
             cancellationToken: ct)).ConfigureAwait(false);
 
         return [.. rows.Select(Map)];

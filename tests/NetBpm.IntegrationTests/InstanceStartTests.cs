@@ -206,6 +206,34 @@ public sealed class InstanceStartTests
         Assert.Equal(ErrorCodes.AuthInsufficientScope, problem.GetProperty("code").GetString());
     }
 
+    /// <summary>
+    /// 业务主键超过列宽（255）必须是 400，而不是落到数据库后变成 503。
+    /// </summary>
+    /// <remarks>
+    /// 不挡的话，驱动抛出的 <c>DbException</c> 会被全局异常处理器映射成「数据库暂时不可用」，
+    /// 调用方会去查库、查连接池，而真正原因是自己拼了个超长单号。
+    /// </remarks>
+    [Fact]
+    public async Task Start_Should400_ForOverlongBusinessKey()
+    {
+        using var host = BuildHost();
+        await DeployAsync(host);
+
+        using var client = host.CreateClient();
+        var secret = await RegisterAsync(client, "oa-portal", [PlatformScopes.InstanceStart]);
+
+        using var response = await SendStartAsync(client, secret, subject: null, new
+        {
+            processKey = ProcessKey,
+            businessKey = new string('x', 256),
+        });
+
+        var problem = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(ErrorCodes.RequestMalformed, problem.GetProperty("code").GetString());
+    }
+
     // ─────────────────────────── 测试基础设施 ───────────────────────────
 
     private static WebApplicationFactory<Program> BuildHost() =>

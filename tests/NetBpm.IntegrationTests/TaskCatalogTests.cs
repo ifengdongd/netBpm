@@ -176,6 +176,36 @@ public sealed class TaskCatalogTests
 
     // ─────────────────────────── 测试基础设施 ───────────────────────────
 
+    /// <summary>
+    /// <c>scope=ALL</c>（全员待办）缺 <c>workflow:history:read:all</c> 时必须 403，不能静默降级成 MINE。
+    /// </summary>
+    /// <remarks>
+    /// 降级的表现是「列表少了一批单子但不报错」——调用方会把全员待办当自己的待办渲染，
+    /// 业务上就是漏单；而且日志里看不出任何异常。
+    /// </remarks>
+    [Fact]
+    public async Task TaskList_Should403_ForAllScope_WithoutHistoryReadAll()
+    {
+        using var host = BuildHost();
+        await DeployApprovalAsync(host);
+
+        using var client = host.CreateClient();
+
+        // 只有待办读：足够列自己的待办，但不够列全员
+        var secret = await RegisterAsync(client, "oa-portal", [PlatformScopes.TaskRead]);
+
+        // 不声明 subject：避免先撞上「声明操作人需 onbehalf」的 403，测的是 scope=ALL 自己的闸门
+        using var response = await SendAsync(client, "/workflow/v1/tasks?scope=ALL", secret, subject: null);
+        var problem = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(ErrorCodes.AuthInsufficientScope, problem.GetProperty("code").GetString());
+        Assert.Contains(
+            PlatformScopes.HistoryReadAll,
+            problem.GetProperty("detail").GetString(),
+            StringComparison.Ordinal);
+    }
+
     private static WebApplicationFactory<Program> BuildHost() =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {

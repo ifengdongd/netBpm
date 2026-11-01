@@ -186,6 +186,16 @@ public static class PlatformServiceGuards
                 + "多副本请设 NetBpm__RateLimit__Store=Redis 并配置 NetBpm__RateLimit__Redis__*。");
         }
 
+        if (string.Equals(queue, "Memory", StringComparison.OrdinalIgnoreCase))
+        {
+            // 队列在进程内 = 每个副本只看得见自己的作业，而异步作业 / 定时器的语义是「至少要跑一次」：
+            // 多副本时同一作业会被每个副本各执行一遍，异步委托的副作用（发短信、扣库存）就重复了。
+            // 与配额那条同源：配置写在注释里没人看，启动日志里说一次最省事。
+            logger.LogWarning(
+                "作业队列为进程内实现（NetBpm:Jobs:Queue:Provider=Memory）：多副本部署时同一作业会在每个副本各执行一次，"
+                + "异步委托的副作用会重复。多副本请设 NetBpm__Jobs__Queue__Provider=Redis 并配置 NetBpm__Jobs__Queue__Redis__*。");
+        }
+
         if (!requireCredential)
         {
             logger.LogWarning(

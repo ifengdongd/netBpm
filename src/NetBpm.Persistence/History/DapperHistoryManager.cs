@@ -689,7 +689,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
                    START_USER_ID_, START_ACT_ID_, END_ACT_ID_, DELETE_REASON_, NAME_, TENANT_ID_
             from ACT_HI_PROCINST
             {where}
-            order by START_TIME_ {direction}, ID_ {direction}
+            order by START_TIME_ {direction}, ID_ asc
             {paging}
             """;
 
@@ -928,6 +928,13 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
             // 等值比较保证 TENANT_ID_ 索引可用；历史 NULL 由初始化脚本 0012 段归一
             conditions.Add("TENANT_ID_ = @tenantId");
             parameters.Add("tenantId", filter.TenantId);
+        }
+
+        if (filter.TenantIds is { Count: > 0 })
+        {
+            // 「本租户 + 全局共享」用 in 表达：or 形式（= @t or = ''）在多数执行计划里会退化成扫索引全表
+            conditions.Add("TENANT_ID_ in @tenantIds");
+            parameters.Add("tenantIds", filter.TenantIds);
         }
 
         if (filter.Finished is { } finished)

@@ -104,6 +104,77 @@ public interface IClientDirectory
     ValueTask<IReadOnlyList<ClientDescriptor>> ListAsync(
         string? tenantId = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 按 <c>(tenant_id, client_id)</c> 升序分页（keyset：只返回严格排在游标之后的行）。
+    /// </summary>
+    /// <remarks>
+    /// 配额总览要「一屏看全网」：客户端数是租户数 × 系统数的乘积，全量拉回再切片在接入方一多就打到内存与连接上。
+    /// 游标用 <c>(tenant_id, client_id)</c> 而不是 offset —— 注册 / 注销随时发生，offset 会漏行。
+    /// 默认实现是给测试替身兜底的（先取全量再切），库实现走主键与 <c>ix_nb_api_client_tenant</c>。
+    /// </remarks>
+    /// <param name="tenantId">租户过滤；<see langword="null"/> 表示跨租户。</param>
+    /// <param name="afterTenantId">上一页最后一条的租户 id；与 <paramref name="afterClientId"/> 同时为空表示第一页。</param>
+    /// <param name="afterClientId">上一页最后一条的客户端 id。</param>
+    /// <param name="limit">最多返回条数。</param>
+    /// <param name="ct">取消令牌。</param>
+    async ValueTask<IReadOnlyList<ClientDescriptor>> ListPageAsync(
+        string? tenantId,
+        string? afterTenantId,
+        string? afterClientId,
+        int limit,
+        CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        var all = await ListAsync(tenantId, ct).ConfigureAwait(false);
+
+        // 必须自己按 (tenant_id, client_id) 排：ListAsync 的默认顺序是 created_at，
+        // 直接 Take 会得到「不属于这一页」的行，翻页就有漏行的可能。
+        var ordered = all
+            .OrderBy(client => client.TenantId, StringComparer.Ordinal)
+            .ThenBy(client => client.ClientId, StringComparer.Ordinal);
+
+        if (string.IsNullOrEmpty(afterTenantId) && string.IsNullOrEmpty(afterClientId))
+        {
+            return [.. ordered.Take(limit)];
+        }
+
+        return
+        [
+            .. ordered
+                .Where(client => IsAfter(client, afterTenantId, afterClientId))
+                .Take(limit),
+        ];
+    }
+
+    /// <summary>每个租户的客户端数量（配额总览的「租户行」用）。</summary>
+    /// <param name="tenantId">租户过滤；<see langword="null"/> 表示跨租户汇总。</param>
+    /// <param name="ct">取消令牌。</param>
+    async ValueTask<IReadOnlyDictionary<string, int>> CountByTenantAsync(
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var all = await ListAsync(tenantId, ct).ConfigureAwait(false);
+
+        return all
+            .GroupBy(client => client.TenantId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+    }
+
+    /// <summary>游标比较：<c>(tenant_id, client_id)</c> 字典序。</summary>
+    /// <param name="client">候选行。</param>
+    /// <param name="afterTenantId">游标租户。</param>
+    /// <param name="afterClientId">游标客户端。</param>
+    private static bool IsAfter(ClientDescriptor client, string? afterTenantId, string? afterClientId)
+    {
+        var cursorTenant = afterTenantId ?? string.Empty;
+        var byTenant = string.CompareOrdinal(client.TenantId, cursorTenant);
+
+        return byTenant != 0
+            ? byTenant > 0
+            : string.CompareOrdinal(client.ClientId, afterClientId ?? string.Empty) > 0;
+    }
 }
 
 /// <summary>

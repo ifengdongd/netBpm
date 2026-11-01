@@ -5,6 +5,8 @@ using NetBpm.Bpmn.Validation;
 using NetBpm.Engine;
 using NetBpm.Persistence;
 using NetBpm.Persistence.Platform;
+using NetBpm.Platform.Contracts;
+using NetBpm.Rest.Platform;
 using NetBpm.Rest.Security;
 
 namespace NetBpm.Rest;
@@ -44,12 +46,65 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
 
         httpContext.Response.StatusCode = statusCode;
 
+        // 平台面一律 RFC 9457：请求体绑定失败（BadHttpRequestException）、租户越界（ForbiddenException）
+        // 这些最常见的错误也必须同形，否则「端点的 400 是新信封、异常通道的 400 是旧信封」，
+        // 调用方只能两套解析都写一遍。
+        if (PlatformProblems.IsPlatformPath(httpContext.Request.Path))
+        {
+            var problem = PlatformProblem.Create(
+                PlatformCode(code),
+                TitleOf(statusCode),
+                statusCode,
+                message) with
+            {
+                Instance = httpContext.Request.Path.Value,
+                TraceId = httpContext.TraceIdentifier,
+                Errors = errors?
+                    .Select(error => new PlatformFieldError(
+                        error.ElementId ?? error.Rule,
+                        error.Rule,
+                        error.Message))
+                    .ToArray(),
+            };
+
+            await httpContext.Response
+                .WriteAsJsonAsync(
+                    problem,
+                    options: null,
+                    contentType: "application/problem+json",
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return true;
+        }
+
         await httpContext.Response.WriteAsJsonAsync(
             new ErrorResponse(message, errors, httpContext.TraceIdentifier, code),
             cancellationToken).ConfigureAwait(false);
 
         return true;
     }
+
+    /// <summary>旧引擎码里触达平台面的那些，换成平台面的稳定码（其余按原样透出）。</summary>
+    private static string PlatformCode(string? code) => code switch
+    {
+        null or EngineErrorCode.ValidationError => ErrorCodes.RequestMalformed,
+        _ => code,
+    };
+
+    /// <summary>RFC 9457 的 <c>title</c>：按状态码给固定短标题，<c>detail</c> 才是具体说明。</summary>
+    private static string TitleOf(int statusCode) => statusCode switch
+    {
+        StatusCodes.Status400BadRequest => "请求无效",
+        StatusCodes.Status401Unauthorized => "未认证",
+        StatusCodes.Status403Forbidden => "拒绝访问",
+        StatusCodes.Status404NotFound => "资源不存在",
+        StatusCodes.Status409Conflict => "状态冲突",
+        StatusCodes.Status422UnprocessableEntity => "无法处理",
+        StatusCodes.Status501NotImplemented => "能力未实现",
+        StatusCodes.Status503ServiceUnavailable => "服务暂时不可用",
+        _ => "服务器内部错误",
+    };
 
     private static (int StatusCode, string Message, IReadOnlyList<ValidationError>? Errors, string? Code) Map(
         Exception exception) =>

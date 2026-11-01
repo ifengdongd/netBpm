@@ -88,6 +88,18 @@ function extractMessage(body: unknown, fallback: string): string {
     if (message) {
       return message;
     }
+
+    // 平台面（/workflow/v1、/admin/v1）用 RFC 9457：正文在 detail、标题在 title。
+    // 不读 detail 的话，新面的 403 / 400 在页面上只会显示 "Forbidden" 这种无信息量的文案。
+    const problem = body as { detail?: string; title?: string };
+
+    if (typeof problem.detail === 'string' && problem.detail.length > 0) {
+      return problem.detail;
+    }
+
+    if (typeof problem.title === 'string' && problem.title.length > 0) {
+      return problem.title;
+    }
   }
 
   return fallback;

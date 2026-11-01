@@ -332,7 +332,11 @@ public static class NetBpmHost
         app.MapAdminReadEndpoints();
 
         // 事件订阅管理（M13）：与客户端注册同属接入配置，放同一组路径与鉴权口径下
+        app.MapEventSubscriptionAdminEndpoints();
+
+#pragma warning disable CS0618 // 旧路径仅服务既有运维脚本；新接入走 /admin/v1/subscriptions
         app.MapEventSubscriptionEndpoints();
+#pragma warning restore CS0618
 
         mapAdditionalEndpoints?.Invoke(app);
 

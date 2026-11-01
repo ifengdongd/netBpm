@@ -151,17 +151,23 @@ public sealed class ApprovalVocabulary : IApprovalVocabulary
 
         var cacheKey = ApprovalVocabularyCache.Key(tenantId, processKey);
 
-        if (_cache.TryGetValue(cacheKey, out IReadOnlyList<ApprovalDictionaryEntry>? cached)
+        if (_cache.TryGetValue(cacheKey, out CachedDeclarations? cached)
             && cached is not null)
         {
-            return cached;
+            // 缓存命中不等于「还新鲜」：写路径只能失效写者自己的进程，
+            // 所以用一次聚合查询（主键前缀）跨副本校验水位。
+            if (await IsStillCurrentAsync(cached.Revision, tenantId, processKey, ct).ConfigureAwait(false))
+            {
+                return cached.Entries;
+            }
         }
 
         try
         {
             var entries = await _store.ListAsync(tenantId, processKey, ct).ConfigureAwait(false);
+            var revision = await _store.GetRevisionAsync(tenantId, processKey, ct).ConfigureAwait(false);
 
-            _cache.Set(cacheKey, entries, DictionaryCacheLifetime);
+            _cache.Set(cacheKey, new CachedDeclarations(entries, revision), DictionaryCacheLifetime);
 
             return entries;
         }
@@ -179,6 +185,42 @@ public sealed class ApprovalVocabulary : IApprovalVocabulary
             return [];
         }
     }
+
+    /// <summary>
+    /// 缓存里的这份声明是否仍等于库里的水位（行数 + 最近更新时间）。
+    /// </summary>
+    /// <remarks>
+    /// 水位查询失败时<b>沿用缓存</b>而不是抛：字典是审批语义的辅助数据，
+    /// 一次读库抖动不该让所有办理页 500；最坏情况是读到旧语义，且下一次请求还会重试校验。
+    /// </remarks>
+    private async ValueTask<bool> IsStillCurrentAsync(
+        ApprovalDictionaryRevision cached,
+        string tenantId,
+        string processKey,
+        CancellationToken ct)
+    {
+        try
+        {
+            var current = await _store.GetRevisionAsync(tenantId, processKey, ct).ConfigureAwait(false);
+
+            return current == cached;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogDebug(
+                exception,
+                "审批语义字典水位查询失败（{TenantId}/{ProcessKey}）：本次沿用进程内缓存。",
+                tenantId,
+                processKey);
+
+            return true;
+        }
+    }
+
+    /// <summary>缓存条目：声明 + 取这份声明时的水位。</summary>
+    private sealed record CachedDeclarations(
+        IReadOnlyList<ApprovalDictionaryEntry> Entries,
+        ApprovalDictionaryRevision Revision);
 
     /// <summary>两层合并出一个 <see cref="ApprovalOption"/>。</summary>
     private static ApprovalOption BuildOption(

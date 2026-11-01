@@ -50,6 +50,23 @@ public static class PlatformProblems
         return Results.Json(problem, statusCode: status, contentType: "application/problem+json");
     }
 
+    /// <summary>
+    /// 该路径是否属于「平台面」：<c>/workflow/v1/**</c> 与 <c>/admin/v1/**</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 平台面的错误体<b>一律</b>是 RFC 9457（见 <see cref="PlatformProblem"/>），不区分错误来自端点
+    /// 自身、认证中间件还是全局异常处理器 —— 否则「401 是旧信封、400 是新信封」这种不一致
+    /// 会让 SDK 的问题解析在最常见的入口错误上失效。
+    /// </para>
+    /// <para>
+    /// 旧引擎面 <c>/api/**</c> 不在此列：改它的错误体属于破坏性变更，要跟 SDK 一起发版。
+    /// </para>
+    /// </remarks>
+    public static bool IsPlatformPath(PathString path) =>
+        path.StartsWithSegments("/workflow", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWithSegments("/admin", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>403：缺少 scope。</summary>
     /// <param name="http">当前请求。</param>
     /// <param name="context">身份上下文。</param>

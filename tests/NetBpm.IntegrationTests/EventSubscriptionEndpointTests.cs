@@ -239,6 +239,127 @@ public sealed class EventSubscriptionEndpointTests
         Assert.Equal(0, clearedJson.RootElement.GetProperty("maxPerMinute").GetInt32());
     }
 
+    // ─────────────────────── /admin/v1（收口后的写路径） ───────────────────────
+
+    [Fact]
+    public async Task AdminV1_Create_ShouldAudit_AndNeverPutSecretInAudit()
+    {
+        using var host = BuildHost();
+        using var client = host.CreateClient();
+
+        var secret = await RegisterAsync(
+            client,
+            "sub-v1",
+            [PlatformScopes.EventSubscribe, PlatformScopes.AdminAuditRead]);
+
+        using var created = await client.SendAsync(
+            Json(HttpMethod.Post, "/admin/v1/subscriptions", secret, new
+            {
+                name = "ERP 回调（新面）",
+                endpointUrl = "https://erp.test/hook?token=should-not-be-audited",
+                eventTypes = new[] { "TASK_CREATED" },
+            }),
+            Ct);
+
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        using var createdJson = JsonDocument.Parse(await created.Content.ReadAsStringAsync(Ct));
+        var view = createdJson.RootElement.GetProperty("subscription");
+        var subscriptionId = view.GetProperty("id").GetString()!;
+        var plainSecret = createdJson.RootElement.GetProperty("secret").GetString()!;
+
+        Assert.StartsWith("/admin/v1/subscriptions/", created.Headers.Location?.ToString(), StringComparison.Ordinal);
+
+        // 写进审计：谁建的、建了哪一条；密钥与查询串（可能带 token）都不能进审计表
+        using var audit = await client.SendAsync(
+            Get("/admin/v1/audit?action=event_subscription.create", secret),
+            Ct);
+
+        Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
+
+        using var auditJson = JsonDocument.Parse(await audit.Content.ReadAsStringAsync(Ct));
+        var entries = auditJson.RootElement.GetProperty("items").EnumerateArray().ToList();
+
+        var entry = Assert.Single(entries);
+
+        Assert.Equal(subscriptionId, entry.GetProperty("targetId").GetString());
+        Assert.Equal("event_subscription", entry.GetProperty("targetType").GetString());
+
+        var detail = entry.GetProperty("detail").GetString()!;
+
+        Assert.DoesNotContain(plainSecret, detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("should-not-be-audited", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AdminV1_Rotate_ShouldAudit()
+    {
+        using var host = BuildHost();
+        using var client = host.CreateClient();
+
+        var secret = await RegisterAsync(
+            client,
+            "sub-v1-rotate",
+            [PlatformScopes.EventSubscribe, PlatformScopes.AdminAuditRead]);
+
+        var subscriptionId = await CreateViaAdminV1Async(client, secret);
+
+        using var rotated = await client.SendAsync(
+            Json(HttpMethod.Post, $"/admin/v1/subscriptions/{subscriptionId}/rotate", secret, new { }),
+            Ct);
+
+        Assert.Equal(HttpStatusCode.OK, rotated.StatusCode);
+
+        using var audit = await client.SendAsync(
+            Get("/admin/v1/audit?action=event_subscription.rotate", secret),
+            Ct);
+
+        using var auditJson = JsonDocument.Parse(await audit.Content.ReadAsStringAsync(Ct));
+        var entry = auditJson.RootElement.GetProperty("items").EnumerateArray().Single();
+
+        Assert.Equal(subscriptionId, entry.GetProperty("targetId").GetString());
+    }
+
+    [Fact]
+    public async Task AdminV1_ShouldNotCrossTenant()
+    {
+        using var host = BuildHost();
+        using var client = host.CreateClient();
+
+        var secret = await RegisterAsync(client, "sub-v1-tenant", [PlatformScopes.EventSubscribe]);
+
+        // 凭据绑定 default：显式指向别的租户必须 403（跨租户是平台运营视角，不是租户管理员）
+        using var crossed = await client.SendAsync(
+            Get("/admin/v1/subscriptions?tenantId=other", secret),
+            Ct);
+
+        Assert.Equal(HttpStatusCode.Forbidden, crossed.StatusCode);
+
+        using var problem = JsonDocument.Parse(await crossed.Content.ReadAsStringAsync(Ct));
+
+        Assert.Equal(ErrorCodes.TenantForbidden, problem.RootElement.GetProperty("code").GetString());
+    }
+
+    private static async Task<string> CreateViaAdminV1Async(HttpClient client, string secret)
+    {
+        using var created = await client.SendAsync(
+            Json(HttpMethod.Post, "/admin/v1/subscriptions", secret, new
+            {
+                name = "归档服务（新面）",
+                endpointUrl = "https://archive.test/hook",
+            }),
+            Ct);
+
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        using var json = JsonDocument.Parse(await created.Content.ReadAsStringAsync(Ct));
+
+        return json.RootElement
+            .GetProperty("subscription")
+            .GetProperty("id")
+            .GetString()!;
+    }
+
     private static async Task<string> CreateAsync(
         HttpClient client,
         string secret,

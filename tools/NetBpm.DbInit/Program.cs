@@ -22,11 +22,11 @@ using NetBpm.Persistence.Database;
 // 幂等性由脚本内的方言守卫保证（create table if not exists / information_schema 判重），
 // 因此可以重复执行：新库一次建成，老库只补缺失部分（见 DatabaseMigrator）。
 
-var options = Options.Parse(args);
+var options = DbInitOptions.Parse(args);
 
 if (options is null)
 {
-    Options.PrintUsage();
+    DbInitOptions.PrintUsage();
     return 2;
 }
 
@@ -79,7 +79,7 @@ Console.WriteLine($"结构版本校验通过：schema.version = {DatabaseSchemaC
 
 return 0;
 
-static void CreateDatabase(Options options)
+static void CreateDatabase(DbInitOptions options)
 {
     var databaseName = options.DatabaseName!;
 
@@ -143,7 +143,15 @@ static string StripDatabase(string connectionString, out string? databaseName)
     return builder.ConnectionString;
 }
 
-internal sealed class Options
+/// <summary>
+/// 命令行参数。
+/// </summary>
+/// <remarks>
+/// 名字带前缀是刻意的：全局命名空间里的 <c>Options</c> 会和 <c>Microsoft.Extensions.Options.Options</c>
+/// 撞车（本项目通过 <c>InternalsVisibleTo</c> 对单测可见，于是整个测试项目里的 <c>Options.Create(...)</c>
+/// 都会解析到这个类型）。
+/// </remarks>
+internal sealed class DbInitOptions
 {
     public required DatabaseType DatabaseType { get; init; }
 
@@ -155,7 +163,7 @@ internal sealed class Options
 
     public string? DatabaseName { get; init; }
 
-    public static Options? Parse(string[] args)
+    public static DbInitOptions? Parse(string[] args)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -205,7 +213,7 @@ internal sealed class Options
             }
         }
 
-        return new Options
+        return new DbInitOptions
         {
             DatabaseType = databaseType,
             ConnectionString = connectionString,

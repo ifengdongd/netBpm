@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Persistence.Platform;
 using NetBpm.Platform.Contracts;
@@ -59,6 +61,91 @@ public sealed class ApprovalVocabularyTests
 
         Assert.Equal(ApprovalSemantic.Return, byId["3"].Semantic);
         Assert.Equal(ApprovalOutcomeClass.Negative, byId["3"].OutcomeClass);
+    }
+
+    /// <summary>
+    /// 多副本下「别人改了字典」必须被本副本看到，而不是等 10 分钟 TTL 过期。
+    /// </summary>
+    /// <remarks>
+    /// 写路径只能失效<b>写者自己进程</b>的 <see cref="IMemoryCache"/>；其他副本必须靠水位校验。
+    /// 这条用例用两个独立的 <see cref="IMemoryCache"/> 模拟两台机器、共享一张字典表：
+    /// 没有水位校验时，第二台会一直按旧语义把「驳回」当 CUSTOM（统计口径与审批结论都会错）。
+    /// </remarks>
+    [Fact]
+    public async Task Vocabulary_ShouldObserveDictionaryWrittenByAnotherReplica()
+    {
+        var store = new InMemoryApprovalDictionaryStore();
+
+        // 两台副本各有一份进程内缓存
+        using var cacheReplicaA = new MemoryCache(new MemoryCacheOptions());
+        using var cacheReplicaB = new MemoryCache(new MemoryCacheOptions());
+
+        var replicaA = new ApprovalVocabulary(
+            store,
+            cacheReplicaA,
+            NullLogger<ApprovalVocabulary>.Instance);
+
+        var replicaB = new ApprovalVocabulary(
+            store,
+            cacheReplicaB,
+            NullLogger<ApprovalVocabulary>.Instance);
+
+        const string OptionId = "refund_to_finance";
+
+        // ① A 先解析一次（把「没有自定义映射」这份结果放进 A 的缓存）
+        var before = await replicaA.ResolveOptionAsync(
+            LeaveKey,
+            DefaultTenant,
+            activityId: "task_leader_approve",
+            OptionId,
+            fallbackLabel: "转财务复核",
+            ct: Ct);
+
+        Assert.Equal(ApprovalSemantic.Custom, before!.Semantic);
+
+        // ② B 写入映射（只失效 B 自己的缓存，A 的缓存保持不动）
+        var now = DateTimeOffset.UtcNow;
+
+        await store.UpsertAsync(
+            new ApprovalDictionaryEntry(
+                TenantId: DefaultTenant,
+                ProcessKey: LeaveKey,
+                NodeId: null,
+                OptionId: OptionId,
+                Semantic: ApprovalSemantic.Return,
+                OutcomeClass: ApprovalOutcomeClass.Negative,
+                Label: "退回财务",
+                RequiresComment: true,
+                RequiresTargetNode: false,
+                AllowedTargetNodes: null,
+                Attributes: null,
+                CreatedAt: now,
+                UpdatedAt: now),
+            Ct);
+
+        // ③ A 仍在 TTL 内，但必须看到新语义
+        var after = await replicaA.ResolveOptionAsync(
+            LeaveKey,
+            DefaultTenant,
+            activityId: "task_leader_approve",
+            OptionId,
+            fallbackLabel: "转财务复核",
+            ct: Ct);
+
+        Assert.Equal(ApprovalSemantic.Return, after!.Semantic);
+        Assert.Equal(ApprovalOutcomeClass.Negative, after.OutcomeClass);
+        Assert.True(after.RequiresComment);
+
+        // 对照：B 自己也看到（说明不是只对 A 生效的特例）
+        var fromB = await replicaB.ResolveOptionAsync(
+            LeaveKey,
+            DefaultTenant,
+            activityId: "task_leader_approve",
+            OptionId,
+            fallbackLabel: "转财务复核",
+            ct: Ct);
+
+        Assert.Equal(ApprovalSemantic.Return, fromB!.Semantic);
     }
 
     [Fact]

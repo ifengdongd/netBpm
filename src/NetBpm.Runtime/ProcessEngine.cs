@@ -764,12 +764,28 @@ public sealed class ProcessEngine : IProcessEngine
             definitionIds = resolved;
         }
 
+        // 显式给的定义 id 白名单与 key 过滤取交集（两者都有时语义是「这些 key 里我只关心这几个版本」）
+        var effectiveIds = query.ProcessDefinitionIds;
+
+        if (definitionIds is not null)
+        {
+            effectiveIds = effectiveIds is null
+                ? definitionIds
+                : [.. effectiveIds.Intersect(definitionIds, StringComparer.Ordinal)];
+
+            if (effectiveIds.Count == 0)
+            {
+                return null;
+            }
+        }
+
         return new ProcessInstanceFilter(
             ProcessDefinitionId: query.ProcessDefinitionId,
-            ProcessDefinitionIds: definitionIds,
+            ProcessDefinitionIds: effectiveIds,
             BusinessKey: query.BusinessKey,
             StartUserId: query.StartUserId,
             TenantId: query.TenantId,
+            TenantIds: query.TenantIds,
             IsActive: query.IsActive,
             StartedAfter: query.StartedAfter,
             StartedBefore: query.StartedBefore,
@@ -807,12 +823,16 @@ public sealed class ProcessEngine : IProcessEngine
         (string.IsNullOrWhiteSpace(query.ProcessDefinitionId)
             || string.Equals(instance.ProcessDefinitionId, query.ProcessDefinitionId, StringComparison.Ordinal))
         && (definitionIds is null || definitionIds.Contains(instance.ProcessDefinitionId ?? string.Empty))
+        && (query.ProcessDefinitionIds is null
+            || query.ProcessDefinitionIds.Contains(instance.ProcessDefinitionId ?? string.Empty))
         && (string.IsNullOrWhiteSpace(query.BusinessKey)
             || string.Equals(instance.BusinessKey, query.BusinessKey, StringComparison.Ordinal))
         && (string.IsNullOrWhiteSpace(query.StartUserId)
             || string.Equals(instance.StartUserId, query.StartUserId, StringComparison.Ordinal))
         && (query.TenantId is null
             || string.Equals(instance.TenantId ?? string.Empty, query.TenantId, StringComparison.Ordinal))
+        && (query.TenantIds is null
+            || query.TenantIds.Contains(instance.TenantId ?? string.Empty))
         && (query.IsActive is null || instance.IsActive == query.IsActive)
         && (query.StartedAfter is null
             || (instance.StartTime is { } startedAfter && startedAfter >= query.StartedAfter))
@@ -1208,10 +1228,13 @@ public sealed class ProcessEngine : IProcessEngine
         Func<T, string> idSelector,
         bool descending = false)
     {
+        // tie-break 恒为 id 升序（两个方向都一样）：这是与 SQL 下推（`order by START_TIME_ {dir}, ID_ asc`）
+        // 以及平台游标共用的全序。如果倒序时 id 也跟着倒，同刻多条在两种排序下顺序不同，
+        // 「分页下推 + 合并」与「取全量再排序」就会得到不同的页边界。
         IEnumerable<T> ordered = descending
             ? items
                 .OrderByDescending(item => timeSelector(item) ?? DateTime.MinValue)
-                .ThenByDescending(idSelector, StringComparer.Ordinal)
+                .ThenBy(idSelector, StringComparer.Ordinal)
             : items
                 .OrderBy(item => timeSelector(item) ?? DateTime.MinValue)
                 .ThenBy(idSelector, StringComparer.Ordinal);
@@ -1961,9 +1984,24 @@ public sealed class ProcessEngine : IProcessEngine
             definitionIds = resolved;
         }
 
+        // 显式给的定义 id 白名单与 key 过滤取交集（两者都有时语义是「这些 key 里我只关心这几个版本」）
+        var effectiveIds = query.ProcessDefinitionIds;
+
+        if (definitionIds is not null)
+        {
+            effectiveIds = effectiveIds is null
+                ? definitionIds
+                : [.. effectiveIds.Intersect(definitionIds, StringComparer.Ordinal)];
+
+            if (effectiveIds.Count == 0)
+            {
+                return null;
+            }
+        }
+
         return new HistoricProcessInstanceFilter(
             ProcessDefinitionId: query.ProcessDefinitionId,
-            ProcessDefinitionIds: definitionIds,
+            ProcessDefinitionIds: effectiveIds,
             BusinessKey: query.BusinessKey,
             StartUserId: query.StartUserId,
             Finished: query.Finished,
@@ -1973,6 +2011,7 @@ public sealed class ProcessEngine : IProcessEngine
             EndedAfter: query.EndedAfter,
             EndedBefore: query.EndedBefore,
             TenantId: query.TenantId,
+            TenantIds: query.TenantIds,
             FirstResult: query.FirstResult,
             MaxResults: query.MaxResults,
             Descending: query.Descending);
@@ -2007,12 +2046,15 @@ public sealed class ProcessEngine : IProcessEngine
         (string.IsNullOrWhiteSpace(query.ProcessDefinitionId)
             || string.Equals(instance.ProcessDefinitionId, query.ProcessDefinitionId, StringComparison.Ordinal))
         && (definitionIds is null || definitionIds.Contains(instance.ProcessDefinitionId))
+        && (query.ProcessDefinitionIds is null || query.ProcessDefinitionIds.Contains(instance.ProcessDefinitionId))
         && (string.IsNullOrWhiteSpace(query.BusinessKey)
             || string.Equals(instance.BusinessKey, query.BusinessKey, StringComparison.Ordinal))
         && (string.IsNullOrWhiteSpace(query.StartUserId)
             || string.Equals(instance.StartUserId, query.StartUserId, StringComparison.Ordinal))
         && (query.TenantId is null
             || string.Equals(instance.TenantId ?? string.Empty, query.TenantId, StringComparison.Ordinal))
+        && (query.TenantIds is null
+            || query.TenantIds.Contains(instance.TenantId ?? string.Empty))
         && (query.Finished is null || instance.IsRunning != query.Finished.Value)
         && (query.Deleted is null
             || (instance.DeleteReason is not null) == query.Deleted.Value)

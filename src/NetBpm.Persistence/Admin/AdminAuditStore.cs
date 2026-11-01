@@ -704,6 +704,24 @@ public static class AdminAuditActions
 
     /// <summary>删除审批语义字典的一条映射（该选项回落默认字典）。</summary>
     public const string DictionaryDelete = "dictionary.delete";
+
+    /// <summary>创建事件订阅（签发首个签名密钥）。</summary>
+    public const string EventSubscriptionCreate = "event_subscription.create";
+
+    /// <summary>修改事件订阅（地址 / 事件类型 / 请求头 / 重试与限速）。</summary>
+    public const string EventSubscriptionUpdate = "event_subscription.update";
+
+    /// <summary>删除事件订阅（其后续事件不再投递）。</summary>
+    public const string EventSubscriptionDelete = "event_subscription.delete";
+
+    /// <summary>启用 / 停用事件订阅。</summary>
+    public const string EventSubscriptionStatus = "event_subscription.status";
+
+    /// <summary>轮换事件订阅的签名密钥。</summary>
+    public const string EventSubscriptionRotate = "event_subscription.rotate";
+
+    /// <summary>人工重投死信事件投递。</summary>
+    public const string EventDeliveryRetry = "event_delivery.retry";
 }
 
 /// <summary>审计目标类型常量。</summary>
@@ -747,6 +765,9 @@ public static class AdminAuditTargets
 
     /// <summary>租户（nb_tenant）。</summary>
     public const string Tenant = "tenant";
+
+    /// <summary>事件订阅（nb_event_subscription）。</summary>
+    public const string EventSubscription = "event_subscription";
 
     /// <summary>流程目录覆盖行（nb_process_catalog）。</summary>
     public const string ProcessCatalog = "process_catalog";

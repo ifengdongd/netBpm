@@ -103,10 +103,11 @@ curl -X POST http://localhost:8080/api/runtime/process-instances \
 
 服务端开了凭据就没人能调注册接口，因此第一次要用**管理端点**：
 在尚未收紧凭据的窗口注册，或直接在库里执行 `tools/NetBpm.DbMigrate` 后由管理员通过
-`POST /api/admin/clients` 创建 —— **`clientSecret` 只在响应里出现这一次**，之后只能看到后 4 位。
+`POST /admin/v1/clients` 创建 —— **`clientSecret` 只在响应里出现这一次**，之后只能看到后 4 位。
+（旧路径 `POST /api/admin/clients` 仍可用，但它标了 `[Obsolete]`，只留给既有运维脚本。）
 
 ```bash
-curl -X POST "http://localhost:8080/api/admin/clients?confirmPrivilegedScopes=true" \
+curl -X POST "http://localhost:8080/admin/v1/clients?confirmPrivilegedScopes=true" \
   -H "Content-Type: application/json" \
   -d '{"name":"order-worker","tenantId":"default","scopes":["workflow:external:task"]}'
 # → {"clientId":"cl_...","clientSecret":"nbc.cl_......."}

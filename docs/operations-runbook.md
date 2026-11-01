@@ -327,7 +327,7 @@ NETBPM_RUN_LOAD_TESTS=1 \
 dotnet run --project tools/NetBpm.DbMigrate -- migrate --create-database --provider mysql --connection "$CS"
 dotnet run --project tools/NetBpm.DbMigrate -- check   --provider mysql --connection "$CS"
 
-# 控制台账号（管理面登录用；netbpm.admin 不等于 workflow:* 的超级权限）
+# 控制台账号（管理面登录用；JWT 里的 netbpm.admin 是引擎超管，等价于全部 workflow:* 平台 scope，只授给平台运维）
 dotnet run --project tools/NetBpm.DbMigrate -- users add --username admin --display-name 管理员 --scopes netbpm.admin
 dotnet run --project tools/NetBpm.DbMigrate -- users list
 

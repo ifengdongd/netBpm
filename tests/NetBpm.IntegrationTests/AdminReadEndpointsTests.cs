@@ -32,6 +32,7 @@ public sealed class AdminReadEndpointsTests
     [
         PlatformScopes.AdminProcess,
         PlatformScopes.AdminClient,
+        PlatformScopes.AdminAuditRead,
         PlatformScopes.EventSubscribe,
         PlatformScopes.ProcessRead,
     ];
@@ -477,6 +478,101 @@ public sealed class AdminReadEndpointsTests
         Assert.False(body.GetProperty("rateLimitEnabled").GetBoolean());
     }
 
+    /// <summary>
+    /// 游标被改坏 / 从别的接口抄来时必须 400，不能 500，也不能「当成第一页」静默返回。
+    /// </summary>
+    /// <remarks>
+    /// 静默当第一页最坏：调用方以为自己在翻第二页，实际反复拿同一批行，
+    /// 页面上表现为「加载更多没有新数据」，排查时完全看不出是游标坏了。
+    /// </remarks>
+    [Fact]
+    public async Task Quotas_Should400_ForMalformedCursor()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        using var client = host.CreateClient();
+        var secret = await RegisterClientAsync(client, "quota-bad-cursor", quotaPerMinute: null);
+
+        using var response = await ReadEndpointHarness.GetAsync(
+            client,
+            "/admin/v1/quotas?clientCursor=not-a-cursor",
+            secret);
+
+        var problem = await ReadEndpointHarness.ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(ErrorCodes.RequestMalformed, problem.GetProperty("code").GetString());
+    }
+
+    /// <summary>
+    /// 配额总览的客户端列表必须能游标翻页：不重复、不漏行，且客户端数量按全量统计。
+    /// </summary>
+    /// <remarks>
+    /// 这条守的是「分页之后 clientCount 不能变成『本页行数』」——
+    /// 那个错误看起来完全正常（数字还是数字），但会让管理端误判某个租户只有 2 个客户端。
+    /// </remarks>
+    [Fact]
+    public async Task Quotas_ShouldPageClientsWithCursor()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        using var client = host.CreateClient();
+
+        var names = new[] { "quota-a", "quota-b", "quota-c", "quota-d" };
+
+        string? secret = null;
+
+        foreach (var name in names)
+        {
+            secret = await RegisterClientAsync(client, name, quotaPerMinute: 60);
+        }
+
+        var seen = new List<string>();
+        string? cursor = null;
+        var pages = 0;
+
+        do
+        {
+            var path = cursor is null
+                ? "/admin/v1/quotas?max=2"
+                : $"/admin/v1/quotas?max=2&clientCursor={Uri.EscapeDataString(cursor)}";
+
+            using var response = await ReadEndpointHarness.GetAsync(client, path, secret!);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var body = await ReadEndpointHarness.ReadJsonAsync(response);
+            var page = body.GetProperty("clients").EnumerateArray().ToList();
+
+            Assert.True(page.Count <= 2, "单页条数不能超过 max。");
+            Assert.Equal(2, page.Count);
+
+            seen.AddRange(page.Select(item => item.GetProperty("clientId").GetString()!));
+
+            var next = body.GetProperty("clientsNextCursor");
+            cursor = next.ValueKind == JsonValueKind.Null ? null : next.GetString();
+
+            // 租户行只有 default 一个：max=2 也翻不出第二页
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("tenantsNextCursor").ValueKind);
+
+            // 数量按全量算（本页只有 2 条，但租户下有 5 个：4 个新注册 + BuildHost 的登记客户端）
+            var defaultTenant = body.GetProperty("tenants").EnumerateArray()
+                .Single(tenant => tenant.GetProperty("tenantId").GetString() == "default");
+
+            Assert.True(
+                defaultTenant.GetProperty("clientCount").GetInt32() >= names.Length,
+                "clientCount 不能退化成『本页行数』。");
+
+            pages++;
+        }
+        while (cursor is not null && pages < 10);
+
+        Assert.Equal(names.Length, seen.Count);
+        Assert.Equal(seen.Count, seen.Distinct(StringComparer.Ordinal).Count());
+    }
+
     [Fact]
     public async Task ReadEndpoints_ShouldRequireTheirOwnScopes()
     {
@@ -494,7 +590,8 @@ public sealed class AdminReadEndpointsTests
         foreach (var (path, scope) in new[]
         {
             ($"/admin/v1/dictionaries?processKey={ProcessKey}", PlatformScopes.AdminProcess),
-            ("/admin/v1/audit", PlatformScopes.AdminClient),
+            // 审计读是独立 scope：能发密钥（admin:client）不等于能看合规流水
+            ("/admin/v1/audit", PlatformScopes.AdminAuditRead),
             ("/admin/v1/subscriptions", PlatformScopes.EventSubscribe),
             ("/admin/v1/events/deadletters", PlatformScopes.EventSubscribe),
             ("/admin/v1/events/stats", PlatformScopes.EventSubscribe),

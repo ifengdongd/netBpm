@@ -538,7 +538,7 @@ if not exists (select 1 from sys.foreign_keys where name = 'ACT_FK_VAR_BYTEARRAY
 go
 
 
--- ─────────────────────────── ①-3 引擎初值（ACT_GE_PROPERTY：仅在缺失时插入） ───────────────────────────
+-- ─────────────────────────── ①-3 引擎初值（ACT_GE_PROPERTY：仅在缺失时插入，结构版本单独对齐） ───────────────────────────
 
 if not exists (select 1 from ACT_GE_PROPERTY where NAME_ = 'schema.version')
     insert into ACT_GE_PROPERTY (NAME_, VALUE_, REV_) values ('schema.version', '8.1.4', '1');
@@ -548,6 +548,9 @@ if not exists (select 1 from ACT_GE_PROPERTY where NAME_ = 'schema.history')
 go
 if not exists (select 1 from ACT_GE_PROPERTY where NAME_ = 'next.dbid')
     insert into ACT_GE_PROPERTY (NAME_, VALUE_, REV_) values ('next.dbid', '1', '1');
+go
+-- 结构版本对齐：老库重跑脚本时抬到当前代码期望值（不重置 next.dbid）
+update ACT_GE_PROPERTY set VALUE_ = N'8.1.4' where NAME_ = 'schema.version' and VALUE_ <> N'8.1.4';
 go
 
 
@@ -1432,6 +1435,9 @@ go
 if not exists (select 1 from sys.indexes where name = 'ix_nb_instance_timeline_occurred' and object_id = object_id('nb_instance_timeline'))
 create index ix_nb_instance_timeline_occurred on nb_instance_timeline (tenant_id, occurred_at);
 go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_instance_timeline_task' and object_id = object_id('nb_instance_timeline'))
+create index ix_nb_instance_timeline_task on nb_instance_timeline (task_id, kind);
+go
 if object_id(N'nb_approval_snapshot', N'U') is null
     create table nb_approval_snapshot (
     task_id nvarchar(64) not null,
@@ -1455,6 +1461,9 @@ go
 
 if not exists (select 1 from sys.indexes where name = 'ix_nb_approval_snapshot_instance' and object_id = object_id('nb_approval_snapshot'))
 create index ix_nb_approval_snapshot_instance on nb_approval_snapshot (tenant_id, process_instance_id);
+go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_approval_snapshot_instance_seq' and object_id = object_id('nb_approval_snapshot'))
+create index ix_nb_approval_snapshot_instance_seq on nb_approval_snapshot (process_instance_id, captured_at);
 go
 if not exists (select 1 from sys.indexes where name = 'ix_nb_approval_snapshot_captured' and object_id = object_id('nb_approval_snapshot'))
 create index ix_nb_approval_snapshot_captured on nb_approval_snapshot (captured_at);
@@ -1502,6 +1511,9 @@ go
 
 if not exists (select 1 from sys.indexes where name = 'ix_nb_parameter_snapshot_updated' and object_id = object_id('nb_parameter_snapshot'))
 create index ix_nb_parameter_snapshot_updated on nb_parameter_snapshot (tenant_id, updated_at);
+go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_parameter_snapshot_expiry' and object_id = object_id('nb_parameter_snapshot'))
+create index ix_nb_parameter_snapshot_expiry on nb_parameter_snapshot (updated_at);
 go
 if object_id(N'nb_external_task', N'U') is null
     create table nb_external_task (
@@ -1579,6 +1591,9 @@ go
 
 if not exists (select 1 from sys.indexes where name = 'ix_nb_event_delivery_subscription' and object_id = object_id('nb_event_delivery'))
 create index ix_nb_event_delivery_subscription on nb_event_delivery (subscription_id, status);
+go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_event_delivery_dead_letter' and object_id = object_id('nb_event_delivery'))
+create index ix_nb_event_delivery_dead_letter on nb_event_delivery (status, updated_at);
 go
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────

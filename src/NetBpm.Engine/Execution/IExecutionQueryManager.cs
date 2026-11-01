@@ -11,6 +11,8 @@ public sealed record ProcessInstanceFilter(
     string? BusinessKey = null,
     string? StartUserId = null,
     string? TenantId = null,
+    /// <summary>租户白名单（<c>in</c> 语义）；与 <paramref name="TenantId"/> 同时给出时两个条件都生效。</summary>
+    IReadOnlyCollection<string>? TenantIds = null,
     bool? IsActive = null,
     DateTime? StartedAfter = null,
     DateTime? StartedBefore = null,

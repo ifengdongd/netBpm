@@ -1,11 +1,19 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using NetBpm.Engine.Events;
+using NetBpm.Persistence.Admin;
 using NetBpm.Platform.Contracts;
+using NetBpm.Rest.Auditing;
+using NetBpm.Rest.Platform;
 using NetBpm.Rest.Security;
 
 namespace NetBpm.Rest.Endpoints;
 
 /// <summary>
-/// 事件订阅管理端点（M13）：<c>/api/admin/event-subscriptions</c>。
+/// 事件订阅管理端点：<c>/admin/v1/subscriptions</c>（旧路径 <c>/api/admin/event-subscriptions</c> 仅兼容）。
+/// </summary>
+/// <remarks>
 /// <para>
 /// 订阅是<b>把引擎内部的事件推给外部系统</b>的那根线：没有它，
 /// <c>ACT_EVT_OUTBOX</c> 里攒着的事件只能靠订阅方自己来拉（而它根本不知道什么时候有新事件）。
@@ -15,60 +23,101 @@ namespace NetBpm.Rest.Endpoints;
 /// 订阅密钥等价于「能伪造 NetBpm 通知」的凭据，管理端列表页把它明文摊开是最常见的泄漏方式。
 /// 忘了就调 <c>POST /{id}/rotate</c> 换一把。
 /// </para>
-/// </summary>
+/// <para>
+/// 三条纪律（与客户端接入、字典写路径一致）：① 错误体一律 RFC 9457；② 租户不越界
+/// （<see cref="PlatformTenant"/>）；③ 每次变更都进管理审计 —— 尤其是「谁换了密钥」。
+/// </para>
+/// </remarks>
 public static class EventSubscriptionEndpoints
 {
-    /// <summary>注册端点。</summary>
+    private const string DefaultTenantId = "default";
+
+    /// <summary>注册平台面的订阅管理端点（<c>/admin/v1</c>）。</summary>
+    public static IEndpointRouteBuilder MapEventSubscriptionAdminEndpoints(this IEndpointRouteBuilder endpoints)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        var group = endpoints.MapGroup("/admin/v1").WithTags("platform-admin");
+
+        // 列表读已在 AdminReadEndpoints（GET /admin/v1/subscriptions）——
+        // 同一条路由挂两遍会在运行时抛 AmbiguousMatchException，所以这里不再重复注册
+        MapOperations(group, "subscriptions", includeList: false);
+
+        return endpoints;
+    }
+
+    /// <summary>注册旧面的订阅管理端点（<c>/api/admin/event-subscriptions</c>）。</summary>
+    /// <remarks>
+    /// 只保留给已经上线的运维脚本；错误的形状、租户口径、审计与 <c>/admin/v1</c> 完全一致
+    /// （共用同一批处理器），下个大版本删除。
+    /// </remarks>
+    [Obsolete("事件订阅的写路径已迁到 /admin/v1/subscriptions，旧路径仅保留兼容。")]
     public static IEndpointRouteBuilder MapEventSubscriptionEndpoints(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
         var group = endpoints.MapGroup("/api/admin").WithTags("platform-admin");
 
-        group.MapGet("/event-subscriptions", ListSubscriptionsAsync)
-            .Produces<IReadOnlyList<EventSubscriptionView>>();
-
-        group.MapPost("/event-subscriptions", CreateSubscriptionAsync)
-            .Accepts<CreateEventSubscriptionRequest>("application/json")
-            .Produces<CreatedEventSubscription>(StatusCodes.Status201Created)
-            .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
-
-        group.MapGet("/event-subscriptions/{subscriptionId}", FindSubscriptionAsync)
-            .Produces<EventSubscriptionView>()
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
-
-        group.MapPatch("/event-subscriptions/{subscriptionId}", UpdateSubscriptionAsync)
-            .Accepts<UpdateEventSubscriptionRequest>("application/json")
-            .Produces<EventSubscriptionView>()
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
-
-        group.MapDelete("/event-subscriptions/{subscriptionId}", DeleteSubscriptionAsync)
-            .Produces(StatusCodes.Status204NoContent)
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
-
-        group.MapPost("/event-subscriptions/{subscriptionId}/status", SetSubscriptionStatusAsync)
-            .Produces<EventSubscriptionView>()
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
-
-        // 换密钥：旧密钥立刻失效，正在投递中的请求会用新密钥重签（下一次重试生效）
-        group.MapPost("/event-subscriptions/{subscriptionId}/rotate", RotateSubscriptionSecretAsync)
-            .Produces<IssuedEventSubscriptionSecret>()
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
-
-        // 投递记录：回答「这条事件到底有没有送到」
-        group.MapGet("/event-subscriptions/{subscriptionId}/deliveries", ListDeliveriesAsync)
-            .Produces<IReadOnlyList<EventDeliveryView>>()
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
-
-        group.MapPost("/events/{eventId}/deliveries/{subscriptionId}/retry", RetryDeliveryAsync)
-            .Produces(StatusCodes.Status204NoContent)
-            .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
-            .Produces<ErrorResponse>(StatusCodes.Status409Conflict);
+        MapOperations(group, "event-subscriptions", includeList: true);
 
         return endpoints;
     }
 
+    private static void MapOperations(RouteGroupBuilder group, string resource, bool includeList)
+    {
+        if (includeList)
+        {
+            group.MapGet($"/{resource}", ListSubscriptionsAsync)
+                .Produces<IReadOnlyList<EventSubscriptionView>>();
+        }
+
+        group.MapPost($"/{resource}", CreateSubscriptionAsync)
+            .Accepts<CreateEventSubscriptionRequest>("application/json")
+            // 响应体含一次性明文密钥：退出幂等缓存（见 NoIdempotencyMetadata）
+            .WithMetadata(new NoIdempotencyMetadata())
+            .Produces<CreatedEventSubscription>(StatusCodes.Status201Created)
+            .Produces<PlatformProblem>(StatusCodes.Status400BadRequest);
+
+        group.MapGet($"/{resource}/{{subscriptionId}}", FindSubscriptionAsync)
+            .Produces<EventSubscriptionView>()
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        group.MapPatch($"/{resource}/{{subscriptionId}}", UpdateSubscriptionAsync)
+            .Accepts<UpdateEventSubscriptionRequest>("application/json")
+            .Produces<EventSubscriptionView>()
+            .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        group.MapDelete($"/{resource}/{{subscriptionId}}", DeleteSubscriptionAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        group.MapPost($"/{resource}/{{subscriptionId}}/status", SetSubscriptionStatusAsync)
+            .Produces<EventSubscriptionView>()
+            .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        // 换密钥：旧密钥立刻失效，正在投递中的请求会用新密钥重签（下一次重试生效）
+        group.MapPost($"/{resource}/{{subscriptionId}}/rotate", RotateSubscriptionSecretAsync)
+            // 响应体含一次性明文密钥：退出幂等缓存
+            .WithMetadata(new NoIdempotencyMetadata())
+            .Produces<IssuedEventSubscriptionSecret>()
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        // 投递记录：回答「这条事件到底有没有送到」
+        group.MapGet($"/{resource}/{{subscriptionId}}/deliveries", ListDeliveriesAsync)
+            .Produces<IReadOnlyList<EventDeliveryView>>()
+            .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        group.MapPost($"/events/{{eventId}}/deliveries/{{subscriptionId}}/retry", RetryDeliveryAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound)
+            .Produces<PlatformProblem>(StatusCodes.Status409Conflict);
+    }
+
     private static async Task<IResult> ListSubscriptionsAsync(
+        HttpContext http,
         string? tenantId,
         bool? enabled,
         int? maxResults,
@@ -76,13 +125,19 @@ public static class EventSubscriptionEndpoints
         IEventSubscriptionStore store,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "查看事件订阅");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
-        var scope = ClientAdminEndpoints.ResolveTenantScope(context, tenantId);
+        if (!PlatformTenant.TryResolve(http, context, tenantId, "事件订阅", out var scopedTenant, out var problem))
+        {
+            return problem;
+        }
 
         var items = await store.FindAsync(
             new EventSubscriptionQuery(
-                scope,
+                scopedTenant,
                 enabled,
                 maxResults is > 0 ? Math.Min(maxResults.Value, 200) : 100),
             ct).ConfigureAwait(false);
@@ -91,36 +146,60 @@ public static class EventSubscriptionEndpoints
     }
 
     private static async Task<IResult> CreateSubscriptionAsync(
+        HttpContext http,
         CreateEventSubscriptionRequest? request,
         RequestContext context,
         IEventSubscriptionStore store,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "创建事件订阅");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         if (request is null)
         {
-            throw new BadHttpRequestException("请求体不能为空（至少要有 name 与 endpointUrl）。");
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestBodyRequired,
+                "缺少请求体",
+                StatusCodes.Status400BadRequest,
+                "请求体不能为空（至少要有 name 与 endpointUrl）。");
         }
 
         if (string.IsNullOrWhiteSpace(request.Name))
         {
-            throw new BadHttpRequestException("name 不能为空：它是管理端区分订阅的唯一标识。");
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestMalformed,
+                "请求无效",
+                StatusCodes.Status400BadRequest,
+                "name 不能为空：它是管理端区分订阅的唯一标识。");
         }
 
-        if (string.IsNullOrWhiteSpace(request.EndpointUrl)
-            || !Uri.TryCreate(request.EndpointUrl, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        if (!TryValidateEndpoint(request.EndpointUrl, out var endpointDetail))
         {
-            throw new BadHttpRequestException("endpointUrl 必须是 http/https 绝对地址。");
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestMalformed,
+                "请求无效",
+                StatusCodes.Status400BadRequest,
+                endpointDetail);
         }
 
         // 租户不能越出凭据所属范围：否则一个租户的凭据就能往任意租户的事件上挂回调
-        var tenantId = ClientAdminEndpoints.ResolveTenantScope(context, request.TenantId) ?? "default";
+        if (!PlatformTenant.TryResolve(http, context, request.TenantId, "事件订阅", out var tenantId, out var problem))
+        {
+            return problem;
+        }
 
         var subscription = new EventSubscription
         {
-            TenantId = tenantId,
+            TenantId = tenantId ?? DefaultTenantId,
             Name = request.Name.Trim(),
             EventTypes = NormalizeTypes(request.EventTypes),
             ProcessDefinitionId = request.ProcessDefinitionId,
@@ -136,50 +215,82 @@ public static class EventSubscriptionEndpoints
 
         var created = await store.CreateAsync(subscription, ct).ConfigureAwait(false);
 
+        await auditor.RecordAsync(
+            context,
+            AdminAuditActions.EventSubscriptionCreate,
+            AdminAuditTargets.EventSubscription,
+            created.Id,
+            detail: new
+            {
+                created.TenantId,
+                created.Name,
+                Endpoint = HostOf(created.EndpointUrl),
+                created.EventTypes,
+                created.ProcessDefinitionId,
+                created.Enabled,
+                created.MaxAttempts,
+                created.MaxPerMinute,
+                // 只记「是不是自定义密钥」，不记密钥本身
+                CustomSecret = !string.IsNullOrEmpty(request.Secret),
+                Caller = context.CallerId,
+            },
+            ct: ct).ConfigureAwait(false);
+
         // 明文密钥只在这一次响应里出现
         return Results.Created(
-            $"/api/admin/event-subscriptions/{created.Id}",
+            $"/admin/v1/subscriptions/{created.Id}",
             new CreatedEventSubscription(EventSubscriptionView.From(created), created.Secret));
     }
 
     private static async Task<IResult> FindSubscriptionAsync(
         string subscriptionId,
+        HttpContext http,
         RequestContext context,
         IEventSubscriptionStore store,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "查看事件订阅");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         var subscription = await store.FindByIdAsync(subscriptionId, ct).ConfigureAwait(false);
 
-        return subscription is null || !ClientAdminEndpoints.IsVisible(context, subscription.TenantId)
-            ? Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"))
+        return subscription is null || !TenantScopes.IsVisible(context, subscription.TenantId)
+            ? NotFound(http, context, subscriptionId)
             : Results.Ok(EventSubscriptionView.From(subscription));
     }
 
     private static async Task<IResult> UpdateSubscriptionAsync(
         string subscriptionId,
         UpdateEventSubscriptionRequest? request,
+        HttpContext http,
         RequestContext context,
         IEventSubscriptionStore store,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "修改事件订阅");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         if (request is null)
         {
-            throw new BadHttpRequestException("请求体不能为空。");
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestBodyRequired,
+                "缺少请求体",
+                StatusCodes.Status400BadRequest,
+                "PATCH 至少要带一个待修改字段。");
         }
 
         var existing = await store.FindByIdAsync(subscriptionId, ct).ConfigureAwait(false);
 
-        if (existing is null || !ClientAdminEndpoints.IsVisible(context, existing.TenantId))
+        if (existing is null || !TenantScopes.IsVisible(context, existing.TenantId))
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"));
+            return NotFound(http, context, subscriptionId);
         }
 
         if (request.Name is { Length: > 0 } name)
@@ -199,10 +310,15 @@ public static class EventSubscriptionEndpoints
 
         if (request.EndpointUrl is { Length: > 0 } url)
         {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
-                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            if (!TryValidateEndpoint(url, out var endpointDetail))
             {
-                throw new BadHttpRequestException("endpointUrl 必须是 http/https 绝对地址。");
+                return PlatformProblems.Create(
+                    http,
+                    context,
+                    ErrorCodes.RequestMalformed,
+                    "请求无效",
+                    StatusCodes.Status400BadRequest,
+                    endpointDetail);
             }
 
             existing.EndpointUrl = url.Trim();
@@ -234,27 +350,63 @@ public static class EventSubscriptionEndpoints
 
         await store.UpdateAsync(existing, ct).ConfigureAwait(false);
 
+        await auditor.RecordAsync(
+            context,
+            AdminAuditActions.EventSubscriptionUpdate,
+            AdminAuditTargets.EventSubscription,
+            subscriptionId,
+            detail: new
+            {
+                existing.Name,
+                Endpoint = HostOf(existing.EndpointUrl),
+                existing.EventTypes,
+                existing.ProcessDefinitionId,
+                existing.Enabled,
+                existing.MaxAttempts,
+                existing.MaxPerMinute,
+                HeaderKeys = existing.Headers.Keys.ToArray(),
+                Caller = context.CallerId,
+            },
+            ct: ct).ConfigureAwait(false);
+
         return Results.Ok(EventSubscriptionView.From(existing));
     }
 
     private static async Task<IResult> DeleteSubscriptionAsync(
         string subscriptionId,
+        HttpContext http,
         RequestContext context,
         IEventSubscriptionStore store,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "删除事件订阅");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         var existing = await store.FindByIdAsync(subscriptionId, ct).ConfigureAwait(false);
 
-        if (existing is null || !ClientAdminEndpoints.IsVisible(context, existing.TenantId))
+        if (existing is null || !TenantScopes.IsVisible(context, existing.TenantId))
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"));
+            return NotFound(http, context, subscriptionId);
         }
 
         await store.DeleteAsync(subscriptionId, ct).ConfigureAwait(false);
+
+        await auditor.RecordAsync(
+            context,
+            AdminAuditActions.EventSubscriptionDelete,
+            AdminAuditTargets.EventSubscription,
+            subscriptionId,
+            detail: new
+            {
+                existing.TenantId,
+                existing.Name,
+                Endpoint = HostOf(existing.EndpointUrl),
+                Caller = context.CallerId,
+            },
+            ct: ct).ConfigureAwait(false);
 
         return Results.NoContent();
     }
@@ -262,58 +414,85 @@ public static class EventSubscriptionEndpoints
     private static async Task<IResult> SetSubscriptionStatusAsync(
         string subscriptionId,
         bool? enabled,
+        HttpContext http,
         RequestContext context,
         IEventSubscriptionStore store,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "切换事件订阅状态");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         if (enabled is null)
         {
-            throw new BadHttpRequestException("查询参数 enabled 不能为空（true/false）。");
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestMalformed,
+                "请求无效",
+                StatusCodes.Status400BadRequest,
+                "查询参数 enabled 不能为空（true/false）。");
         }
 
         var existing = await store.FindByIdAsync(subscriptionId, ct).ConfigureAwait(false);
 
-        if (existing is null || !ClientAdminEndpoints.IsVisible(context, existing.TenantId))
+        if (existing is null || !TenantScopes.IsVisible(context, existing.TenantId))
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"));
+            return NotFound(http, context, subscriptionId);
         }
 
         if (!await store.SetEnabledAsync(subscriptionId, enabled.Value, ct).ConfigureAwait(false))
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"));
+            return NotFound(http, context, subscriptionId);
         }
 
         existing.Enabled = enabled.Value;
+
+        await auditor.RecordAsync(
+            context,
+            AdminAuditActions.EventSubscriptionStatus,
+            AdminAuditTargets.EventSubscription,
+            subscriptionId,
+            detail: new { existing.Name, existing.Enabled, Caller = context.CallerId },
+            ct: ct).ConfigureAwait(false);
 
         return Results.Ok(EventSubscriptionView.From(existing));
     }
 
     private static async Task<IResult> RotateSubscriptionSecretAsync(
         string subscriptionId,
+        HttpContext http,
         RequestContext context,
         IEventSubscriptionStore store,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "轮换事件订阅密钥");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         var existing = await store.FindByIdAsync(subscriptionId, ct).ConfigureAwait(false);
 
-        if (existing is null || !ClientAdminEndpoints.IsVisible(context, existing.TenantId))
+        if (existing is null || !TenantScopes.IsVisible(context, existing.TenantId))
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"));
+            return NotFound(http, context, subscriptionId);
         }
 
         existing.Secret = EventSubscriptionSecret.New();
 
         await store.UpdateAsync(existing, ct).ConfigureAwait(false);
+
+        // 审计只记「谁换了、换了哪一条」—— 密钥本身绝不进审计表
+        await auditor.RecordAsync(
+            context,
+            AdminAuditActions.EventSubscriptionRotate,
+            AdminAuditTargets.EventSubscription,
+            subscriptionId,
+            detail: new { existing.TenantId, existing.Name, Caller = context.CallerId },
+            ct: ct).ConfigureAwait(false);
 
         return Results.Ok(new IssuedEventSubscriptionSecret(subscriptionId, existing.Secret));
     }
@@ -321,26 +500,34 @@ public static class EventSubscriptionEndpoints
     private static async Task<IResult> ListDeliveriesAsync(
         string subscriptionId,
         string? eventId,
+        HttpContext http,
         RequestContext context,
         IEventSubscriptionStore subscriptions,
         IEventDeliveryStore deliveries,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "查看事件投递记录");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         var subscription = await subscriptions.FindByIdAsync(subscriptionId, ct).ConfigureAwait(false);
 
-        if (subscription is null || !ClientAdminEndpoints.IsVisible(context, subscription.TenantId))
+        if (subscription is null || !TenantScopes.IsVisible(context, subscription.TenantId))
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"));
+            return NotFound(http, context, subscriptionId);
         }
 
         // 存储侧只有「按事件查全部订阅」的索引；按订阅查要全表扫，因此 eventId 是必填条件
         if (string.IsNullOrWhiteSpace(eventId))
         {
-            throw new BadHttpRequestException("查询参数 eventId 不能为空（投递记录按事件归集，不提供会退化成全表扫描）。");
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestMalformed,
+                "请求无效",
+                StatusCodes.Status400BadRequest,
+                "查询参数 eventId 不能为空（投递记录按事件归集，不提供会退化成全表扫描）。");
         }
 
         var items = await deliveries.FindByEventAsync(eventId, ct).ConfigureAwait(false);
@@ -354,38 +541,92 @@ public static class EventSubscriptionEndpoints
     private static async Task<IResult> RetryDeliveryAsync(
         string eventId,
         string subscriptionId,
+        HttpContext http,
         RequestContext context,
         IEventSubscriptionStore subscriptions,
         IEventDeliveryStore deliveries,
+        AdminActionAuditor auditor,
         CancellationToken ct)
     {
-        EnsureAdmin(context, PlatformScopes.EventSubscribe, "重投事件投递");
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.EventSubscribe))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.EventSubscribe);
+        }
 
         var subscription = await subscriptions.FindByIdAsync(subscriptionId, ct).ConfigureAwait(false);
 
-        if (subscription is null || !ClientAdminEndpoints.IsVisible(context, subscription.TenantId))
+        if (subscription is null || !TenantScopes.IsVisible(context, subscription.TenantId))
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件订阅 '{subscriptionId}' 不存在。",
-                Code: "event_subscription_not_found"));
+            return NotFound(http, context, subscriptionId);
         }
 
         if (await deliveries.FindAsync(eventId, subscriptionId, ct).ConfigureAwait(false) is null)
         {
-            return Results.NotFound(new ErrorResponse(
-                $"事件 '{eventId}' 对订阅 '{subscriptionId}' 没有投递记录。",
-                Code: "event_delivery_not_found"));
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.EventDeliveryNotFound,
+                "投递记录不存在",
+                StatusCodes.Status404NotFound,
+                $"事件 '{eventId}' 对订阅 '{subscriptionId}' 没有投递记录。");
         }
 
         if (!await deliveries.RetryAsync(eventId, subscriptionId, DateTime.UtcNow, ct).ConfigureAwait(false))
         {
-            return Results.Conflict(new ErrorResponse(
-                $"该投递不是 {EventDeliveryStatus.DeadLetter} 状态，无需重投。",
-                Code: "event_delivery_not_dead_letter"));
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.EventDeliveryNotDeadLetter,
+                "投递状态冲突",
+                StatusCodes.Status409Conflict,
+                $"该投递不是 {EventDeliveryStatus.DeadLetter} 状态，无需重投。");
         }
+
+        await auditor.RecordAsync(
+            context,
+            AdminAuditActions.EventDeliveryRetry,
+            AdminAuditTargets.EventSubscription,
+            subscriptionId,
+            detail: new { EventId = eventId, subscription.TenantId, Caller = context.CallerId },
+            ct: ct).ConfigureAwait(false);
 
         return Results.NoContent();
     }
+
+    /// <summary>订阅不存在与「不属于当前租户」共用一个 404，避免给枚举 id 的接口。</summary>
+    private static IResult NotFound(HttpContext http, RequestContext context, string subscriptionId) =>
+        PlatformProblems.Create(
+            http,
+            context,
+            ErrorCodes.EventSubscriptionNotFound,
+            "事件订阅不存在",
+            StatusCodes.Status404NotFound,
+            $"事件订阅 '{subscriptionId}' 不存在，或不属于当前凭据的租户。");
+
+    private static bool TryValidateEndpoint(string? endpointUrl, out string detail)
+    {
+        if (!string.IsNullOrWhiteSpace(endpointUrl)
+            && Uri.TryCreate(endpointUrl, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            detail = string.Empty;
+            return true;
+        }
+
+        detail = "endpointUrl 必须是 http/https 绝对地址。";
+        return false;
+    }
+
+    /// <summary>
+    /// 审计里记的「地址」：只到路径，去掉查询串。
+    /// </summary>
+    /// <remarks>
+    /// 回调地址常常带 <c>?token=...</c> 这类凭据，整串进审计表等于把密钥换个地方存。
+    /// </remarks>
+    private static string HostOf(string endpointUrl) =>
+        Uri.TryCreate(endpointUrl, UriKind.Absolute, out var uri)
+            ? uri.GetLeftPart(UriPartial.Path)
+            : endpointUrl;
 
     private static string[] NormalizeTypes(IReadOnlyList<string>? types) =>
         types?.Where(type => !string.IsNullOrWhiteSpace(type))
@@ -402,9 +643,6 @@ public static class EventSubscriptionEndpoints
     /// </remarks>
     private static int NormalizePerMinute(int? perMinute) =>
         perMinute is > 0 ? Math.Min(perMinute.Value, 6000) : 0;
-
-    private static void EnsureAdmin(RequestContext context, string scope, string action) =>
-        ClientAdminEndpoints.EnsureAdmin(context, scope, action);
 }
 
 /// <summary>创建订阅的请求。</summary>

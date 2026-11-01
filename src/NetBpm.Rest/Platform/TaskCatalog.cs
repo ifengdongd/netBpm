@@ -532,8 +532,13 @@ public sealed class TaskCatalog : ITaskCatalog
     }
 
     /// <summary>
-    /// 解析 scope 到引擎查询条件。ALL 需要管理权限（超管或历史全读），否则回落到 MINE。
+    /// 解析 scope 到引擎查询条件。ALL 需要管理权限（超管或历史全读）。
     /// </summary>
+    /// <remarks>
+    /// 缺权限时<b>抛</b>而不是回落 MINE：静默降级会让调用方把「全员待办」当成「我的待办」渲染，
+    /// 表现是列表少了一批单子而不报错 —— 漏单比 403 贵得多。端点层已经先做过一次 403（带 scope 名），
+    /// 这里是给其它调用方兜底。
+    /// </remarks>
     private static (string? Assignee, string? CandidateUser, bool AllUsers) ResolveScope(
         TaskScope scope,
         RequestContext context)
@@ -542,6 +547,8 @@ public sealed class TaskCatalog : ITaskCatalog
         {
             TaskScope.Claimed => (context.SubjectId, null, false),
             TaskScope.All when CanReadAll(context) => (null, null, true),
+            TaskScope.All => throw new ForbiddenException(
+                "scope=ALL（全员待办）需要管理视角或 workflow:history:read:all。"),
             _ => (null, context.SubjectId, false),
         };
     }

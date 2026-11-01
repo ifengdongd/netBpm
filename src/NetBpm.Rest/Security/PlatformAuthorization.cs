@@ -49,7 +49,17 @@ public static class PlatformAuthorization
             return true;
         }
 
-        return PlatformScopes.IsSatisfiedBy([.. context.Scopes], scope);
+        if (PlatformScopes.IsSatisfiedBy([.. context.Scopes], scope))
+        {
+            return true;
+        }
+
+        // 同一能力的两种话术：JWT 管理员拿的是 netbpm.admin.audit.read，
+        // 平台上叫 workflow:admin:audit:read。不互认的话，运维调 /admin/v1/audit 会被 403，
+        // 而调 /api/admin/audit 又能过 —— 这不是权限收紧，是两套名字互相不认识。
+        var engineScope = EngineSurfaceScopes.EngineEquivalent(scope);
+
+        return engineScope is not null && EngineSurfaceScopes.IsAdminSatisfied(context, engineScope);
     }
 
     /// <summary>当前调用方是否具备其中<b>任意一个</b> scope。</summary>

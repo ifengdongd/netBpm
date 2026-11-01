@@ -320,7 +320,7 @@ POST /api/runtime/process-instances/{id}/migrate
 | `netbpm.admin.variables.write` | **越权**直写 / 删除实例变量与任务局部变量 |
 | `netbpm.admin.metrics.read` | 管理指标 |
 | `netbpm.admin.redis.read` | Redis 作业队列诊断（连接状态 / 队列键条目数 / 服务端 INFO） |
-| `netbpm.admin.audit.read` | 管理动作审计查询 |
+| `netbpm.admin.audit.read` | 管理动作审计查询（与平台面 `workflow:admin:audit:read` **互认**：`/api/admin/audit` 与 `/admin/v1/audit` 同源） |
 | `netbpm.admin.audit.purge` | 清理审计记录（可抹除历史痕迹，单独授权） |
 | `netbpm.admin.history.archive` | 历史归档（执行与查询） |
 
@@ -710,13 +710,20 @@ npm test          # vitest 单元测试
 |---|---|
 | 流程模型 | 新建 / 导入 / 复制 / 反建、关键字搜索、设计器跳转、发布前预检、发布（内容未变自动跳过）、发布历史、版本历史与回滚、If-Match 并发冲突提示 |
 | 部署与定义 | 部署列表（定义数 / 最新版本 / 挂起数）与关键字过滤、定义版本、挂起 / 激活、删除部署、下载 XML |
+| 接入管理 | 租户登记 / 启用停用（整租户止血）、接入系统注册、scope 与流程白名单、配额、密钥轮换（明文只显示一次）与注销 |
+| 审批字典 | 按流程列出「定义里声明的选项」，逐项补语义（同意 / 拒绝 / 退回 / 转办 / 自定义）、必填意见、目标环节限制；未配置项如实显示为「流程自定义」 |
+| 事件订阅 | 订阅增删改 / 启停 / 密钥轮换、回调地址与事件类型白名单、限速与重试次数、投递记录、死信列表与重投 |
+| 配额总览 | 租户默认配额 + 接入系统实际配额（含是否继承）、限流开关状态；两个表都支持「加载更多」（游标分页） |
 | 监控 / 实例 | 多条件筛选、挂起 / 激活 / 删除、跳转节点、**取消活动 / 活动前启动**、变量直写（JSON 合并写 + 审计提示）、流程图与历史 |
 | 监控 / 任务 | 改到期时间 / 优先级、转办与取消认领、候选人 / 候选组增删、委派与解决、批量转办、**批量改到期时间**、表单元数据（formKey + formProperty） |
 | 监控 / 作业 | 边界定时作业查询与统计、改期、**立即触发** |
 | 审计 / 指标 | 分页查询（动作 / 操作人 / 实例 / 成功失败）、筛选项、CSV 导出、保留策略清理、总量与待办分布 |
 
-控制台所有变更类操作都会复用后端审计（`/api/admin/audit` 可回放）；发布 / 发起 / 完成带 `Idempotency-Key`，
-重复点击或代理重试不会产生重复版本 / 重复实例。
+控制台所有变更类操作都会复用后端审计（`/api/admin/audit` 可回放；`/admin/v1/*` 的写操作落同一张审计表）；
+发布 / 发起 / 完成带 `Idempotency-Key`，重复点击或代理重试不会产生重复版本 / 重复实例。
+「接入管理」页走平台面 `/admin/v1`（租户 / 客户端），密钥签发**不做幂等**，页面以「提交中禁用 + 明文只显示一次」保证安全。
+管理台的写操作全部走 `/admin/v1/*`（`/api/admin/*` 的同类路径仅保留兼容）；
+`/admin/v1` 的错误体是 RFC 9457，控制台会把 `detail` 直接展示成可读文案，而不是「Forbidden」。
 
 ⚠️ `src/NetBpm.Admin/wwwroot/` 是**构建产物，不入库**（设计器与管理台共用该目录，
 分别由 `web/designer` 与 `web/admin` 的 `npm run build` 产出）。首次拉取代码或清理后，
@@ -793,7 +800,15 @@ dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
 Demo 的 HTTP 接口（发起 / 实例 / 历史 / 待办 / 提交 / 流程图 / 业务数据核对）见
 `docs/process-design-guide.md` §9.1，详细设计见 `samples/NetBpm.Demo/README.md`。
 
-### 在自己的宿主接入审批流（公共类）
+### 在自己的宿主接入审批流（公共类 · ⚠️ 仅维护既有宿主）
+
+> ⚠️ **新接入不要从这里开始**：`MapWorkflowEndpoints` / `AddNetBpmWorkflow` 这套应用层已标记
+> `[Obsolete]`（替代路径见 `src/NetBpm.Workflow/Hosting/Deprecation.cs`）。新宿主按下面两种形态之一接入：
+> 1. **平台面（推荐）**：`NetBpmHost.MapNetBpmHostEndpoints()` 直接暴露 `/workflow/v1/**` + `/admin/v1/**`，
+>    调用方用 `sdk/`（.NET / TypeScript / Java）或任何 HTTP 客户端；
+> 2. **进程内**：需要复用引擎时用 `NetBpm.Persistence` + 引擎门面，业务侧仍通过平台面的 DTO 语义对接。
+>
+> 下面这套「公共类」保留给**已经在用**的宿主升级到平台面的过渡期。
 
 流程相关功能已封装为 `NetBpm.Workflow` 的公共类，宿主六步接入：
 
@@ -803,7 +818,7 @@ builder.Services.AddNetBpmUserGroupManager<MyUserGroupManager>();   // ② 身�
 builder.Services.AddNetBpmWorkflow<MyWorkflowDataStore>();          // ③ 应用层 + 业务数据端口（IWorkflowDataStore）
 builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly); // ④ 服务任务委托（类上标 [ServiceTaskName]）
 
-app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions // ⑤ 通用流程 HTTP 端点
+app.MapWorkflowEndpoints("/api/workflow", new WorkflowEndpointOptions // ⑤ 通用流程 HTTP 端点（⚠️ 已废弃，新宿主见上）
 {
     ProcessKey = _ => "my_process",
     // TransformStartRequest / DecorateInstanceView / DecorateInstanceSummary / ErrorResponseFactory
@@ -875,6 +890,71 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 
 > 目录读端点需要 `workflow:process:read`；未授权的流程不出现，按 key 访问返回 **404**（不是 403）。
 > 名片在「什么都没配置」时也能用：名称与入口从部署的 BPMN 派生，`nb_process_catalog` 只做精修覆盖。
+
+**业务面其余端点**（都在 `/workflow/v1`，错误体同为一律 RFC 9457）：
+
+| 方法 | 路径 | 所需 scope |
+|---|---|---|
+| GET | `/workflow/v1/processes/{key}/parameters/schema`、`/processes/{key}/form/schema` | `workflow:process:read` |
+| GET | `/workflow/v1/instances`、`/instances/{id}`、`/instances/{id}/history`、`/instances/{id}/parameters`、`/instances/{id}/parameters/history`、`/instances/{id}/diagram.svg` | `workflow:instance:read` |
+| POST | `/workflow/v1/instances` | `workflow:instance:start` |
+| POST | `/workflow/v1/instances/{id}/terminate` | `workflow:instance:terminate`（高危，单独授予） |
+| GET | `/workflow/v1/tasks`、`/tasks/{id}`、`/tasks/{id}/form`、`/tasks/{id}/attachments` | `workflow:task:read`（`scope=DONE` 另需 `workflow:history:read`；`scope=ALL` 另需 `workflow:history:read:all`，缺权限 **403**，不降级） |
+| POST | `/workflow/v1/tasks/{id}/submit` | `workflow:task:submit`（代他人提交另需 `workflow:task:submit:onbehalf`） |
+| POST | `/workflow/v1/tasks/{id}/claim`、`/unclaim`、`/transfer` | `workflow:task:assign` |
+
+**管理面 `/admin/v1`**（管理能力，非对外契约；错误体同为 RFC 9457）：
+
+| 方法 | 路径 | 所需 scope |
+|---|---|---|
+| GET / PUT | `/admin/v1/tenants`、`/tenants/{tenantId}`、`/tenants/{tenantId}/status` | `workflow:admin:client` |
+| GET / POST / PATCH / DELETE | `/admin/v1/clients[/{clientId}]`、`POST /clients/{clientId}/rotate`（创建与轮换**返回一次性明文密钥**） | `workflow:admin:client` |
+| GET / PUT / DELETE | `/admin/v1/processes[/{processKey}]`（流程名片精修覆盖） | `workflow:admin:process` |
+| GET | `/admin/v1/dictionaries`、`/dictionaries/{processKey}/declared` | `workflow:admin:process` |
+| PUT / DELETE | `/admin/v1/dictionaries/{processKey}/options/{optionId}` | `workflow:admin:process` |
+| GET | `/admin/v1/audit`、`/audit/facets` | `workflow:admin:audit:read`（**不再**借用 `admin:client`） |
+| GET | `/admin/v1/subscriptions`、`/events/deadletters`、`/events/stats` | `workflow:event:subscribe` |
+| GET / POST / PATCH / DELETE | `/admin/v1/subscriptions[/{id}]`、`/subscriptions/{id}/status`、`/subscriptions/{id}/rotate`、`/subscriptions/{id}/deliveries`、`/events/{eventId}/deliveries/{subscriptionId}/retry` | `workflow:event:subscribe` |
+| GET | `/admin/v1/quotas`（`?tenantCursor=&clientCursor=&max=`；两个列表各自游标分页，默认 50 / 上限 500，响应带 `tenantsNextCursor` / `clientsNextCursor`） | `workflow:admin:client` |
+
+租户边界（**新面一律按此口径，旧面行为一致**）：
+
+- 业务面：凭据绑定租户后只能看到本租户；未授权流程按 key 访问、跨租户实例按 id 访问都是 **404**（不给枚举空间），跨租户写 **403**。
+- 管理面：**未绑定租户**的平台凭据才拥有跨租户运营视角；**绑定了租户**的凭据即使传 `?tenantId=` 也只能看到自己（403 `tenant.forbidden`）。
+- `/api/admin/*` 的**客户端注册 / 租户 / 事件订阅写路径已废弃**，仅保留给既有运维脚本（错误体、租户口径、审计与新面一致）。新接入一律走 `/admin/v1/*`。
+
+实例列表（`GET /workflow/v1/instances`）的过滤与分页都在库里完成，不是「拉回来再筛」：
+
+- 租户边界（`TENANT_ID_ in (本租户, '')`）、流程白名单（key 展开成定义 id 白名单）、发起人、业务主键、时间窗、
+  `status` 的「运行 / 结束」粗筛与 `limit` **全部下推到 SQL**；两个数据源（运行态、历史）各取 `limit+1` 条再合并，
+  排序与游标共用同一个全序（`START_TIME_` + `ID_` 升序 tie-break），所以翻页不重不漏。
+- 只有两种查询会在平台侧做二次过滤：`involvedUser`（「我参与过」需要按人展开实例集合）与 `status=失败`（引擎不产出，查一次确认为空）。
+- 单页上限 100；每行还要补「当前办理人 / 结论」，属于有界 N+1（并发 4），翻页不是导数据通道。
+
+**平台 scope 一览**（`workflow:*` 通配只覆盖**非** `:admin`、**非** `:onbehalf` 的项；`workflow:task:*` 这类前缀通配不生效）：
+
+| scope | 覆盖 |
+|---|---|
+| `workflow:process:read` | 流程目录 / 定义原文 / 版本 / 参数与表单 schema / 流程图 |
+| `workflow:instance:read` | 实例视图 / 参数快照 / 实例流程图 / 实例时间线 |
+| `workflow:instance:start` | 发起流程（配合 `Idempotency-Key` 防重复开单） |
+| `workflow:instance:terminate` | 终止实例（高危） |
+| `workflow:task:read` | 待办列表与详情 / 表单 / 附件 |
+| `workflow:task:submit` | 提交审批（结论必须落到真人主体） |
+| `workflow:task:submit:onbehalf` | 代他人提交（需 token exchange 的 `act.sub`） |
+| `workflow:task:assign` | 认领 / 取消认领 / 转办 |
+| `workflow:history:read` | 审批记录 / 已办 |
+| `workflow:history:read:all` | 跨人查看全部审批历史（审计角色） |
+| `workflow:admin:process` | 部署 / 挂起 / 激活定义，流程名片与审批语义字典维护 |
+| `workflow:admin:instance` | 跳转节点 / 实例迁移 / 批量干预 |
+| `workflow:admin:variables` | 越过参数 schema 直写变量（默认不授予任何客户端） |
+| `workflow:admin:client` | 租户 / 客户端注册 / 流程授权 / 配额 |
+| `workflow:admin:audit:read` | 管理动作审计与筛选项 |
+| `workflow:event:subscribe` | 事件订阅读写、投递记录、死信重投 |
+| `workflow:external:task` | 外部任务领取与回执（`activiti:topic`） |
+
+> 幂等：变更型端点支持 `Idempotency-Key`（同键回放、同键异体 409）。**密钥签发类端点（客户端创建 / 轮换、订阅创建 / 轮换）明确不做幂等**——
+> 把响应体缓存下来等于把明文密钥写进 `ACT_IDEMPOTENCY`；丢了响应请调 `/rotate`，旧密钥在宽限期内仍有效。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

@@ -180,8 +180,18 @@ public sealed record ClientQuotaView(
 /// 管理端必须能区分这两种状态，否则会把「配额配得很大」误读成「已经放开了」。
 /// </param>
 /// <param name="DefaultPerMinute">未配置配额时的兜底每分钟上限（<c>NetBpm:RateLimit:ApiPerMinute</c>）。</param>
+/// <param name="TenantsNextCursor">
+/// 租户列表的下一页游标；<see langword="null"/> 表示这一页已经是最后一页。
+/// <para>
+/// 两个列表<b>各自分页</b>（游标与 limit 互不影响）：租户是「配得对不对」的参照，客户端是「谁吃满了」的主体，
+/// 把它们塞进一个游标会让翻页语义变得没人能解释清楚。管理端按需分别「加载更多」。
+/// </para>
+/// </param>
+/// <param name="ClientsNextCursor">客户端列表的下一页游标；<see langword="null"/> 表示没有更多。</param>
 public sealed record QuotaOverviewView(
     IReadOnlyList<TenantQuotaView> Tenants,
     IReadOnlyList<ClientQuotaView> Clients,
     bool RateLimitEnabled,
-    int DefaultPerMinute);
+    int DefaultPerMinute,
+    string? TenantsNextCursor = null,
+    string? ClientsNextCursor = null);

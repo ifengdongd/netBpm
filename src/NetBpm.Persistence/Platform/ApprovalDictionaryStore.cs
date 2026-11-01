@@ -77,6 +77,27 @@ public interface IApprovalDictionaryStore
         CancellationToken ct = default);
 
     /// <summary>
+    /// 读取某租户某流程字典的「水位」：<c>(行数, 最近更新时间)</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 进程内缓存用它做<b>跨副本校验</b>：写路径只能失效写者自己进程的缓存，
+    /// 其他副本靠这条聚合查询（走 <c>(tenant_id, process_key)</c> 主键前缀）判断缓存是否过期。
+    /// </para>
+    /// <para>
+    /// 为什么同时看行数：只看 <c>max(updated_at)</c> 的话，删除「不是最新那行」不会改变水位，
+    /// 其他副本就会继续按已删除的映射判语义（把退回算成通过）；行数配合时间戳能覆盖增 / 删 / 改。
+    /// </para>
+    /// </remarks>
+    /// <param name="tenantId">租户。</param>
+    /// <param name="processKey">流程 key。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<ApprovalDictionaryRevision> GetRevisionAsync(
+        string tenantId,
+        string processKey,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// 新增或覆盖一条映射（按「租户 + 流程 + 环节 + 选项」定位）。
     /// </summary>
     /// <remarks>
@@ -103,6 +124,17 @@ public interface IApprovalDictionaryStore
         string? nodeId,
         string optionId,
         CancellationToken ct = default);
+}
+
+/// <summary>
+/// 字典缓存的水位：行数 + 最近更新时间。
+/// </summary>
+/// <param name="Count">该租户该流程的映射行数。</param>
+/// <param name="UpdatedAt">最近一次写入时间；没有行时为 <see cref="DateTime.MinValue"/>。</param>
+public readonly record struct ApprovalDictionaryRevision(long Count, DateTime UpdatedAt)
+{
+    /// <summary>空字典的水位。</summary>
+    public static ApprovalDictionaryRevision Empty { get; } = new(0, DateTime.MinValue);
 }
 
 /// <summary>JSON 列的读写口径（键一律 camelCase）。</summary>
@@ -169,6 +201,28 @@ public sealed class DapperApprovalDictionaryStore : IApprovalDictionaryStore
             .ConfigureAwait(false);
 
         return [.. rows.Select(ToEntry)];
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<ApprovalDictionaryRevision> GetRevisionAsync(
+        string tenantId,
+        string processKey,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+
+        await using var connection = _connections.CreateConnection();
+
+        var row = await connection
+            .QuerySingleAsync<RevisionRow>(new CommandDefinition(
+                "select count(*) as Total, max(updated_at) as LastUpdated from nb_approval_dictionary "
+                + "where tenant_id = @tenantId and process_key = @processKey",
+                new { tenantId, processKey },
+                cancellationToken: ct))
+            .ConfigureAwait(false);
+
+        return new ApprovalDictionaryRevision(row.Total, row.LastUpdated ?? DateTime.MinValue);
     }
 
     /// <inheritdoc />
@@ -316,6 +370,14 @@ public sealed class DapperApprovalDictionaryStore : IApprovalDictionaryStore
 
     private static DateTimeOffset ToOffset(DateTime value) => new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
 
+    /// <summary>水位聚合的查询结果（属性名与 SQL 别名一致）。</summary>
+    private sealed class RevisionRow
+    {
+        public long Total { get; set; }
+
+        public DateTime? LastUpdated { get; set; }
+    }
+
     /// <summary>Dapper 行（属性名与 SQL 别名一致）。</summary>
     private sealed class Row
     {
@@ -383,6 +445,27 @@ public sealed class InMemoryApprovalDictionaryStore : IApprovalDictionaryStore
         ];
 
         return ValueTask.FromResult(result);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<ApprovalDictionaryRevision> GetRevisionAsync(
+        string tenantId,
+        string processKey,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+
+        var matched = _entries.Values
+            .Where(entry => string.Equals(entry.TenantId, tenantId, StringComparison.Ordinal)
+                && string.Equals(entry.ProcessKey, processKey, StringComparison.Ordinal))
+            .ToArray();
+
+        var revision = matched.Length == 0
+            ? ApprovalDictionaryRevision.Empty
+            : new ApprovalDictionaryRevision(matched.Length, matched.Max(entry => entry.UpdatedAt.UtcDateTime));
+
+        return ValueTask.FromResult(revision);
     }
 
     /// <inheritdoc />

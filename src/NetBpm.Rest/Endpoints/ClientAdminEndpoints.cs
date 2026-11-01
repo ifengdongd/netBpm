@@ -65,6 +65,8 @@ public static class ClientAdminEndpoints
 
         group.MapPost("/clients", RegisterClientAsync)
             .Accepts<RegisterClientRequest>("application/json")
+            // 响应体含一次性明文密钥：退出幂等缓存（见 NoIdempotencyMetadata）
+            .WithMetadata(new NoIdempotencyMetadata())
             .Produces<IssuedClientSecret>(StatusCodes.Status201Created)
             .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
             .Produces<ErrorResponse>(StatusCodes.Status403Forbidden);
@@ -76,6 +78,8 @@ public static class ClientAdminEndpoints
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
 
         group.MapPost("/clients/{clientId}/rotate", RotateSecretAsync)
+            // 响应体含一次性明文密钥：退出幂等缓存
+            .WithMetadata(new NoIdempotencyMetadata())
             .Produces<IssuedClientSecret>()
             .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
 
@@ -95,7 +99,13 @@ public static class ClientAdminEndpoints
 
         var tenants = await registry.ListAsync(ct).ConfigureAwait(false);
 
-        return Results.Ok(tenants.Select(ToView).ToArray());
+        // 与 /admin/v1/tenants 同口径：绑定租户的凭据只看得到自己那个租户。
+        // 少了这一行，旧面就是新面租户边界的旁路（同一个 scope 在两边得到不同结果）。
+        return Results.Ok(
+            tenants
+                .Where(tenant => IsVisible(context, tenant.TenantId))
+                .Select(ToView)
+                .ToArray());
     }
 
     private static async Task<IResult> EnsureTenantAsync(
@@ -111,6 +121,12 @@ public static class ClientAdminEndpoints
         if (request is null || string.IsNullOrWhiteSpace(request.Name))
         {
             return Results.BadRequest(new ErrorResponse("请提供租户名称。", Code: ErrorCodes.TenantNameRequired));
+        }
+
+        // 跨租户写按禁止（403）而不是 404：目标租户就在请求路径里，调用方本来就知道它存在
+        if (!IsVisible(context, tenantId.Trim()))
+        {
+            throw new ForbiddenException($"无权登记租户 '{tenantId.Trim()}'。");
         }
 
         var registration = new TenantRegistration(
@@ -144,6 +160,12 @@ public static class ClientAdminEndpoints
         if (request is null)
         {
             return Results.BadRequest(new ErrorResponse("请提供 active 字段。", Code: ErrorCodes.RequestBodyRequired));
+        }
+
+        // 跨租户写按禁止（403）：停用开关是整租户的止血闸，不能由别的租户的管理员按下
+        if (!IsVisible(context, tenantId))
+        {
+            throw new ForbiddenException($"无权修改租户 '{tenantId}' 的状态。");
         }
 
         // 自己的租户不能自己停用：一旦停用，当前这把凭据立刻失效，连「改回来」都做不到

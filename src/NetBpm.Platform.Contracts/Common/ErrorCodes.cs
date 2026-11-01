@@ -10,6 +10,9 @@ namespace NetBpm.Platform.Contracts;
 public static class ErrorCodes
 {
     /// <summary>未携带任何凭据。<c>401</c></summary>
+    /// <summary>401：凭据缺失、无效、过期或被停用（不细分，避免给探测者方向）。</summary>
+    public const string AuthUnauthorized = "auth.unauthorized";
+
     public const string AuthMissingCredential = "auth.missing_credential";
 
     /// <summary>令牌签名 / 过期 / 受众不符。<c>401</c></summary>
@@ -128,6 +131,15 @@ public static class ErrorCodes
 
     /// <summary>客户端不存在（管理面按 id 查询时）。<c>404</c></summary>
     public const string ClientNotFound = "client.not_found";
+
+    /// <summary>404：事件订阅不存在，或不属于当前凭据的租户。</summary>
+    public const string EventSubscriptionNotFound = "event_subscription.not_found";
+
+    /// <summary>404：该事件对该订阅没有投递记录。</summary>
+    public const string EventDeliveryNotFound = "event_delivery.not_found";
+
+    /// <summary>409：投递不在死信状态，无需重投。</summary>
+    public const string EventDeliveryNotDeadLetter = "event_delivery.not_dead_letter";
 
     /// <summary>授予了未定义的 scope（拼错或跨版本）。<c>422</c></summary>
     public const string ClientScopeUnknown = "client.scope_unknown";

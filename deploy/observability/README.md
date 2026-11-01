@@ -84,6 +84,14 @@ OTel 里的点号在 Prometheus 侧会被规整成下划线，Counter 还会加 
 | `netbpm.outbox.oldest_pending_age`（秒） | `netbpm_outbox_oldest_pending_age_seconds` | 最老一条待发布事件的年龄 |
 | `netbpm.outbox.backlog_stale` | `netbpm_outbox_backlog_stale` | 1 = 采样已停，上面三个数不可信 |
 
+单位后缀规则（已按 Collector `pkg/translator/prometheus/normalize_unit.go` 核对，别再猜）：
+
+- 只有 UCUM 主单位会被翻译成后缀（`s` → `_seconds`、`ms` → `_milliseconds`、`By` → `_bytes`）；
+- `{event}` / `{state}` 这类**注解单位含花括号**，翻译函数直接返回空串 → **不加任何后缀**；
+- Counter 由类型规则补 `_total`，Gauge 不补（`unit == "1"` 的 Gauge 才会补 `_ratio`，这里没用）。
+
+所以上表的 Gauge 名不带 `_events` / `_state`，告警与看板可以直接照抄；改单位前先看这条。
+
 采样参数（`NetBpm:Outbox:Metrics`）：`Enabled`（默认 true）、`IntervalSeconds`（默认 15）、
 `StartupDelaySeconds`（默认 10）。**开 outbox 就会自动挂上**（`AddNetBpm`）。
 

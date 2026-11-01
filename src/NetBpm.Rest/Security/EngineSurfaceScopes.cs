@@ -55,9 +55,15 @@ internal static class EngineSurfaceScopes
     /// 引擎管理 scope → 平台管理 scope 的对应表。
     /// </summary>
     /// <remarks>
-    /// 刻意<b>不</b>覆盖指标 / 审计 / Redis / 作业 / 归档这几类：它们的平台面还没有对应端点
-    /// （`/admin/v1/*` 尚未铺开），也就没有可授予客户端的 scope。宁可让客户端被拒，
-    /// 也不要为「先通再说」发明一个 <c>workflow:admin:*</c>。
+    /// <para>
+    /// 审计已铺开（<c>GET /admin/v1/audit</c>），因此有独立对应：<c>netbpm.admin.audit.read</c>
+    /// → <c>workflow:admin:audit:read</c>。两边是同一件事，不该因为「走哪个面的 HTTP」而两套授权结论。
+    /// </para>
+    /// <para>
+    /// 指标 / Redis 诊断 / 作业 / 归档仍<b>不</b>覆盖：它们的平台面还没有对应端点
+    /// （只存在于 <c>/api/admin/*</c> 引擎面），也就没有可授予客户端的 scope。
+    /// 宁可让客户端被拒，也不要为「先通再说」发明一个 <c>workflow:admin:*</c>。
+    /// </para>
     /// </remarks>
     private static readonly Dictionary<string, string> AdminBridge = new(StringComparer.Ordinal)
     {
@@ -68,7 +74,20 @@ internal static class EngineSurfaceScopes
         [TaskScopes.AdminInstanceDelete] = PlatformScopes.AdminInstance,
         [TaskScopes.AdminInstanceSuspend] = PlatformScopes.AdminInstance,
         [TaskScopes.AdminVariablesWrite] = PlatformScopes.AdminVariables,
+        [TaskScopes.AdminAuditRead] = PlatformScopes.AdminAuditRead,
     };
+
+    /// <summary>
+    /// 平台 scope 在引擎话术里的等价 scope（无对应时返回 <see langword="null"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 用于反向互认：JWT 管理员拿的是 <c>netbpm.admin.audit.read</c>，
+    /// 调 <c>/admin/v1/audit</c> 时不该因为「scope 名字不同」被拒。
+    /// </remarks>
+    /// <param name="platformScope">平台 scope。</param>
+    internal static string? EngineEquivalent(string platformScope) =>
+        AdminBridge.FirstOrDefault(
+            pair => string.Equals(pair.Value, platformScope, StringComparison.Ordinal)).Key;
 
     /// <summary>引擎管理 scope 在平台话术里的等价 scope（无对应时返回 <see langword="null"/>）。</summary>
     /// <param name="engineScope">引擎管理 scope（见 <see cref="TaskScopes"/>）。</param>

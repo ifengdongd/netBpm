@@ -143,7 +143,8 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         // 「我参与过的单据」：一次算出「这个人 → 实例 id → 角色」，既做过滤也用来回填 myRoles
         var involvement = await LoadInvolvementAsync(query.InvolvedUser, context, ct).ConfigureAwait(false);
 
-        var candidates = await LoadCandidatesAsync(query, startedBy, cursor, descending, ct).ConfigureAwait(false);
+        var candidates = await LoadCandidatesAsync(query, startedBy, cursor, descending, limit, involvement is null, context, ct)
+            .ConfigureAwait(false);
 
         var filtered = new List<Candidate>(candidates.Count);
 
@@ -333,6 +334,9 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         string? startedBy,
         CursorPosition? cursor,
         bool descending,
+        int limit,
+        bool canLimit,
+        RequestContext context,
         CancellationToken ct)
     {
         var merged = new Dictionary<string, Candidate>(StringComparer.Ordinal);
@@ -346,10 +350,30 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         var startedAfter = descending ? fromBound : cursor?.StartTime ?? fromBound;
         var startedBefore = descending ? cursor?.StartTime ?? toBound : toBound;
 
+        // ── 把「租户边界」与「流程白名单」也下推 ──
+        // 不下推时这两层是在 BuildSummaries 里按行过滤的：也就是先把这个租户（或所有租户）在窗口内的
+        // 全部实例拉回来、逐条补详情，再丢掉不属于自己的那些。实例上万之后，这一步就是翻页慢的主因。
+        var tenantIds = context.EffectiveTenantId is { } tenantId
+            ? new[] { tenantId, string.Empty }
+            : null;
+
+        var definitionIds = await ResolveAllowedDefinitionIdsAsync(context, ct).ConfigureAwait(false);
+
+        if (definitionIds is { Count: 0 })
+        {
+            // 白名单里的 key 一个已部署版本都没有：语义是「零匹配」，绝不能退化成「不加过滤」
+            return merged;
+        }
+
+        // 每源多取一条判断 hasMore。两个源的排序口径（时间 + id 升序 tie-break）与内存合并完全一致，
+        // 所以「各取前 N 条再合并」与「取全量再排序」得到的前 N 条相同。
+        int? maxResults = canLimit ? limit + 1 : null;
+
         if (NeedsHistoric(query.Status))
         {
             var historicQuery = new HistoricProcessInstanceQuery(
                 ProcessDefinitionKey: NullIfBlank(query.ProcessKey),
+                ProcessDefinitionIds: definitionIds,
                 BusinessKey: NullIfBlank(query.BusinessKey),
                 StartUserId: startedBy,
                 // Status 明确指向「已结束」时由引擎侧筛掉运行中的行：
@@ -357,6 +381,8 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
                 Finished: query.Status is InstanceStatus.Completed or InstanceStatus.Terminated ? true : null,
                 StartedAfter: startedAfter,
                 StartedBefore: startedBefore,
+                MaxResults: maxResults,
+                TenantIds: tenantIds,
                 Descending: descending);
 
             foreach (var historic in await _engine
@@ -381,10 +407,13 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         {
             var executionQuery = new ProcessInstanceQuery(
                 ProcessDefinitionKey: NullIfBlank(query.ProcessKey),
+                ProcessDefinitionIds: definitionIds,
                 BusinessKey: NullIfBlank(query.BusinessKey),
                 StartUserId: startedBy,
                 StartedAfter: startedAfter,
                 StartedBefore: startedBefore,
+                MaxResults: maxResults,
+                TenantIds: tenantIds,
                 Descending: descending);
 
             foreach (var execution in await _engine
@@ -421,6 +450,41 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
     /// <summary>该状态是否需要查历史侧。</summary>
     private static bool NeedsHistoric(InstanceStatus? status) =>
         status is null or InstanceStatus.Completed or InstanceStatus.Terminated;
+
+    /// <summary>
+    /// 把客户端的「可用流程 key 白名单」展开成定义 id 列表（用于下推）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQL 只能按 <c>PROC_DEF_ID_</c> 过滤，白名单却是按 key 授权的：同一个 key 有多个版本，
+    /// 而版本 id 只有定义表知道。定义表每版本一行（很少），且仓储自带缓存，
+    /// 一次 <c>FindAll</c> 远比「把窗口内的实例全拉回来再逐条解析 key」便宜。
+    /// </para>
+    /// <para>
+    /// 返回 <see langword="null"/> = 不限制（凭据没有白名单）；
+    /// 返回空列表 = 白名单里的 key 一个版本都没部署 → 调用方必须直接返回空页，
+    /// 不能让它退化成「不加过滤」（那是越权，不是性能问题）。
+    /// </para>
+    /// </remarks>
+    private async ValueTask<IReadOnlyCollection<string>?> ResolveAllowedDefinitionIdsAsync(
+        RequestContext context,
+        CancellationToken ct)
+    {
+        if (context.AllowedProcessKeys.Count == 0)
+        {
+            return null;
+        }
+
+        // null 租户 = 跨租户取全部定义：客户端看到的实例里既有本租户部署的，也可能有全局共享的
+        var definitions = await _definitionStore.FindAllAsync(null, ct).ConfigureAwait(false);
+
+        return
+        [
+            .. definitions
+                .Where(definition => context.AllowedProcessKeys.Contains(definition.Key))
+                .Select(definition => definition.Id),
+        ];
+    }
 
     /// <summary>该状态是否需要查运行态。</summary>
     /// <remarks>

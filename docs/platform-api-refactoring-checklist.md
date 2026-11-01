@@ -533,7 +533,7 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 改造项（M1–M16） | 16 | 16 | 0 |
 | 守门测试用例（§6 表内 26 项） | 26 | **26** | **0** ✅（`DualModeTests` 2 / `LoadTests` 2 于 v1.28 补齐） |
 | 业务面端点（`/workflow/v1`） | 23（另有 1 条已划掉） | 23 | 0 |
-| 管理面端点（`/admin/v1`） | 23 个操作 / 17 条路径 | 23 | 0 |
+| 管理面端点（`/admin/v1`） | 31 个操作 / 22 条路径（v1.31 把订阅写路径迁入后重算） | 31 | 0 |
 | 平台表（`nb_*`） | 14（12 已建 + 2 刻意不建） | 12 | 0（2 项是**决定不建**，不是欠账） |
 | 人日（估算，M1–M16） | 135 | 135 | 0（门禁与运维文档不计入这 135） |
 
@@ -547,8 +547,8 @@ v1.27 补齐管理面写路径、事件看板与单订阅限速、时间线轮�
 八个硬缺口 **A–H 全部闭环**（H 于 v1.23：OpenAPI 快照 + 分类 diff + CI 守门 + 治理文档；
 **C 于 v1.25**：旧 `Decorate*` 封存为 `[Obsolete]`，替代路径写进标记与 `Deprecation.Message`）。
 
-> **核查结论（v1.27 后）**：M1–M16、五个阶段、两张面（`/workflow/v1` 22 路径 / 23 操作，`/admin/v1` 17 路径 / 23 操作）
-> 与 12 张平台表都已落地。核查时真正没做的只剩三件，都是「门禁」与「运维件」（不是 M 项、也不是端点）——
+> **核查结论（v1.27 后）**：M1–M16、五个阶段、两张面（`/workflow/v1` 22 路径 / 23 操作，`/admin/v1` 17 路径 / 23 操作；
+> v1.31 迁移订阅写路径后为 **22 路径 / 31 操作**）与 12 张平台表都已落地。核查时真正没做的只剩三件，都是「门禁」与「运维件」（不是 M 项、也不是端点）——
 > 明细见下面的 [§0.1](#01-未完成项核查v127-之后2026-11-01)。
 >
 > **v1.28 收尾**：这三件已全部完成并验收（下表均已标 ✅）。**清单至此零 `[ ]`**。
@@ -733,6 +733,58 @@ v1.27 补齐管理面写路径、事件看板与单订阅限速、时间线轮�
 | GET | `/processes/{key}/diagram.svg` | 同上 | [x] v1.4 |
 | GET | `/processes/{key}/parameters/schema` | 同上 | [x] v1.5 |
 | GET | `/processes/{key}/form/schema` | 同上 | [x] v1.22 |
+
+---
+
+## 9. v1.30 平台化复盘（代码审查发现的问题与收口）
+
+> 清单口径「M 项与端点都已收口」核查成立：`/workflow/v1` 22 路径 / 23 操作、`/admin/v1` 17 路径 / 23 操作
+> （v1.31 把订阅写路径迁入后为 22 路径 / 31 操作）与快照、SDK、CI 全对得上。
+> 但按**代码**逐条核对后发现 7 类「计划项之外」的问题，v1.30 全部修复：
+
+- [x] **旧面租户边界**：`/api/admin/tenants` 列表原样返回全网租户、登记 / 停用无 `IsVisible` ——
+      绑定租户 A 的凭据可枚举、停用其它租户，等于新面租户边界的旁路。已按同一份 `TenantScopes` 收窄。
+- [x] **密钥签发退出幂等**：幂等中间件按路径生效，`POST /admin/v1/clients`、`.../rotate`、
+      订阅创建 / 轮换的**明文密钥**会被写进 `ACT_IDEMPOTENCY` 并允许回放，与「只存摘要、只出现一次」相反。
+      改为端点元数据 `NoIdempotencyMetadata` 显式退出。
+- [x] **审计读独立 scope + 租户收敛**：新增 `workflow:admin:audit:read`（与 `netbpm.admin.audit.read` 互认），
+      审计 / 订阅 / 死信 / 配额统一走 `PlatformTenant.TryResolve`（未绑定租户才能跨租户），`?tenantId=` 不再直达存储。
+- [x] **错误体按面统一**：401（认证中间件）与请求体绑定失败（全局异常处理器）此前固定回旧信封，
+      幂等中间件的 409 又对 `/api` 回 RFC 9457（与其约定相反）。现在统一由 `PlatformProblems.IsPlatformPath` 决定形状，
+      并修掉 `WriteAsJsonAsync` 覆盖 `Content-Type` 的老问题。
+- [x] **订阅写路径迁入 `/admin/v1/subscriptions`**（RFC 9457 + 审计：创建 / 更新 / 删除 / 启停 / 轮换 / 重投），
+      旧路径 `[Obsolete]` 仅兼容；新增审计动作 `event_subscription.*` / `event_delivery.retry`。
+- [x] **升级与结构守门**：字典缓存加「行数 + 最近更新时间」水位校验（跨副本 10 分钟旧语义问题）；
+      脚本末尾幂等更新 `schema.version`（否则抬高期望值会让老库启动校验失败）；新增
+      `DatabaseScriptDriftTests`（`db/*.sql` 必须等于 `SchemaCatalog` 渲染结果）。
+- [x] **运维语义与性能**：`Platform.Service` 对 `Jobs:Queue:Provider=Memory` 启动告警；
+      `scope=ALL` 缺 `history:read:all` 改 **403**（原静默降级成 MINE）；`businessKey` 超 255 改 **400**
+      （原落库后映射成 503）；补 4 条索引（timeline `task_id`、snapshot 实例序、参数清理 `updated_at`、死信 `status+updated_at`）。
+- [x] **文档 / CI / 控制台**：README 补平台面端点总览 + 17 个平台 scope + 租户边界口径 + 密钥幂等例外，
+      并把 `MapWorkflowEndpoints` 标为「仅维护既有宿主」；CI 增加 `tsc --noEmit` 与 `mvn compile`
+      （文本比对证明不了能编译）；控制台新增「接入管理」页（租户 / 客户端 / 密钥轮换）。
+
+**v1.30 留下、v1.31 已补齐的三个缺口**（不再是「有意保留」）：
+
+- [x] **管理台补三页**：审批字典（声明选项 ↔ 语义映射，左侧点选直接补）、事件订阅（订阅 / 投递记录 / 死信重投）、
+      配额总览（租户默认值 + 客户端实际值，标出「继承租户」）。写路径全走 `/admin/v1`。
+- [x] **`/admin/v1/quotas` 游标分页**：`?tenantCursor=&clientCursor=&max=`（默认 50 / 上限 500），
+      响应增 `tenantsNextCursor` / `clientsNextCursor`；两个列表各自 keyset 翻页。
+      同时修掉「`clientCount` 从本页行数算」的隐性错误 —— 改为一条 `group by` 的全量口径。
+- [x] **实例列表真正下推**：租户（`TENANT_ID_ in (本租户,'')`）、流程白名单（key → 定义 id 白名单）、
+      时间窗、`Finished`、`limit` 全部进 SQL；两个数据源各取 `limit+1` 再合并。
+      SQL 的 tie-break 统一为 `START_TIME_ {dir}, ID_ asc`（与门面 `ApplyPaging`、平台游标同一全序），
+      否则「各取前 N 条再合并」不等于「取全量再排序」，同刻多条会漏行。
+      没有采用新索引表：`ACT_HI_PROCINST` / `ACT_RU_EXECUTION` 的列与索引本就够用，
+      缺的是**查询条件**（`TenantIds` / `ProcessDefinitionIds`）与**翻页下推**；建索引表等于把已有一份数据再抄一遍，
+      还要解决「引擎内部结束（定时器 / 消息）时索引谁来更新」的一致性问题。
+- 仍只有 `involvedUser`（我参与过）在平台侧二次过滤：它需要按人展开实例集合，下推要 JOIN `ACT_HI_IDENTITYLINK`，
+      属于下一轮的事；该路径已显式不做 `limit`（宁慢不错）。
+
+配套守门用例：`Quotas_ShouldPageClientsWithCursor`（翻页不重不漏 + `clientCount` 不退化成页大小）、
+`Quotas_Should400_ForMalformedCursor`（坏游标 400，不静默当第一页）、
+`List_ShouldHonourMultiKeyWhitelist`（多 key 白名单生效且越权流程不出现）。
+
 | POST | `/instances` | `workflow:instance:start` | [x] v1.9（幂等） |
 | GET | `/instances` | `workflow:instance:read` | [x] v1.11（cursor） |
 | GET | `/instances/{id}` | 同上 | [x] v1.8 |
@@ -751,10 +803,14 @@ v1.27 补齐管理面写路径、事件看板与单订阅限速、时间线轮�
 | GET | `/tasks/{id}/attachments` | `workflow:task:read` | [x] v1.22 |
 | ~~GET~~ | ~~/history/tasks~~ | — | [x] v1.12 起**收敛到 `/tasks?scope=DONE`**，不单开历史端点 |
 
-管理面 `/admin/v1`（23 个操作 / 17 条路径，全部就位）：
+管理面 `/admin/v1`（**22 条路径 / 31 个操作**，全部就位）：
 `/processes` 覆盖行读写 ✅ v1.24（`workflow:admin:process`、RFC 9457、写操作进管理审计）；
 `/dictionaries` 读 + `/dictionaries/{key}/declared` + `/dictionaries/{key}/options/{optionId}` 读写 ✅ v1.27（写前按流程定义校验）；
-`/audit` + `/audit/facets`、`/quotas`（`AdminClient`）、`/subscriptions`、`/events/deadletters`、`/events/stats`（`EventSubscribe`）只读；
+`/audit` + `/audit/facets`（`workflow:admin:audit:read`）、`/quotas`（`AdminClient`，游标分页 ✅ v1.31）、
+`/events/deadletters`、`/events/stats`（`EventSubscribe`）只读；
+`/subscriptions` 读写 ✅ v1.31：`GET/POST /subscriptions`、`GET/PATCH/DELETE /subscriptions/{id}`、
+`POST /subscriptions/{id}/status|rotate`、`GET /subscriptions/{id}/deliveries`、
+`POST /events/{eventId}/deliveries/{subscriptionId}/retry`（RFC 9457 + 审计 `event_subscription.*` / `event_delivery.retry`）；
 `/tenants` 与 `/clients`（登记 / 注册 / 改 / 轮换 / 吊销）✅ v1.27 迁入，旧 `/api/admin` 那套保留并标 `[Obsolete]`。
 
 ---

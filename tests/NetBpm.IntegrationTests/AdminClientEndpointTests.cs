@@ -23,7 +23,15 @@ namespace NetBpm.IntegrationTests;
 /// </remarks>
 public sealed class AdminClientEndpointTests
 {
-    private static string[] AdminScopes => [PlatformScopes.AdminClient, PlatformScopes.ProcessRead];
+    /// <summary>
+    /// 运维角色：接入管理 + 审计读 + 流程读。
+    /// <para>
+    /// 审计读是<b>独立 scope</b>（<c>workflow:admin:audit:read</c>），不再由 <c>workflow:admin:client</c> 自动覆盖 ——
+    /// 能发密钥不等于该看合规流水。用例里要读审计就必须显式带上它。
+    /// </para>
+    /// </summary>
+    private static string[] AdminScopes =>
+        [PlatformScopes.AdminClient, PlatformScopes.AdminAuditRead, PlatformScopes.ProcessRead];
 
     [Fact]
     public async Task Register_ShouldIssueSecretOnce_AndNeverReturnItAgain()
@@ -492,6 +500,208 @@ public sealed class AdminClientEndpointTests
         var request = new HttpRequestMessage(
             HttpMethod.Delete,
             new Uri($"/admin/v1/clients/{clientId}", UriKind.Relative));
+
+        request.Headers.Add("X-Api-Key", secret);
+
+        return client.SendAsync(request, ReadEndpointHarness.Ct);
+    }
+
+    // ─────────────────────────── 旧面租户边界（P0 回归） ───────────────────────────
+
+    [Fact]
+    public async Task LegacyTenantSurface_ShouldRespectTenantBoundary()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        using var client = host.CreateClient();
+
+        // 无凭据的 dev 身份不受租户约束：用它造一个「别家租户」
+        using var other = await client.PutAsJsonAsync(
+            new Uri("/admin/v1/tenants/other", UriKind.Relative),
+            new { name = "别家租户" },
+            ReadEndpointHarness.Ct);
+
+        Assert.Equal(HttpStatusCode.OK, other.StatusCode);
+
+        // 这把凭据绑定 default 租户、持有管理 scope
+        var admin = await ReadEndpointHarness.RegisterAsync(client, "ops", AdminScopes);
+
+        // ① 列表：旧面也不能列出别家租户（与 /admin/v1/tenants 同口径）
+        using var list = await ReadEndpointHarness.GetAsync(client, "/api/admin/tenants", admin);
+
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+
+        var tenantIds = (await ReadEndpointHarness.ReadJsonAsync(list))
+            .EnumerateArray()
+            .Select(item => item.GetProperty("tenantId").GetString())
+            .ToArray();
+
+        Assert.Contains(ReadEndpointHarness.DefaultTenant, tenantIds);
+        Assert.DoesNotContain("other", tenantIds);
+
+        // ② 跨租户写：登记 / 停用都必须是 403
+        using var put = await PutLegacyTenantAsync(client, admin, "other", new { name = "别家租户" });
+
+        Assert.Equal(HttpStatusCode.Forbidden, put.StatusCode);
+
+        using var status = await PutLegacyTenantStatusAsync(client, admin, "other", active: false);
+
+        Assert.Equal(HttpStatusCode.Forbidden, status.StatusCode);
+    }
+
+    // ─────────────────────────── 密钥签发不落幂等表（P0 回归） ───────────────────────────
+
+    [Fact]
+    public async Task SecretIssuingEndpoint_ShouldNotBeServedFromIdempotencyCache()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        using var client = host.CreateClient();
+        var admin = await ReadEndpointHarness.RegisterAsync(client, "ops", AdminScopes);
+
+        // 同一个 Idempotency-Key + 同一个请求体：普通写端点会被回放，
+        // 密钥签发端点必须真的再发一把（否则明文密钥已被缓存进 ACT_IDEMPOTENCY）
+        var key = Guid.NewGuid().ToString("N");
+
+        using var first = await RegisterClientWithIdempotencyKeyAsync(client, admin, key, "erp");
+        using var second = await RegisterClientWithIdempotencyKeyAsync(client, admin, key, "erp");
+
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+
+        Assert.False(
+            second.Headers.Contains("Idempotency-Replayed"),
+            "密钥签发端点不允许回放：回放意味着明文密钥被写入幂等表。");
+
+        var firstId = (await ReadEndpointHarness.ReadJsonAsync(first)).GetProperty("clientId").GetString();
+        var secondId = (await ReadEndpointHarness.ReadJsonAsync(second)).GetProperty("clientId").GetString();
+
+        Assert.NotEqual(firstId, secondId);
+    }
+
+    // ─────────────────────────── 审计读：独立 scope + 租户边界（P0 回归） ───────────────────────────
+
+    [Fact]
+    public async Task AuditRead_ShouldRequireDedicatedScope()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        using var client = host.CreateClient();
+
+        // 只有客户端管理 scope（含能发密钥）：读不了审计
+        var secret = await ReadEndpointHarness.RegisterAsync(
+            client,
+            "ops",
+            [PlatformScopes.AdminClient, PlatformScopes.ProcessRead]);
+
+        using var response = await ReadEndpointHarness.GetAsync(client, "/admin/v1/audit", secret);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        var problem = await ReadEndpointHarness.ReadJsonAsync(response);
+
+        Assert.Equal(ErrorCodes.AuthInsufficientScope, problem.GetProperty("code").GetString());
+        Assert.Contains(
+            PlatformScopes.AdminAuditRead,
+            problem.GetProperty("detail").GetString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AuditRead_ShouldNotCrossTenant()
+    {
+        using var host = ReadEndpointHarness.BuildHost();
+        await ReadEndpointHarness.DeployAsync(host);
+
+        using var client = host.CreateClient();
+
+        using var other = await client.PutAsJsonAsync(
+            new Uri("/admin/v1/tenants/other", UriKind.Relative),
+            new { name = "别家租户" },
+            ReadEndpointHarness.Ct);
+
+        Assert.Equal(HttpStatusCode.OK, other.StatusCode);
+
+        var auditReader = await ReadEndpointHarness.RegisterAsync(
+            client,
+            "auditor",
+            [PlatformScopes.AdminAuditRead, PlatformScopes.ProcessRead]);
+
+        // 显式指向别家租户：403（租户管理员不是平台运营）
+        using var crossed = await ReadEndpointHarness.GetAsync(
+            client,
+            "/admin/v1/audit?tenantId=other",
+            auditReader);
+
+        Assert.Equal(HttpStatusCode.Forbidden, crossed.StatusCode);
+
+        var problem = await ReadEndpointHarness.ReadJsonAsync(crossed);
+
+        Assert.Equal(ErrorCodes.TenantForbidden, problem.GetProperty("code").GetString());
+
+        // 不带参数：自动落到本租户，正常返回
+        using var own = await ReadEndpointHarness.GetAsync(client, "/admin/v1/audit", auditReader);
+
+        Assert.Equal(HttpStatusCode.OK, own.StatusCode);
+    }
+
+    private static Task<HttpResponseMessage> RegisterClientWithIdempotencyKeyAsync(
+        HttpClient client,
+        string secret,
+        string idempotencyKey,
+        string name)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            new Uri("/admin/v1/clients?confirmPrivilegedScopes=true", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new
+            {
+                name,
+                tenantId = ReadEndpointHarness.DefaultTenant,
+                scopes = new[] { PlatformScopes.ProcessRead },
+            }),
+        };
+
+        request.Headers.Add("X-Api-Key", secret);
+        request.Headers.Add("Idempotency-Key", idempotencyKey);
+
+        return client.SendAsync(request, ReadEndpointHarness.Ct);
+    }
+
+    private static Task<HttpResponseMessage> PutLegacyTenantAsync(
+        HttpClient client,
+        string secret,
+        string tenantId,
+        object body)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            new Uri($"/api/admin/tenants/{tenantId}", UriKind.Relative))
+        {
+            Content = JsonContent.Create(body),
+        };
+
+        request.Headers.Add("X-Api-Key", secret);
+
+        return client.SendAsync(request, ReadEndpointHarness.Ct);
+    }
+
+    private static Task<HttpResponseMessage> PutLegacyTenantStatusAsync(
+        HttpClient client,
+        string secret,
+        string tenantId,
+        bool active)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            new Uri($"/api/admin/tenants/{tenantId}/status", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new { active }),
+        };
 
         request.Headers.Add("X-Api-Key", secret);
 

@@ -73,6 +73,54 @@ public sealed class InstanceListTests
         Assert.True(first >= second, "列表应按下发时间倒序（最新的在前）。");
     }
 
+    /// <summary>
+    /// 流程白名单有多个 key 时：列表里既能看到两个授权流程的单据，也看不到第三个流程的。
+    /// </summary>
+    /// <remarks>
+    /// 白名单是按 key 授权的，SQL 只能按定义 id 过滤：这条用例守的是「key → 定义 id」的展开
+    /// 与「白名单命不中时不能退化成不加过滤」这两个容易写错的点（后者是越权，不是性能问题）。
+    /// 同一发起人 + 三个流程，过滤只能来自白名单，排除了「碰巧只查到自己」的假绿。
+    /// </remarks>
+    [Fact]
+    public async Task List_ShouldHonourMultiKeyWhitelist()
+    {
+        const string SecretKey = "list_secret";
+
+        using var harness = await Harness.StartAsync(
+            [PlatformScopes.InstanceRead],
+            allowedProcessKeys: [LeaveKey, OrderKey]);
+
+        await harness.DeployAsync(LeaveKey);
+        await harness.DeployAsync(OrderKey);
+        await harness.DeployAsync(SecretKey);
+
+        await harness.StartAsync(LeaveKey, "zhangsan");
+        await harness.StartAsync(OrderKey, "zhangsan");
+        await harness.StartAsync(SecretKey, "zhangsan");
+
+        using var response = await harness.GetAsync("/workflow/v1/instances", "zhangsan");
+        var body = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var keys = body.GetProperty("items").EnumerateArray()
+            .Select(item => item.GetProperty("processKey").GetString())
+            .ToList();
+
+        Assert.Equal(2, keys.Count);
+        Assert.Contains(LeaveKey, keys);
+        Assert.Contains(OrderKey, keys);
+        Assert.DoesNotContain(SecretKey, keys);
+
+        // 白名单外的流程按 key 过滤：返回空页（列表语义是「筛出来的集合」，
+        // 找不到 / 没权限在这里都表现为空，不给「存在但无权」的枚举信号）
+        using var direct = await harness.GetAsync($"/workflow/v1/instances?processKey={SecretKey}", "zhangsan");
+        var directBody = await ReadJsonAsync(direct);
+
+        Assert.Equal(HttpStatusCode.OK, direct.StatusCode);
+        Assert.Empty(directBody.GetProperty("items").EnumerateArray());
+    }
+
     [Fact]
     public async Task List_ShouldFilterByProcessKey()
     {
@@ -405,7 +453,7 @@ public sealed class InstanceListTests
 
         private IProcessEngine Engine => Host.Services.GetRequiredService<IProcessEngine>();
 
-        internal static async Task<Harness> StartAsync(string[] scopes)
+        internal static async Task<Harness> StartAsync(string[] scopes, string[]? allowedProcessKeys = null)
         {
             var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
@@ -426,7 +474,10 @@ public sealed class InstanceListTests
             {
                 // 带 X-Subject-Id 的请求在鉴权中间件就要求 onbehalf（代客调用）；
                 // 这是中间件的独立规则，与端点自身的 scope 闸门不相干，所以统一补上。
-                var secret = await RegisterAsync(client, [.. scopes, PlatformScopes.TaskSubmitOnBehalf]);
+                var secret = await RegisterAsync(
+                    client,
+                    [.. scopes, PlatformScopes.TaskSubmitOnBehalf],
+                    allowedProcessKeys);
 
                 return new Harness(host, client, secret);
             }
@@ -488,11 +539,14 @@ public sealed class InstanceListTests
             Host.Dispose();
         }
 
-        private static async Task<string> RegisterAsync(HttpClient client, string[] scopes)
+        private static async Task<string> RegisterAsync(
+            HttpClient client,
+            string[] scopes,
+            string[]? allowedProcessKeys = null)
         {
             using var response = await client.PostAsJsonAsync(
                 new Uri("/api/admin/clients?confirmPrivilegedScopes=true", UriKind.Relative),
-                new { name = "list-client", tenantId = DefaultTenant, scopes },
+                new { name = "list-client", tenantId = DefaultTenant, scopes, allowedProcessKeys },
                 Ct);
 
             var body = await response.Content.ReadAsStringAsync(Ct);

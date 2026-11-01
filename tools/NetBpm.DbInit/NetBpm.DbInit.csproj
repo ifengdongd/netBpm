@@ -12,4 +12,9 @@
     <ProjectReference Include="..\..\src\NetBpm.Persistence\NetBpm.Persistence.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 生成器是内部实现：只对单测开放，用来守「仓库脚本 == SchemaCatalog 输出」 -->
+    <InternalsVisibleTo Include="NetBpm.UnitTests" />
+  </ItemGroup>
+
 </Project>

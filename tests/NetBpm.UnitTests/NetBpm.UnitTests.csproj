@@ -20,6 +20,8 @@
     <ProjectReference Include="..\..\src\NetBpm.Platform.Client\NetBpm.Platform.Client.csproj" />
     <!-- M15：SDK 生成器的产物必须与快照一致（纯函数，不需要数据库） -->
     <ProjectReference Include="..\..\tools\NetBpm.SdkGen\NetBpm.SdkGen.csproj" />
+    <!-- 库脚本必须与 SchemaCatalog 的渲染结果一致（漂移守门，纯字符串比对） -->
+    <ProjectReference Include="..\..\tools\NetBpm.DbInit\NetBpm.DbInit.csproj" />
   </ItemGroup>
 
   <ItemGroup>

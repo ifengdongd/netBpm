@@ -1812,7 +1812,7 @@ public sealed record CallerIdentity(
 
 | 文件 | 内容 | 对应文档章节 |
 |---|---|---|
-| `Common/PlatformScopes.cs` | 15 个对外 scope + `IsSatisfiedBy`（`workflow:*` 不覆盖 `:admin` / `:onbehalf`） | §3.3 |
+| `Common/PlatformScopes.cs` | 15 个对外 scope + `IsSatisfiedBy`（`workflow:*` 不覆盖 `:admin` / `:onbehalf`）；v1.30 增 `workflow:admin:audit:read`，现 **17** 个 | §3.3 |
 | `Common/ErrorCodes.cs` | 36 个稳定错误码常量 | 附录 B |
 | `Common/PlatformProblem.cs` | RFC 9457 响应体、字段级错误、`CursorPage<T>`、`SortDirection` | §3.5 / §3.6 |
 | `Common/ScreamingSnakeCaseEnumConverter.cs` | 枚举统一 `SCREAMING_SNAKE_CASE`，策略随类型走 | ADR-11 |

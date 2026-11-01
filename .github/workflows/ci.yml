@@ -74,7 +74,7 @@ jobs:
     # M14/M15 契约治理，四件事一起守：
     #   1. `/workflow/v1` 的 OpenAPI 快照必须与代码生成结果一致；
     #   2. 上一版基线（contracts/baseline/）里的每条路径与响应结构，当前服务仍然满足；
-    #   3. sdk/ 下的 TS/Java 产物等于「用当前快照重新生成一遍」；
+    #   3. sdk/ 下的 TS/Java 产物等于「用当前快照重新生成一遍」，且**都能编译**（tsc / mvn）；
     #   4. 业务面至少还有 20 条路径（防止过滤逻辑放宽后快照悄悄空心化）。
     # 单独成 Job 而不是塞进 build 里当一步 —— 契约破了要一眼看到是「契约」红了，
     # 而不是「构建」红了之后去翻日志才知道是 diff 还是编译错误。
@@ -110,6 +110,31 @@ jobs:
         run: >
           dotnet run --project tests/NetBpm.UnitTests --no-build --
           -class NetBpm.UnitTests.SdkGenerationTests
+
+      # 生成器是字符串模板：文本比对只能证明「和快照一致」，证明不了「能编译」。
+      # 生成器出语法错时，下面两步是唯一会红的关卡（本地验证过不算，本地会忘）。
+      - name: Setup Node 20 (SDK)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - name: Compile generated TypeScript SDK
+        working-directory: sdk/typescript
+        run: |
+          npm ci --no-audit --no-fund
+          npx tsc --noEmit
+
+      - name: Setup JDK 21 (SDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Compile generated Java SDK
+        working-directory: sdk/java
+        run: mvn -B -q compile
 
   integration-tests:
     # 真库测试：MySQL 服务容器 + DbMigrate 建表；

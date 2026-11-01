@@ -76,6 +76,9 @@ public sealed class InstanceStartService : IInstanceStartService
     /// <summary>对外参数命名空间前缀（与目录 / 参数 schema 派生同口径）。</summary>
     private const string ParameterApiPrefix = "param.";
 
+    /// <summary>业务主键上限（与 <c>ACT_RU_EXECUTION.BUSINESS_KEY_ varchar(255)</c> 对齐）。</summary>
+    private const int MaxBusinessKeyLength = 255;
+
     private readonly IProcessEngine _engine;
     private readonly IProcessCatalog _catalog;
     private readonly IInstanceCatalog _instanceCatalog;
@@ -141,6 +144,20 @@ public sealed class InstanceStartService : IInstanceStartService
         }
 
         EnsureStartable(descriptor, request.EntryPointKey);
+
+        // 业务主键列宽 255（ACT_RU_EXECUTION.BUSINESS_KEY_）。
+        // 不在这里挡住的话，超长值会一路落到数据库，被全局异常处理器映射成 503「数据库暂时不可用」——
+        // 调用方会朝「库挂了」的方向排查，而真正原因是入参超长。
+        if (request.BusinessKey is { } rawBusinessKey
+            && rawBusinessKey.Trim().Length > MaxBusinessKeyLength)
+        {
+            throw StartException(
+                ErrorCodes.RequestMalformed,
+                "业务主键过长",
+                StatusCodes.Status400BadRequest,
+                $"businessKey 最长 {MaxBusinessKeyLength} 个字符（与 ACT_RU_EXECUTION.BUSINESS_KEY_ 列宽一致），"
+                + $"实际 {rawBusinessKey.Trim().Length} 个。");
+        }
 
         // 参数：镜像 + 校验（保留名冲突 400，只读 / 必填缺失 / 类型不符 422）
         var schema = await _catalog.GetParameterSchemaAsync(request.ProcessKey, context, ct).ConfigureAwait(false);

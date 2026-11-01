@@ -20,6 +20,14 @@ public sealed record HistoricProcessInstanceFilter(
     DateTime? EndedAfter = null,
     DateTime? EndedBefore = null,
     string? TenantId = null,
+    /// <summary>
+    /// 租户白名单（<c>in</c> 语义）；与 <paramref name="TenantId"/> 同时给出时两个条件都生效。
+    /// </summary>
+    /// <remarks>
+    /// 平台面要「本租户 + 全局共享（空租户）」一起看，等值条件表达不了这件事；
+    /// 用列表而不是「等值或空」的开关，是为了让 SQL 保持 <c>in</c>（索引可用）而不是 <c>or</c>（多半不走索引）。
+    /// </remarks>
+    IReadOnlyCollection<string>? TenantIds = null,
     int FirstResult = 0,
     int? MaxResults = 20,
     string SortBy = "startTime",

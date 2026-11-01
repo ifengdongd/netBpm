@@ -60,6 +60,15 @@ public static class PlatformScopes
     /// <summary>维护客户端注册、租户、流程授权与配额。</summary>
     public const string AdminClient = "workflow:admin:client";
 
+    /// <summary>
+    /// 读管理动作审计（<c>/admin/v1/audit</c> 与筛选项）。
+    /// <para>
+    /// 与 <see cref="AdminClient"/> 分开的理由：审计是「谁改了什么」的合规凭证，
+    /// 能签发密钥不等于该看全量审计记录。这是最小权限原则，不是多一个常量。
+    /// </para>
+    /// </summary>
+    public const string AdminAuditRead = "workflow:admin:audit:read";
+
     /// <summary>事件订阅管理。</summary>
     public const string EventSubscribe = "workflow:event:subscribe";
 
@@ -90,6 +99,7 @@ public static class PlatformScopes
         AdminInstance,
         AdminVariables,
         AdminClient,
+        AdminAuditRead,
         EventSubscribe,
         ExternalTask,
     ];

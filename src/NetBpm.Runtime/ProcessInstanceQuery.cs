@@ -35,7 +35,17 @@ public sealed record ProcessInstanceQuery(
     DateTime? StartedBefore = null,
     int FirstResult = 0,
     int? MaxResults = null,
-    bool Descending = true);
+    bool Descending = true,
+    /// <summary>
+    /// 按流程定义 id 白名单过滤（同 key 的多个版本一次查完）。
+    /// </summary>
+    /// <remarks>
+    /// 平台面的「客户端流程白名单」是按 key 授权的，落成 SQL 需要先展开成定义 id 列表；
+    /// 单 key 的 <paramref name="ProcessDefinitionKey"/> 表达不了「白名单里有 3 个流程」。
+    /// </remarks>
+    IReadOnlyCollection<string>? ProcessDefinitionIds = null,
+    /// <summary>按租户白名单过滤（<c>in</c> 语义，用于「本租户 + 全局共享」）。</summary>
+    IReadOnlyCollection<string>? TenantIds = null);
 
 /// <summary>
 /// 历史流程实例的查询条件（已办结检索 / 审计 / 报表）。
@@ -79,7 +89,11 @@ public sealed record HistoricProcessInstanceQuery(
     int FirstResult = 0,
     int? MaxResults = null,
     string? TenantId = null,
-    bool Descending = true);
+    bool Descending = true,
+    /// <summary>按流程定义 id 白名单过滤（平台面的客户端流程白名单落成 SQL）。</summary>
+    IReadOnlyCollection<string>? ProcessDefinitionIds = null,
+    /// <summary>按租户白名单过滤（<c>in</c> 语义，用于「本租户 + 全局共享」）。</summary>
+    IReadOnlyCollection<string>? TenantIds = null);
 
 /// <summary>
 /// 流程定义的查询条件（定义列表 / 按 key 查全部版本）。

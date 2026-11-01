@@ -5,6 +5,7 @@ using System.Text;
 using Microsoft.IdentityModel.Tokens;
 using NetBpm.Persistence.Platform;
 using NetBpm.Platform.Contracts;
+using NetBpm.Rest.Platform;
 
 namespace NetBpm.Rest.Security;
 
@@ -580,6 +581,27 @@ public sealed class AuthenticationMiddleware
         if (bearer)
         {
             context.Response.Headers.WWWAuthenticate = "Bearer";
+        }
+
+        // 平台面的 401 也必须走 RFC 9457：这是接入方第一次就会撞上的错误，
+        // 这里若回旧信封，等于 SDK 的问题解析从第一步就不成立。
+        if (PlatformProblems.IsPlatformPath(context.Request.Path))
+        {
+            var problem = PlatformProblem.Create(
+                ErrorCodes.AuthUnauthorized,
+                "未认证",
+                StatusCodes.Status401Unauthorized,
+                message) with
+            {
+                Instance = context.Request.Path.Value,
+                TraceId = context.TraceIdentifier,
+            };
+
+            await context.Response
+                .WriteAsJsonAsync(problem, options: null, contentType: "application/problem+json")
+                .ConfigureAwait(false);
+
+            return;
         }
 
         context.Response.ContentType = "application/json; charset=utf-8";

@@ -15,6 +15,10 @@ const ModelsPage = lazy(() => import('./pages/ModelsPage'));
 const MonitoringPage = lazy(() => import('./pages/MonitoringPage'));
 const ProcessTypesPage = lazy(() => import('./pages/ProcessTypesPage'));
 const RedisPage = lazy(() => import('./pages/RedisPage'));
+const AccessPage = lazy(() => import('./pages/AccessPage'));
+const SemanticsPage = lazy(() => import('./pages/SemanticsPage'));
+const EventSubscriptionsPage = lazy(() => import('./pages/EventSubscriptionsPage'));
+const QuotasPage = lazy(() => import('./pages/QuotasPage'));
 
 /** 路由切换时的加载占位。 */
 function PageFallback() {
@@ -33,6 +37,10 @@ export default function App() {
           <Route path="/process-types" element={<ProcessTypesPage />} />
           <Route path="/deployments" element={<DeploymentsPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
+          <Route path="/access" element={<AccessPage />} />
+          <Route path="/semantics" element={<SemanticsPage />} />
+          <Route path="/subscriptions" element={<EventSubscriptionsPage />} />
+          <Route path="/quotas" element={<QuotasPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/metrics" element={<MetricsPage />} />
           <Route path="/redis" element={<RedisPage />} />

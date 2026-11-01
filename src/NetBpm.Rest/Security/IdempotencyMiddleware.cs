@@ -3,8 +3,27 @@ using System.Text;
 using System.Text.Json;
 using NetBpm.Persistence.Idempotency;
 using NetBpm.Platform.Contracts;
+using NetBpm.Rest.Platform;
 
 namespace NetBpm.Rest.Security;
+
+/// <summary>
+/// 端点标记：响应体含<b>一次性明文密钥</b>，禁止幂等缓存。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 幂等中间件会把首次响应体整段写进 <c>ACT_IDEMPOTENCY.RESPONSE_BODY_</c> 供 24 小时内回放。
+/// 密钥签发类端点（注册客户端 / 轮换密钥 / 注册订阅 / 轮换订阅密钥）的响应体里就是明文密钥 ——
+/// 「为了让重试拿到同一把密钥」而把明文落进另一张表，等于亲手拆掉
+/// 「只存摘要、只出现一次」这条承诺（见 <c>AdminClientEndpoints</c> 的类注释）。
+/// </para>
+/// <para>
+/// 丢响应的正确恢复动作是 <c>/rotate</c>：旧密钥在宽限期内继续有效，不会打断已上线的对接。
+/// </para>
+/// </remarks>
+public sealed class NoIdempotencyMetadata
+{
+}
 
 /// <summary>
 /// HTTP 幂等：客户端带 <c>Idempotency-Key</c> 时，同键重试直接回放首次响应。
@@ -70,7 +89,7 @@ public sealed class IdempotencyMiddleware
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(store);
 
-        if (!ShouldHandle(context.Request))
+        if (!ShouldHandle(context))
         {
             await _next(context).ConfigureAwait(false);
             return;
@@ -316,7 +335,9 @@ public sealed class IdempotencyMiddleware
     {
         context.Response.StatusCode = statusCode;
 
-        if (IsPlatformSurface(context.Request.Path))
+        // 只有平台面（/workflow/v1、/admin/v1）用 RFC 9457；/api 继续旧信封，
+        // 与端点自身和全局异常处理器的口径保持一致。
+        if (PlatformProblems.IsPlatformPath(context.Request.Path))
         {
             context.Response.ContentType = "application/problem+json";
 
@@ -330,8 +351,13 @@ public sealed class IdempotencyMiddleware
                 TraceId = context.TraceIdentifier,
             };
 
+            // contentType 必须显式传：WriteAsJsonAsync 不传就会把已设好的 problem+json 覆盖成 application/json
             await context.Response
-                .WriteAsJsonAsync(problem, ProblemJsonOptions, context.RequestAborted)
+                .WriteAsJsonAsync(
+                    problem,
+                    ProblemJsonOptions,
+                    contentType: "application/problem+json",
+                    cancellationToken: context.RequestAborted)
                 .ConfigureAwait(false);
 
             return;
@@ -346,13 +372,25 @@ public sealed class IdempotencyMiddleware
             .ConfigureAwait(false);
     }
 
-    private static bool ShouldHandle(HttpRequest request) =>
-        IsPlatformSurface(request.Path)
-        && !string.IsNullOrWhiteSpace(request.Headers[HeaderName].ToString())
-        && (HttpMethods.IsPost(request.Method)
-            || HttpMethods.IsPut(request.Method)
-            || HttpMethods.IsPatch(request.Method)
-            || HttpMethods.IsDelete(request.Method));
+    private static bool ShouldHandle(HttpContext context)
+    {
+        var request = context.Request;
+
+        // 密钥签发类端点显式退出幂等：响应体里是一次性明文密钥，
+        // 缓存它等于把明文写进 ACT_IDEMPOTENCY 并允许回放（见 NoIdempotencyMetadata）。
+        // 端点元数据在路由解析之后可读（WebApplication 会自动把 UseRouting 放在用户中间件之前）。
+        if (context.GetEndpoint()?.Metadata.GetMetadata<NoIdempotencyMetadata>() is not null)
+        {
+            return false;
+        }
+
+        return IsPlatformSurface(request.Path)
+            && !string.IsNullOrWhiteSpace(request.Headers[HeaderName].ToString())
+            && (HttpMethods.IsPost(request.Method)
+                || HttpMethods.IsPut(request.Method)
+                || HttpMethods.IsPatch(request.Method)
+                || HttpMethods.IsDelete(request.Method));
+    }
 
     /// <summary>是否属于「写入口」：引擎原语面 + 平台业务面 + 平台管理面。</summary>
     private static bool IsPlatformSurface(PathString path) =>

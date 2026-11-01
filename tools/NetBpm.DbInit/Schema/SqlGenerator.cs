@@ -38,6 +38,19 @@ internal static class SqlGenerator
         GenerateFor(repoRoot, Dialect.SqlServer, "sqlserver");
     }
 
+    /// <summary>
+    /// 渲染两份方言脚本（仓库相对路径 → 内容），不落盘。
+    /// </summary>
+    /// <remarks>
+    /// 生成与「产物漂移守门」共用这一份渲染逻辑：测试比对的是字符串，
+    /// 不需要向仓库或临时目录写文件（写文件会带来「测试失败时留下残留」的问题）。
+    /// </remarks>
+    internal static IReadOnlyList<(string RelativePath, string Content)> Render() =>
+    [
+        ($"db/mysql/{InitScriptFileName}", RenderText(Dialect.MySql)),
+        ($"db/sqlserver/{InitScriptFileName}", RenderText(Dialect.SqlServer)),
+    ];
+
     private static void GenerateFor(string repoRoot, Dialect dialect, string folder)
     {
         var directory = Path.Combine(repoRoot, "db", folder);
@@ -54,18 +67,21 @@ internal static class SqlGenerator
             File.Delete(stale);
         }
 
-        Emit(directory, dialect, InitScriptFileName, RenderInitScript(dialect));
+        File.WriteAllText(
+            Path.Combine(directory, InitScriptFileName),
+            RenderText(dialect),
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
-    private static void Emit(string directory, Dialect dialect, string fileName, List<string> lines)
+    private static string RenderText(Dialect dialect)
     {
         var content = new StringBuilder();
-        foreach (var line in lines)
+        foreach (var line in RenderInitScript(dialect))
         {
             content.Append(line).Append("\r\n");
         }
 
-        File.WriteAllText(Path.Combine(directory, fileName), content.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return content.ToString();
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -111,7 +127,7 @@ internal static class SqlGenerator
             lines.AddRange(RenderGuardedForeignKey(fk, dialect));
         }
 
-        lines.AddRange(BlankSection("①-3 引擎初值（ACT_GE_PROPERTY：仅在缺失时插入）"));
+        lines.AddRange(BlankSection("①-3 引擎初值（ACT_GE_PROPERTY：仅在缺失时插入，结构版本单独对齐）"));
         lines.AddRange(RenderPropertySeeds(dialect));
 
         // ② 流程实例业务表 / 流程类型 / 流程模型
@@ -860,6 +876,25 @@ internal static class SqlGenerator
                 lines.Add($"    insert into ACT_GE_PROPERTY {columns} values ({values});");
                 lines.Add("go");
             }
+        }
+
+        // 结构版本必须跟着代码走，只 insert 是不够的：
+        // 老库重复执行脚本时 insert 是空操作，schema.version 会永远停在「建库那天的版本」，
+        // 一旦发布时抬高 ExpectedSchemaVersion，所有老库的启动校验直接失败 ——
+        // 而运维看到的现象是「脚本明明执行成功了」。
+        // 只更新 schema.version（且仅在与代码期望值不同时），绝不动 next.dbid。
+        var version = DatabaseSchemaChecker.ExpectedSchemaVersion;
+
+        lines.Add($"-- 结构版本对齐：老库重跑脚本时抬到当前代码期望值（不重置 next.dbid）");
+
+        if (dialect == Dialect.MySql)
+        {
+            lines.Add($"update ACT_GE_PROPERTY set VALUE_ = '{version}' where NAME_ = 'schema.version' and VALUE_ <> '{version}';");
+        }
+        else
+        {
+            lines.Add($"update ACT_GE_PROPERTY set VALUE_ = N'{version}' where NAME_ = 'schema.version' and VALUE_ <> N'{version}';");
+            lines.Add("go");
         }
 
         lines.Add(string.Empty);

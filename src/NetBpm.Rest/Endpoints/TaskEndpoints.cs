@@ -122,6 +122,15 @@ public static class TaskEndpoints
             return PlatformProblems.InsufficientScope(http, context, PlatformScopes.HistoryRead);
         }
 
+        if (parsedScope == TaskScope.All
+            && !PlatformAuthorization.HasScope(context, PlatformScopes.HistoryReadAll)
+            && !context.IsAdmin)
+        {
+            // 与 DONE 同口径：缺权限就 403，而不是静默降级成 MINE。
+            // 降级会让调用方把「全员待办」当「我的待办」处理（业务上就是漏单），且日志里看不出任何异常。
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.HistoryReadAll);
+        }
+
         var query = new TaskQuery(
             Scope: parsedScope,
             ProcessKey: processKey,

@@ -181,6 +181,87 @@ public sealed class DapperClientRegistry : IClientRegistry
     }
 
     /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<ClientDescriptor>> ListPageAsync(
+        string? tenantId,
+        string? afterTenantId,
+        string? afterClientId,
+        int limit,
+        CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        await using var connection = _connections.CreateConnection();
+
+        var parameters = new DynamicParameters();
+        var conditions = new List<string> { "(@tenantId is null or tenant_id = @tenantId)" };
+        parameters.Add("tenantId", string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim());
+
+        if (!string.IsNullOrEmpty(afterTenantId) || !string.IsNullOrEmpty(afterClientId))
+        {
+            // keyset：先比租户再比客户端 id（与 order by 完全一致，翻页不重不漏）
+            conditions.Add("(tenant_id > @afterTenant or (tenant_id = @afterTenant and id > @afterClient))");
+            parameters.Add("afterTenant", afterTenantId ?? string.Empty);
+            parameters.Add("afterClient", afterClientId ?? string.Empty);
+        }
+
+        var paging = SqlPaging.Build(_connections.DatabaseType, 0, limit, parameters);
+
+        var rows = (await connection.QueryAsync<ClientRow>(new CommandDefinition(
+            $"select {ClientColumns} from nb_api_client where {string.Join(" and ", conditions)} "
+            + $"order by tenant_id, id{paging}",
+            parameters,
+            cancellationToken: ct)).ConfigureAwait(false)).ToList();
+
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = rows.Select(row => row.Id).ToArray();
+
+        var grantRows = await connection.QueryAsync<GrantRow>(new CommandDefinition(
+            $"select {GrantColumns} from nb_client_process_grant where client_id in @ids " +
+            "order by client_id, process_key",
+            new { ids },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        var lookup = grantRows
+            .GroupBy(grant => grant.ClientId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(grant => grant.ProcessKey).ToArray(),
+                StringComparer.Ordinal);
+
+        return
+        [
+            .. rows.Select(row => row.ToDescriptor(
+                lookup.TryGetValue(row.Id, out var grants) ? grants : [])),
+        ];
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyDictionary<string, int>> CountByTenantAsync(
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        await using var connection = _connections.CreateConnection();
+
+        // 一条 group by 代替「每行租户再查一次 count」：配额总览的租户行最多一页，
+        // 但按租户逐个 count 是 N 次往返，接入方一多就是翻页卡顿。
+        var rows = await connection.QueryAsync<TenantCountRow>(new CommandDefinition(
+            """
+            select tenant_id as TenantId, count(*) as Total
+            from nb_api_client
+            where (@tenantId is null or tenant_id = @tenantId)
+            group by tenant_id
+            """,
+            new { tenantId = string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim() },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return rows.ToDictionary(row => row.TenantId, row => row.Total, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
     public async ValueTask<ClientDescriptor?> UpdateAsync(
         string clientId,
         UpdateClientRequest request,
@@ -511,6 +592,14 @@ public sealed class DapperClientRegistry : IClientRegistry
             "update nb_api_client set last_used_at = @now where id = @clientId",
             new { clientId = row.Id, now = now.UtcDateTime },
             cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <summary>按租户聚合的客户端数量（配额总览用）。</summary>
+    private sealed class TenantCountRow
+    {
+        public string TenantId { get; set; } = string.Empty;
+
+        public int Total { get; set; }
     }
 
     private sealed class ClientRow
