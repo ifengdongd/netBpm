@@ -1,0 +1,246 @@
+{
+  "uid": "netbpm-overview",
+  "title": "NetBpm / 平台总览",
+  "description": "引擎命令、作业与 outbox、外部任务告警、事件投递、管理面拒绝。数据源：Prometheus（指标由 OpenTelemetry 导出，需用 OTLP 接收端或 otel-collector 的 prometheus exporter 落地）。",
+  "tags": ["netbpm"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "tenant",
+        "label": "租户",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(netbpm_event_delivery, tenant)",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "引擎",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "命令速率（按结果）",
+      "description": "netbpm_command_executed。result 突变为 failure 说明引擎侧在报错，不是接入方的问题。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(netbpm_command_executed_total[5m]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "命令耗时 p95",
+      "description": "netbpm_command_duration（毫秒）。这是引擎内部命令的耗时，不含 HTTP 与序列化；HTTP 层的 p95 看 APM 或 LoadTests。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(netbpm_command_duration_bucket[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(netbpm_command_duration_bucket[5m])))",
+          "legendFormat": "p50"
+        }
+      ],
+      "unit": "ms",
+      "fillOpacity": 0
+    },
+    {
+      "type": "timeseries",
+      "title": "乐观锁重试速率",
+      "description": "netbpm_command_retry。持续非零说明同一批实例在被并发写（多副本抢同一作业，或接入方在重试），不是错误但会吃掉吞吐。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(netbpm_command_retry_total[5m]))",
+          "legendFormat": "retry/s"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    },
+    {
+      "type": "row",
+      "title": "作业与 outbox",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "作业失败（区分是否进死信）",
+      "description": "netbpm_timer_job_failure / netbpm_async_job_failure，标签 dead_letter。dead_letter=true 的曲线一旦出现就不是「重试就好」——要人工介入。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (dead_letter) (rate(netbpm_timer_job_failure_total[5m]))",
+          "legendFormat": "timer dead_letter={{dead_letter}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (dead_letter) (rate(netbpm_async_job_failure_total[5m]))",
+          "legendFormat": "async dead_letter={{dead_letter}}"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "outbox 发布失败",
+      "description": "netbpm_outbox_failure。dead_letter=true 表示事件发布已放弃；此时 GET /admin/v1/events/stats 的 outbox.deadLetter 会同步增长。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (dead_letter) (rate(netbpm_outbox_failure_total[5m]))",
+          "legendFormat": "dead_letter={{dead_letter}}"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    },
+    {
+      "type": "row",
+      "title": "外部任务与事件",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "外部任务告警（按告警码）",
+      "description": "netbpm.external_task.alert（Prometheus 里为 netbpm_external_task_alert_total），标签 code / tenant。no_worker = 没人来领，dead_letter = 重试耗尽。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (code) (rate(netbpm_external_task_alert_total{tenant=~\"$tenant\"}[5m]))",
+          "legendFormat": "{{code}}"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "事件投递成功率",
+      "description": "netbpm_event_delivery，标签 subscription / result。SLO：success 占比 ≥ 99%。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(netbpm_event_delivery_total{result=\"success\"}[5m])) / clamp_min(sum(rate(netbpm_event_delivery_total[5m])), 0.0001)",
+          "legendFormat": "成功率"
+        }
+      ],
+      "unit": "percentunit",
+      "fillOpacity": 0,
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.99 },
+              { "color": "green", "value": 0.999 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "管理面",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "授权拒绝（按 scope）",
+      "description": "netbpm_admin_authorization_denied。突增通常是接入方配错 scope；持续低频则可能是有人在扫接口。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (netbpm_admin_scope) (rate(netbpm_admin_authorization_denied_total[5m]))",
+          "legendFormat": "{{netbpm_admin_scope}}"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "旧面写入被拒",
+      "description": "netbpm_platform_surface_denied。注册客户端仍在 /api/** 做业务写入；已封存面，应迁到 /workflow/v1。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (netbpm_admin_action) (rate(netbpm_platform_surface_denied_total[5m]))",
+          "legendFormat": "{{netbpm_admin_action}}"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "管理审计留痕（按成功 / 失败）",
+      "description": "netbpm.admin.audit.recorded（Prometheus 里为 netbpm_admin_audit_recorded_total），标签 netbpm.audit.success / netbpm.admin.action。success=false 意味着有管理动作没留下痕迹——审计库满了或写失败，比「动作失败」更隐蔽。",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 44 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (netbpm_audit_success) (rate(netbpm_admin_audit_recorded_total[5m]))",
+          "legendFormat": "success={{netbpm_audit_success}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(netbpm_admin_audit_purged_total[5m]))",
+          "legendFormat": "保留期清理"
+        }
+      ],
+      "unit": "ops",
+      "fillOpacity": 10
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true
+}

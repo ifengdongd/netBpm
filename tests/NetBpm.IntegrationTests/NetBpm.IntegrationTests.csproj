@@ -21,6 +21,10 @@
     <ProjectReference Include="..\..\samples\NetBpm.Demo\NetBpm.Demo.csproj">
       <Aliases>DemoHost</Aliases>
     </ProjectReference>
+    <!-- 独立部署宿主（Platform.Service）：DualModeTests 要拿它和演示宿主对比 timeline 语义 -->
+    <ProjectReference Include="..\..\src\NetBpm.Platform.Service\NetBpm.Platform.Service.csproj">
+      <Aliases>PlatformHost</Aliases>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,180 @@
+# NetBpm Prometheus 告警规则
+#
+# 前提：指标由 OpenTelemetry 导出。Prometheus 侧会把 OTel 的 `netbpm.x.y` 规整成
+# `netbpm_x_y`，并给 Counter 加 `_total` 后缀 —— 所以 `netbpm.command.executed`
+# 在这里写作 `netbpm_command_executed_total`。若你的接收端做了别的规整，按实际改。
+#
+# 严重度约定：
+#   page    —— 立刻叫人（流程停了 / 数据要丢）
+#   ticket  —— 当班处理（有量但还没停）
+#   patrol  —— 巡检时看（趋势与接入方卫生）
+#
+# 阈值都从「一条流程卡住多久才算故障」反推，不是凭感觉拍的：
+# 外部任务 10 分钟无人领取 = 这条单已经停了 10 分钟；outbox 最老一条 15 分钟 =
+# 订阅方已经晚收到 15 分钟。
+
+groups:
+  - name: netbpm.engine
+    rules:
+      - alert: NetBpmCommandFailureSustained
+        expr: |
+          sum(rate(netbpm_command_executed_total{result="failure"}[5m]))
+            / clamp_min(sum(rate(netbpm_command_executed_total[5m])), 0.0001)
+          > 0.05
+        for: 10m
+        labels:
+          severity: page
+          component: engine
+        annotations:
+          summary: "引擎命令失败率 > 5% 持续 10 分钟"
+          description: "失败率 {{ $value | humanizePercentage }}。引擎侧在报错，与接入方无关：查实例级 LAST_ERROR_ 与日志。"
+          runbook: "docs/operations-runbook.md §6"
+
+      - alert: NetBpmOptimisticLockThrashing
+        expr: |
+          sum(rate(netbpm_command_retry_total[10m]))
+            / clamp_min(sum(rate(netbpm_command_executed_total[10m])), 0.0001)
+          > 0.5
+        for: 15m
+        labels:
+          severity: ticket
+          component: engine
+        annotations:
+          summary: "乐观锁重试次数达到命令数的 50%"
+          description: "同一批实例在被并发写。多副本场景先确认作业队列 Provider 是 Redis（Memory 会让多副本各执行一遍同一作业）。"
+          runbook: "docs/operations-runbook.md §1"
+
+  - name: netbpm.jobs
+    rules:
+      - alert: NetBpmTimerJobDeadLetter
+        expr: increase(netbpm_timer_job_failure_total{dead_letter="true"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: page
+          component: jobs
+        annotations:
+          summary: "出现定时作业死信"
+          description: "定时作业不会自愈。查 ACT_RU_TIMER_JOB 的 LAST_ERROR_ 与对应实例。"
+          runbook: "docs/operations-runbook.md §6"
+
+      - alert: NetBpmAsyncJobDeadLetter
+        expr: increase(netbpm_async_job_failure_total{dead_letter="true"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: page
+          component: jobs
+        annotations:
+          summary: "出现异步作业死信"
+          description: "多为委托解析或表达式求值失败。查 ACT_RU_JOB 的 LAST_ERROR_。"
+          runbook: "docs/operations-runbook.md §6"
+
+      - alert: NetBpmOutboxDeadLetter
+        expr: increase(netbpm_outbox_failure_total{dead_letter="true"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+          component: outbox
+        annotations:
+          summary: "出现事件发布死信"
+          description: "事件已放弃发布。先看订阅方是否在 5xx，再核对签名与地址。重投前必须确认订阅方能收。"
+          runbook: "docs/operations-runbook.md §3.2"
+
+  - name: netbpm.external_task
+    rules:
+      - alert: NetBpmExternalTaskNoWorker
+        expr: increase(netbpm_external_task_alert_total{code="external_task.no_worker"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: page
+          component: external_task
+        annotations:
+          summary: "外部任务无人领取（{{ $labels.tenant }}）"
+          description: "流程在这一步停住了，待办列表也是空的 —— 使用者会以为「系统坏了」。先起 worker / 修 topic，不要手工改状态。"
+          runbook: "docs/operations-runbook.md §3.1"
+
+      - alert: NetBpmExternalTaskDeadLetter
+        expr: increase(netbpm_external_task_alert_total{code="external_task.dead_letter"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: page
+          component: external_task
+        annotations:
+          summary: "外部任务进死信（{{ $labels.tenant }}）"
+          description: "这一步确实没做。不修根因就重投只会再死一次。"
+          runbook: "docs/operations-runbook.md §3.1"
+
+      - alert: NetBpmEventDeliveryDeadLetter
+        expr: increase(netbpm_external_task_alert_total{code="event.delivery.dead_letter"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+          component: events
+        annotations:
+          summary: "事件投递进死信"
+          description: "某个订阅已停投。订阅方必须先具备按 CloudEvents id 去重的能力，再重投 —— 否则一次重投就是一次重复记账。"
+          runbook: "docs/operations-runbook.md §3.2"
+
+  - name: netbpm.surface
+    rules:
+      - alert: NetBpmAdminAuthorizationDeniedSpike
+        expr: sum(rate(netbpm_admin_authorization_denied_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: patrol
+          component: admin
+        annotations:
+          summary: "管理面授权拒绝持续超过 1 次/秒"
+          description: "通常是接入方配错 scope；若伴随陌生来源 IP，按扫接口处理。按 netbpm_admin_scope 分组能直接看出是哪个 scope。"
+          runbook: "docs/operations-runbook.md §6"
+
+      - alert: NetBpmAdminAuditNotRecorded
+        expr: increase(netbpm_admin_audit_recorded_total{netbpm_audit_success="false"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+          component: admin
+        annotations:
+          summary: "管理审计留痕失败"
+          description: "有管理动作没留下痕迹。审计是「谁在什么时候改了什么」的唯一凭据，写不进去比动作失败更隐蔽——动作失败调用方会立刻知道，审计失败谁都不知道。先查磁盘与 admin_audit_log 的写入权限。"
+          runbook: "docs/operations-runbook.md §12"
+
+      - alert: NetBpmLegacySurfaceWrite
+        expr: increase(netbpm_platform_surface_denied_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: patrol
+          component: admin
+        annotations:
+          summary: "仍有客户端在旧面做业务写入"
+          description: "/api/** 已封存为 [Obsolete]，注册客户端做业务写入会被拒。通知接入方迁移到 /workflow/v1。"
+          runbook: "docs/operations-runbook.md §6"
+
+  - name: netbpm.slo
+    rules:
+      # 这两个是 burn-rate 之外的兜底：只看「有没有慢到不能用」，
+      # 不替代 LoadTests（那是发版前的人工门禁，不是常驻告警）。
+      - alert: NetBpmCommandDurationP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(netbpm_command_duration_bucket[5m]))) > 500
+        for: 15m
+        labels:
+          severity: ticket
+          component: engine
+        annotations:
+          summary: "引擎命令 p95 > 500ms 持续 15 分钟"
+          description: "引擎内部命令的耗时（不含 HTTP）。先查数据库与锁等待，再怀疑代码。"
+          runbook: "docs/operations-runbook.md §10"
+
+      - alert: NetBpmEventDeliverySuccessRateLow
+        expr: |
+          sum(rate(netbpm_event_delivery_total{result="success"}[30m]))
+            / clamp_min(sum(rate(netbpm_event_delivery_total[30m])), 0.0001)
+          < 0.99
+        for: 10m
+        labels:
+          severity: ticket
+          component: events
+        annotations:
+          summary: "事件投递成功率 < 99%"
+          description: "SLO 是 ≥ 99%。按 subscription 分组定位是某一家订阅方的问题还是全局问题。"
+          runbook: "docs/operations-runbook.md §7"
