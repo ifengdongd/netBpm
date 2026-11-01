@@ -141,6 +141,10 @@ public static class NetBpmHost
         // 必须在 AddNetBpmAuth 之后：两者都依赖 NetBpmOptions / IDbConnectionFactory 的注册结果。
         builder.Services.AddNetBpmPlatformSecurity(configuration);
 
+        // 平台存储：参数规范索引（nb_process_parameter）+ 参数修订历史（nb_parameter_snapshot）
+        // 必须早于 AddNetBpmProcessCatalog：目录在派生参数规范时会把结果物化进索引
+        builder.Services.AddNetBpmParameterStores();
+
         // 平台业务面：流程目录（引擎定义 + BPMN 派生 + nb_process_catalog 覆盖）
         builder.Services.AddNetBpmProcessCatalog();
 

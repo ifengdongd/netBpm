@@ -7,8 +7,9 @@ namespace NetBpm.Rest.Auditing;
 
 /// <summary>
 /// 归档类数据的保留策略后台服务：定期清理
-/// <c>admin_history_archive</c>（按 <c>archived_at</c>）与
-/// <c>nb_approval_snapshot</c>（按 <c>captured_at</c>），两者共用
+/// <c>admin_history_archive</c>（按 <c>archived_at</c>）、
+/// <c>nb_approval_snapshot</c>（按 <c>captured_at</c>）与
+/// <c>nb_parameter_snapshot</c>（按 <c>updated_at</c>），三者共用
 /// <c>NetBpm:Admin:ArchiveRetentionDays</c> 一个配置。
 /// <para>
 /// 归档表只进不出会无限膨胀（payload 是 5 张 ACT_HI_* 行的 JSON 快照，单条可观）；
@@ -88,6 +89,17 @@ public sealed class AdminArchiveCleanupService(
                 {
                     logger.LogInformation(
                         "已清理 {Count} 份早于 {Cutoff:O} 的表单快照。", prunedSnapshots, cutoff);
+                }
+
+                // 参数修订历史与归档同一切点：它解释的也是「这张单当时怎么走的」，
+                // 归档没了它留着就是一串无法定位的孤儿值
+                var parameterStore = scope.ServiceProvider.GetRequiredService<IParameterSnapshotStore>();
+                var prunedParameters = await parameterStore.PruneAsync(cutoff, stoppingToken).ConfigureAwait(false);
+
+                if (prunedParameters > 0)
+                {
+                    logger.LogInformation(
+                        "已清理 {Count} 版早于 {Cutoff:O} 的参数修订。", prunedParameters, cutoff);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

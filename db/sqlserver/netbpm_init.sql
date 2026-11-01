@@ -1458,6 +1458,50 @@ go
 if not exists (select 1 from sys.indexes where name = 'ix_nb_approval_snapshot_captured' and object_id = object_id('nb_approval_snapshot'))
 create index ix_nb_approval_snapshot_captured on nb_approval_snapshot (captured_at);
 go
+if object_id(N'nb_process_parameter', N'U') is null
+    create table nb_process_parameter (
+    tenant_id nvarchar(64) not null constraint df_nb_process_parameter_tenant_id default ('default'),
+    process_key nvarchar(255) not null,
+    definition_version int not null constraint df_nb_process_parameter_definition_version default (0),
+    api_name nvarchar(255) not null,
+    variable_name nvarchar(255),
+    display_name nvarchar(255),
+    type nvarchar(32) not null constraint df_nb_process_parameter_type default ('STRING'),
+    required tinyint not null constraint df_nb_process_parameter_required default (0),
+    default_value nvarchar(1000),
+    description nvarchar(1000),
+    writable_by_json nvarchar(1000),
+    visible_to_json nvarchar(1000),
+    rules_json nvarchar(max),
+    sort_order int not null constraint df_nb_process_parameter_sort_order default (0),
+    schema_version int not null constraint df_nb_process_parameter_schema_version default (0),
+    updated_at datetime not null,
+    constraint pk_nb_process_parameter primary key clustered (tenant_id, process_key, definition_version, api_name)
+    );
+go
+
+if not exists (select 1 from sys.indexes where name = 'ix_nb_process_parameter_variable' and object_id = object_id('nb_process_parameter'))
+create index ix_nb_process_parameter_variable on nb_process_parameter (tenant_id, variable_name);
+go
+if object_id(N'nb_parameter_snapshot', N'U') is null
+    create table nb_parameter_snapshot (
+    process_instance_id nvarchar(64) not null,
+    revision bigint not null,
+    tenant_id nvarchar(64) not null constraint df_nb_parameter_snapshot_tenant_id default ('default'),
+    process_key nvarchar(255),
+    source nvarchar(32) not null constraint df_nb_parameter_snapshot_source default ('SUBMIT'),
+    task_id nvarchar(64),
+    activity_id nvarchar(255),
+    values_json nvarchar(max) not null,
+    updated_at datetime not null,
+    updated_by nvarchar(255),
+    constraint pk_nb_parameter_snapshot primary key clustered (process_instance_id, revision)
+    );
+go
+
+if not exists (select 1 from sys.indexes where name = 'ix_nb_parameter_snapshot_updated' and object_id = object_id('nb_parameter_snapshot'))
+create index ix_nb_parameter_snapshot_updated on nb_parameter_snapshot (tenant_id, updated_at);
+go
 if object_id(N'nb_external_task', N'U') is null
     create table nb_external_task (
     id nvarchar(64) not null,
@@ -4558,6 +4602,258 @@ if exists (select 1 from sys.columns
     exec sp_addextendedproperty @name = N'MS_Description', @value = N'定稿时间（UTC）',
         @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_approval_snapshot',
         @level2type = N'COLUMN', @level2name = N'captured_at';
+go
+
+if object_id('nb_process_parameter', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('nb_process_parameter') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程参数规范索引：按定义版本物化 BPMN 声明的参数（真源仍是 BPMN，此表让历史实例按当时契约渲染）',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'nb_process_parameter';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'process_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'process_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程 key（= BPMN process/@id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'process_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'definition_version')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'definition_version')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'派生自哪一版流程定义（与 ACT_RE_PROCDEF.VERSION_ 对齐）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'definition_version';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'api_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'api_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'对外参数名（param.{variable}，可在 netbpm:parameters/@apiName 覆盖）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'api_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'variable_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'variable_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'镜像写入的流程变量名（裸名）；NULL = 只存档不写变量',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'variable_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'display_name')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'display_name')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'显示名',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'display_name';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'type')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'type')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'参数类型 STRING/LONG/DECIMAL/BOOLEAN/DATE/DATETIME/ENUM/JSON（对外 JSON 词汇，不存枚举序号）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'type';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'required')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'required')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'发起时是否必填（0/1）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'required';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'default_value')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'default_value')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'默认值（字符串形式，按 type 解析）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'default_value';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'description')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'description')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'说明',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'description';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'writable_by_json')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'writable_by_json')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'允许写入的角色数组（JSON）；NULL = 发起时可写、之后只读',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'writable_by_json';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'visible_to_json')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'visible_to_json')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'可见角色数组（JSON）；NULL = 全部可见',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'visible_to_json';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'rules_json')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'rules_json')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'取值约束（JSON 对象：minLength/maxLength/minimum/maximum/pattern/enumValues）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'rules_json';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'sort_order')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'sort_order')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'表单渲染顺序',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'sort_order';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'schema_version')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'schema_version')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'参数规范版本（对外 ParameterSchema.version；0 = 该版本未声明参数）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'schema_version';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_process_parameter') and name = N'updated_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_process_parameter') and c.name = N'updated_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'物化时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_process_parameter',
+        @level2type = N'COLUMN', @level2name = N'updated_at';
+go
+
+if object_id('nb_parameter_snapshot', 'U') is not null
+    and not exists (select 1 from sys.extended_properties where name = N'MS_Description'
+        and major_id = object_id('nb_parameter_snapshot') and minor_id = 0)
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'参数修订历史（append-only）：每次参数变化落一版，revision 在实例内单调递增',
+        @level0type = N'SCHEMA', @level0name = N'dbo',
+        @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot';
+go
+
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'process_instance_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'process_instance_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程实例 id（= 根执行 id）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'process_instance_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'revision')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'revision')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'实例内单调修订号（从 1 开始）；主键 (process_instance_id, revision) 保证单调',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'revision';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'tenant_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'tenant_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'租户（平台表一律带租户，便于按租户归档 / 清理）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'tenant_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'process_key')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'process_key')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'流程 key（写入时定稿）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'process_key';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'source')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'source')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'来源 START/SUBMIT/ADMIN（谁引起的这次修订，审计要看得出）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'source';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'task_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'task_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'引起修订的任务 id（发起时为空）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'task_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'activity_id')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'activity_id')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'引起修订的环节 id',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'activity_id';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'values_json')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'values_json')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'修订后的参数值（JSON 对象，键 = ParameterDefinition.apiName，值一律字符串）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'values_json';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'updated_at')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'updated_at')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'修订时间（UTC）',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'updated_at';
+go
+if exists (select 1 from sys.columns
+    where object_id = object_id('nb_parameter_snapshot') and name = N'updated_by')
+    and not exists (select 1 from sys.extended_properties ep
+        join sys.columns c on c.object_id = ep.major_id and c.column_id = ep.minor_id
+        where ep.name = N'MS_Description' and ep.major_id = object_id('nb_parameter_snapshot') and c.name = N'updated_by')
+    exec sp_addextendedproperty @name = N'MS_Description', @value = N'修订人（令牌 subject）；纯服务令牌产生的修订为空',
+        @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'nb_parameter_snapshot',
+        @level2type = N'COLUMN', @level2name = N'updated_by';
 go
 
 if object_id('nb_external_task', 'U') is not null

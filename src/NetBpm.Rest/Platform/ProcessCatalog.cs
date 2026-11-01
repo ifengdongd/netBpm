@@ -83,6 +83,23 @@ public interface IProcessCatalog
         RequestContext context,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// 查某一版定义的参数规范（历史实例按当时契约渲染）。
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="version"/> 为空等同于查当前生效版本。索引里没有该版本时退回当前派生结果：
+    /// 「查不到那一版」不该让参数面板整体空白。
+    /// </remarks>
+    /// <param name="processKey">流程 key。</param>
+    /// <param name="version">定义版本；为空表示当前生效版本。</param>
+    /// <param name="context">调用方身份。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<ParameterSchema?> GetParameterSchemaAsync(
+        string processKey,
+        int? version,
+        RequestContext context,
+        CancellationToken ct = default);
+
     /// <summary>渲染流程图（SVG）。<paramref name="version"/> 为空表示当前生效版本。</summary>
     /// <param name="processKey">流程 key。</param>
     /// <param name="version">版本号。</param>
@@ -124,27 +141,32 @@ public sealed class ProcessCatalog : IProcessCatalog
 
     private readonly IProcessEngine _engine;
     private readonly IProcessCatalogStore _store;
+    private readonly IProcessParameterStore _parameters;
     private readonly IMemoryCache _cache;
     private readonly ILogger<ProcessCatalog> _logger;
 
     /// <summary>构造。</summary>
     /// <param name="engine">引擎门面（定义真源）。</param>
     /// <param name="store">目录覆盖表。</param>
+    /// <param name="parameters">参数规范索引（<c>nb_process_parameter</c>：派生结果的物化）。</param>
     /// <param name="cache">派生结果缓存（BPMN 解析不便宜，列表页会反复用到）。</param>
     /// <param name="logger">日志。</param>
     public ProcessCatalog(
         IProcessEngine engine,
         IProcessCatalogStore store,
+        IProcessParameterStore parameters,
         IMemoryCache cache,
         ILogger<ProcessCatalog> logger)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(cache);
         ArgumentNullException.ThrowIfNull(logger);
 
         _engine = engine;
         _store = store;
+        _parameters = parameters;
         _cache = cache;
         _logger = logger;
     }
@@ -303,8 +325,121 @@ public sealed class ProcessCatalog : IProcessCatalog
             return null;
         }
 
+        // 顺带把派生结果物化到 nb_process_parameter：这张表是「索引」，不是真源，
+        // 因此这里**返回派生值**（BPMN 改了就必须立刻生效），落库只是让历史版本有据可查。
+        await MaterializeAsync(
+            context.EffectiveTenantId,
+            current.Definition.Version,
+            current.Derived.ParameterSchema,
+            ct).ConfigureAwait(false);
+
         return current.Derived.ParameterSchema;
     }
+
+    /// <inheritdoc />
+    public async ValueTask<ParameterSchema?> GetParameterSchemaAsync(
+        string processKey,
+        int? version,
+        RequestContext context,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processKey);
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (version is not { } wanted)
+        {
+            return await GetParameterSchemaAsync(processKey, context, ct).ConfigureAwait(false);
+        }
+
+        // 历史实例的参数面板必须按**它当时那版定义**的声明渲染（v3 新加的参数不能出现在 v1 的单据上）。
+        // 索引里查得到就用它；查不到（老库 / 该版本还没被物化过）退回当前派生——
+        // 宁可多显示几个字段，也不能让参数面板整体空白。
+        var indexed = await TryFindIndexedAsync(
+            context.EffectiveTenantId,
+            processKey,
+            wanted,
+            ct).ConfigureAwait(false);
+
+        return indexed ?? await GetParameterSchemaAsync(processKey, context, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>读索引里的某一版参数规范；没有或读失败都返回 null（索引是加速与留痕，不是必需品）。</summary>
+    private async ValueTask<ParameterSchema?> TryFindIndexedAsync(
+        string? tenantId,
+        string processKey,
+        int definitionVersion,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await _parameters
+                .FindAsync(tenantId ?? DefaultTenantId, processKey, definitionVersion, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // 老库可能还没跑补表脚本。参数面板不该因为「索引表不存在」而不可用：
+            // 派生路径一直是在的，索引只是加速与留痕。
+            _logger.LogWarning(
+                exception,
+                "参数规范索引不可读（{ProcessKey} v{Version}）：本次退回 BPMN 派生。"
+                + "请执行 db/{Dialect}/netbpm_init.sql 补齐 nb_process_parameter。",
+                processKey,
+                definitionVersion,
+                "mysql|sqlserver");
+
+            return null;
+        }
+    }
+
+    /// <summary>把某一版定义的参数规范写进索引（整组重建，失败只记日志）。</summary>
+    /// <remarks>
+    /// 写失败<b>不影响</b>本次查询：索引不可用只是让治理查询与历史渲染少一份依据，
+    /// 而参数校验走的是派生结果，不会因为索引写不进去就放过一张不合规的单据。
+    /// </remarks>
+    private async ValueTask MaterializeAsync(
+        string? tenantId,
+        int definitionVersion,
+        ParameterSchema schema,
+        CancellationToken ct)
+    {
+        // 没声明参数的流程不落任何行：一张全是空索引的表既不能回答问题，还会让「有没有参数」
+        // 这个判断从「查不到」变成「查到了 0 行」，两件事在 SQL 层分不清。
+        if (definitionVersion <= 0 || schema.Parameters.Count == 0)
+        {
+            return;
+        }
+
+        var effectiveTenant = tenantId ?? DefaultTenantId;
+
+        try
+        {
+            // 已经物化过就跳过：目录列表页每次都会走到这里，没必要每次都开一个事务删了再插
+            var existing = await _parameters
+                .FindAsync(effectiveTenant, schema.ProcessKey, definitionVersion, ct)
+                .ConfigureAwait(false);
+
+            if (existing is not null)
+            {
+                return;
+            }
+
+            await _parameters
+                .ReplaceAsync(effectiveTenant, definitionVersion, schema, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception,
+                "参数规范索引写入失败（{ProcessKey} v{Version}）：本次仍然按 BPMN 派生结果返回。",
+                schema.ProcessKey,
+                definitionVersion);
+        }
+    }
+
+    /// <summary>无租户上下文时落库用的租户（平台表一律带租户）。</summary>
+    private const string DefaultTenantId = "default";
 
     /// <inheritdoc />
     public async ValueTask<string?> GetDiagramSvgAsync(

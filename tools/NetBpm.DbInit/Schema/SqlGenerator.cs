@@ -202,6 +202,8 @@ internal static class SqlGenerator
         SchemaCatalog.ApprovalDictionaryTable,
         SchemaCatalog.InstanceTimelineTable,
         SchemaCatalog.ApprovalSnapshotTable,
+        SchemaCatalog.ProcessParameterTable,
+        SchemaCatalog.ParameterSnapshotTable,
         SchemaCatalog.ExternalTaskTable,
         SchemaCatalog.EventSubscriptionTable,
         SchemaCatalog.EventDeliveryTable,

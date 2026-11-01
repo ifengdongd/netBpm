@@ -1920,6 +1920,58 @@ prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
 
+create table if not exists nb_process_parameter (
+    tenant_id varchar(64) not null default 'default' comment '租户',
+    process_key varchar(255) not null comment '流程 key（= BPMN process/@id）',
+    definition_version int not null default 0 comment '派生自哪一版流程定义（与 ACT_RE_PROCDEF.VERSION_ 对齐）',
+    api_name varchar(255) not null comment '对外参数名（param.{variable}，可在 netbpm:parameters/@apiName 覆盖）',
+    variable_name varchar(255) comment '镜像写入的流程变量名（裸名）；NULL = 只存档不写变量',
+    display_name varchar(255) comment '显示名',
+    type varchar(32) not null default 'STRING' comment '参数类型 STRING/LONG/DECIMAL/BOOLEAN/DATE/DATETIME/ENUM/JSON（对外 JSON 词汇，不存枚举序号）',
+    required tinyint not null default 0 comment '发起时是否必填（0/1）',
+    default_value varchar(1000) comment '默认值（字符串形式，按 type 解析）',
+    description varchar(1000) comment '说明',
+    writable_by_json varchar(1000) comment '允许写入的角色数组（JSON）；NULL = 发起时可写、之后只读',
+    visible_to_json varchar(1000) comment '可见角色数组（JSON）；NULL = 全部可见',
+    rules_json mediumtext comment '取值约束（JSON 对象：minLength/maxLength/minimum/maximum/pattern/enumValues）',
+    sort_order int not null default 0 comment '表单渲染顺序',
+    schema_version int not null default 0 comment '参数规范版本（对外 ParameterSchema.version；0 = 该版本未声明参数）',
+    updated_at datetime(3) not null comment '物化时间（UTC）',
+    primary key (tenant_id, process_key, definition_version, api_name),
+    index ix_nb_process_parameter_variable (tenant_id, variable_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='流程参数规范索引：按定义版本物化 BPMN 声明的参数（真源仍是 BPMN，此表让历史实例按当时契约渲染）';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_process_parameter_variable on nb_process_parameter (tenant_id, variable_name)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_process_parameter' and index_name = 'ix_nb_process_parameter_variable');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+create table if not exists nb_parameter_snapshot (
+    process_instance_id varchar(64) not null comment '流程实例 id（= 根执行 id）',
+    revision bigint not null comment '实例内单调修订号（从 1 开始）；主键 (process_instance_id, revision) 保证单调',
+    tenant_id varchar(64) not null default 'default' comment '租户（平台表一律带租户，便于按租户归档 / 清理）',
+    process_key varchar(255) comment '流程 key（写入时定稿）',
+    source varchar(32) not null default 'SUBMIT' comment '来源 START/SUBMIT/ADMIN（谁引起的这次修订，审计要看得出）',
+    task_id varchar(64) comment '引起修订的任务 id（发起时为空）',
+    activity_id varchar(255) comment '引起修订的环节 id',
+    values_json mediumtext not null comment '修订后的参数值（JSON 对象，键 = ParameterDefinition.apiName，值一律字符串）',
+    updated_at datetime(3) not null comment '修订时间（UTC）',
+    updated_by varchar(255) comment '修订人（令牌 subject）；纯服务令牌产生的修订为空',
+    primary key (process_instance_id, revision),
+    index ix_nb_parameter_snapshot_updated (tenant_id, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='参数修订历史（append-only）：每次参数变化落一版，revision 在实例内单调递增';
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_parameter_snapshot_updated on nb_parameter_snapshot (tenant_id, updated_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_parameter_snapshot' and index_name = 'ix_nb_parameter_snapshot_updated');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
 create table if not exists nb_external_task (
     id varchar(64) not null comment '主键',
     process_instance_id varchar(64) not null comment '流程实例 id（= 根执行 id）',

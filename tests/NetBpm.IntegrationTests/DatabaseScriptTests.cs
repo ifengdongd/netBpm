@@ -79,9 +79,14 @@ public sealed partial class DatabaseScriptTests
         "nb_api_client",
         "nb_client_process_grant",
         "nb_process_catalog",
+        "nb_process_parameter",
         "nb_approval_dictionary",
+        "nb_approval_snapshot",
+        "nb_parameter_snapshot",
         "nb_instance_timeline",
         "nb_external_task",
+        "nb_event_subscription",
+        "nb_event_delivery",
     ];
 
     [Theory]

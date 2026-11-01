@@ -1080,6 +1080,86 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: false);
 
+    // 参数规范索引（见 docs/platform-api-refactoring-plan.md §7.1）
+    //
+    // 真源仍是 BPMN（formProperty + netbpm:parameters）：这张表是**派生结果的物化**。
+    // 主键带 definition_version，因此它保存的是「每一版定义各自声明了什么参数」——
+    // 这不是冗余，而是历史单据的唯一解释：实例停在 v1、流程已升到 v3 时，
+    // 只有按 v1 的声明渲染参数面板，才不会把 v3 新加的字段显示成「空值」。
+    // （与表单快照 nb_approval_snapshot 同一条理由，区别是这里按定义版本而不是按任务冻。）
+    //
+    // 写入规矩：同一 (租户, key, 版本) 整组重建，**旧版本的行不删**——删掉等于抹掉历史契约。
+    internal static readonly TableDef ProcessParameterTable = new(
+        "nb_process_parameter",
+        "流程参数规范索引：按定义版本物化 BPMN 声明的参数（真源仍是 BPMN，此表让历史实例按当时契约渲染）",
+        [
+            C("tenant_id", ColType.Varchar, 64, false, def: "'default'", comment: "租户"),
+            C("process_key", ColType.Varchar, 255, false, comment: "流程 key（= BPMN process/@id）"),
+            C("definition_version", ColType.Int, nullable: false, def: "0",
+                comment: "派生自哪一版流程定义（与 ACT_RE_PROCDEF.VERSION_ 对齐）"),
+            C("api_name", ColType.Varchar, 255, false,
+                comment: "对外参数名（param.{variable}，可在 netbpm:parameters/@apiName 覆盖）"),
+            C("variable_name", ColType.Varchar, 255, comment: "镜像写入的流程变量名（裸名）；NULL = 只存档不写变量"),
+            C("display_name", ColType.Varchar, 255, comment: "显示名"),
+            C("type", ColType.Varchar, 32, false, def: "'STRING'",
+                comment: "参数类型 STRING/LONG/DECIMAL/BOOLEAN/DATE/DATETIME/ENUM/JSON（对外 JSON 词汇，不存枚举序号）"),
+            C("required", ColType.TinyInt, nullable: false, def: "0", comment: "发起时是否必填（0/1）"),
+            C("default_value", ColType.Varchar, 1000, comment: "默认值（字符串形式，按 type 解析）"),
+            C("description", ColType.Varchar, 1000, comment: "说明"),
+            C("writable_by_json", ColType.Varchar, 1000,
+                comment: "允许写入的角色数组（JSON）；NULL = 发起时可写、之后只读"),
+            C("visible_to_json", ColType.Varchar, 1000, comment: "可见角色数组（JSON）；NULL = 全部可见"),
+            C("rules_json", ColType.MediumText,
+                comment: "取值约束（JSON 对象：minLength/maxLength/minimum/maximum/pattern/enumValues）"),
+            C("sort_order", ColType.Int, nullable: false, def: "0", comment: "表单渲染顺序"),
+            C("schema_version", ColType.Int, nullable: false, def: "0",
+                comment: "参数规范版本（对外 ParameterSchema.version；0 = 该版本未声明参数）"),
+            C("updated_at", ColType.DateTime3, nullable: false, comment: "物化时间（UTC）"),
+        ],
+        ["tenant_id", "process_key", "definition_version", "api_name"],
+        [
+            // 反向查询：某个变量名被哪些流程 / 版本声明（改 BPMN 前的兼容性排查）
+            new IndexDef("ix_nb_process_parameter_variable", ["tenant_id", "variable_name"]),
+        ],
+        [], [],
+        EngineCharset: false);
+
+    // 参数修订历史（见 docs/platform-api-refactoring-plan.md §7.1）
+    //
+    // 与「实例变量」的分工：ACT_RU_VARIABLE 是**当前状态**（且随实例结束而消失），
+    // 这张表是**提交记录**——只增不改，回答「谁在第几步把金额从多少改成了多少」。
+    //
+    // 键是 (process_instance_id, revision)：revision 由存储侧分配（读 max + 1，撞唯一键重试），
+    // 单调性由主键物理保证；调用方的增量拉取游标就是它。
+    //
+    // 只落「有参数」的提交：没有参数变化就不写行，否则一张表会被无参数的审批流水刷满。
+    internal static readonly TableDef ParameterSnapshotTable = new(
+        "nb_parameter_snapshot",
+        "参数修订历史（append-only）：每次参数变化落一版，revision 在实例内单调递增",
+        [
+            C("process_instance_id", ColType.Varchar, 64, false, comment: "流程实例 id（= 根执行 id）"),
+            C("revision", ColType.BigInt, nullable: false,
+                comment: "实例内单调修订号（从 1 开始）；主键 (process_instance_id, revision) 保证单调"),
+            C("tenant_id", ColType.Varchar, 64, false, def: "'default'",
+                comment: "租户（平台表一律带租户，便于按租户归档 / 清理）"),
+            C("process_key", ColType.Varchar, 255, comment: "流程 key（写入时定稿）"),
+            C("source", ColType.Varchar, 32, nullable: false, def: "'SUBMIT'",
+                comment: "来源 START/SUBMIT/ADMIN（谁引起的这次修订，审计要看得出）"),
+            C("task_id", ColType.Varchar, 64, comment: "引起修订的任务 id（发起时为空）"),
+            C("activity_id", ColType.Varchar, 255, comment: "引起修订的环节 id"),
+            C("values_json", ColType.MediumText, nullable: false,
+                comment: "修订后的参数值（JSON 对象，键 = ParameterDefinition.apiName，值一律字符串）"),
+            C("updated_at", ColType.DateTime3, nullable: false, comment: "修订时间（UTC）"),
+            C("updated_by", ColType.Varchar, 255, comment: "修订人（令牌 subject）；纯服务令牌产生的修订为空"),
+        ],
+        ["process_instance_id", "revision"],
+        [
+            // 保留期清理与按租户归档都按时间走
+            new IndexDef("ix_nb_parameter_snapshot_updated", ["tenant_id", "updated_at"]),
+        ],
+        [], [],
+        EngineCharset: false);
+
     // 0014 外部任务表（`activiti:topic` 的等待点）
     internal static readonly TableDef ExternalTaskTable = new(
         "nb_external_task",

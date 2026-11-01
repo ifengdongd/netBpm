@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.History;
 using NetBpm.Persistence.Deployment;
+using NetBpm.Persistence.Platform;
 using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
@@ -51,6 +52,25 @@ public interface IInstanceCatalog
         string instanceId,
         RequestContext context,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 查实例的参数修订历史（<c>GET /instances/{id}/parameters/history</c>），修订号倒序。
+    /// </summary>
+    /// <remarks>
+    /// 回答的是「谁在第几步把金额改成了多少」：引擎变量只有<b>当前值</b>，
+    /// 而审计要看的是过程。历史由 <c>nb_parameter_snapshot</c> 提供（append-only）。
+    /// 值同样过 <c>visibleTo</c>：不给看的人连历史里的那一栏都不该出现。
+    /// 不存在 / 未授权返回 <see langword="null"/>，与 <see cref="FindAsync"/> 同口径。
+    /// </remarks>
+    /// <param name="instanceId">流程实例 id。</param>
+    /// <param name="limit">最多返回多少版（最近的在前）。</param>
+    /// <param name="context">调用方身份。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<IReadOnlyList<ParameterSnapshot>?> GetParameterHistoryAsync(
+        string instanceId,
+        int limit,
+        RequestContext context,
+        CancellationToken ct = default);
 }
 
 /// <inheritdoc />
@@ -75,6 +95,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
     private readonly ITaskCatalog _taskCatalog;
     private readonly IProcessCatalog _processCatalog;
     private readonly IInstanceParticipation _participation;
+    private readonly IParameterSnapshotStore _parameterSnapshots;
     private readonly ILogger<InstanceCatalog> _logger;
 
     /// <summary>构造。</summary>
@@ -84,6 +105,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
     /// <param name="taskCatalog">待办读模型（实例上的待办视图单一出口）。</param>
     /// <param name="processCatalog">流程目录（参数规范：<c>visibleTo</c> 的依据）。</param>
     /// <param name="participation">参与者索引（判定这位真人是申请人还是审批人）。</param>
+    /// <param name="parameterSnapshots">参数修订历史（<c>nb_parameter_snapshot</c>：回答「谁在第几步改了什么」）。</param>
     /// <param name="logger">日志。</param>
     public InstanceCatalog(
         IProcessEngine engine,
@@ -92,6 +114,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
         ITaskCatalog taskCatalog,
         IProcessCatalog processCatalog,
         IInstanceParticipation participation,
+        IParameterSnapshotStore parameterSnapshots,
         ILogger<InstanceCatalog> logger)
     {
         ArgumentNullException.ThrowIfNull(engine);
@@ -100,6 +123,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
         ArgumentNullException.ThrowIfNull(taskCatalog);
         ArgumentNullException.ThrowIfNull(processCatalog);
         ArgumentNullException.ThrowIfNull(participation);
+        ArgumentNullException.ThrowIfNull(parameterSnapshots);
         ArgumentNullException.ThrowIfNull(logger);
 
         _engine = engine;
@@ -108,6 +132,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
         _taskCatalog = taskCatalog;
         _processCatalog = processCatalog;
         _participation = participation;
+        _parameterSnapshots = parameterSnapshots;
         _logger = logger;
     }
 
@@ -178,6 +203,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
             Parameters: await BuildParameterSnapshotAsync(
                 processKey,
                 instanceId,
+                definition?.Version,
                 revision,
                 variables,
                 startedBy,
@@ -203,7 +229,12 @@ public sealed class InstanceCatalog : IInstanceCatalog
             return null;
         }
 
-        var declared = await TryLoadSchemaAsync(view.ProcessKey, context, ct).ConfigureAwait(false);
+        // 按「实例停在的那一版定义」取参数声明：流程升级后 v1 的单据不该显示 v3 新加的字段
+        var declared = await TryLoadSchemaAsync(
+            view.ProcessKey,
+            view.DefinitionVersion,
+            context,
+            ct).ConfigureAwait(false);
         var roles = await ResolveViewerRolesAsync(instanceId, view.StartedBy, context, ct).ConfigureAwait(false);
         var hidden = declared is null ? [] : ComputeHidden(declared, roles);
 
@@ -286,6 +317,79 @@ public sealed class InstanceCatalog : IInstanceCatalog
             Parameters: rows);
     }
 
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<ParameterSnapshot>?> GetParameterHistoryAsync(
+        string instanceId,
+        int limit,
+        RequestContext context,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // 存在性 / 可见性复用详情读模型：能看详情才能看它的参数历史，两处判定不能各写一套
+        var view = await FindAsync(instanceId, context, ct).ConfigureAwait(false);
+
+        if (view is null)
+        {
+            return null;
+        }
+
+        var declared = await TryLoadSchemaAsync(
+            view.ProcessKey,
+            view.DefinitionVersion,
+            context,
+            ct).ConfigureAwait(false);
+        var roles = await ResolveViewerRolesAsync(instanceId, view.StartedBy, context, ct).ConfigureAwait(false);
+        var hidden = declared is null ? [] : ComputeHidden(declared, roles);
+
+        IReadOnlyList<ParameterSnapshotRecord> records;
+
+        try
+        {
+            records = await _parameterSnapshots.ListAsync(instanceId, limit, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // 老库可能还没跑补表脚本：历史读不出来就返回空，而不是让整张审批页 500
+            _logger.LogWarning(
+                exception,
+                "参数修订历史不可读（{InstanceId}）：本次返回空历史。"
+                + "请执行 db/{Dialect}/netbpm_init.sql 补齐 nb_parameter_snapshot。",
+                instanceId,
+                "mysql|sqlserver");
+
+            return [];
+        }
+
+        return [.. records.Select(record => new ParameterSnapshot(
+            InstanceId: record.InstanceId,
+            Revision: record.Revision,
+            Values: FilterHidden(record.Values, hidden),
+            UpdatedAt: record.UpdatedAt,
+            UpdatedBy: record.UpdatedBy))];
+    }
+
+    /// <summary>把 <c>visibleTo</c> 不满足的参数从历史值里摘掉（声明里的两种叫法都要摘）。</summary>
+    private static Dictionary<string, string?> FilterHidden(
+        IReadOnlyDictionary<string, string?> values,
+        HashSet<string> hidden)
+    {
+        var result = new Dictionary<string, string?>(values.Count, StringComparer.Ordinal);
+
+        foreach (var (name, value) in values)
+        {
+            if (hidden.Contains(name))
+            {
+                continue;
+            }
+
+            result[name] = value;
+        }
+
+        return result;
+    }
+
     /// <summary>解析流程定义（拿 key / 名称 / 版本）；失败时降级为按定义 id 解析 key。</summary>
     private async ValueTask<ProcessDefinition?> ResolveDefinitionAsync(
         string processDefinitionId,
@@ -353,9 +457,18 @@ public sealed class InstanceCatalog : IInstanceCatalog
     /// 独立部署下业务参数以裸名镜像进引擎变量（§4.3），因此这里从变量快照直接派生。
     /// <c>revision</c> 沿用实例修订号（参数本身没有独立计数器）；<c>UpdatedBy</c> 本轮不追溯。
     /// </remarks>
+    /// <param name="processKey">流程 key。</param>
+    /// <param name="instanceId">实例 id。</param>
+    /// <param name="definitionVersion">实例停在的定义版本（决定用哪一版参数声明做可见性过滤）。</param>
+    /// <param name="revision">实例修订号。</param>
+    /// <param name="variables">引擎变量快照。</param>
+    /// <param name="startedBy">发起人（判定 APPLICANT 角色）。</param>
+    /// <param name="context">调用方身份。</param>
+    /// <param name="ct">取消令牌。</param>
     private async ValueTask<ParameterSnapshot> BuildParameterSnapshotAsync(
         string processKey,
         string instanceId,
+        int? definitionVersion,
         long revision,
         Dictionary<string, object?> variables,
         string? startedBy,
@@ -364,6 +477,7 @@ public sealed class InstanceCatalog : IInstanceCatalog
     {
         var hidden = await LoadHiddenParametersAsync(
             processKey,
+            definitionVersion,
             instanceId,
             variables,
             startedBy,
@@ -416,13 +530,14 @@ public sealed class InstanceCatalog : IInstanceCatalog
     /// </remarks>
     private async ValueTask<HashSet<string>> LoadHiddenParametersAsync(
         string processKey,
+        int? definitionVersion,
         string instanceId,
         Dictionary<string, object?> variables,
         string? startedBy,
         RequestContext context,
         CancellationToken ct)
     {
-        var declared = await TryLoadSchemaAsync(processKey, context, ct).ConfigureAwait(false);
+        var declared = await TryLoadSchemaAsync(processKey, definitionVersion, context, ct).ConfigureAwait(false);
 
         if (declared is null || declared.Parameters.Count == 0 || variables.Count == 0)
         {
@@ -482,13 +597,14 @@ public sealed class InstanceCatalog : IInstanceCatalog
     /// <summary>取参数规范；读不到一律返回 null（由调用方决定降级，这里不抛）。</summary>
     private async ValueTask<ParameterSchema?> TryLoadSchemaAsync(
         string processKey,
+        int? definitionVersion,
         RequestContext context,
         CancellationToken ct)
     {
         try
         {
             return await _processCatalog
-                .GetParameterSchemaAsync(processKey, context, ct)
+                .GetParameterSchemaAsync(processKey, definitionVersion, context, ct)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

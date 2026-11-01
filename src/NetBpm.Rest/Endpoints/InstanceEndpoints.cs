@@ -21,6 +21,12 @@ namespace NetBpm.Rest.Endpoints;
 /// </remarks>
 public static class InstanceEndpoints
 {
+    /// <summary>参数修订历史的默认条数（审批页「展开看历史」够用，又不至于一次拉全部）。</summary>
+    private const int DefaultParameterHistoryLimit = 20;
+
+    /// <summary>参数修订历史的单次上限。</summary>
+    private const int MaxParameterHistoryLimit = 200;
+
     /// <summary>注册实例端点。</summary>
     /// <param name="endpoints">端点构建器。</param>
     public static IEndpointRouteBuilder MapInstanceEndpoints(this IEndpointRouteBuilder endpoints)
@@ -44,6 +50,12 @@ public static class InstanceEndpoints
 
         group.MapGet("/instances/{instanceId}/parameters", ParametersAsync)
             .Produces<InstanceParameterView>()
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
+
+        // 参数修订历史：引擎变量只有当前值，审计要的是「谁在第几步改成了多少」
+        group.MapGet("/instances/{instanceId}/parameters/history", ParameterHistoryAsync)
+            .Produces<IReadOnlyList<ParameterSnapshot>>()
+            .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
             .Produces<PlatformProblem>(StatusCodes.Status404NotFound);
 
         // 流转状态图直接给 SVG：浏览器 / <img> 就能显示，调用方不必引入 BPMN 渲染库
@@ -279,6 +291,54 @@ public static class InstanceEndpoints
         return view is null
             ? PlatformProblems.InstanceNotFound(http, context, instanceId)
             : Results.Ok(view);
+    }
+
+    /// <summary>
+    /// 实例的<b>参数修订历史</b>（<c>GET /instances/{id}/parameters/history</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 参数是「提交记录」而不是「当前状态」：同一次审批里把金额从 3 万改成 5 万，
+    /// 引擎变量只能告诉你现在是 5 万，而这里能告诉你第几步、被谁、从多少改成多少。
+    /// </para>
+    /// <para>
+    /// 修订号倒序（最近的在前），<c>limit</c> 缺省 20、上限 200：这是一条给审批页「展开看历史」用的接口，
+    /// 不是导出接口。值同样过 <c>visibleTo</c>，不给看的人连历史里那一栏都不出现。
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> ParameterHistoryAsync(
+        string instanceId,
+        int? limit,
+        HttpContext http,
+        RequestContext context,
+        IInstanceCatalog catalog,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.InstanceRead))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.InstanceRead);
+        }
+
+        var take = limit ?? DefaultParameterHistoryLimit;
+
+        if (take <= 0 || take > MaxParameterHistoryLimit)
+        {
+            return PlatformProblems.Create(
+                http,
+                context,
+                ErrorCodes.RequestMalformed,
+                "查询参数不合法",
+                StatusCodes.Status400BadRequest,
+                $"limit 的取值必须在 1..{MaxParameterHistoryLimit} 之间，实际为 {take}。");
+        }
+
+        var history = await catalog
+            .GetParameterHistoryAsync(instanceId, take, context, ct)
+            .ConfigureAwait(false);
+
+        return history is null
+            ? PlatformProblems.InstanceNotFound(http, context, instanceId)
+            : Results.Ok(history);
     }
 
     /// <summary>

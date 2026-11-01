@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using NetBpm.Engine;
+using NetBpm.Persistence.Platform;
 using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
@@ -46,6 +47,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
     private readonly IInstanceCatalog _instanceCatalog;
     private readonly IApprovalTimeline _timeline;
     private readonly IApprovalSnapshot _snapshots;
+    private readonly IParameterSnapshotStore _parameterSnapshots;
     private readonly IProcessCatalog _processCatalog;
     private readonly ILogger<TaskSubmitService> _logger;
 
@@ -55,6 +57,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
     /// <param name="instanceCatalog">实例读模型（提交结果的 Instance 单一出口）。</param>
     /// <param name="timeline">审批记录时间线（写 <c>TASK_COMPLETED</c> 与结束条目）。</param>
     /// <param name="snapshots">表单快照（冻住「当时的字段定义 + 值」）。</param>
+    /// <param name="parameterSnapshots">参数修订历史（这次提交改了哪些参数）。</param>
     /// <param name="processCatalog">流程目录（参数规范：写侧按 <c>writableBy</c> 拒绝）。</param>
     /// <param name="logger">日志。</param>
     public TaskSubmitService(
@@ -63,6 +66,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         IInstanceCatalog instanceCatalog,
         IApprovalTimeline timeline,
         IApprovalSnapshot snapshots,
+        IParameterSnapshotStore parameterSnapshots,
         IProcessCatalog processCatalog,
         ILogger<TaskSubmitService> logger)
     {
@@ -71,6 +75,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         ArgumentNullException.ThrowIfNull(instanceCatalog);
         ArgumentNullException.ThrowIfNull(timeline);
         ArgumentNullException.ThrowIfNull(snapshots);
+        ArgumentNullException.ThrowIfNull(parameterSnapshots);
         ArgumentNullException.ThrowIfNull(processCatalog);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -79,6 +84,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         _instanceCatalog = instanceCatalog;
         _timeline = timeline;
         _snapshots = snapshots;
+        _parameterSnapshots = parameterSnapshots;
         _processCatalog = processCatalog;
         _logger = logger;
     }
@@ -147,7 +153,52 @@ public sealed class TaskSubmitService : ITaskSubmitService
                 $"待办 '{taskId}' 已被办结。");
         }
 
+        // 任务已办结：参数变更另起一版修订（写失败不阻断——审批结论已经落地，
+        // 这里抛错只会让调用方重试一次早已生效的提交）
+        await AppendParameterRevisionAsync(view, request, context, ct).ConfigureAwait(false);
+
         return await BuildResultAsync(view, option, request, context, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>把这次提交携带的参数落成新一版修订（没有参数就什么都不写）。</summary>
+    /// <remarks>
+    /// 只记<b>本次提交的</b>参数，不把整份变量快照拍一遍：修订的语义是「这一次改了什么」，
+    /// 每版都存全量会让「谁改了什么」重新变成一个需要 diff 才知道答案的问题。
+    /// </remarks>
+    private async ValueTask AppendParameterRevisionAsync(
+        TaskView view,
+        SubmitTaskRequest request,
+        RequestContext context,
+        CancellationToken ct)
+    {
+        if (request.Parameters is not { Count: > 0 } parameters)
+        {
+            return;
+        }
+
+        try
+        {
+            await _parameterSnapshots.AppendAsync(
+                new ParameterRevision(
+                    InstanceId: view.InstanceId,
+                    TenantId: context.EffectiveTenantId ?? "default",
+                    ProcessKey: view.ProcessKey,
+                    Source: ParameterRevisionSources.Submit,
+                    TaskId: view.TaskId,
+                    ActivityId: view.ActivityId,
+                    Values: parameters,
+                    UpdatedAt: DateTimeOffset.UtcNow,
+                    UpdatedBy: context.SubjectId),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception,
+                "参数修订历史写入失败（{InstanceId} / 任务 {TaskId}）：审批已生效，但这次参数变更没有留痕。",
+                view.InstanceId,
+                view.TaskId);
+        }
     }
 
     /// <summary>在服务端已算好的选项集里找调用方回传的选项；没有就是 422。</summary>

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using NetBpm.Engine;
+using NetBpm.Persistence.Platform;
 using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
@@ -80,6 +81,7 @@ public sealed class InstanceStartService : IInstanceStartService
     private readonly IInstanceCatalog _instanceCatalog;
     private readonly IBusinessKeyGenerator _businessKeys;
     private readonly IApprovalTimeline _timeline;
+    private readonly IParameterSnapshotStore _parameterSnapshots;
     private readonly ILogger<InstanceStartService> _logger;
 
     /// <summary>构造。</summary>
@@ -88,6 +90,7 @@ public sealed class InstanceStartService : IInstanceStartService
     /// <param name="instanceCatalog">实例读模型（结果的 Instance 单一出口）。</param>
     /// <param name="businessKeys">业务主键发号器。</param>
     /// <param name="timeline">审批记录时间线（写 <c>INSTANCE_STARTED</c>）。</param>
+    /// <param name="parameterSnapshots">参数修订历史（落第 1 版：发起时填了什么）。</param>
     /// <param name="logger">日志。</param>
     public InstanceStartService(
         IProcessEngine engine,
@@ -95,6 +98,7 @@ public sealed class InstanceStartService : IInstanceStartService
         IInstanceCatalog instanceCatalog,
         IBusinessKeyGenerator businessKeys,
         IApprovalTimeline timeline,
+        IParameterSnapshotStore parameterSnapshots,
         ILogger<InstanceStartService> logger)
     {
         ArgumentNullException.ThrowIfNull(engine);
@@ -102,6 +106,7 @@ public sealed class InstanceStartService : IInstanceStartService
         ArgumentNullException.ThrowIfNull(instanceCatalog);
         ArgumentNullException.ThrowIfNull(businessKeys);
         ArgumentNullException.ThrowIfNull(timeline);
+        ArgumentNullException.ThrowIfNull(parameterSnapshots);
         ArgumentNullException.ThrowIfNull(logger);
 
         _engine = engine;
@@ -109,6 +114,7 @@ public sealed class InstanceStartService : IInstanceStartService
         _instanceCatalog = instanceCatalog;
         _businessKeys = businessKeys;
         _timeline = timeline;
+        _parameterSnapshots = parameterSnapshots;
         _logger = logger;
     }
 
@@ -201,9 +207,53 @@ public sealed class InstanceStartService : IInstanceStartService
             context,
             ct).ConfigureAwait(false);
 
+        // 参数第 1 版：发起时填了什么。写失败不阻断（与时间线同一条规矩：
+        // 实例已经起来了，这时候抛错只会让调用方以为没发起成功）。
+        await AppendParameterRevisionAsync(instanceId, request, context, ct).ConfigureAwait(false);
+
         var instance = await _instanceCatalog.FindAsync(instanceId, context, ct).ConfigureAwait(false);
 
         return new StartInstanceResult(instanceId, request.ProcessKey, businessKey, instance);
+    }
+
+    /// <summary>把发起时填的参数落成第 1 版修订（没有参数就什么都不写）。</summary>
+    /// <remarks>
+    /// 只落<b>调用方实际提交的</b>参数，不落「默认值 / 派生值」：修订历史的语义是
+    /// 「谁在第几步把值改成了什么」，把引擎自动带的默认值写进去只会让第 1 版变得没有信息量。
+    /// </remarks>
+    private async ValueTask AppendParameterRevisionAsync(
+        string instanceId,
+        StartInstanceRequest request,
+        RequestContext context,
+        CancellationToken ct)
+    {
+        if (request.Parameters is not { Count: > 0 } parameters)
+        {
+            return;
+        }
+
+        try
+        {
+            await _parameterSnapshots.AppendAsync(
+                new ParameterRevision(
+                    InstanceId: instanceId,
+                    TenantId: context.EffectiveTenantId ?? "default",
+                    ProcessKey: request.ProcessKey,
+                    Source: ParameterRevisionSources.Start,
+                    TaskId: null,
+                    ActivityId: null,
+                    Values: parameters,
+                    UpdatedAt: DateTimeOffset.UtcNow,
+                    UpdatedBy: context.SubjectId),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception,
+                "参数修订历史写入失败（{InstanceId} 发起）：审批可以继续，但这一次的参数值没有留痕。",
+                instanceId);
+        }
     }
 
     /// <summary>按目录状态判定能否发起；Draft/Retired/Suspended 都拒绝，入口标识必须存在。</summary>
