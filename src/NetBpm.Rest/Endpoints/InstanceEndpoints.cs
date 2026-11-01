@@ -50,6 +50,13 @@ public static class InstanceEndpoints
             .Produces<PlatformProblem>(StatusCodes.Status409Conflict)
             .Produces<PlatformProblem>(StatusCodes.Status422UnprocessableEntity);
 
+        group.MapPost("/instances/{instanceId}/terminate", TerminateAsync)
+            .Produces<InstanceView>()
+            .Produces<PlatformProblem>(StatusCodes.Status403Forbidden)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound)
+            .Produces<PlatformProblem>(StatusCodes.Status409Conflict)
+            .Produces<PlatformProblem>(StatusCodes.Status422UnprocessableEntity);
+
         return endpoints;
     }
 
@@ -251,6 +258,49 @@ public static class InstanceEndpoints
             return Results.Created($"/workflow/v1/instances/{result.InstanceId}", result);
         }
         catch (StartInstanceException exception)
+        {
+            return PlatformProblems.Create(
+                http,
+                context,
+                exception.Code,
+                exception.Title,
+                exception.Status,
+                exception.Detail);
+        }
+    }
+
+    /// <summary>
+    /// 终止流程实例（<c>workflow:instance:terminate</c>，高危 scope，单独授予）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 终止原因<b>必填</b>：它会原样进审批记录。允许「无理由终止」等于允许在审计里
+    /// 留下一句「不知为何这张单没了」。
+    /// </para>
+    /// <para>
+    /// 返回体是终止后的 <see cref="InstanceView"/>：调用方不用再发一次详情请求
+    /// 才能刷新页面上的状态与待办列表（那两次请求之间实例可能又被别人改过）。
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> TerminateAsync(
+        string instanceId,
+        TerminateInstanceRequest request,
+        HttpContext http,
+        RequestContext context,
+        IInstanceTermination termination,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.InstanceTerminate))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.InstanceTerminate);
+        }
+
+        try
+        {
+            return Results.Ok(await termination.TerminateAsync(instanceId, request, context, ct)
+                .ConfigureAwait(false));
+        }
+        catch (PlatformActionRejectedException exception)
         {
             return PlatformProblems.Create(
                 http,

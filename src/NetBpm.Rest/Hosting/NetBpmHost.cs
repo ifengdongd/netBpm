@@ -159,6 +159,12 @@ public static class NetBpmHost
         // 平台业务面：发起流程编排（闸门 → 参数镜像/校验 → 发号 → 启动 → 组装结果）
         builder.Services.AddNetBpmInstanceStart();
 
+        // 平台业务面：终止实例（原因必填 + 落时间线，补上管理干预的审计断档）
+        builder.Services.AddNetBpmInstanceTermination();
+
+        // 平台业务面：待办归属调整（认领 / 取消认领 / 转办，三个动作都落时间线）
+        builder.Services.AddNetBpmTaskAssignment();
+
         // 平台业务面：审批记录时间线（append-only；写时定稿 + 老实例从引擎历史回填）
         builder.Services.AddNetBpmApprovalTimeline();
 

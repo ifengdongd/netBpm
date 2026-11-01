@@ -5,6 +5,9 @@ using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Platform;
 using NetBpm.Rest.Security;
 
+// 引擎面（NetBpm.Rest.Contracts）也有一个 ClaimTaskRequest，这里要的是平台契约的那一个。
+using PlatformClaimRequest = NetBpm.Platform.Contracts.ClaimTaskRequest;
+
 namespace NetBpm.Rest.Endpoints;
 
 /// <summary>
@@ -48,6 +51,25 @@ public static class TaskEndpoints
         group.MapPost("/tasks/{taskId}/submit", SubmitAsync)
             .Produces<SubmitTaskResult>()
             .Produces<PlatformProblem>(StatusCodes.Status400BadRequest)
+            .Produces<PlatformProblem>(StatusCodes.Status403Forbidden)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound)
+            .Produces<PlatformProblem>(StatusCodes.Status409Conflict)
+            .Produces<PlatformProblem>(StatusCodes.Status422UnprocessableEntity);
+
+        group.MapPost("/tasks/{taskId}/claim", ClaimAsync)
+            .Produces<TaskView>()
+            .Produces<PlatformProblem>(StatusCodes.Status403Forbidden)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound)
+            .Produces<PlatformProblem>(StatusCodes.Status409Conflict);
+
+        group.MapPost("/tasks/{taskId}/unclaim", UnclaimAsync)
+            .Produces<TaskView>()
+            .Produces<PlatformProblem>(StatusCodes.Status403Forbidden)
+            .Produces<PlatformProblem>(StatusCodes.Status404NotFound)
+            .Produces<PlatformProblem>(StatusCodes.Status409Conflict);
+
+        group.MapPost("/tasks/{taskId}/transfer", TransferAsync)
+            .Produces<TaskView>()
             .Produces<PlatformProblem>(StatusCodes.Status403Forbidden)
             .Produces<PlatformProblem>(StatusCodes.Status404NotFound)
             .Produces<PlatformProblem>(StatusCodes.Status409Conflict)
@@ -205,4 +227,104 @@ public static class TaskEndpoints
                 exception.Detail);
         }
     }
+
+    /// <summary>
+    /// 认领待办（把办理人设为自己）。
+    /// </summary>
+    /// <remarks>
+    /// 认领只认「还没人认领、且我在候选范围内」的待办。已被别人认领时返回 <c>409</c>
+    /// 而不是 <c>404</c>：调用方这时候<b>已经看得到</b>这条待办，
+    /// 「被谁拿走了」是它需要知道的信息，不是需要保密的信息。
+    /// </remarks>
+    private static async Task<IResult> ClaimAsync(
+        string taskId,
+        PlatformClaimRequest? request,
+        HttpContext http,
+        RequestContext context,
+        ITaskAssignment assignment,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.TaskAssign))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.TaskAssign);
+        }
+
+        try
+        {
+            return Results.Ok(await assignment.ClaimAsync(taskId, request, context, ct).ConfigureAwait(false));
+        }
+        catch (PlatformActionRejectedException exception)
+        {
+            return Rejected(http, context, exception);
+        }
+    }
+
+    /// <summary>
+    /// 取消认领（把待办退回候选池）。
+    /// </summary>
+    /// <remarks>
+    /// 只有办理人本人能放弃自己的待办；管理员要改别人的归属用 <c>transfer</c>，
+    /// 不用 unclaim —— 否则「谁放弃了这单」这条时间线会记成管理员而不是实际办理人。
+    /// </remarks>
+    private static async Task<IResult> UnclaimAsync(
+        string taskId,
+        HttpContext http,
+        RequestContext context,
+        ITaskAssignment assignment,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.TaskAssign))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.TaskAssign);
+        }
+
+        try
+        {
+            return Results.Ok(await assignment.UnclaimAsync(taskId, context, ct).ConfigureAwait(false));
+        }
+        catch (PlatformActionRejectedException exception)
+        {
+            return Rejected(http, context, exception);
+        }
+    }
+
+    /// <summary>
+    /// 转办（把待办交给指定的人，可覆盖现有办理人）。
+    /// </summary>
+    /// <remarks>
+    /// 转办比认领门槛高，因为它能覆盖别人的办理人：管理视角、当前办理人本人、或候选范围内的人才能转。
+    /// 它<b>不改认领时间</b>——被转办的人没有主动认领，把认领时间刷成新的等于伪造一次认领动作。
+    /// </remarks>
+    private static async Task<IResult> TransferAsync(
+        string taskId,
+        TransferTaskRequest request,
+        HttpContext http,
+        RequestContext context,
+        ITaskAssignment assignment,
+        CancellationToken ct)
+    {
+        if (!PlatformAuthorization.HasScope(context, PlatformScopes.TaskAssign))
+        {
+            return PlatformProblems.InsufficientScope(http, context, PlatformScopes.TaskAssign);
+        }
+
+        try
+        {
+            return Results.Ok(await assignment.TransferAsync(taskId, request, context, ct).ConfigureAwait(false));
+        }
+        catch (PlatformActionRejectedException exception)
+        {
+            return Rejected(http, context, exception);
+        }
+    }
+
+    /// <summary>把「写动作被拒」转成统一的问题响应（错误码 → 状态码的映射只写这一处）。</summary>
+    private static IResult Rejected(HttpContext http, RequestContext context, PlatformActionRejectedException exception) =>
+        PlatformProblems.Create(
+            http,
+            context,
+            exception.Code,
+            exception.Title,
+            exception.Status,
+            exception.Detail);
 }

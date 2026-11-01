@@ -3,6 +3,8 @@ using NetBpm.Engine.Command;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Migration;
 using NetBpm.Persistence.Admin;
+using NetBpm.Platform.Contracts;
+using NetBpm.Rest.Platform;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 
@@ -102,8 +104,54 @@ public interface IInstanceCommandService
 internal sealed class InstanceCommandService(
     IProcessEngine engine,
     IExecutionManager executionManager,
-    RuntimeAudit audit) : IInstanceCommandService
+    RuntimeAudit audit,
+    IApprovalTimeline timeline) : IInstanceCommandService
 {
+    /// <summary>
+    /// 给<b>管理干预</b>补一条时间线。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为什么要补：管理动作审计（<c>admin_audit_log</c>）只回答「哪个调用方在什么时候调了哪个接口」，
+    /// 它挂在调用方身上、不挂在实例上。审计真正断档的地方是<b>实例自己的时间线</b>——
+    /// 跳转 / 终止 / 挂起这些动作有授权、有审计，却在这张单的审批记录里看不到，
+    /// 于是「这张单为什么突然出现在另一个节点」只能靠人去对日志。
+    /// </para>
+    /// <para>
+    /// 写失败不阻断：<see cref="IApprovalTimeline.AppendAsync"/> 内部已经吞掉异常，
+    /// 这里再包一层只是为了让「引擎已经跳过去了但时间线没写」这件事留下一条日志。
+    /// </para>
+    /// </remarks>
+    private async ValueTask AppendInterventionAsync(
+        string processInstanceId,
+        TimelineEntryKind kind,
+        string? comment,
+        string? targetActivityId,
+        RequestContext context,
+        CancellationToken ct)
+    {
+        // 返回值只用来确认「有没有写进去」；写失败时 AppendAsync 内部已记日志，这里不再重复。
+        _ = await timeline.AppendAsync(
+            processInstanceId,
+            new TimelineEntry(
+                Sequence: 0,
+                InstanceId: processInstanceId,
+                Kind: kind,
+                ActivityId: null,
+                ActivityName: null,
+                TaskId: null,
+                ActorId: context.SubjectId,
+                ActorCallerId: null,
+                OptionId: null,
+                Semantic: null,
+                Comment: comment,
+                TargetNodeId: targetActivityId,
+                FormSnapshotTaskId: null,
+                OccurredAt: DateTimeOffset.UtcNow),
+            context,
+            ct).ConfigureAwait(false);
+    }
+
     public async Task<string> StartAsync(
         StartProcessInstanceRequest request,
         RequestContext context,
@@ -172,6 +220,16 @@ internal sealed class InstanceCommandService(
                 await engine.DeleteProcessInstanceAsync(processInstanceId, deleteReason, ct)
                     .ConfigureAwait(false);
 
+                // 撤销（删除）运行中的实例对审批流来说就是一次终止：单据不再往下走，
+                // 时间线上必须有一行说明它去哪了，否则审批记录里只剩一串没有下文的待办。
+                await AppendInterventionAsync(
+                    processInstanceId,
+                    TimelineEntryKind.InstanceTerminated,
+                    string.IsNullOrWhiteSpace(deleteReason) ? "实例被撤销（无原因）" : deleteReason,
+                    targetActivityId: null,
+                    context,
+                    ct).ConfigureAwait(false);
+
                 return true;
             },
             ct).ConfigureAwait(false);
@@ -188,6 +246,14 @@ internal sealed class InstanceCommandService(
             {
                 await engine.SuspendProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
 
+                await AppendInterventionAsync(
+                    processInstanceId,
+                    TimelineEntryKind.InstanceSuspended,
+                    "实例被挂起",
+                    targetActivityId: null,
+                    context,
+                    ct).ConfigureAwait(false);
+
                 return true;
             },
             ct).ConfigureAwait(false);
@@ -203,6 +269,14 @@ internal sealed class InstanceCommandService(
             async () =>
             {
                 await engine.ActivateProcessInstanceAsync(processInstanceId, ct).ConfigureAwait(false);
+
+                await AppendInterventionAsync(
+                    processInstanceId,
+                    TimelineEntryKind.InstanceResumed,
+                    "实例被恢复",
+                    targetActivityId: null,
+                    context,
+                    ct).ConfigureAwait(false);
 
                 return true;
             },
@@ -226,6 +300,16 @@ internal sealed class InstanceCommandService(
                 await engine
                     .MoveActivityToAsync(processInstanceId, targetActivityId, reason, ct)
                     .ConfigureAwait(false);
+
+                // 跳转会把当前待办直接删掉：这是审批流上最容易「查无对证」的一类动作，
+                // 目标节点写进 TargetNodeId，原因写进 Comment，审计才能还原「谁把单挪到了哪、为什么」。
+                await AppendInterventionAsync(
+                    processInstanceId,
+                    TimelineEntryKind.InstanceJumped,
+                    string.IsNullOrWhiteSpace(reason) ? null : reason,
+                    targetActivityId,
+                    context,
+                    ct).ConfigureAwait(false);
 
                 return true;
             },

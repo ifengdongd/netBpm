@@ -48,6 +48,16 @@ public enum TimelineEntryKind
 
     /// <summary>参数变更（记录变更前后值，用于合规审计）。</summary>
     ParametersUpdated = 11,
+
+    /// <summary>
+    /// 管理干预：跳转节点（<c>netbpm.admin.instance.jump</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 它<b>不是一次审批</b>——没有 optionId、没有审批语义，只是有人把这张单挪到了另一个节点。
+    /// 刻意单列一个类型而不是复用 <see cref="Comment"/>：审计要能一眼区分
+    /// 「这张单是被谁批过去的」和「这张单是被谁挪过去的」。
+    /// </remarks>
+    InstanceJumped = 12,
 }
 
 /// <summary>

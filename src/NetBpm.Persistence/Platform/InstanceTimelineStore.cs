@@ -415,6 +415,7 @@ internal static class TimelineKindText
         TimelineEntryKind.InstanceCompleted => "INSTANCE_COMPLETED",
         TimelineEntryKind.Comment => "COMMENT",
         TimelineEntryKind.ParametersUpdated => "PARAMETERS_UPDATED",
+        TimelineEntryKind.InstanceJumped => "INSTANCE_JUMPED",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "未知的时间线条目类型。"),
     };
 
