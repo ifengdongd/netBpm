@@ -1,12 +1,48 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-10-31 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.20 小节
+> 导出时间：2026-11-01 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.21 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.21 本轮落地（2026-11-01，审计断档收口：管理干预写时间线 + 写入型端点）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **前置规矩：管理干预写时间线** | `InstanceCommandService` 注入 `IApprovalTimeline`：跳转写 `INSTANCE_JUMPED`（新增 kind，目标节点进 `TargetNodeId`、原因进 `Comment`）、撤销实例写 `INSTANCE_TERMINATED`、挂起 / 恢复写 `INSTANCE_SUSPENDED` / `INSTANCE_RESUMED` | `AdminGovernanceTests.Jump_And_VariableWrite_ShouldBeAudited` 追加时间线断言（真 MySQL） |
+| **变量直写写时间线** | `VariableService` 写 / 删变量前先读旧值，落 `PARAMETERS_UPDATED`，`Comment` 记 `name: 旧值 → 新值`（值截断 120 字符，整条截断 1000） | 同上（同一用例里的 `variable.write`） |
+| **`POST /instances/{id}/terminate`** | `IInstanceTermination`：scope `workflow:instance:terminate`；**原因必填**（空白 422）；`ExpectedRevision` 乐观并发（不匹配 409）；数据级只认**发起人或管理视角**（其余 404）；返回终止后的 `InstanceView` | `InstanceTerminationTests`（5 项） |
+| **`POST /tasks/{id}/claim`** | `ITaskAssignment.ClaimAsync`：真人主体（纯服务 403）；待办必须未认领（已被别人认领 409 `task.already_claimed`）；非候选范围与不存在**同口径 404**；可带 `expectedAssignee` 做抢单校验 | `TaskAssignmentTests`（8 项） |
+| **`POST /tasks/{id}/unclaim`** | 只有办理人本人能放弃（别人 404，改别人的归属走 transfer）；已未认领时幂等 | 同上 |
+| **`POST /tasks/{id}/transfer`** | `assignee` 必填（空白 422）；管理视角 / 当前办理人 / 候选范围三者之一才可转；**不改认领时间**（引擎语义） | 同上 |
+| **统一拒绝通道** | 新增 `PlatformActionRejectedException`（与 `SubmitDecisionException` 同形状），端点一处转 `PlatformProblem`，错误码 → 状态码只写一遍 | 三个端点复用 |
+
+**为什么管理动作审计不够、还必须写时间线：**
+
+管理动作审计（`admin_audit_log`）是**挂在调用方身上**的：它回答「哪个 client 在几点调了哪个接口」。
+而审计真正会断档的地方是**实例自己的时间线**——跳转 / 终止 / 变量直写有授权、有审计，
+却在这张单的审批记录里看不到，于是「这张单为什么突然出现在另一个节点」只能靠人去对日志。
+文档点名的「唯一有授权但没记录的口子」说的正是这件事，本轮把它补上。
+kind 单列 `INSTANCE_JUMPED` 而不是复用 `COMMENT`，是为了让审计能一眼区分
+「这张单是被谁批过去的」和「这张单是被谁挪过去的」。
+
+**为什么认领的「不在候选范围」用 404 而「已被认领」用 409：**
+
+两者看似都是「拿不到」，但信息含义相反。
+不在候选范围时，这条待办对调用方而言应当**等同于不存在**——回答 403 就等于告诉它「存在，只是不归你」，
+而待办的存在性本身就是不该泄露的。已被别人认领时，调用方此刻**已经看得到**这条待办
+（它就是从待办列表里点进来的），「被谁拿走了」是它需要知道的信息，属于正常的并发冲突，所以 409 + `task.already_claimed`。
+
+**为什么记录变量的前后值：**
+
+变量直写是**越过 schema** 的管理动作，它改的是单据内容本身。
+只写「变量被改过」回答不了合规最关心的问题——「金额在终审前被人改成了多少」。
+记值有代价（变量可能含敏感信息），但替代方案是「根本不知道被改过」，两者之间取前者；因此值一律截断。
 
 ---
 
@@ -204,7 +240,9 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
    `task.moderate→task:assign`、`variables.write→admin:variables`。指标 / 审计 / Redis / 作业 / 归档**不翻译**——
    平台面还没有对应端点，宁可拒掉也不发明一个 `workflow:admin:*`。
 4. ~~**已知残留**：引擎面 `complete` 不写时间线~~ —— v1.16 已按「关闭写原语」的方向解决（见开头 v1.16 小节），
-   引擎面对客户端只剩「读 + 管理干预」。**剩下的同类缺口**（跳转 / 终止 / 变量直写仍不写时间线）已单独立在 §3 ③ 的前置规矩。
+   引擎面对客户端只剩「读 + 管理干预」。~~**剩下的同类缺口**（跳转 / 终止 / 变量直写仍不写时间线）~~
+   —— **v1.21 已补齐**：跳转写 `INSTANCE_JUMPED`、撤销写 `INSTANCE_TERMINATED`、变量直写写 `PARAMETERS_UPDATED`，
+   管理干预在实例时间线上不再有断档。
 
 ---
 
@@ -234,7 +272,7 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 阶段（S1–S5） | 5 | 2 完成 + 1 基本完成 | 2 |
 | 改造项（M1–M16） | 16 | 8 完成 + 5 部分 | 3 |
 | 守门测试用例 | 30 | 25 | 5 |
-| 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 14 | 8 |
+| 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 18 | 4 |
 | 平台表（`nb_*`） | 13 | 9 | 4 |
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
@@ -321,14 +359,14 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 
 ### ③ 写入型端点 —— 属 S4 面
 
-- [ ] `POST /instances/{id}/terminate`
-- [ ] `POST /tasks/{id}/claim` / `unclaim` / `transfer`
+- [x] `POST /instances/{id}/terminate` ✅ v1.21（原因必填 + 乐观并发 + 落时间线，`InstanceTerminationTests` 5 项）
+- [x] `POST /tasks/{id}/claim` / `unclaim` / `transfer` ✅ v1.21（三个动作都落时间线，`TaskAssignmentTests` 8 项）
+- [x] **前置规矩**：跳转 / 终止 / 变量直写写时间线条目 ✅ v1.21（新增 `INSTANCE_JUMPED` kind；文档点名的「唯一有授权没记录」的口子已补）
 - [ ] `GET /tasks/{id}/attachments`（只存引用，不做存储）
 - [ ] `GET /instances/{id}/diagram.svg`（高亮流转状态图）
 - [ ] `GET /instances/{id}/parameters`（参数快照）
 - [ ] `GET /processes/{key}/form/schema`
 - [ ] `/admin/v1/processes` 写路径（`IProcessCatalogStore` 目前无写方法）
-- [ ] **前置规矩**：跳转 / 终止也要写时间线条目，否则审计出现断档
 
 ### ④ S4 独立部署（最大一块）
 
@@ -365,14 +403,14 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | GET | `/instances/{id}/history` | `workflow:history:read` | [x] v1.10 |
 | GET | `/instances/{id}/diagram.svg` | `workflow:instance:read` | [ ] |
 | GET | `/instances/{id}/parameters` | 同上 | [ ] |
-| POST | `/instances/{id}/terminate` | `workflow:instance:terminate` | [ ] |
+| POST | `/instances/{id}/terminate` | `workflow:instance:terminate` | [x] v1.21 |
 | GET | `/tasks`（`scope=MINE\|CLAIMED\|ALL`；`DONE` 为已办，另需 `history:read`） | `workflow:task:read` | [x] v1.7 / v1.12 |
 | GET | `/tasks/{id}` | 同上 | [x] v1.7 |
 | GET | `/tasks/{id}/form` | 同上 | [x] v1.13 |
 | POST | `/tasks/{id}/submit` | `workflow:task:submit` | [x] v1.8（幂等） |
-| POST | `/tasks/{id}/claim` | `workflow:task:assign` | [ ] |
-| POST | `/tasks/{id}/unclaim` | 同上 | [ ] |
-| POST | `/tasks/{id}/transfer` | 同上 | [ ] |
+| POST | `/tasks/{id}/claim` | `workflow:task:assign` | [x] v1.21 |
+| POST | `/tasks/{id}/unclaim` | 同上 | [x] v1.21 |
+| POST | `/tasks/{id}/transfer` | 同上 | [x] v1.21 |
 | GET | `/tasks/{id}/attachments` | `workflow:task:read` | [ ] |
 | ~~GET~~ | ~~/history/tasks~~ | — | [x] v1.12 起**收敛到 `/tasks?scope=DONE`**，不单开历史端点 |
 
@@ -502,12 +540,14 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 3. ~~现在只剩一个判断：要不要做 **S4**~~ —— 门槛项 **M12 外部任务已在 v1.17 落地**，
    「引擎独立部署给别人用」不再卡在「跑不了 `serviceTask`」上。
    ~~继续 S4 的话，下一步是 `Platform.Service` 容器化 + 端到端演示~~ —— **已在 v1.19 完成并实跑**。
-4. ~~回头补 M11 的两张平台表与 Redis 版全局配额~~ —— **全局配额已在 v1.20 完成**（真 Redis 实跑 + 启动自检）。
-   剩下的选项是 **S5（M14 契约治理 / M15 SDK）**，或 M11 的 `nb_process_parameter` / `nb_parameter_snapshot` 两张表。
-5. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
+4. ~~回头补 M11 的两张平台表与 Redis 版全局配额~~ —— **全局配额已在 v1.20 完成**（真 Redis 实跑 + 启动自检）；
+   ~~§3 ③ 的前置规矩~~ —— **审计断档已在 v1.21 补上**（跳转 / 终止 / 变量直写都写时间线）。
+5. 剩下的选项是 **S5（M14 契约治理 / M15 SDK）**、M11 的 `nb_process_parameter` / `nb_parameter_snapshot` 两张表，
+   或 §3 ③ 剩下的四个**读形态**端点（`attachments` / 实例 `diagram.svg` / `parameters` / `form/schema`）。
+6. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
-> 引擎原语面对客户端只留读与管理干预。S4/S5 可以整体后移。
+> 引擎原语面对客户端只留读与管理干预，**且管理干预在实例时间线上留痕**。S4/S5 可以整体后移。
 >
-> ⚠️ 后移前建议先把 §3 ③ 的「前置规矩」做掉：跳转 / 终止 / 变量直写目前仍不写时间线，
-> 管理干预能在审计里留下断档——这是当前唯一「有授权但没记录」的口子。
+> ✅ v1.21 之后不再有「有授权但没记录」的口子：跳转 / 终止 / 变量直写 / 认领 / 转办全部落入
+> `nb_instance_timeline`，审计可以从一张单的视角完整还原发生了什么。

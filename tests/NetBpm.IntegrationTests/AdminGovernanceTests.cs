@@ -10,6 +10,7 @@ using System.Text.Json;
 using Dapper;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 
 namespace NetBpm.IntegrationTests;
@@ -653,6 +654,15 @@ public sealed class AdminGovernanceTests : IClassFixture<AdminEngineFactory>
 
         Assert.Contains("variable.write", actions, StringComparer.Ordinal);
         Assert.Contains("instance.jump", actions, StringComparer.Ordinal);
+
+        // 前置规矩：管理干预也要写进<b>实例自己的时间线</b>。
+        // 管理动作审计挂在调用方身上（谁调了接口），回答不了「这张单的审批流上发生了什么」；
+        // 缺了时间线这一行，审计就会在「为什么这张单突然到了另一个节点」上断档。
+        var timeline = host.Services.GetRequiredService<NetBpm.Persistence.Platform.IApprovalTimelineStore>();
+        var entries = await timeline.ListAsync(instanceId, 0, 100, Ct);
+
+        Assert.Contains(entries, entry => entry.Kind == NetBpm.Platform.Contracts.TimelineEntryKind.ParametersUpdated);
+        Assert.Contains(entries, entry => entry.Kind == NetBpm.Platform.Contracts.TimelineEntryKind.InstanceJumped);
     }
 
     [Fact]
