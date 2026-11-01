@@ -70,6 +70,32 @@ jobs:
       - name: Unit tests
         run: dotnet run --project tests/NetBpm.UnitTests --no-build
 
+  contract-governance:
+    # M14 契约治理：`/workflow/v1` 的 OpenAPI 快照必须与代码生成结果一致。
+    # 单独成 Job 而不是塞进 build 里当一步 —— 契约破了要一眼看到是「契约」红了，
+    # 而不是「构建」红了之后去翻日志才知道是 diff 还是编译错误。
+    #
+    # ⚠️ 这一关不能靠刷新快照放行：确需变更时，本地设 NETBPM_UPDATE_CONTRACTS=1 重跑
+    # ContractSnapshotTests，把 contracts/openapi/workflow-v1.json 的改动当作代码一起评审提交
+    # （破坏性变更还要先走 docs/platform-api-refactoring-plan.md §7.2 的公告流程）。
+    # 该 Job 只读 OpenAPI 文档（端点元数据），不需要数据库。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build NetBpm.slnx --nologo
+
+      - name: Contract snapshot diff
+        run: >
+          dotnet run --project tests/NetBpm.IntegrationTests --no-build --
+          -class NetBpm.IntegrationTests.ContractSnapshotTests
+
   integration-tests:
     # 真库测试：MySQL 服务容器 + DbMigrate 建表；
     # SqlServer 由测试自己用 Testcontainers 拉起 mssql/server:2022（runner 自带 Docker），
