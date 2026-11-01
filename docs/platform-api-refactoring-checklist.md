@@ -1,12 +1,57 @@
 # NetBpm 平台化改造 —— 任务清单（勾选版）
 
 > 来源：`docs/platform-api-refactoring-plan.md`（**v1.13**，2026-10-30）。本文只是它的**进度投影**，不替代方案本身。
-> 导出时间：2026-11-01 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.22 小节
+> 导出时间：2026-11-01 ｜ 代码基线：`68a40e3`（v1.16，已推送 `origin/main`）｜ 最新进度见开头 v1.23 小节
 >
 > **图例**
 > - `[x]` 已落地 ｜ `[ ]` 未做 ｜ 部分落地的项用**子项**拆开，不写「半勾」
 > - `[!]` 阻塞项（不做它，后面的都推不动）
 > - 人日与周数沿用方案 §6 / §8 的原始估算，不是实测
+
+---
+
+## v1.23 本轮落地（2026-11-01，M11 两张表收尾 + M14 契约治理）
+
+| 项 | 落点 | 验证 |
+|---|---|---|
+| **`nb_process_parameter`** | `IProcessParameterStore`（Dapper / InMemory 双实现）：把 BPMN 派生出来的参数规范**按 `definition_version` 物化**。`ProcessCatalog.GetParameterSchemaAsync` 读到派生结果时顺手落库，已存在则跳过——零后台任务、零配置 | `ParameterStorageTests.Index_ShouldMaterializeDeclaredParameters`（真 MySQL） |
+| **版本不覆盖** | 主键含 `definition_version`，`ReplaceAsync` 只删**本版本**行。重部署新版本不会抹掉旧版本的声明，历史单据仍按它停在的那一版渲染 | `Index_ShouldKeepPreviousVersionRows`：同一 `processKey` 两个版本并存 |
+| **`nb_parameter_snapshot`** | `IParameterSnapshotStore`：append-only，实例内 `revision` 单调（`max+1` + 唯一键冲突重试 5 次）。发起 / 提交 / 管理直写三处落库，写失败只 `LogWarning` 不阻断主流程（与时间线、表单快照同一条规矩） | `History_ShouldRecordStartAndSubmit`：发起 + 一次提交 = 两条修订，`source` 与 `taskId` 对得上 |
+| **`GET /instances/{id}/parameters/history`** | `InstanceCatalog.GetParameterHistoryAsync`：先走详情读模型判存在性（不存在 → 404，与详情同口径），再用**同一份** `ComputeHidden` 过滤 `visibleTo`；老库缺表时降级空历史而不是 500 | `History_ShouldHideParametersHiddenFromViewer`：审批人看不到 `param.costCenter` |
+| **归档同 cutoff** | `AdminArchiveCleanupService` 在原有循环里追加 `PruneAsync(cutoff)`，与历史归档、表单快照共用 `NetBpm:Admin:ArchiveRetentionDays`，避免「历史没了、修订还在」的孤儿 | 启动横幅文案已同步 |
+| **M14 契约快照** | `contracts/openapi/workflow-v1.json`：`/openapi/v1.json` 只留 `/workflow/v1`（22 条路径 / 23 个操作）→ 递归按键排序 → 固定 `info`（去掉程序集版本）→ CRLF 落盘 | `ContractSnapshotTests` 2 项：一致性 0 差异；覆盖面 ≥ 20 条且不含 `/api/**` |
+| **分类 diff** | `OpenApiContractDiff.Compare` 把差异分成**破坏性 / 兼容**两类（删路径、必填化、类型改变、`$ref` 换、枚举取值减少 → 破坏），对应方案 §7.2 | 失败时报告直接列出「哪一处、算哪一类、为什么」 |
+| **CI 守门** | `.github/workflows/ci.yml` 新增独立 job `contract-governance`（只读 OpenAPI 文档，不需要数据库） | 契约破了是「契约」红，不是「构建」红 |
+| **治理口径** | `contracts/README.md`：覆盖范围 / 更新方式 / 破坏性清单 / 更新快照的三条纪律 | — |
+
+**为什么参数索引按「定义版本」冻，而不是只存当前一份：**
+
+参数规范的真源始终是 BPMN。但审批页要渲染的从来不是「这个流程现在声明了哪些参数」，
+而是**「这张单发起时承诺了哪些参数」**。只存当前一份，重部署一次、新版本加了个字段，
+三个月前那张已结束的单据上就会凭空多出一行——填过什么、能不能改、该怎么校验，全错。
+所以主键带上 `definition_version`，与 `nb_approval_snapshot` 按任务冻是同一条理由：
+**契约要跟着它被承诺的那一刻走**，区别只是这里按「定义版本」冻、那里按「任务」冻。
+
+**为什么 `InstanceCatalog` 的四条取声明路径都要传 `definitionVersion`：**
+
+v1.22 之前它取的是「当前版本的参数规范」，对运行中的实例恰好等价，对历史实例则是错位：
+实例停在 v1 的定义上，参数面板却按 v3 的声明渲染，于是 v3 新增的必填字段在 v1 的单据上
+显示成「已声明未填」——看起来像用户漏填，实际是声明取错了。这轮把 `definitionVersion`
+一路传到 `TryLoadSchemaAsync` / `BuildParameterSnapshotAsync` / `LoadHiddenParametersAsync`，
+`FindAsync` 传 `definition?.Version`、`GetParametersAsync` 传 `view.DefinitionVersion`。
+
+**为什么修订历史要复用详情读模型判存在性，而不是自己查一次：**
+
+「这条实例存不存在」在这个系统里有两种答案——运行态和历史归档，而且**可见性也在这里收窄**
+（本单相关人 vs 管理视角）。另写一份判定，迟早会与详情页给出不同答案：
+详情 404、修订历史 200 空数组，等于告诉调用方「有这张单，只是没修订」。
+所以先 `FindAsync` 一次，`null` 直接 404；过滤也直接用同一份 `ComputeHidden`。
+
+**为什么 CI 里契约单独成 job：**
+
+塞进 build 当一步也能跑，但红灯的语义就糊了——「构建失败」要翻日志才知道是编译错误还是契约 diff。
+契约治理的全部价值在于**让人在 30 秒内决定「这个变更能不能接受」**，
+报告出现在一个叫 `contract-governance` 的 job 里，比出现在 build 的第 7 步里有用。
 
 ---
 
@@ -293,16 +338,16 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 阶段（S1–S5） | 5 | 2 完成 + 1 基本完成 | 2 |
 | 改造项（M1–M16） | 16 | 8 完成 + 5 部分 | 3 |
 | 守门测试用例 | 30 | 29 | 1 |
-| 业务面端点（`/workflow/v1`） | 22（另有 1 条已划掉） | 22 | 0 |
-| 平台表（`nb_*`） | 13 | 9 | 4 |
+| 业务面端点（`/workflow/v1`） | 23（另有 1 条已划掉） | 23 | 0 |
+| 平台表（`nb_*`） | 13 | 11 | 2 |
 | 人日（估算） | 135 | ≈ 75 | ≈ 60 |
 
 **一句话定位**：S1（契约）、S2（身份与授权，含引擎面对客户端只留读与管理干预）、S3（业务标准）已全部落地，
 S4（独立部署）**已完成**：门槛项 M12 外部任务 v1.17、M12 收尾与 M13 事件投递 v1.18、
 `Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 v1.19；S5（治理/SDK）未动。
 八个硬缺口中 **A（对外模型）、B（多流程）、D（审批语义）、E（参数 schema + 写侧）、F（身份三元组）、
-G（委托进程内）已闭环**；C（响应强类型）只差 M3 的 Decorator 收尾，
-H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 CI diff 没有。
+G（委托进程内）、H（契约治理）已闭环**（H 于 v1.23：OpenAPI 快照 + 分类 diff + CI 守门 + 治理文档）；
+C（响应强类型）只差 M3 的 Decorator 收尾。
 
 ---
 
@@ -310,17 +355,17 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 
 | 阶段 | 周期 | 状态 | 出口条件达成情况 |
 |---|---|---|---|
-| S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 未做** |
+| S1 契约与骨架 | 3 周 | ✅ 完成 | 契约工程已落地；**OpenAPI 快照 / openapi-diff 于 v1.23 补齐**（M14） |
 | S2 身份与授权 | 4 周 | 🟢 完成（缺出口用例） | RS256 + JWKS（v1.14）、引擎面 `/api/**` 按 `workflow:*` 收口（v1.15）、业务写入对客户端关闭（v1.16）均已完成；跨租户 404、客户端白名单 404、按客户端限流已覆盖；**幂等重放、纯服务 submit 403、密钥轮换双活仍无独立用例** |
 | S3 业务标准 | 5 周 | ✅ 完成 | 部署期守卫能拒「选项无映射」BPMN（严格模式）；旧 BPMN 不改一字仍可跑 |
 | S4 独立部署 | 4 周 | 🟢 **完成** | M12 外部任务（v1.17）+ 死信重投与告警 + M13 事件投递（v1.18）+ `Platform.Service` 宿主、容器化与端到端演示（v1.19）。含 `serviceTask` 的 BPMN 在独立部署下已实跑通过：worker 作为独立进程拉走任务并推流程，失败则停在原地不动 |
-| S5 治理与 SDK | 3 周 | ⬜ 未开始 | 阻塞于 **M14 契约治理** |
+| S5 治理与 SDK | 3 周 | 🟡 进行中 | M14 契约治理 ✅ v1.23（快照 + 分类 diff + CI + 口径文档）；剩 **M15 SDK** 与 `CompatibilityTests` |
 
 - [x] S1 契约与骨架
 - [ ] S2 身份与授权（剩余见 §3 第 ② 组；RS256 已闭环）
 - [x] S3 业务标准
 - [x] S4 独立部署
-- [ ] S5 治理与 SDK
+- [ ] S5 治理与 SDK（M14 已完成，剩 M15）
 
 ---
 
@@ -340,7 +385,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
   - [x] 从 `formProperty` 派生 `ParameterSchema`（v1.5）
   - [x] `netbpm:parameters` 覆盖 `apiName`/`writableBy`/`visibleTo`/约束（v1.13）
   - [x] **写侧强制**：发起按 `APPLICANT`、提交按 `APPROVER` 拒绝，未声明 = 发起可写 / 审批只读（v1.14）
-  - [ ] `nb_process_parameter` 索引表
+  - [x] `nb_process_parameter` 索引表 ✅ v1.23（按 `definition_version` 物化，旧版本行保留）
 - [x] **M8 表单快照**（5 人日）—— `nb_approval_snapshot`，值带定义一起冻住（v1.13）
 - [ ] **M9 状态机与聚合**（8 人日）
   - [x] 5 态 `InstanceStatus`（Running/Suspended/Completed/Terminated/…）
@@ -348,12 +393,14 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] **M10 结论推导上移**（4 人日）—— 三级回落 `DECLARED → LAST_DECISION → FALLBACK`（v1.10）
 - [ ] **M11 平台存储**（12 人日）
   - [x] 目录 / 字典 / 快照 / 时间线 / 客户端 / 租户 六类存储落地
-  - [ ] `nb_process_parameter`、`nb_parameter_snapshot`、`nb_idempotency`、`nb_external_task`、`nb_audit_log` 五张表（`nb_event_subscription` / `nb_event_delivery` 已随 M13 落地）
+  - [x] `nb_external_task` ✅ v1.17；`nb_event_subscription` / `nb_event_delivery` ✅ v1.18
+  - [x] `nb_process_parameter`、`nb_parameter_snapshot` ✅ v1.23（参数规范按定义版本物化 + 参数修订历史）
+  - [ ] `nb_idempotency`（→ 复用 `ACT_IDEMPOTENCY`，不另建表）、`nb_audit_log`（→ 复用 `admin_audit_log`）
   - [x] 幂等键从「全局」改为「按调用主体」 ✅ v1.19（`ToStorageKey`：caller → subject → tenant 回落）
 - [x] **[!] M12 外部任务**（15 人日）—— fetch/complete/failure + 锁 + 死信。**S4 的硬前提**：没有它，含 `serviceTask` 的 BPMN 在独立部署下起不来。✅ **v1.17 已落地**（`activiti:topic` + `nb_external_task` + 三条端点 + 死信）；v1.18 补齐死信重投端点与 `external_task.no_worker` / `external_task.dead_letter` 告警，见开头 v1.18 小节
 - [x] **M13 事件对外**（10 人日）—— CloudEvents + 签名 + 重试 + 订阅管理。✅ **v1.18 已落地**
   （`CloudEvent` + HMAC 签名、`CloudEventOutboxHandler`、`nb_event_subscription` / `nb_event_delivery`、订阅管理端点）；剩余：看板与单订阅限速，见开头 v1.18 小节
-- [ ] **[!] M14 契约治理**（6 人日）—— OpenAPI 快照 + CI diff。**S5 的前置**
+- [x] **M14 契约治理**（6 人日）—— OpenAPI 快照 + CI diff。**S5 的前置**。✅ v1.23：`contracts/openapi/workflow-v1.json`（22 路径 / 23 操作）+ `OpenApiContractDiff` 破坏性/兼容分类 + CI `contract-governance` job + `contracts/README.md` 治理口径
 - [ ] **M15 官方 SDK**（10 人日）—— `NetBpm.Platform.Client`（.NET）+ 生成 Java/TS
 - [x] **M16 客户端注册与隔离**（10 人日）—— `nb_api_client` + `IClientRegistry` + 认证中间件改造、密钥轮换、流程白名单、按 client 配额（v1.3 / v1.4）
 
@@ -396,11 +443,11 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] `Platform.Service` 宿主 + 容器化 + 含 `serviceTask` 的端到端演示 ✅ v1.19（`deploy/Dockerfile` + `docker-compose.yml` + `samples/NetBpm.ExternalWorker`，已实跑）
 - [x] 幂等键按调用主体收窄（原「按 client」）✅ v1.19
 - [x] 全局（跨实例）配额改 Redis 版 ✅ v1.20（`IRateLimiter` + `RedisFixedWindowRateLimiter`，`NetBpm:RateLimit:Store`；真 Redis 实跑 + 启动自检）
-- [ ] M11 平台存储收尾：`nb_process_parameter` / `nb_parameter_snapshot` 两张表（`nb_idempotency` → `ACT_IDEMPOTENCY`、`nb_audit_log` → `admin_audit_log`、`nb_external_task` 均已存在）
+- [x] M11 平台存储收尾：`nb_process_parameter` / `nb_parameter_snapshot` 两张表 ✅ v1.23（`nb_idempotency` → `ACT_IDEMPOTENCY`、`nb_audit_log` → `admin_audit_log`、`nb_external_task` 均已存在）
 
 ### ⑤ S5 治理与 SDK
 
-- [ ] M14 契约治理：OpenAPI 快照 + CI diff（`contracts/` 目录 + CI 脚本）
+- [x] M14 契约治理：OpenAPI 快照 + CI diff ✅ v1.23（`contracts/` 目录 + `contract-governance` job + 治理文档）
 - [ ] M15 官方 SDK：.NET 优先，再生成 TS / Java
 - [ ] M3 收尾：Decorator 迁移 / 删除，`WorkflowEndpointOptions` 标 `[Obsolete]`
 - [ ] 配额与限流看板、审计、SLO、迁移与接入文档（Runbook）
@@ -424,6 +471,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | GET | `/instances/{id}/history` | `workflow:history:read` | [x] v1.10 |
 | GET | `/instances/{id}/diagram.svg` | `workflow:instance:read` | [x] v1.22 |
 | GET | `/instances/{id}/parameters` | 同上 | [x] v1.22 |
+| GET | `/instances/{id}/parameters/history` | 同上 | [x] v1.23（参数修订历史，`visibleTo` 过滤） |
 | POST | `/instances/{id}/terminate` | `workflow:instance:terminate` | [x] v1.21 |
 | GET | `/tasks`（`scope=MINE\|CLAIMED\|ALL`；`DONE` 为已办，另需 `history:read`） | `workflow:task:read` | [x] v1.7 / v1.12 |
 | GET | `/tasks/{id}` | 同上 | [x] v1.7 |
@@ -448,8 +496,8 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 - [x] `nb_approval_dictionary`
 - [x] `nb_instance_timeline`（append-only，唯一索引 `(process_instance_id, seq)`）
 - [x] `nb_approval_snapshot`
-- [ ] `nb_process_parameter`
-- [ ] `nb_parameter_snapshot`
+- [x] `nb_process_parameter` ✅ v1.23（主键含 `definition_version`，旧版本行不删）
+- [x] `nb_parameter_snapshot` ✅ v1.23（append-only，实例内 revision 单调）
 - [ ] `nb_idempotency`（→ 复用 `ACT_IDEMPOTENCY`，不另建表）
 - [x] `nb_external_task` ✅ v1.17
 - [x] `nb_event_subscription` ✅ v1.18（配套 `nb_event_delivery` 同批落地）
@@ -460,7 +508,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 ## 6. 守门测试清单（§9）
 
 **契约层**
-- [ ] `ContractSnapshotTests` —— 提交的 `openapi.v1.json` 与代码生成结果字节一致
+- [x] `ContractSnapshotTests` ✅ v1.23 —— 提交的 `contracts/openapi/workflow-v1.json` 与代码生成结果一致（归一化后比对，差异按破坏性 / 兼容分类；另有用例防快照「空心化」）
 - [x] `ContractSerializationTests` ✅（`PlatformContractTests`）
 - [ ] `CompatibilityTests` —— 上一版 SDK 打新服务全部端点通过
 
@@ -521,7 +569,7 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
 | E 参数无 schema | ✅ | schema + `netbpm:parameters` 覆盖 + **写侧按 `writableBy` 拒绝**（v1.14） |
 | F 身份只有「一个人」 | ✅ | 三元组 `caller/subject/tenant` |
 | G 委托在宿主进程内 | ✅ | **外部任务已落地**（v1.17 / M12）：`activiti:topic` 的 serviceTask 交给 worker 拉走执行，独立部署不再要求把业务代码放进引擎进程。未注入 broker 时执行到该节点显式报错，不静默跳过 |
-| H 无契约治理 | 🟡 | 有 `/v1` 前缀与错误码总表；无 OpenAPI 快照与 CI diff |
+| H 无契约治理 | ✅ | `/v1` 前缀 + 错误码总表 + **OpenAPI 快照与分类 diff**（v1.23 / M14） |
 
 ---
 
@@ -565,9 +613,11 @@ H（契约治理）只做了一半——错误码总表有，OpenAPI 快照与 C
    ~~§3 ③ 的前置规矩~~ —— **审计断档已在 v1.21 补上**（跳转 / 终止 / 变量直写都写时间线）。
 5. ~~§3 ③ 剩下的四个读形态端点~~ —— **已在 v1.22 完成**（`attachments` / 实例 `diagram.svg` / `parameters` / `form/schema`）。
    至此 `/workflow/v1` 的 22 个端点上表全绿，**业务面没有未落地项**。
-6. 剩下的只有：**S5（M14 契约治理 / M15 SDK）**、M11 的 `nb_process_parameter` / `nb_parameter_snapshot`
-   两张表、`/admin/v1` 的管理面写路径（`IProcessCatalogStore` 目前无写方法）。
-7. **M14 契约治理**要在 SDK 之前做完 —— 没有快照与 CI diff，生成的 SDK 无法守兼容性。
+6. ~~M11 的两张表~~ / ~~M14 契约治理~~ —— **均已在 v1.23 完成**：参数规范按定义版本物化 + 参数修订历史，
+   契约快照 + 分类 diff + CI 守门 + 治理文档。
+7. 剩下的只有：**M15 官方 SDK**（前置的 M14 已就绪，SDK 模型可直接从快照生成）、
+   `CompatibilityTests`（拿上一版 SDK 打当前服务）、`/admin/v1` 的管理面写路径
+   （`IProcessCatalogStore` 目前无写方法）、以及 M3 / M9 的收尾项。
 
 > 若目标只是「让内部系统统一走一套干净 API」，到这里已经可以收口：对外只有 `/workflow/v1` 一套业务语义，
 > 引擎原语面对客户端只留读与管理干预，**且管理干预在实例时间线上留痕**。S4/S5 可以整体后移。
