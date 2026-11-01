@@ -1274,6 +1274,9 @@ internal static class SchemaCatalog
             // 死信列表是「跨订阅、按状态筛、按更新时间倒序」：
             // 上面那条以 subscription_id 打头，谓词里没有它就退化成全表扫 + 排序。
             new IndexDef("ix_nb_event_delivery_dead_letter", ["status", "updated_at"]),
+            // 保留期清理按 (status = 'DELIVERED', delivered_at) 删（EventDeliveryCleanupService）。
+            // 成功行占全表绝大多数，没有这条就是每 6 小时一次全表扫着删。
+            new IndexDef("ix_nb_event_delivery_delivered", ["status", "delivered_at"]),
         ],
         [], [],
         EngineCharset: false);

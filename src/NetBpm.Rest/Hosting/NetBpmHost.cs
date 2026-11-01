@@ -12,6 +12,7 @@ using NetBpm.Persistence;
 using NetBpm.Rest.Auditing;
 using NetBpm.Rest.Diagnostics;
 using NetBpm.Rest.Endpoints;
+using NetBpm.Rest.Events;
 using NetBpm.Rest.Platform;
 using NetBpm.Rest.RateLimiting;
 using NetBpm.Rest.Security;
@@ -186,6 +187,8 @@ public static class NetBpmHost
 
         builder.Services.AddHostedService<AdminAuditCleanupService>();
         builder.Services.AddHostedService<AdminArchiveCleanupService>();
+        // 事件投递表（nb_event_delivery）的保留期清理：默认关闭，配 NetBpm:Events:DeliveryRetentionDays
+        builder.Services.AddHostedService<EventDeliveryCleanupService>();
 
         // 可选 OpenTelemetry 接线（NetBpm:Otel:Enabled 或 OTEL_EXPORTER_OTLP_ENDPOINT）
         builder.Services.AddNetBpmOpenTelemetry(configuration);

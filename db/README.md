@@ -173,6 +173,7 @@ alter index all on ACT_HI_PROCINST rebuild;
 |---|---|---|
 | 管理动作审计 | `AdminAuditCleanupService`（每 6h） | `NetBpm:Admin:AuditRetentionDays`（0=永久） |
 | 历史归档快照 + 表单快照 | `AdminArchiveCleanupService`（每 6h，两张表同一切点） | `NetBpm:Admin:ArchiveRetentionDays`（0=永久） |
+| 事件投递 `nb_event_delivery` | `EventDeliveryCleanupService`（每 6h，只删 `DELIVERED` / `DEAD_LETTER`） | `NetBpm:Events:DeliveryRetentionDays`（0=永久） |
 | 模型版本历史 | 端点手动清理 `DELETE /api/admin/models/{id}/history?keepLatest=N` | — |
 
 > ⚠️ 归档记录删除前如需长期留存，请先把 `admin_history_archive.payload`

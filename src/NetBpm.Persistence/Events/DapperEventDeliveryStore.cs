@@ -231,13 +231,46 @@ public sealed class DapperEventDeliveryStore : IEventDeliveryStore
 
     /// <inheritdoc />
     public async ValueTask<int> DeleteByEventAsync(string eventId, CancellationToken ct = default)
-    {        using var lease = _sessions.Acquire();
+    {
+        using var lease = _sessions.Acquire();
 
         return await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
             "delete from nb_event_delivery where event_id = @eventId",
             new { eventId },
             lease.Session.Transaction,
             cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default)
+    {
+        using var lease = _sessions.Acquire();
+        var connection = lease.Session.Connection;
+
+        // 只删终结态：PENDING / FAILED 还在重试链路上，删掉就是把「还没投成」伪装成「从来没有这条」。
+        // 拆成两条 delete 而不是一条 or：两种终态各走一条不同时间列的索引
+        // （ix_nb_event_delivery_delivered / ix_nb_event_delivery_dead_letter），
+        // 一条带 or 的语句两个方言都容易退化成全表扫（MySQL 的 index merge 也不适用于 delete）。
+        // 终态但没有时间戳的行（历史脏数据）不删：宁可多留一条，也不要凭空抹掉一条投递结论。
+        var delivered = await connection.ExecuteAsync(new CommandDefinition(
+            $"""
+             delete from nb_event_delivery
+              where status = '{EventDeliveryStatus.Delivered}' and delivered_at < @before
+             """,
+            new { before },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        var deadLettered = await connection.ExecuteAsync(new CommandDefinition(
+            $"""
+             delete from nb_event_delivery
+              where status = '{EventDeliveryStatus.DeadLetter}' and updated_at < @before
+             """,
+            new { before },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return delivered + deadLettered;
     }
 
     /// <inheritdoc />

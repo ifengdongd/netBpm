@@ -186,6 +186,26 @@ public interface IEventDeliveryStore
     ValueTask<int> DeleteByEventAsync(string eventId, CancellationToken ct = default);
 
     /// <summary>
+    /// 按保留期清理<b>已终结</b>的投递记录，返回删除条数。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 只删两种终态：<see cref="EventDeliveryStatus.Delivered"/>（按 <c>delivered_at</c>）与
+    /// <see cref="EventDeliveryStatus.DeadLetter"/>（按 <c>updated_at</c>）。
+    /// <see cref="EventDeliveryStatus.Pending"/> / <see cref="EventDeliveryStatus.Failed"/> 一律不动 ——
+    /// 它们还在重试链路上，删掉等于把「这条还没投成」伪装成「从来没有这条」。
+    /// </para>
+    /// <para>
+    /// 死信在业务上也是终态（自动流程不会再碰它），但它同时是运维的人工重投队列：
+    /// 保留期到点意味着「放弃这条投递」。因此调用方（<c>EventDeliveryCleanupService</c>）
+    /// 只在显式配置 <c>NetBpm:Events:DeliveryRetentionDays</c> 时才启用，<c>0</c>（默认）表示永不清理。
+    /// </para>
+    /// </remarks>
+    /// <param name="before">截止时间（UTC）：早于它的终态记录被删除。</param>
+    /// <param name="ct">取消令牌。</param>
+    ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default);
+
+    /// <summary>
     /// 列死信（只返回 <see cref="EventDeliveryStatus.DeadLetter"/>，按更新时间倒序）。
     /// </summary>
     /// <remarks>
@@ -367,6 +387,22 @@ public sealed class InMemoryEventDeliveryStore : IEventDeliveryStore
     }
 
     /// <inheritdoc />
+    public ValueTask<int> PruneAsync(DateTime before, CancellationToken ct = default)
+    {
+        var keys = _deliveries
+            .Where(pair => IsExpired(pair.Value, before))
+            .Select(pair => pair.Key)
+            .ToList();
+
+        foreach (var key in keys)
+        {
+            _deliveries.Remove(key);
+        }
+
+        return ValueTask.FromResult(keys.Count);
+    }
+
+    /// <inheritdoc />
     public ValueTask<EventDeadLetterPage> ListDeadLettersAsync(
         EventDeadLetterQuery query,
         CancellationToken ct = default)
@@ -426,6 +462,16 @@ public sealed class InMemoryEventDeliveryStore : IEventDeliveryStore
 
         return ValueTask.FromResult(stats);
     }
+
+    /// <summary>
+    /// 与 SQL 侧同一口径：成功按 <c>delivered_at</c>、死信按 <c>updated_at</c>；
+    /// 时间戳缺失的终态行不算过期（保留比误删安全）。
+    /// </summary>
+    private static bool IsExpired(EventDelivery item, DateTime before) =>
+        string.Equals(item.Status, EventDeliveryStatus.Delivered, StringComparison.Ordinal)
+            ? item.DeliveredAt is { } deliveredAt && deliveredAt < before
+            : string.Equals(item.Status, EventDeliveryStatus.DeadLetter, StringComparison.Ordinal)
+                && item.UpdatedAt < before;
 
     private static DateTimeOffset? AsOffset(DateTime? value) =>
         value is { } actual ? new DateTimeOffset(DateTime.SpecifyKind(actual, DateTimeKind.Utc)) : null;

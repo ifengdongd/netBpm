@@ -270,6 +270,95 @@ public sealed class EventSubscriptionDatabaseTests : IClassFixture<RestEngineFac
         }
     }
 
+    /// <summary>
+    /// 保留期清理：成功行按 <c>delivered_at</c>、死信行按 <c>updated_at</c>；
+    /// <c>PENDING</c> / <c>FAILED</c> 即使很旧也不动（它们还在重试链路上）。
+    /// </summary>
+    /// <remarks>
+    /// 只能用真库守：状态常量与时间列都写在 SQL 字符串里，内存实现跑通证明不了
+    /// 「库里真的只删了两种终态」。
+    /// </remarks>
+    [Fact]
+    public async Task Delivery_Prune_ShouldRemoveOnlySettledRows()
+    {
+        SkipUnlessReady();
+
+        var subscriptions = _factory.Services.GetRequiredService<IEventSubscriptionStore>();
+        var deliveries = _factory.Services.GetRequiredService<IEventDeliveryStore>();
+
+        var tenant = $"prune-{Guid.NewGuid():N}";
+
+        var subscription = await subscriptions.CreateAsync(
+            new EventSubscription
+            {
+                TenantId = tenant,
+                Name = "保留期清理",
+                EndpointUrl = "https://prune.test/hook",
+            },
+            Ct);
+
+        var old = DateTime.UtcNow.AddDays(-30);
+        var fresh = DateTime.UtcNow.AddDays(-1);
+        var cutoff = DateTime.UtcNow.AddDays(-7);
+
+        var eventIds = new[]
+        {
+            "evt-prune-delivered-old",
+            "evt-prune-delivered-new",
+            "evt-prune-dead-old",
+            "evt-prune-failed-old",
+            "evt-prune-pending-old",
+        };
+
+        try
+        {
+            await deliveries.GetOrCreateAsync("evt-prune-delivered-old", subscription.Id, tenant, Ct);
+            await deliveries.MarkDeliveredAsync("evt-prune-delivered-old", subscription.Id, old, Ct);
+
+            await deliveries.GetOrCreateAsync("evt-prune-delivered-new", subscription.Id, tenant, Ct);
+            await deliveries.MarkDeliveredAsync("evt-prune-delivered-new", subscription.Id, fresh, Ct);
+
+            // 上限 1：一次失败即进死信，updated_at 取这里给的时间
+            await deliveries.GetOrCreateAsync("evt-prune-dead-old", subscription.Id, tenant, Ct);
+            await deliveries.MarkFailureAsync("evt-prune-dead-old", subscription.Id, "500", old, null, 1, Ct);
+
+            // 还在重试额度内的失败：updated_at 同样很旧，但不该被删
+            await deliveries.GetOrCreateAsync("evt-prune-failed-old", subscription.Id, tenant, Ct);
+            await deliveries.MarkFailureAsync(
+                "evt-prune-failed-old", subscription.Id, "超时", old, old.AddSeconds(5), 5, Ct);
+
+            // 从没试过的一条：时间列由库写的 now，这里改旧，用来证明状态过滤真的生效
+            await deliveries.GetOrCreateAsync("evt-prune-pending-old", subscription.Id, tenant, Ct);
+
+            using (var session = MySqlTestDatabase.CreateSessionFactory().Create())
+            {
+                session.Connection.Execute(
+                    "update nb_event_delivery set created_at = @at, updated_at = @at "
+                    + "where event_id = @eventId and subscription_id = @subscriptionId",
+                    new { at = old, eventId = "evt-prune-pending-old", subscriptionId = subscription.Id });
+            }
+
+            // 库里可能有别的用例留下的过期行，所以只断言「至少删了这两条」，逐行验结果
+            var removed = await deliveries.PruneAsync(cutoff, Ct);
+
+            Assert.True(removed >= 2, $"期望至少删除 2 条终态记录，实际 {removed}。");
+            Assert.Null(await deliveries.FindAsync("evt-prune-delivered-old", subscription.Id, Ct));
+            Assert.Null(await deliveries.FindAsync("evt-prune-dead-old", subscription.Id, Ct));
+            Assert.NotNull(await deliveries.FindAsync("evt-prune-delivered-new", subscription.Id, Ct));
+            Assert.NotNull(await deliveries.FindAsync("evt-prune-failed-old", subscription.Id, Ct));
+            Assert.NotNull(await deliveries.FindAsync("evt-prune-pending-old", subscription.Id, Ct));
+        }
+        finally
+        {
+            foreach (var eventId in eventIds)
+            {
+                await deliveries.DeleteByEventAsync(eventId, Ct);
+            }
+
+            await subscriptions.DeleteAsync(subscription.Id, Ct);
+        }
+    }
+
     private static void SkipUnlessReady()
     {
         Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);

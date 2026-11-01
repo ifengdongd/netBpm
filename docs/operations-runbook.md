@@ -313,10 +313,17 @@ NETBPM_RUN_LOAD_TESTS=1 \
 | 表单快照 `nb_approval_snapshot` | 同上（共用同一个 cutoff） | 同上 |
 | 参数修订 `nb_parameter_snapshot` | 同上 | 同上 |
 | 管理审计 `admin_audit_log` | 同上 | 同上 |
-| 事件投递 `nb_event_delivery` | 未纳入自动清理 | 需自行按 `created_at` 归档 |
+| 事件投递 `nb_event_delivery` | `NetBpm:Events:DeliveryRetentionDays` | `0`（关闭，永久保留） |
 
 清理在 `AdminArchiveCleanupService` 的同一循环里做，共用同一个保留期——分开配会出现「快照删了、时间线还在」
 这种半截状态，事后无法还原当时看到的表单。
+
+事件投递走**独立**的一个键（`EventDeliveryCleanupService`，节奏同审计/归档：启动后 5 分钟首轮、之后每 6 小时）：
+
+- 只删**终结态**：`DELIVERED` 按 `delivered_at`、`DEAD_LETTER` 按 `updated_at`；
+- `PENDING` / `FAILED` **永不删**——它们还在重试链路上，删掉等于把「这条还没投成」伪装成「从来没有这条」；
+- ⚠️ 死信同时是运维的人工重投队列，保留期到点即「放弃这条投递」。该值应当 ≥ 运维实际响应窗口；
+  开启后每轮日志会写明清理条数，死信被清掉这件事有据可查。
 
 ---
 

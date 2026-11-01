@@ -1595,6 +1595,9 @@ go
 if not exists (select 1 from sys.indexes where name = 'ix_nb_event_delivery_dead_letter' and object_id = object_id('nb_event_delivery'))
 create index ix_nb_event_delivery_dead_letter on nb_event_delivery (status, updated_at);
 go
+if not exists (select 1 from sys.indexes where name = 'ix_nb_event_delivery_delivered' and object_id = object_id('nb_event_delivery'))
+create index ix_nb_event_delivery_delivered on nb_event_delivery (status, delivered_at);
+go
 
 -- ─────────────────────────── ⑥ 老库兼容补齐（幂等；新库执行为空操作） ───────────────────────────
 

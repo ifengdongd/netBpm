@@ -2093,7 +2093,8 @@ create table if not exists nb_event_delivery (
     delivered_at datetime(3) comment '投递成功时间（UTC）',
     primary key (event_id, subscription_id),
     index ix_nb_event_delivery_subscription (subscription_id, status),
-    index ix_nb_event_delivery_dead_letter (status, updated_at)
+    index ix_nb_event_delivery_dead_letter (status, updated_at),
+    index ix_nb_event_delivery_delivered (status, delivered_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='事件投递：一条 outbox 事件对某个订阅的投递状态（重投时跳过已成功的订阅，避免无谓重发）';
 
 set @ddl = (select if(count(*) = 0,
@@ -2108,6 +2109,14 @@ set @ddl = (select if(count(*) = 0,
         'create index ix_nb_event_delivery_dead_letter on nb_event_delivery (status, updated_at)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'nb_event_delivery' and index_name = 'ix_nb_event_delivery_dead_letter');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ix_nb_event_delivery_delivered on nb_event_delivery (status, delivered_at)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'nb_event_delivery' and index_name = 'ix_nb_event_delivery_delivered');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
