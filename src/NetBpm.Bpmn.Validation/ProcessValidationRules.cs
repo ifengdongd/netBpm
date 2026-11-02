@@ -377,6 +377,38 @@ public sealed class UnsupportedCapabilityRule : IProcessValidationRule
 }
 
 /// <summary>
+/// 规则：解析到但<b>本子集不支持</b>的 BPMN 元素（子流程 / 调用活动 / 中间事件 …）必须显式拒绝。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 2026-11-02 新增：此前这些元素在<b>解析期</b>直接抛 <c>BpmnXmlParseException</c>
+/// （「元素 &lt;subProcess&gt; 不在本子集支持范围内」）。那句话本身没错，但形态不对：
+/// 它是「XML 坏了」的样子，而实际是「这个能力不做」；设计器也拿不到结构化提示。
+/// 现在解析器把它们记进 <see cref="Process.UnsupportedElements"/>，由本规则产出
+/// 与其它规则同形的 <see cref="ValidationError"/>（带元素 id，设计器能标红）。
+/// </para>
+/// </remarks>
+public sealed class UnsupportedElementRule : IProcessValidationRule
+{
+    public string Name => "unsupported-element";
+
+    public IEnumerable<ValidationError> Validate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        foreach (var element in process.UnsupportedElements)
+        {
+            yield return new ValidationError(
+                Name,
+                element.Id,
+                element.ElementName,
+                $"{element.Capability}（<{element.ElementName}>）不在本子集支持范围内；" +
+                "支持的元素见开发计划 §1.2，排除项见 §1.3。");
+        }
+    }
+}
+
+/// <summary>
 /// 规则：异步作业（<c>activiti:asyncBefore</c> / <c>asyncAfter</c>）的配置边界。
 /// <para>
 /// 本子集支持「独占异步作业」：同一实例的作业串行执行，一个作业 = 一个命令。

@@ -389,22 +389,61 @@ public sealed class BpmnXmlConverterTests
     }
 
     [Fact]
-    public void ConvertToBpmnModel_ShouldRejectOutOfSubsetElement()
+    public void OutOfSubsetElement_ShouldBeRecordedNotThrown()
     {
-        // §1.3 的排除项必须显式失败，不能静默忽略（否则"上线才发现问题"）
+        // §1.3 的排除项必须显式失败，不能静默忽略（否则"上线才发现问题"）。
+        // 但失败形态要和其它规则一致：解析器只负责"记下来"，拒绝由 unsupported-element 规则给出 ——
+        // 否则报出来的是「XML 坏了」的解析异常，设计器也拿不到带元素 id 的结构化提示。
         const string xml = """
             <?xml version="1.0" encoding="UTF-8"?>
             <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="http://netbpm/test">
               <process id="bad" isExecutable="true">
                 <startEvent id="start" />
-                <subProcess id="sub" />
+                <subProcess id="sub">
+                  <startEvent id="subStart" />
+                </subProcess>
+                <endEvent id="end" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml).GetMainProcess()!;
+
+        // 解析不再抛：子流程整棵跳过，不留残渣（子元素不能被当成流程级元素）
+        var unsupported = Assert.Single(process.UnsupportedElements);
+
+        Assert.Equal("subProcess", unsupported.ElementName);
+        Assert.Equal("sub", unsupported.Id);
+        Assert.Equal("子流程", unsupported.Capability);
+        Assert.DoesNotContain(process.FlowElements, element => element.Id == "subStart");
+
+        // 拒绝由校验层给出，且能定位到元素 id
+        var error = Assert.Single(
+            new ProcessValidator().Validate(process),
+            item => item.Rule == "unsupported-element");
+
+        Assert.Equal("sub", error.ElementId);
+        Assert.Contains("子流程", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConvertToBpmnModel_ShouldRejectTrulyUnknownElement()
+    {
+        // 完全不认识的元素仍然在解析期硬拒：它连"属于哪个能力"都说不清，
+        // 记录进模型只会变成一条没有说明的拒绝
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="http://netbpm/test">
+              <process id="bad" isExecutable="true">
+                <startEvent id="start" />
+                <whatever id="x" />
                 <endEvent id="end" />
               </process>
             </definitions>
             """;
 
         var exception = Assert.Throws<BpmnXmlParseException>(() => Parse(xml));
-        Assert.Contains("subProcess", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("whatever", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

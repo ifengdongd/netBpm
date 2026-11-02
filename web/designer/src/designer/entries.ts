@@ -22,6 +22,7 @@ import {
 import { h } from 'preact';
 
 import { businessObject, type DiagramElement, type ModelingService, type ModdleService, type ModdleElement, type PropertyEntry } from './types';
+import { UNSUPPORTED_ELEMENTS } from '../validation';
 
 /**
  * 自实现的短防抖，替代面板的 `debounceInput` 服务。
@@ -591,6 +592,14 @@ export function unsupportedCapabilities(element: DiagramElement): string[] {
   const bo: ModdleElement = businessObject(element);
   const found: string[] = [];
   const extensions = bo.extensionElements?.values ?? [];
+
+  // 元素本身就是子集外的能力（子流程 / 调用活动 / 中间事件 …）：
+  // 与 validation.ts 共用同一份清单，避免"面板说支持、部署被拒绝"
+  const elementCapability = UNSUPPORTED_ELEMENTS[bo.$type ?? ''];
+
+  if (elementCapability) {
+    found.push(`${elementCapability}（不在子集内）`);
+  }
 
   // ⚠️ 执行/任务/事件监听器与表单属性已支持（见 listEditors.ts），不再列为"不支持"；
   // 字段注入仍属子集外能力。

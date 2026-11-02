@@ -238,6 +238,11 @@ export default function MonitoringPage() {
   const [batchAssigneeSubmitting, setBatchAssigneeSubmitting] = useState(false);
   const [batchAssigneeForm] = Form.useForm<{ assignee?: string; clearAssignee?: boolean }>();
 
+  // 批量迁移到目标定义版本（不可逆：只有同 key 的实例能成功，其余计入失败条数）
+  const [batchMigrateOpen, setBatchMigrateOpen] = useState(false);
+  const [batchMigrateSubmitting, setBatchMigrateSubmitting] = useState(false);
+  const [batchMigrateForm] = Form.useForm<{ targetProcessDefinitionId: string; reason?: string }>();
+
   /** 关闭实例详情：同时清掉地址栏的 instanceId，避免刷新后又弹出来。 */
   const closeInstanceDetail = () => {
     setManualInstanceId(null);
@@ -570,6 +575,45 @@ export default function MonitoringPage() {
     }
   };
 
+  /** 批量迁移：目标定义必须是**同一个流程 key 的另一版本**，否则该项失败（逐项执行，不回滚）。 */
+  const openBatchMigrate = () => {
+    if (selectedIds.length === 0) {
+      message.warning('请先勾选要迁移的实例');
+      return;
+    }
+
+    batchMigrateForm.resetFields();
+    setBatchMigrateOpen(true);
+  };
+
+  const submitBatchMigrate = async () => {
+    let values: { targetProcessDefinitionId: string; reason?: string };
+
+    try {
+      values = await batchMigrateForm.validateFields();
+    } catch {
+      return;
+    }
+
+    setBatchMigrateSubmitting(true);
+
+    try {
+      const result = await runtimeApi.batchMigrateInstances(
+        selectedIds,
+        values.targetProcessDefinitionId.trim(),
+        values.reason?.trim() || undefined,
+      );
+
+      message.success(`批量迁移完成：成功 ${result.succeeded} 条，失败 ${result.failed} 条`);
+      setBatchMigrateOpen(false);
+      refreshAll();
+    } catch (error) {
+      message.error(`批量迁移失败：${(error as Error).message}`);
+    } finally {
+      setBatchMigrateSubmitting(false);
+    }
+  };
+
   // ─────────────────────────── 任务操作 ───────────────────────────
 
   const claimTask = async (task: TaskResponse) => {
@@ -771,6 +815,9 @@ export default function MonitoringPage() {
             </Button>
             <Button disabled={selectedIds.length === 0} onClick={() => void batchSetSuspension(false)}>
               批量激活
+            </Button>
+            <Button disabled={selectedIds.length === 0} onClick={openBatchMigrate}>
+              批量迁移版本（{selectedIds.length}）
             </Button>
             <Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0} onClick={() => void batchDelete()}>
               批量删除选中（{selectedIds.length}）
@@ -1139,6 +1186,38 @@ export default function MonitoringPage() {
             extra="按本地时区填写；逐项执行，单条失败不影响其它条。"
           >
             <Input type="datetime-local" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`批量迁移版本（${selectedIds.length} 条）`}
+        open={batchMigrateOpen}
+        confirmLoading={batchMigrateSubmitting}
+        okText="迁移"
+        cancelText="取消"
+        onOk={() => void submitBatchMigrate()}
+        onCancel={() => setBatchMigrateOpen(false)}
+        destroyOnClose
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="迁移不可逆"
+          description="目标定义必须是同一个流程 key 的另一个版本；不同 key 的实例会失败并计入失败条数（逐项执行，不做整体回滚）。多实例节点不支持迁移，同样逐项失败。"
+        />
+        <Form form={batchMigrateForm} layout="vertical">
+          <Form.Item
+            name="targetProcessDefinitionId"
+            label="目标流程定义 id"
+            extra="在「流程定义」页复制目标版本的 id（形如 demo:1:xxxx）"
+            rules={[{ required: true, message: '请填写目标流程定义 id' }]}
+          >
+            <Input placeholder="demo:2:3f2a…" />
+          </Form.Item>
+          <Form.Item name="reason" label="迁移原因（可选）" extra="写进审计：为什么迁移、谁批准的">
+            <Input.TextArea rows={3} placeholder="修复 v1 的审批连线错误，统一迁移到 v2" />
           </Form.Item>
         </Form>
       </Modal>

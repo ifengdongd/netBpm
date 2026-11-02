@@ -86,8 +86,14 @@ public class ElException : Exception
 }
 
 /// <summary>
-/// 预留能力的表达式异常：P3 尚未实现该语法时抛出，避免静默求值错误。
+/// 已实现的语法之外、遇到<b>明确不支持</b>的写法时抛出，避免静默求值错误。
 /// </summary>
+/// <remarks>
+/// ⚠️ 2026-11-02 复核：P3 的预留语法已全部实现，当前 <c>src/</c> 里**没有 throw 点**
+/// （唯一的引用是 <c>TaskBehaviors</c> 里的一处 catch：求值失败时回退原文而不是让提交失败）。
+/// 保留它是给将来看：新增语法时若选择「先解析、暂不执行」，就要用它显式失败，
+/// 而不是返回一个看起来正常的结果。别把它当成「EL 还有缺口」的信号 —— 现在没有。
+/// </remarks>
 public sealed class ElNotSupportedException : ElException
 {
     public ElNotSupportedException(string message)

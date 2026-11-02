@@ -47,6 +47,7 @@ public sealed class ProcessValidator : IProcessValidator
             new RequiredAttributesRule(),
             new ListenerConfigurationRule(),
             new UnsupportedCapabilityRule(),
+            new UnsupportedElementRule(),
             new UnknownActivitiAttributeRule(),
             new ScriptTaskRule(),
             new MultiInstanceRule(),

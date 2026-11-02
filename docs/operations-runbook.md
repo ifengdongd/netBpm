@@ -335,7 +335,68 @@ NETBPM_RUN_LOAD_TESTS=1 \
 
 ---
 
-## 13. 附：常用命令
+## 13. 崩溃恢复演练
+
+> 这一章回答的是一个**正确性**问题，不是可用性问题：
+> 进程可以死，但「已经答应的工作」不能假装没发生过。压测、SLO、看板都齐了之后，
+> 唯一还没被验证的就是「强杀之后那些在途状态到底还在不在、能不能续做」。
+
+### 13.1 准备：制造在途状态
+
+空库演练没有意义。先让库里出现下面四类在途状态中的**任意一类**（起一个带 `activiti:asyncBefore`
+节点的实例是最省事的，它会同时产生作业与 outbox 事件）：
+
+| 在途状态 | 表 | 崩溃后的预期 |
+|---|---|---|
+| 异步作业 | `ACT_RU_JOB` | 行还在；租约（`LOCK_OWNER_` / `LOCK_EXP_TIME_`）到期即回收，重启后由执行器续做 |
+| 定时作业 | `ACT_RU_TIMER_JOB` | 同上 |
+| 待投递事件 | `ACT_EVT_OUTBOX`（`PUBLISHED_=0`） | 行还在；`NEXT_ATTEMPT_` 兼作租约，到期重投；失败累计 5 次才进死信 |
+| 外部任务锁 | `nb_external_task`（`LOCK_EXP_TIME_` 非空） | 锁到期自动回收，**不需要有人解锁**；迟到的 worker 回执会被拒 |
+| 幂等占位 | `ACT_IDEMPOTENCY` | 过期行由 `IdempotencyCleanupService` 清理（宿主启用后台服务才有） |
+
+关键设计前提（这三句话决定了上面那张表）：作业 / outbox 行与业务变更在**同一个事务**里写入，
+所以「推进了但没落作业」和「落了作业但没推进」都不可能发生；租约一律「到期自动释放」而不是靠显式解锁。
+
+### 13.2 跑演练
+
+```powershell
+# 会强杀宿主进程（等价 kill -9：没有 graceful shutdown、没有 flush、没有 finally）
+./tools/drills/crash-recovery.ps1 `
+  -Connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm" `
+  -ProcessId 12345            # ⚠️ 用 -ProcessName dotnet 会强杀机器上所有同名进程
+```
+
+脚本做三件事：**记基线 → 强杀 → 复查**（崩溃后一次、重启并等一轮轮询后再一次），最后打判定表。
+退出码：`0` 全通过 / `1` 有 FAIL / `2` 没得练（库里没有在途状态，或找不到宿主进程）。
+
+### 13.3 判定标准
+
+| 判定项 | 通过条件 | 不通过意味着 |
+|---|---|---|
+| 崩溃不丢异步作业 | `ACT_RU_JOB` 条数不减少 | 作业与业务不同事务 —— 这是架构缺陷，必须修代码 |
+| 崩溃不丢待投递事件 | 待投递条数不减少 | 同上（outbox 不生效） |
+| 崩溃不吞历史 | `ACT_HI_ACTINST` 条数不减少 | 历史写入在事务外 |
+| 重启后作业被续做 | 作业条数下降，或历史活动行增加 | 执行器没有扫到期作业，或租约没到期回收 |
+| 重启后事件被续投 | 已投递条数增加 | outbox 发布器没跑，或租约没回收 |
+| 过期外锁可被接管 | 能查到 `LOCK_EXP_TIME_ <= now` 的锁 | ——（这一项只做观测，锁靠到期回收，不需要人工解锁） |
+
+### 13.4 没有 mysql 客户端时
+
+照着查就行，判定同上：
+
+```sql
+select count(*) from ACT_RU_JOB;
+select count(*) from ACT_RU_TIMER_JOB;
+select count(*) from ACT_EVT_OUTBOX where PUBLISHED_ = 0;
+select count(*) from ACT_EVT_OUTBOX where PUBLISHED_ = 1;
+select count(*) from nb_external_task where LOCK_EXP_TIME_ is not null;
+select count(*) from ACT_IDEMPOTENCY;
+select count(*) from ACT_HI_ACTINST;
+```
+
+---
+
+## 14. 附：常用命令
 
 ```bash
 # 库探活 / 建库 / 迁移 / 只校验版本

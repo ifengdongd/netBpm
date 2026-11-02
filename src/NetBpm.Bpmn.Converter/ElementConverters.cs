@@ -522,7 +522,10 @@ public sealed class ManualTaskXmlConverter : BaseBpmnXmlConverter<ManualTask>
     }
 }
 
-/// <summary>脚本任务（<c>scriptTask</c>）转换器。执行实现属二期（见 §1.2）。</summary>
+/// <summary>
+/// 脚本任务（<c>scriptTask</c>）转换器。
+/// <para>执行已由 Roslyn 实现（<c>ScriptTaskEngine</c>），只支持 <c>csharp</c> / <c>c#</c> 脚本格式。</para>
+/// </summary>
 public sealed class ScriptTaskXmlConverter : BaseBpmnXmlConverter<ScriptTask>
 {
     private static readonly HashSet<string> KnownAttributes = new(StringComparer.Ordinal)

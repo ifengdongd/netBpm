@@ -19,6 +19,16 @@ public class Process : BaseElement, IFlowElementsContainer
     /// </summary>
     public IList<EventListener> EventListeners { get; } = [];
 
+    /// <summary>
+    /// 解析到但<b>本子集不支持</b>的流程元素（如 <c>subProcess</c> / <c>callActivity</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 为什么不直接在解析器里抛异常：那样报出来的是「XML 坏了」形态的解析错误，
+    /// 而它其实是「这个能力不在子集内」—— 与其它 20 条规则的 <see cref="ValidationError"/> 形态不一致，
+    /// 前端设计器也拿不到结构化提示。记进模型、交给校验层拒绝，才能和其它出界能力同形。
+    /// </remarks>
+    public IList<UnsupportedElement> UnsupportedElements { get; } = [];
+
     public void AddFlowElement(FlowElement element)
     {
         ArgumentNullException.ThrowIfNull(element);
@@ -52,3 +62,11 @@ public class Process : BaseElement, IFlowElementsContainer
     /// </summary>
     public FlowElement? GetInitialFlowElement() => FlowElements.OfType<StartEvent>().FirstOrDefault();
 }
+
+/// <summary>
+/// 一个「认识但不支持」的 BPMN 元素。对应 Activiti 里被 <c>BpmnParse</c> 跳过的能力。
+/// </summary>
+/// <param name="ElementName">XML 元素名（如 <c>subProcess</c>）。</param>
+/// <param name="Id">元素 id（缺失时为 <see langword="null"/>）。</param>
+/// <param name="Capability">能力的中文说明（给建模者看的，不写元素名）。</param>
+public sealed record UnsupportedElement(string ElementName, string? Id, string Capability);

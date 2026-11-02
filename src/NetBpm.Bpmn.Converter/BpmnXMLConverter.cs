@@ -34,6 +34,29 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         "group",
     };
 
+    /// <summary>
+    /// <b>认识但不支持</b>的 BPMN 元素（元素名 → 能力说明）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="IgnorableElements"/> 的区别：那些是「与本子集无关、忽略也无语义损失」
+    /// （<c>textAnnotation</c>、<c>documentation</c> 之类）；这些是<b>有语义、但我们不做</b>的能力，
+    /// 必须记下来由校验层显式拒绝（<c>unsupported-element</c> 规则），
+    /// 否则就退化成「解析期抛异常」，报出来的形态像 XML 坏了、且前端设计器拿不到结构化提示。
+    /// </remarks>
+    private static readonly Dictionary<string, string> UnsupportedElements = new(StringComparer.Ordinal)
+    {
+        ["subProcess"] = "子流程",
+        ["adHocSubProcess"] = "临时子流程",
+        ["transaction"] = "事务子流程",
+        ["callActivity"] = "调用活动",
+        ["receiveTask"] = "接收任务",
+        ["sendTask"] = "发送任务",
+        ["businessRuleTask"] = "业务规则任务",
+        ["intermediateCatchEvent"] = "中间捕获事件",
+        ["intermediateThrowEvent"] = "中间抛出事件",
+        ["complexGateway"] = "复杂网关",
+    };
+
     private readonly Dictionary<string, IBpmnElementXmlConverter> _elementReaders = new(StringComparer.Ordinal);
     private readonly Dictionary<Type, IBpmnElementXmlConverter> _elementWriters = [];
 
@@ -235,6 +258,14 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
             {
                 var element = converter.Read(reader, process);
                 process.AddFlowElement((FlowElement)element);
+            }
+            else if (UnsupportedElements.TryGetValue(reader.LocalName, out var capability))
+            {
+                // 认识但不支持：记下来交给校验层给结构化错误（而不是在这里把「能力不支持」报成「XML 坏了」）
+                process.UnsupportedElements.Add(
+                    new UnsupportedElement(reader.LocalName, reader.GetAttribute("id"), capability));
+
+                SkipSubtree(reader);
             }
             else if (IgnorableElements.Contains(reader.LocalName))
             {

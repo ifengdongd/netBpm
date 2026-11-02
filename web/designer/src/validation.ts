@@ -509,7 +509,21 @@ function validateSequenceFlows(sequenceFlows: ModdleElement[]): DraftIssue[] {
   return issues;
 }
 
-/** 规则 9 + 事件定义 + 未实现的任务监听器事件（后端一律显式拒绝）。 */
+/** 认识但**本子集不支持**的元素（与后端 BpmnXmlConverter.UnsupportedElements 一一对应）。 */
+export const UNSUPPORTED_ELEMENTS: Record<string, string> = {
+  'bpmn:SubProcess': '子流程',
+  'bpmn:AdHocSubProcess': '临时子流程',
+  'bpmn:Transaction': '事务子流程',
+  'bpmn:CallActivity': '调用活动',
+  'bpmn:ReceiveTask': '接收任务',
+  'bpmn:SendTask': '发送任务',
+  'bpmn:BusinessRuleTask': '业务规则任务',
+  'bpmn:IntermediateCatchEvent': '中间捕获事件',
+  'bpmn:IntermediateThrowEvent': '中间抛出事件',
+  'bpmn:ComplexGateway': '复杂网关',
+};
+
+/** 规则 9 + 事件定义 + 不支持的元素 + 未实现的任务监听器事件（后端一律显式拒绝）。 */
 function validateUnsupportedCapabilities(
   flowElements: ModdleElement[],
   process: ModdleElement,
@@ -519,6 +533,21 @@ function validateUnsupportedCapabilities(
 
   for (const element of candidates) {
     const id = element.id ?? '';
+
+    // 子流程 / 调用活动这类"有语义但不做"的元素：后端 unsupported-element 规则会拒绝，
+    // 这里同步提示 —— 否则建模者只在部署时才知道，且拿到的是「XML 坏了」形态的解析错误。
+    const capability = UNSUPPORTED_ELEMENTS[element.$type ?? ''];
+
+    if (capability) {
+      issues.push(
+        error(
+          id,
+          `${label(element)} 是${capability}（${(element.$type ?? '').replace('bpmn:', '')}）：` +
+            '不在本子集支持范围内，部署会被拒绝。',
+        ),
+      );
+    }
+
     const extensions = element.extensionElements?.values ?? [];
 
     for (const extension of extensions) {

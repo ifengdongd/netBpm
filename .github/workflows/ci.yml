@@ -229,6 +229,42 @@ jobs:
             exit "$status"
           fi
 
+      - name: Coverage statement (skipped / 未覆盖的可选路径)
+        # 为什么要有这一步：集成测试里约 130 处 Assert.Skip*（Redis 靠环境变量、SqlServer 靠
+        # Testcontainers、MySQL 靠本机/服务容器）。跳过是**静默**的 —— exit code 是绿的，
+        # 但「本轮其实没验证过双库矩阵与 Redis 路径」这件事没人看见。
+        # 这里把它显式写进 job summary：绿就绿得明白，缺什么一眼可见。
+        if: always()
+        env:
+          NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
+        run: |
+          redis=${REDIS_CONNECTIONSTRING:-${NETBPM_REDIS_CONNECTION:-}}
+          docker_ok="否"
+          if docker version >/dev/null 2>&1; then docker_ok="是"; fi
+
+          {
+            echo "### 可选依赖覆盖情况"
+            echo
+            echo "| 依赖 | 本轮是否覆盖 | 说明 |"
+            echo "|---|---|---|"
+            echo "| MySQL（真库集成测试） | ✅ 是 | 服务容器 mysql:8.4 |"
+            if [ -n "$redis" ]; then
+              echo "| Redis（作业队列 / 缓存） | ✅ 是 | 连接串已配置 |"
+            else
+              echo "| Redis（作业队列 / 缓存） | ⚠️ 否 | 未配置连接串，相关用例跳过 |"
+            fi
+            echo "| SqlServer（双库功能矩阵） | $([ "$docker_ok" = "是" ] && echo '⚠️ 视 Testcontainers 能否拉起镜像' || echo '❌ 否') | docker 可用=$docker_ok |"
+            echo
+            echo "> 跳过不算通过：这些路径的回归靠本地或专用流水线，CI 只负责把它们**标出来**。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$redis" ]; then
+            echo "::warning title=Redis 路径未覆盖::未配置 REDIS_CONNECTIONSTRING，依赖 Redis 的用例本轮被跳过"
+          fi
+          if [ "$docker_ok" != "是" ]; then
+            echo "::warning title=SqlServer 路径未覆盖::Docker 不可用，双库功能矩阵本轮被跳过"
+          fi
+
   differential:
     # 差分对拍：拿 Java 预言机（真 Activiti）产出的三维度真值，比 NetBpm 的实现。
     #
