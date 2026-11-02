@@ -263,6 +263,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 真值新鲜度检查读的是 git 提交时间：浅克隆里所有文件的提交时间相同，
+          # 检查会静默通过（等于没检查）。完整历史是这道检查能生效的前提。
+          fetch-depth: 0
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -271,6 +275,14 @@ jobs:
 
       - name: Build
         run: dotnet build NetBpm.slnx --nologo
+
+      - name: Oracle freshness (语料改过 ⇒ 真值必须重跑)
+        # 真值是人工跑 Java 预言机产出的，CI 只消费不生产。语料一改而真值没重跑，
+        # 后面那一步比的就是「新语料 vs 旧真值」，差异看着像引擎退步其实是真值过期 ——
+        # 所以这一步必须**先于**跑批，且失败即停（不带着过期真值去下一个结论）。
+        run: >
+          dotnet run --project tests/NetBpm.DifferentialTests --no-build -- -noColor
+          -class NetBpm.DifferentialTests.OracleFreshnessTests
 
       - name: Differential run (against Activiti oracle)
         # 对拍库是独立的 netbpm_diff（TestDatabase 自动建库建表）：与集成测试的 netbpm 分开，
@@ -290,6 +302,22 @@ jobs:
             echo "::error title=差分对拍失败::exit=${status} ${detail:0:1500}"
             exit "$status"
           fi
+
+      - name: Gate margin (job summary)
+        # 已登记的差异仍计入一致率：门禁过了不代表「还很宽裕」。
+        # 把余量写进 job summary，nightly 扫一眼就知道下一次差异还能不能靠登记消化。
+        if: always()
+        run: |
+          {
+            echo "### 对拍门禁余量"
+            echo
+            if [ -f artifacts/differential/report.md ]; then
+              sed -n '/### 门禁余量/,/^$/p' artifacts/differential/report.md
+              sed -n '/| 维度 | 参与比对单元格/,/^$/p' artifacts/differential/report.md
+            else
+              echo "（未产出报告）"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload differential report
         # 报告是给人看的差异清单：一致率达标与否在 CI 里是 exit code，

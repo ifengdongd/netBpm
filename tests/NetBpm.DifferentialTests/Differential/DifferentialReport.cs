@@ -119,6 +119,8 @@ public sealed record DifferentialReport
         AppendDimension(builder, "**整体**", Overall, limits.Overall);
 
         builder.AppendLine();
+        AppendMargins(builder, limits);
+
         builder.AppendLine(CultureInfo.InvariantCulture, $"差异台账：已登记 {ConcludedDifferences} 条，**待结论 {PendingConclusions.Count} 条**").AppendLine();
         builder.AppendLine(CultureInfo.InvariantCulture, $"跑不动的语料：**{ExecutionFailures.Count} 个**（不参与一致率，但会让门禁失败）").AppendLine();
         builder.AppendLine(CultureInfo.InvariantCulture, $"不适用的语料：{InapplicableCases.Count} 个（脚本口径限制，非引擎缺陷；不参与一致率）").AppendLine();
@@ -161,6 +163,8 @@ public sealed record DifferentialReport
             builder.AppendLine();
         }
 
+        AppendComposition(builder);
+
         builder.AppendLine("## 语料明细").AppendLine();
         builder.AppendLine("| 语料 | 预言机 | ① | ② | ③ | 备注 |");
         builder.AppendLine("|---|:--:|---:|---:|---:|---|");
@@ -182,6 +186,108 @@ public sealed record DifferentialReport
         result.ComparedCells == 0
             ? "-"
             : $"{result.MatchRate * 100:F2}%（{result.Differences.Count}/{result.ComparedCells}）";
+
+    /// <summary>
+    /// 门禁余量：每个维度**还能再容纳几条差异**才破线。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为什么要单独算：已登记（有结论）的差异<b>仍然计入一致率</b> —— 台账解决的是
+    /// 「这条差异有没有解释」，不是「它扣不扣分」。于是「登记就完事」会一点点吃掉额度，
+    /// 直到某天一条普通差异就让门禁变红，而没人知道额度早就没了。
+    /// </para>
+    /// <para>
+    /// 有了余量，新增差异时的判断就变成两句话：能回写代码的去写代码；确实属于有意偏离的，
+    /// 登记之后看一眼余量还剩多少 —— 最紧的那个维度（通常是行快照）就是下一次的硬约束。
+    /// </para>
+    /// </remarks>
+    private void AppendMargins(StringBuilder builder, DifferentialThresholds limits)
+    {
+        builder.AppendLine("### 门禁余量").AppendLine();
+        builder.AppendLine("> 已登记的差异仍计入一致率：台账只解决「有没有解释」，不解决「扣不扣分」。").AppendLine();
+        builder.AppendLine("> 因此真正要盯的是**还剩几条额度**。").AppendLine();
+        builder.AppendLine("| 维度 | 当前差异 | 破线上限 | 余量 |");
+        builder.AppendLine("|---|---:|---:|---:|");
+
+        AppendMargin(builder, "① API 返回值", Api, limits.Api);
+        AppendMargin(builder, "② ACT_* 行快照", Tables, limits.Tables);
+        AppendMargin(builder, "③ 事件序列", Events, limits.Events);
+        AppendMargin(builder, "**整体**", Overall, limits.Overall);
+
+        builder.AppendLine();
+    }
+
+    private static void AppendMargin(
+        StringBuilder builder,
+        string label,
+        ComparisonResult result,
+        double target)
+    {
+        // 破线上限 = 不超过 (1 - 目标) 的最大差异条数
+        var ceiling = (int)Math.Floor(result.ComparedCells * (1 - target));
+        var margin = ceiling - result.Differences.Count;
+
+        builder.AppendLine(CultureInfo.InvariantCulture,
+            $"| {label} | {result.Differences.Count} | {ceiling} | {margin} |");
+    }
+
+    /// <summary>
+    /// 差异构成：按「维度 / 表 / 列」聚合当前所有差异（含已登记的）。
+    /// </summary>
+    /// <remarks>
+    /// 报告原本只把<b>待结论</b>的差异列出来，于是「已登记的 74 条从哪来」是个黑盒。
+    /// 列出来之后，系统性偏离（某个列在所有语料上都差）与偶发差异一眼可分：
+    /// 前者要么回写代码一次性收掉一大批，要么就该被承认为设计取舍；后者才需要逐条看。
+    /// </remarks>
+    private void AppendComposition(StringBuilder builder)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var result in Cases)
+        {
+            foreach (var (dimension, comparison) in new[]
+                     {
+                         ("①", result.Api),
+                         ("②", result.Tables),
+                         ("③", result.Events),
+                     })
+            {
+                foreach (var difference in comparison.Differences)
+                {
+                    var key = dimension + "\u001f" + difference.Table + "\u001f" + difference.Column;
+
+                    counts[key] = counts.TryGetValue(key, out var current) ? current + 1 : 1;
+                    labels[key] = dimension;
+                }
+            }
+        }
+
+        if (counts.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine("### 差异构成（按列聚合，含已登记的）").AppendLine();
+        builder.AppendLine("| 维度 | 表 | 列 | 条数 |");
+        builder.AppendLine("|:--:|---|---|---:|");
+
+        foreach (var (key, count) in counts.OrderByDescending(pair => pair.Value).Take(12))
+        {
+            var parts = key.Split('\u001f');
+
+            builder.AppendLine(CultureInfo.InvariantCulture, $"| {parts[0]} | {parts[1]} | {parts[2]} | {count} |");
+        }
+
+        var shown = counts.OrderByDescending(pair => pair.Value).Take(12).Sum(pair => pair.Value);
+
+        if (shown < counts.Values.Sum())
+        {
+            builder.AppendLine(CultureInfo.InvariantCulture, $"| | | *（其余 {counts.Values.Sum() - shown} 条）* | {counts.Values.Sum() - shown} |");
+        }
+
+        builder.AppendLine();
+    }
 
     private static void AppendDimension(StringBuilder builder, string label, ComparisonResult result, double target) =>
         builder.AppendLine(CultureInfo.InvariantCulture,

@@ -75,6 +75,31 @@ dotnet test tests\NetBpm.DifferentialTests\NetBpm.DifferentialTests.csproj
 
 ---
 
+## 四点五、什么时候必须重跑真值（真值是一次性产物）
+
+真值**不是**流水线的产物：它需要 JDK 21 + 本地 install 的 Activiti 9.0.0
+（`mvn install` 进本地仓库，中央仓库未必有 9.0.0），因此只能由维护者在本地生成后**随语料一起提交**。
+代价是真值会过期，而过期之后的差异全部是假的。
+
+以下任一件事发生，**必须先重跑真值再谈对拍结论**：
+
+| 触发 | 为什么 |
+|---|---|
+| 语料被改（BPMN / `case.json`，含生成器重新 `--check` 后的重生成） | 比对的前提是两端跑同一个语料；语料换了，旧真值就是另一道题的答案 |
+| 生成器（`tests/corpus/generator`）的模板/组合规则变了 | 同上：语料会被重新生成，内容变了 |
+| 预言机侧改了（`tools/Oracle/src`、Activiti 版本） | 真值的口径变了，旧真值与新真值不可混用 |
+| 引擎的表结构变了（`db/mysql` 增删列） | 维度②比的是列；多一列/少一列会让整批行的比对失去意义 |
+
+**自动检查**：`NetBpm.DifferentialTests.OracleFreshnessTests` 比对「语料的最后提交时间」与
+「真值的最后提交时间」，语料更晚即失败（列出可疑语料）。CI 的 `differential` job 在跑批**之前**执行它。
+
+⚠️ 两处局限要记住：
+1. 它读的是 **git 提交时间**而不是文件 mtime —— git 不保留 mtime，用 mtime 会在本地恒红、在 CI 恒绿，两头都没意义；
+2. 因此需要**完整历史**，浅克隆（`--depth 1`）里所有文件的提交时间相同，检查会静默通过
+   （CI 的该 job 已显式 `fetch-depth: 0`）。
+
+---
+
 ## 五、与 C# 侧的分工
 
 ```
