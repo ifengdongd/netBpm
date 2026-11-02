@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -215,6 +216,7 @@ public sealed class ContractSnapshotTests
         var report = new StringBuilder();
 
         report.AppendLine(
+            CultureInfo.InvariantCulture,
             $"契约快照与当前实现不一致：{changes.Count} 处变更（破坏性 {breaking} 处）。");
 
         if (breaking > 0)
@@ -232,7 +234,7 @@ public sealed class ContractSnapshotTests
         }
 
         report.AppendLine();
-        report.AppendLine($"快照位置：{SnapshotFile}");
+        report.AppendLine(CultureInfo.InvariantCulture, $"快照位置：{SnapshotFile}");
         report.AppendLine(
             "确认变更可接受后更新快照：NETBPM_UPDATE_CONTRACTS=1 dotnet run --project tests/NetBpm.IntegrationTests "
             + "-class NetBpm.IntegrationTests.ContractSnapshotTests");

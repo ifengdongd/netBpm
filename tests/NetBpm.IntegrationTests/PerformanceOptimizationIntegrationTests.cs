@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Dapper;
 using NetBpm.Bpmn.Converter;
@@ -264,7 +265,7 @@ public sealed class PerformanceOptimizationIntegrationTests
         {
             var target = index == gatewayCount ? "endA" : $"gw_{index + 1}";
 
-            xml.AppendLine($$"""
+            xml.AppendLine(CultureInfo.InvariantCulture, $$"""
                     <exclusiveGateway id="gw_{{index}}" />
                     <sequenceFlow id="f_{{index}}_taken" sourceRef="gw_{{index}}" targetRef="{{target}}">
                       <conditionExpression xsi:type="tFormalExpression">${amount > 0}</conditionExpression>

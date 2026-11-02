@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using NetBpm.Persistence;
 
 namespace NetBpm.IntegrationTests;
@@ -79,6 +80,9 @@ internal sealed class CountingDbConnection : DbConnection
     internal DbConnection Inner => _inner;
 
     /// <inheritdoc />
+    // 基类 DbConnection.ConnectionString 的 setter 允许 null（[AllowNull]），
+    // 只给 getter 标非空会让重写签名与基类不一致（CS8765）。
+    [AllowNull]
     public override string ConnectionString
     {
         get => _inner.ConnectionString;
@@ -144,6 +148,8 @@ internal sealed class CountingDbCommand : DbCommand
     }
 
     /// <inheritdoc />
+    // 同 ConnectionString：DbCommand.CommandText 的 setter 也允许 null。
+    [AllowNull]
     public override string CommandText
     {
         get => _inner.CommandText;

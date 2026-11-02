@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -131,7 +132,7 @@ public sealed class DualModeTests
         entry.GetProperty("activityId").GetString() ?? "-",
         entry.GetProperty("round").ValueKind == JsonValueKind.Null
             ? "-"
-            : entry.GetProperty("round").GetInt32().ToString(),
+            : entry.GetProperty("round").GetInt32().ToString(CultureInfo.InvariantCulture),
         entry.GetProperty("optionId").GetString() ?? "-",
         entry.GetProperty("semantic").GetString() ?? "-",
         entry.GetProperty("comment").GetString() ?? "-",
@@ -149,7 +150,7 @@ public sealed class DualModeTests
         outcome.GetProperty("pending").GetInt32(),
         outcome.GetProperty("round").ValueKind == JsonValueKind.Null
             ? "-"
-            : outcome.GetProperty("round").GetInt32().ToString());
+            : outcome.GetProperty("round").GetInt32().ToString(CultureInfo.InvariantCulture));
 
     private static string NormalizeConclusion(JsonElement conclusion) =>
         conclusion.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined

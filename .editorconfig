@@ -51,3 +51,28 @@ dotnet_diagnostic.CA1711.severity = none
 # LoggerMessage 源生成的微优化。高频热路径（操作循环内部）已显式做 IsEnabled 判定。
 dotnet_diagnostic.CA1848.severity = none
 dotnet_diagnostic.CA1873.severity = none
+
+# ── 测试工程：只留下「可能指向真 bug」的规则 ───────────────────────────────
+# tests/ 下的工程关闭了 TreatWarningsAsErrors（见 Directory.Build.props），
+# 所以这里的界线必须自己划清楚：否则 400+ 条机械提示会把真正该看的警告淹掉。
+# 原则：正确性 / 文化 / 可空性类规则保持 warning；纯风格与微优化降为 suggestion
+# （IDE 里仍有灰点提示，只是不再污染 build 输出）。
+[tests/**/*.cs]
+# xUnit1051：建议给每个接受 CancellationToken 的调用补 TestContext.Current.CancellationToken。
+# 本仓库测试是短时用例，机械补 400+ 处换来的可取消性收益远低于噪音成本。
+dotnet_diagnostic.xUnit1051.severity = suggestion
+# xUnit1030：测试方法内不该 ConfigureAwait(false)（会绕过 xUnit 的并行度限制）。
+# 现有用例无并行度依赖，降为提示，留给后续顺手清理。
+dotnet_diagnostic.xUnit1030.severity = suggestion
+# 断言风格建议：集合大小 / 不存在的判断改用 Single、Empty、DoesNotContain。
+dotnet_diagnostic.xUnit2013.severity = suggestion
+dotnet_diagnostic.xUnit2029.severity = suggestion
+# 微优化：常量数组提为 static readonly；可索引集合别绕 Enumerable；
+# 字段/返回值收窄成具体类型；Regex.Count 替代 Regex.Matches(...).Count。
+# 测试辅助代码优先可读性（对接口编程），这几条带来的收益可忽略。
+dotnet_diagnostic.CA1861.severity = suggestion
+dotnet_diagnostic.CA1826.severity = suggestion
+dotnet_diagnostic.CA1859.severity = suggestion
+dotnet_diagnostic.CA1875.severity = suggestion
+# CA1822：xUnit 要求测试方法为实例方法，只有辅助方法能标 static。
+dotnet_diagnostic.CA1822.severity = suggestion

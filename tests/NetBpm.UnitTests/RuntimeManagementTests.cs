@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using NetBpm.Engine;
 using NetBpm.Engine.Command;
 using NetBpm.Engine.Tasks;
@@ -145,7 +147,7 @@ public class RuntimeManagementTests
 
         var instance = await engine.ExecutionManager.FindByIdAsync(instanceId);
         var variables = await instance!.GetVariablesAsync();
-        Assert.Equal(5, Convert.ToInt32(variables["days"]));
+        Assert.Equal(5, Convert.ToInt32(variables["days"], CultureInfo.InvariantCulture));
     }
 
     [Fact]
