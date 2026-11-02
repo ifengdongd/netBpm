@@ -343,6 +343,35 @@ public sealed class ExpressionEvaluationTests
             async () => await manager.CreateExpression("${brandNew}").SetValueAsync(1, scope, Ct));
     }
 
+    /// <summary>
+    /// 反射元数据缓存（<c>ElResolver</c> 的 <c>MethodCache</c>）不得改变方法解析语义：
+    /// 同名重载按参数个数分开解析，缓存命中后结果必须与首次一致。
+    /// </summary>
+    /// <remarks>
+    /// key 里的参数个数不是「优化」而是<b>正确性</b>：漏掉它，先求值的 <c>describe()</c> 会把
+    /// 候选集一起污染成「0 参」，紧跟着的 <c>describe(7)</c> 就会变成「未知方法」——
+    /// 而这条错只在「同一类型先后用不同参数个数」时才出现，最容易在缓存上线后漏测。
+    /// </remarks>
+    [Fact]
+    public async Task MethodOverloads_ShouldResolveByArgumentCount_AcrossCachedCalls()
+    {
+        var manager = new ExpressionManager();
+        var scope = new TestScope(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["probe"] = new OverloadProbe(),
+        });
+
+        // 交替调用不同参数个数：先写进缓存的是哪一组都不该影响结果
+        Assert.Equal("no-arg", await manager.CreateExpression("${probe.describe()}").GetValueAsync(scope, Ct));
+        Assert.Equal("one-arg:7", await manager.CreateExpression("${probe.describe(7)}").GetValueAsync(scope, Ct));
+        Assert.Equal("no-arg", await manager.CreateExpression("${probe.describe()}").GetValueAsync(scope, Ct));
+        Assert.Equal("one-arg:7", await manager.CreateExpression("${probe.describe(7)}").GetValueAsync(scope, Ct));
+
+        // 忽略大小写的回退与精确匹配共用同一份缓存，不能互相顶掉
+        Assert.Equal("no-arg", await manager.CreateExpression("${probe.DESCRIBE()}").GetValueAsync(scope, Ct));
+        Assert.Equal("one-arg:7", await manager.CreateExpression("${probe.DESCRIBE(7)}").GetValueAsync(scope, Ct));
+    }
+
     private static TestScope CreateScope()
     {
         var scope = new TestScope(new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -398,4 +427,12 @@ public sealed class ExpressionEvaluationTests
     }
 
     private sealed record TestDepartment(string Code);
+
+    /// <summary>同名不同参数个数的方法：用来验证反射缓存的 key 必须带参数个数。</summary>
+    private sealed class OverloadProbe
+    {
+        public string Describe() => "no-arg";
+
+        public string Describe(int value) => $"one-arg:{value}";
+    }
 }

@@ -458,9 +458,9 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 | 高 | **P1-7 委托解析仍走根容器** | `IActivityDelegateResolver` 注册为 **单例**（`NetBpmServiceCollectionExtensions.cs:323`），构造注入的是根 `IServiceProvider`；`ServiceProviderActivityDelegateResolver.cs:44,55` 依次 `GetService(type)` → `Activator.CreateInstance` | 改成 `IEngineServices` 持有 `IServiceScopeFactory`，在**命令作用域**内解析并释放；或明确文档化「委托不得依赖 Scoped」并加部署期校验 |
 | 中 | **P1-6 内存宿主单例** | `InMemoryExecutionManager` 仍是 `AddSingleton`；但已补命令级快照 + `OnAborted` 回滚（§十一），失败不再留下半棵树 | 若要彻底解决需改 `IProcessEngine` 生命周期（连锁改动大），建议保持现状并在文档写明「内存宿主 = 单进程单租户演示」 |
 | 中 | **§四C 定义层四条全部未做** | `Process.cs:11` 仍是 public `IList<IFlowElement> FlowElements` + `AddFlowElement`；校验仍是 `foreach (rule) rule.Validate(process)`（`ProcessValidator.cs:76`），5 个规则文件里 34 处 `OfType<` 全扫；`ExtensionElements` **解析侧从不填充**（`BaseBpmnXmlConverter.cs:351-376` 只认已知子元素，未知扩展子元素被静默丢弃），写侧虽遍历该集合但集合恒为空 ⇒ 往返丢失仍在；转换器仍无 `IXmlLineInfo`（全项目 0 处） | 先做往返保真（收集未知扩展子元素）—— 它直接导致设计器保存一次就丢自定义扩展；`Freeze()` 与单次遍历属重构，收益低于风险 |
-| 中 | **§四D-2 `ElResolver` 反射元数据缓存** | `ElResolver.cs:392-399` 每次方法调用都 `type.GetMethods()` + LINQ 过滤；表达式缓存只缓存 AST，不缓存反射结果 | 加 `ConcurrentDictionary<(Type,string,argc), MethodInfo[]>`；热路径上这是稳定开销 |
+| 中 | ~~**§四D-2 `ElResolver` 反射元数据缓存**~~ ✅ **v1.34 已闭环** | `MethodCache`（key 含参数个数）/ `MemberCache` / `IndexerCache` 三个 `ConcurrentDictionary`：属性与索引器缓存读取委托，方法缓存已过滤的候选集。**不设容量上限**——key 的基数是「类型 × 成员名 × 参数个数」，来自业务模型类型，天然有界；表达式缓存要上限是因为表达式文本来自 BPMN，用户能写出无限多不同文本，两者膨胀来源不同 | `MethodOverloads_ShouldResolveByArgumentCount_AcrossCachedCalls` 锁住「key 漏掉参数个数会错配重载」这条边界（这条错只在同类型先后用不同参数个数时出现，最容易漏测） |
 | 中 | **P1-10 监听器异常默认吞** | `EngineEventDispatcher.cs:87` 仍是 `catch (Exception) when (listener.ThrowOnFailure != true)` + `LogWarning` | 语义已文档化；建议在部署期校验里对「关键监听器」强制 `throwOnFailure=true` |
-| 低 | **错误码仍有 7 处无 `code`** | 运行态已全量（本轮补齐 form 400 / history 404 / diagram 404）；`DesignerEndpoints.cs:88,166,463,532`、`IdentityEndpoints.cs:69,84`、`AuthEndpoints.cs:82` 仍是裸 `ErrorResponse` | 把 `InvalidRequest` 提升为公共助手，设计器/身份/登录一并改用 `EngineErrorCode` |
+| 低 | ~~**错误码仍有 7 处无 `code`**~~ ✅ **v1.34 已闭环** | 新增 `EndpointResults`（400 `validation_error` / 404 `not_found`）作为唯一构造点：设计器 4 处（请求体空 ×2、部署不存在、定义不存在）、身份 2 处（组不存在）、登录 1 处（缺参数）全部改用它；`RuntimeEndpoints.InvalidRequest` 退化为薄委托，19 处调用点不动 | `EndpointErrorCodeTests` 2 项：登录 400 与未知组 404 都断言 `code`；设计器那几条在 `netbpm.admin.*` 管理 scope 下，由 `AdminGovernanceTests` 的 JWT 链路间接覆盖 |
 | 低 | **§四G 过度设计仍在** | `IOperation` 4 个实现 + 接口（`Operations/*.cs`）；`IJobQueue` 三件套（Redis/InMemory/JobQueue.cs） | 维持现状：这两处是「看得见调用链」的代价，裁掉的收益低于改错风险 |
 
 ### 13.3 本轮发现并已修（代码）
@@ -479,13 +479,15 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 | `InstanceCommandService` 三处批量循环重复 | `BatchDelete` / `BatchSetSuspension` / `BatchMigrate` 各自 45 行同构（逐项租户 + 执行 + 成败审计） | 抽 `RunBatchAsync(ids, action, detailFor, execute)`，可减约 120 行 |
 | `ResourceNotFoundException` 继承引擎异常 | 为了让批量端点用单条 `catch (EngineException)` 做逐项隔离 | 可接受（类注释已说明）；替代方案是批量里 `catch (ResourceNotFoundException or EngineException)` 两分支 |
 | 历史查询对未知实例的**双语义** | 不受限身份：`/history/.../activities`、`/variables` 返回 200 空数组；受限身份：404（过滤器先拒） | 客户端需同时处理两态；若要统一需额外存在性查询，暂不划算 |
-| 集成测试 7 例 401 失败是环境问题 | 6×`AdminModelGovernanceTests` + 1×`DualDatabaseConsoleApiTests`，改动前基线同样失败 | 修 Admin 测试宿主的凭据注入（`RestEngineFactory` 已有对照实现） |
+| ~~集成测试 7 例 401 失败是环境问题~~ ✅ **v1.33 已修** | 实际是 8 项（7×401 + 1×403）：`AdminEngineFactory` / `DualDatabaseAdminFactory` 继承管理端 Development 配置里的 dev JWT 密钥 → 中间件进入「必须带凭据」模式；`AdminDictionaryEndpointTests.Writes_ShouldBeAudited` 缺 `workflow:admin:audit:read` → 403 | 两个 Admin 宿主夹具显式清空 `Jwt:SigningKey` + `RequireCredential=false`；该用例改用带审计读权限的 scope 集合。全量集成测试 471 项 0 失败 |
 
 ### 13.5 复核回归
 
 | 项 | 结果 |
 |---|---|
 | `dotnet build NetBpm.slnx -c Debug` | 0 error |
-| `NetBpm.UnitTests` | 744 用例，0 失败，13 跳过 |
-| `RuntimeEndpointRegressionTests`（真实 MySQL） | 7 / 7 通过 |
-| `NetBpm.IntegrationTests` 全量 | 200 用例：157 通过 / 36 跳过 / 7 失败（与改动前基线一致，均为 Admin 宿主 401） |
+| `NetBpm.UnitTests` | **835 用例，0 失败，13 跳过**（Redis 不可用） |
+| `NetBpm.IntegrationTests` 全量（真实 MySQL） | **473 用例：429 通过 / 44 跳过 / 0 失败**（跳过项：SqlServer Testcontainers、Redis） |
+| 契约治理三步 | `ContractSnapshotTests` 2 / 2、`CompatibilityTests` 2 / 2、`SdkGenerationTests` 5 / 5 |
+
+> v1.33 修掉 Admin 宿主 401 后，这条基线第一次是「0 失败」而不是「与改动前一致地失败」。

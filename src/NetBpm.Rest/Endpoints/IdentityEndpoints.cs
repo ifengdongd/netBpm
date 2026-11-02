@@ -76,7 +76,7 @@ public static class IdentityEndpoints
         var group = await identity.FindGroupByIdAsync(groupId, ct).ConfigureAwait(false);
 
         return group is null
-            ? Results.NotFound(new ErrorResponse($"组 '{groupId}' 不存在（身份模块可能未接入）。"))
+            ? EndpointResults.NotFound($"组 '{groupId}' 不存在（身份模块可能未接入）。")
             : Results.Ok(UserGroupResponse.From(group));
     }
 
@@ -91,7 +91,7 @@ public static class IdentityEndpoints
 
         if (group is null)
         {
-            return Results.NotFound(new ErrorResponse($"组 '{groupId}' 不存在（身份模块可能未接入）。"));
+            return EndpointResults.NotFound($"组 '{groupId}' 不存在（身份模块可能未接入）。");
         }
 
         // 管理员 / 可信服务可看任意组；普通 JWT 用户只能看自己所在的组（候选人前端需要展开本组）

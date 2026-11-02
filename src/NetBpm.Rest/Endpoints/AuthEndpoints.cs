@@ -96,7 +96,7 @@ public static class AuthEndpoints
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrEmpty(request.Password))
         {
-            return Results.BadRequest(new ErrorResponse("请提供登录名与口令。"));
+            return EndpointResults.InvalidRequest("请提供登录名与口令。");
         }
 
         if (!issuer.CanIssue)

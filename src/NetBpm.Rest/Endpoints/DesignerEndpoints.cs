@@ -98,7 +98,7 @@ public static class DesignerEndpoints
 
         if (string.IsNullOrWhiteSpace(xml))
         {
-            return Results.BadRequest(new ErrorResponse("请求体必须为 BPMN 2.0 XML 文本。"));
+            return EndpointResults.InvalidRequest("请求体必须为 BPMN 2.0 XML 文本。");
         }
 
         var resolvedResourceName = string.IsNullOrWhiteSpace(resourceName)
@@ -197,7 +197,7 @@ public static class DesignerEndpoints
 
         if (string.IsNullOrWhiteSpace(xml))
         {
-            return Results.BadRequest(new ErrorResponse("请求体必须为 BPMN 2.0 XML 文本。"));
+            return EndpointResults.InvalidRequest("请求体必须为 BPMN 2.0 XML 文本。");
         }
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
@@ -494,7 +494,7 @@ public static class DesignerEndpoints
             .ToArray();
 
         return resources.Length == 0
-            ? Results.NotFound(new ErrorResponse($"部署 '{deploymentId}' 不存在。"))
+            ? EndpointResults.NotFound($"部署 '{deploymentId}' 不存在。")
             : Results.Ok(resources);
     }
 
@@ -563,7 +563,7 @@ public static class DesignerEndpoints
         var xml = await engine.GetProcessDefinitionXmlAsync(processDefinitionId, ct).ConfigureAwait(false);
 
         return xml is null
-            ? Results.NotFound(new ErrorResponse($"流程定义 '{processDefinitionId}' 不存在。"))
+            ? EndpointResults.NotFound($"流程定义 '{processDefinitionId}' 不存在。")
             : Results.Text(xml, "text/xml", Encoding.UTF8);
     }
 }

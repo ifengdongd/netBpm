@@ -6,9 +6,8 @@ public static partial class RuntimeEndpoints
     /// <summary>单次批量操作的条数上限。</summary>
     private const int MaxBatchSize = 200;
 
-    /// <summary>400（请求形状不合法）。</summary>
-    private static IResult InvalidRequest(string message) =>
-        Results.BadRequest(new ErrorResponse(message, Code: EngineErrorCode.ValidationError));
+    /// <summary>400（请求形状不合法）—— 错误码定义收敛在 <see cref="EndpointResults"/>，这里只是本组端点的简写。</summary>
+    private static IResult InvalidRequest(string message) => EndpointResults.InvalidRequest(message);
 
     /// <summary>
     /// 批量 id 列表的统一校验：空 → 400，超过 <see cref="MaxBatchSize"/> → 400。

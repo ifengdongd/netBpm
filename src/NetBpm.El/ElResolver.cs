@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;
 
@@ -33,6 +34,30 @@ internal static class ElResolver
 {
     /// <summary>隐式对象名（Activiti 的隐式对象里本子集只提供 <c>execution</c>）。</summary>
     private const string ExecutionIdentifier = "execution";
+
+    /// <summary>
+    /// 反射元数据缓存：表达式缓存只缓存 AST，<b>不缓存反射结果</b> ——
+    /// 同一段 <c>${person.getAge()}</c> 每求值一次都要重扫一遍 <c>GetMethods()</c>。
+    /// 求值发生在「每个任务、每个条件流、每个表单字段」上，是稳定开销而不是偶发开销。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 方法缓存的 key 带参数个数：候选集本就按实参个数过滤，分开缓存能让每次尝试的候选更少。
+    /// </para>
+    /// <para>
+    /// 这里<b>不设容量上限</b>（与表达式缓存的 2048 上限不同），因为 key 的基数天然有界：
+    /// 它是「类型 × 成员名 × 参数个数」，来自业务模型里的类型；而表达式文本来自 BPMN，
+    /// 用户能写出无限多不同的表达式，两者膨胀的来源不同。
+    /// </para>
+    /// <para>
+    /// 缓存的是 <see cref="MethodInfo"/> / 读取委托，不含任何求值状态，所以跨命令、跨线程共享安全。
+    /// </para>
+    /// </remarks>
+    private static readonly ConcurrentDictionary<(Type Type, string Name), Func<object, object?>?> MemberCache = new();
+
+    private static readonly ConcurrentDictionary<Type, Func<object, object?, object?>?> IndexerCache = new();
+
+    private static readonly ConcurrentDictionary<(Type Type, string Method, int ArgumentCount), MethodInfo[]> MethodCache = new();
 
     /// <summary>标识符解析：隐式对象 → 流程变量；都没有则<b>响亮失败</b>。</summary>
     public static async ValueTask<object?> ResolveIdentifierAsync(
@@ -388,24 +413,13 @@ internal static class ElResolver
     private static object? InvokeReflected(object baseValue, string method, object?[] arguments)
     {
         var type = baseValue.GetType();
-        var candidates = type
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .Where(candidate => string.Equals(candidate.Name, method, StringComparison.Ordinal))
-            .Concat(
-                type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(candidate => string.Equals(candidate.Name, method, StringComparison.OrdinalIgnoreCase)))
-            .Where(candidate => !candidate.ContainsGenericParameters)
-            .Where(candidate => !typeof(Task).IsAssignableFrom(candidate.ReturnType))
-            .ToList();
+        var candidates = MethodCache.GetOrAdd(
+            (type, method, arguments.Length),
+            static key => LookupMethods(key.Type, key.Method, key.ArgumentCount));
 
         foreach (var candidate in candidates)
         {
             var parameters = candidate.GetParameters();
-
-            if (parameters.Length != arguments.Length)
-            {
-                continue;
-            }
 
             var converted = new object?[arguments.Length];
             var matches = true;
@@ -483,7 +497,26 @@ internal static class ElResolver
     }
 
     /// <summary>属性或公共字段读取器（先精确匹配，再忽略大小写）。</summary>
-    private static Func<object, object?>? FindMember(Type type, string name)
+    private static Func<object, object?>? FindMember(Type type, string name) =>
+        MemberCache.GetOrAdd(
+            (type, name),
+            static key => LookupMember(key.Type, key.Name));
+
+    /// <summary>候选方法集：同名的精确匹配优先，其次忽略大小写；再按「无泛型 / 非 Task / 参数个数」过滤。</summary>
+    private static MethodInfo[] LookupMethods(Type type, string method, int argumentCount) =>
+    [
+        .. type
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(candidate => string.Equals(candidate.Name, method, StringComparison.Ordinal))
+            .Concat(
+                type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(candidate => string.Equals(candidate.Name, method, StringComparison.OrdinalIgnoreCase)))
+            .Where(candidate => !candidate.ContainsGenericParameters)
+            .Where(candidate => !typeof(Task).IsAssignableFrom(candidate.ReturnType))
+            .Where(candidate => candidate.GetParameters().Length == argumentCount),
+    ];
+
+    private static Func<object, object?>? LookupMember(Type type, string name)
     {
         const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance;
 
@@ -500,7 +533,10 @@ internal static class ElResolver
         return field is null ? null : instance => field.GetValue(instance);
     }
 
-    private static Func<object, object?, object?>? FindIndexer(Type type)
+    private static Func<object, object?, object?>? FindIndexer(Type type) =>
+        IndexerCache.GetOrAdd(type, static cached => LookupIndexer(cached));
+
+    private static Func<object, object?, object?>? LookupIndexer(Type type)
     {
         var property = type.GetProperty("Item", BindingFlags.Public | BindingFlags.Instance);
 
