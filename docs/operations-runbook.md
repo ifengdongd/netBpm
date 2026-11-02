@@ -351,7 +351,7 @@ NETBPM_RUN_LOAD_TESTS=1 \
 | 异步作业 | `ACT_RU_JOB` | 行还在；租约（`LOCK_OWNER_` / `LOCK_EXP_TIME_`）到期即回收，重启后由执行器续做 |
 | 定时作业 | `ACT_RU_TIMER_JOB` | 同上 |
 | 待投递事件 | `ACT_EVT_OUTBOX`（`PUBLISHED_=0`） | 行还在；`NEXT_ATTEMPT_` 兼作租约，到期重投；失败累计 5 次才进死信 |
-| 外部任务锁 | `nb_external_task`（`LOCK_EXP_TIME_` 非空） | 锁到期自动回收，**不需要有人解锁**；迟到的 worker 回执会被拒 |
+| 外部任务锁 | `nb_external_task`（`status='LOCKED'`、锁列 `lock_expires_at`） | 锁到期自动回收，**不需要有人解锁**；迟到的 worker 回执会被拒 |
 | 幂等占位 | `ACT_IDEMPOTENCY` | 过期行由 `IdempotencyCleanupService` 清理（宿主启用后台服务才有） |
 
 关键设计前提（这三句话决定了上面那张表）：作业 / outbox 行与业务变更在**同一个事务**里写入，
@@ -378,9 +378,31 @@ NETBPM_RUN_LOAD_TESTS=1 \
 | 崩溃不吞历史 | `ACT_HI_ACTINST` 条数不减少 | 历史写入在事务外 |
 | 重启后作业被续做 | 作业条数下降，或历史活动行增加 | 执行器没有扫到期作业，或租约没到期回收 |
 | 重启后事件被续投 | 已投递条数增加 | outbox 发布器没跑，或租约没回收 |
-| 过期外锁可被接管 | 能查到 `LOCK_EXP_TIME_ <= now` 的锁 | ——（这一项只做观测，锁靠到期回收，不需要人工解锁） |
+| 过期外锁可被接管 | 能查到 `status='LOCKED' and lock_expires_at <= now` 的锁 | ——（这一项只做观测，锁靠到期回收，不需要人工解锁） |
 
-### 13.4 没有 mysql 客户端时
+### 13.4 本机实跑记录（2026-11-02）
+
+环境：本机 MySQL（root / 空口令），宿主 = `NetBpm.Rest`（`--urls http://127.0.0.1:5199`），
+在途状态来自集成测试留下的 outbox 待投递与外锁。
+
+```powershell
+powershell -File tools/drills/crash-recovery.ps1 `
+  -Connection "Server=127.0.0.1;Database=netbpm;User ID=root;Password=;Allow User Variables=true;" `
+  -ProcessName dotnet -StartCommand .\tools\drills\restart-host.example.cmd
+```
+
+结果：**6 项全 PASS**（真实强杀宿主进程，脚本自动拉起后判定续做）。
+附带确认了一件不是纸面结论的事：宿主启动后 `ACT_EVT_OUTBOX` 里那 10 条待投递被继续投递完。
+
+⚠️ 这一轮实跑抓到三个真问题，都已修（**没有实跑就不会发现**）：
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| 列名写错 | 外部任务锁写成作业的 `LOCK_EXP_TIME_`，真实列是 `status='LOCKED'` + `lock_expires_at` | 按 DDL 改正脚本与本章的表 |
+| 判定假阳性 | 库里本来没有作业时，「重启后作业被续做」判 FAIL —— 把「没造在途状态」报成「没续做」 | 崩溃后作业数为 0 时该项记为**不适用**。假阳性比漏报更伤：它会让人习惯性忽略这条判定 |
+| 硬依赖 mysql 客户端 | 机器上没装，脚本第一条查询就挂 | 自动回退到 `NetBpm.DbMigrate query`（新增只读查询子命令）；顺带修掉连接串缺库名、以及两处 PowerShell 7 专属语法（PS 5.1 下直接语法错） |
+
+### 13.5 没有 mysql 客户端时
 
 照着查就行，判定同上：
 
@@ -389,7 +411,7 @@ select count(*) from ACT_RU_JOB;
 select count(*) from ACT_RU_TIMER_JOB;
 select count(*) from ACT_EVT_OUTBOX where PUBLISHED_ = 0;
 select count(*) from ACT_EVT_OUTBOX where PUBLISHED_ = 1;
-select count(*) from nb_external_task where LOCK_EXP_TIME_ is not null;
+select count(*) from nb_external_task where status = 'LOCKED';
 select count(*) from ACT_IDEMPOTENCY;
 select count(*) from ACT_HI_ACTINST;
 ```

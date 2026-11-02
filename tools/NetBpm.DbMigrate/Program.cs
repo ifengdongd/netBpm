@@ -38,6 +38,7 @@ return options.Command switch
     "purge" => Purge(options),
     "migrate" => Migrate(options),
     "apply" => Apply(options),
+    "query" => Query(options),
     "users" => Users(options).GetAwaiter().GetResult(),
     _ => Unknown(options.Command),
 };
@@ -319,6 +320,59 @@ static int Purge(CommandLineOptions options)
     return 0;
 }
 
+/// <summary>
+/// 执行<b>单条只读</b>查询并打印首行首列（没有结果就打印空行）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 为什么要有它：运维机器上常常只有 .NET Runtime、没有 <c>mysql</c> 客户端，
+/// 而「现在库里有多少在途作业 / 待投递事件 / 过期外锁」是排查与演练判定都要问的问题。
+/// 崩溃恢复演练脚本（<c>tools/drills/crash-recovery.ps1</c>）在找不到 mysql 时就用它。
+/// </para>
+/// <para>
+/// 只接受 <c>select</c>：这条命令叫 query，写操作请走 <c>apply</c> / <c>migrate</c> / <c>purge</c> ——
+/// 免得运维顺手把一条 <c>delete</c> 贴进 "查询" 里。
+/// </para>
+/// </remarks>
+static int Query(CommandLineOptions options)
+{
+    if (string.IsNullOrWhiteSpace(options.Sql))
+    {
+        Console.Error.WriteLine("query 命令需要 --sql \"select ...\"。");
+        return 2;
+    }
+
+    var sql = options.Sql.Trim();
+
+    if (!sql.StartsWith("select", StringComparison.OrdinalIgnoreCase)
+        && !sql.StartsWith("with", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.Error.WriteLine("query 只执行只读查询（select / with），写操作请用 apply / migrate / purge。");
+        return 2;
+    }
+
+    try
+    {
+        using var connection = new DbConnectionFactory(options.DatabaseType, options.ConnectionString).CreateConnection();
+        using var command = connection.CreateCommand();
+
+        command.CommandText = sql;
+
+        var scalar = command.ExecuteScalar();
+
+        Console.WriteLine(scalar is null or DBNull ? string.Empty : Convert.ToString(scalar, CultureInfo.InvariantCulture));
+
+        return 0;
+    }
+    catch (Exception exception) when (exception is not OutOfMemoryException)
+    {
+        // 运维在命令行里跑：给一句话的原因，而不是几百行的堆栈
+        // （连接失败 / 库名没写 / 表不存在，都是这一类）
+        Console.Error.WriteLine($"查询失败：{exception.Message}");
+        return 1;
+    }
+}
+
 static int Unknown(string command)
 {
     Console.Error.WriteLine($"未知命令：{command}");
@@ -460,6 +514,9 @@ internal sealed class CommandLineOptions
     public string? DatabaseName { get; init; }
     public string? ScriptFile { get; init; }
 
+    /// <summary><c>query</c> 命令的 SQL（只读）。</summary>
+    public string? Sql { get; init; }
+
     /// <summary>子命令（目前只有 <c>users</c> 用：add/list/reset-password/enable/disable）。</summary>
     public string? SubCommand { get; init; }
 
@@ -540,6 +597,7 @@ internal sealed class CommandLineOptions
             ScriptDirectory = values.GetValueOrDefault("script-dir"),
             DatabaseName = ExtractDatabaseName(connectionString),
             ScriptFile = values.GetValueOrDefault("script"),
+            Sql = values.GetValueOrDefault("sql"),
             SubCommand = subCommand,
             Username = values.GetValueOrDefault("username"),
             Password = values.GetValueOrDefault("password"),
@@ -551,18 +609,20 @@ internal sealed class CommandLineOptions
 
     public static void PrintUsage()
     {
-        Console.WriteLine("用法：NetBpm.DbMigrate <probe|migrate|check|purge|apply|users> --provider <mysql|sqlserver> --connection \"<连接字符串>\"");
+        Console.WriteLine("用法：NetBpm.DbMigrate <probe|migrate|check|purge|apply|query|users> --provider <mysql|sqlserver> --connection \"<连接字符串>\"");
         Console.WriteLine("命令：");
         Console.WriteLine("  probe    列出可访问的库");
         Console.WriteLine("  migrate  执行建表脚本并校验 schema.version");
         Console.WriteLine("  check    仅校验 schema.version");
         Console.WriteLine("  purge    清空引擎表数据（保留结构；勿在生产库执行）");
         Console.WriteLine("  apply    执行单个 SQL 脚本（--script <文件>；幂等性由脚本保证）");
+        Console.WriteLine("  query    执行单条只读查询并打印首行首列（--sql \"select ...\"）");
         Console.WriteLine("  users    控制台账号（admin_user）：add|list|reset-password|enable|disable");
         Console.WriteLine("选项：");
         Console.WriteLine("  --create-database    migrate 前按需创建数据库（库名取自连接字符串的 Database）");
         Console.WriteLine("  --script-dir <目录>  指定脚本目录（默认自动定位 db/<dialect>）");
         Console.WriteLine("  --script <文件>      apply 命令的脚本文件路径");
+        Console.WriteLine("  --sql <查询>         query 命令的只读 SQL（只接受 select / with）");
         Console.WriteLine("  --username <登录名>  users 子命令的账号");
         Console.WriteLine("  --password <明文>    users add/reset-password 的口令（省略则交互式输入，不回显）");
         Console.WriteLine("  --display-name <名>  显示名");
