@@ -779,6 +779,49 @@ public sealed record CancelActivityRequest(string? Reason = null);
 /// <param name="Reason">审计备注（不影响流程行为）。</param>
 public sealed record StartBeforeActivityRequest(string? Reason = null);
 
+/// <summary>
+/// 指令式修改请求（<c>POST /process-instances/{id}/modify</c>）。
+/// </summary>
+/// <param name="Instructions">
+/// 指令列表，按序执行、**整批原子**：任一条失败则全部不生效。
+/// 类型：<c>cancel</c> / <c>startBefore</c> / <c>startAfter</c> / <c>setVariable</c> / <c>removeVariable</c>。
+/// </param>
+/// <param name="Reason">修改原因（写进任务历史与审计）。</param>
+/// <param name="CommandId">幂等键（可选）；破坏性写操作建议带上。</param>
+public sealed record ModifyProcessInstanceRequest(
+    IReadOnlyList<ModifyInstructionRequest>? Instructions = null,
+    string? Reason = null,
+    string? CommandId = null);
+
+/// <summary>
+/// 一条修改指令。
+/// </summary>
+/// <param name="Type">指令类型。</param>
+/// <param name="ActivityId">cancel / startBefore / startAfter 的目标活动 id；task 作用域变量指令必填。</param>
+/// <param name="VariableName">变量指令的变量名。</param>
+/// <param name="VariableValue">setVariable 的值。</param>
+/// <param name="VariableScope">
+/// 变量作用域：<c>instance</c>（默认，实例级）或 <c>task</c>（该活动上等待中待办的局部）。
+/// ⚠️ <c>task</c> 与 Camunda 的 <c>local</c> 不完全等价：本子集没有执行级变量存储，
+/// 它落到「该活动当前待办」上，因此活动上没有待办时会报 409，而不是静默写成实例变量。
+/// </param>
+public sealed record ModifyInstructionRequest(
+    string? Type = null,
+    string? ActivityId = null,
+    string? VariableName = null,
+    JsonElement? VariableValue = null,
+    string? VariableScope = null);
+
+/// <summary>修改结果（每条指令一条）。</summary>
+/// <param name="Type">指令类型。</param>
+/// <param name="Target">实际作用对象（活动 id / 变量名；startAfter 是推导出的目标活动）。</param>
+public sealed record ModifyInstructionResultResponse(string Type, string? Target = null);
+
+/// <summary>指令式修改的响应体。</summary>
+public sealed record ModifyProcessInstanceResponse(
+    string ProcessInstanceId,
+    IReadOnlyList<ModifyInstructionResultResponse> Applied);
+
 /// <summary>批量挂起 / 激活流程实例请求（<c>POST /process-instances/batch/suspend|activate</c>）。</summary>
 /// <param name="ProcessInstanceIds">流程实例 id 列表（逐项执行，单项失败不影响其它项）。</param>
 public sealed record BatchInstanceSuspensionRequest(

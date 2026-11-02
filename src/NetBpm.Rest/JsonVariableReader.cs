@@ -54,6 +54,14 @@ internal static class JsonVariableReader
         return result.Count == 0 ? null : result;
     }
 
+    /// <summary>
+    /// 还原<b>单个</b>变量值（指令式 modify 的 setVariable 用）；<c>null</c> / 未定义返回 <see langword="null"/>。
+    /// </summary>
+    public static object? ReadScalar(string name, JsonElement? element) =>
+        element is not { } value || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+            ? null
+            : ReadValue(name, value);
+
     private static object? ReadValue(string name, JsonElement element) => element.ValueKind switch
     {
         JsonValueKind.String => element.GetString(),

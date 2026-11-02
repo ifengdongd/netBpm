@@ -58,6 +58,10 @@ public sealed class RuntimeEndpointRegressionTests : IClassFixture<RestEngineFac
             (HttpMethod.Post, $"/api/runtime/process-instances/{MissingInstanceId}/activate", null),
             (HttpMethod.Post, $"/api/runtime/process-instances/{MissingInstanceId}/jump", new { targetActivityId = "end" }),
             (HttpMethod.Post, $"/api/runtime/process-instances/{MissingInstanceId}/migrate", new { targetProcessDefinitionId = "missing-process:1:1" }),
+            // modify：整批原子的破坏性写操作，同样必须挂 RequireInstanceAccess
+            (HttpMethod.Post,
+                $"/api/runtime/process-instances/{MissingInstanceId}/modify",
+                new { instructions = new[] { new { type = "cancel", activityId = "apply" } } }),
             (HttpMethod.Get, $"/api/runtime/process-instances/{MissingInstanceId}/identity-links", null),
             (HttpMethod.Get, $"/api/runtime/process-instances/{MissingInstanceId}/variables", null),
             (HttpMethod.Get, $"/api/runtime/process-instances/{MissingInstanceId}/diagram", null),
@@ -162,6 +166,90 @@ public sealed class RuntimeEndpointRegressionTests : IClassFixture<RestEngineFac
 
         Assert.Single(await TasksOfAsync(client, "applicant"));
         Assert.Single(await TasksOfAsync(client, "reviewer"));
+    }
+
+    /// <summary>
+    /// 指令式 modify：一组指令（取消 apply + 在 review 之前启动 + 写变量）在一个事务里生效。
+    /// <para>与批量端点相反：这里要么整批生效，要么一条都不生效。</para>
+    /// </summary>
+    [Fact]
+    public async Task Modify_ShouldApplyAllInstructionsInOneShot()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        Reset();
+
+        using var client = _factory.CreateClient();
+        await DeployAsync(client, TwoTaskProcess);
+        var instanceId = await StartAsync(client, processDefinitionKey: "regression-two");
+
+        var applyTask = Assert.Single(await TasksOfAsync(client, "applicant"));
+
+        using var response = await client.PostAsJsonAsync(
+            new Uri($"/api/runtime/process-instances/{instanceId}/modify", UriKind.Relative),
+            new
+            {
+                reason = "回归：改派给复核",
+                instructions = new object[]
+                {
+                    new { type = "cancel", activityId = "apply" },
+                    new { type = "startBefore", activityId = "review" },
+                    new { type = "setVariable", variableName = "modifiedBy", variableValue = "ops" },
+                },
+            },
+            Ct);
+
+        var body = await response.Content.ReadAsStringAsync(Ct);
+
+        Assert.True(response.IsSuccessStatusCode, $"modify 失败：{response.StatusCode} {body}");
+
+        using var document = JsonDocument.Parse(body);
+        var applied = document.RootElement.GetProperty("applied").EnumerateArray().ToList();
+
+        Assert.Equal(["cancel", "startBefore", "setVariable"], applied.Select(item => item.GetProperty("type").GetString()));
+
+        // 申请人手上的待办被取消，复核人拿到一条
+        Assert.Empty(await TasksOfAsync(client, "applicant"));
+        Assert.Single(await TasksOfAsync(client, "reviewer"));
+
+        // 变量确实写进去了（实例变量端点是「变量名 → 值」的对象）
+        var variables = await GetJsonAsync(client, $"/api/runtime/process-instances/{instanceId}/variables");
+
+        Assert.Equal("ops", variables.GetProperty("modifiedBy").GetString());
+    }
+
+    /// <summary>
+    /// 指令式 modify 的原子性：第二条指令的活动 id 拼错时，第一条也<b>不能</b>生效。
+    /// </summary>
+    [Fact]
+    public async Task Modify_WithBadInstruction_ShouldApplyNothing()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        Reset();
+
+        using var client = _factory.CreateClient();
+        await DeployAsync(client, TwoTaskProcess);
+        var instanceId = await StartAsync(client, processDefinitionKey: "regression-two");
+
+        var applyTask = Assert.Single(await TasksOfAsync(client, "applicant"));
+
+        using var response = await client.PostAsJsonAsync(
+            new Uri($"/api/runtime/process-instances/{instanceId}/modify", UriKind.Relative),
+            new
+            {
+                instructions = new object[]
+                {
+                    new { type = "cancel", activityId = "apply" },
+                    new { type = "startBefore", activityId = "no_such_node" },
+                },
+            },
+            Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        // 整批不生效：申请人的待办还在
+        Assert.Single(await TasksOfAsync(client, "applicant"));
     }
 
     /// <summary>任务局部变量往返：写 → 读 → 删 → 再删 404。</summary>

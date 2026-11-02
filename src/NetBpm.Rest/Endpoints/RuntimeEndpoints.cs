@@ -110,6 +110,13 @@ public static partial class RuntimeEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status409Conflict);
 
+        group.MapPost("/process-instances/{processInstanceId}/modify", ModifyProcessInstanceAsync)
+            .RequireInstanceAccess()
+            .RequireEngineScope(PlatformScopes.AdminInstance, "指令式修改流程实例")
+            .RequireAdminScope(TaskScopes.AdminInstanceJump, "指令式修改流程实例")
+            .Produces<ModifyProcessInstanceResponse>()
+            .Produces(StatusCodes.Status409Conflict);
+
         group.MapPost("/process-instances/{processInstanceId}/migrate", MigrateProcessInstanceAsync)
             .RequireInstanceAccess()
             .RequireEngineScope(PlatformScopes.AdminInstance, "迁移流程实例")

@@ -267,6 +267,124 @@ public class RuntimeManagementTests
         Assert.Contains(engine.TaskManager.Tasks, task => task.TaskDefinitionKey == "manager_approve");
     }
 
+    // ─────────────────────────── modify：指令式修改（整批原子） ───────────────────────────
+
+    [Fact]
+    public async Task Modify_ShouldApplyAllInstructions()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        Assert.Equal("leader_approve", Assert.Single(engine.TaskManager.Tasks).TaskDefinitionKey);
+
+        // 一组指令 = 一个决定：撤掉组长审批，改从经理审批继续
+        var applied = await engine.CommandExecutor.ExecuteAsync(
+            new ModifyProcessInstanceCommand(
+                instanceId,
+                [
+                    new ModifyInstruction(ModifyInstructionType.Cancel, ActivityId: "leader_approve"),
+                    new ModifyInstruction(ModifyInstructionType.StartBefore, ActivityId: "manager_approve"),
+                    new ModifyInstruction(ModifyInstructionType.SetVariable, VariableName: "modifiedBy", VariableValue: "ops"),
+                ],
+                reason: "运维改派"));
+
+        Assert.Equal(3, applied.Count);
+        Assert.Equal(["cancel", "startBefore", "setVariable"], applied.Select(result => result.Type));
+        Assert.Equal("manager_approve", Assert.Single(engine.TaskManager.Tasks).TaskDefinitionKey);
+
+        var instance = await engine.ExecutionManager.FindByIdAsync(instanceId);
+
+        Assert.Equal("ops", await instance!.GetVariableAsync("modifiedBy"));
+    }
+
+    [Fact]
+    public async Task Modify_InvalidInstruction_ShouldRejectWholeBatch()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        // 第二条指令的活动 id 拼错：整批必须一条都不生效 ——
+        // 这正是 modify 与「批量逐项执行」的分界线：先全量校验，再逐条执行
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => engine.CommandExecutor.ExecuteAsync(
+                new ModifyProcessInstanceCommand(
+                    instanceId,
+                    [
+                        new ModifyInstruction(ModifyInstructionType.StartBefore, ActivityId: "manager_approve"),
+                        new ModifyInstruction(ModifyInstructionType.Cancel, ActivityId: "no_such_node"),
+                    ])).AsTask());
+
+        Assert.Contains("不在流程定义", exception.Message, StringComparison.Ordinal);
+
+        // 第一条（合法）也没有生效
+        Assert.Equal("leader_approve", Assert.Single(engine.TaskManager.Tasks).TaskDefinitionKey);
+    }
+
+    [Fact]
+    public async Task Modify_StartAfter_ShouldFollowSingleOutgoingFlow()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        // leader_approve 只有一条出流 → startAfter 落到 manager_approve
+        var applied = await engine.CommandExecutor.ExecuteAsync(
+            new ModifyProcessInstanceCommand(
+                instanceId,
+                [new ModifyInstruction(ModifyInstructionType.StartAfter, ActivityId: "leader_approve")]));
+
+        Assert.Equal("manager_approve", Assert.Single(applied).Target);
+        Assert.Equal(2, engine.TaskManager.Tasks.Count);
+    }
+
+    [Fact]
+    public async Task Modify_StartAfter_MultipleOutgoing_ShouldThrow()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(ParallelProcess);
+
+        // fork 有两条出流：目标不唯一，明确拒绝 —— 分支语义不该由运维命令替流程定义猜
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => engine.CommandExecutor.ExecuteAsync(
+                new ModifyProcessInstanceCommand(
+                    instanceId,
+                    [new ModifyInstruction(ModifyInstructionType.StartAfter, ActivityId: "fork")])).AsTask());
+
+        Assert.Contains("目标不唯一", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Modify_TaskScopedVariable_WithoutWaitingTask_ShouldThrow()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        // leader_approve 上有待办，但 manager_approve 上没有 → task 作用域不适用，明确报错
+        var exception = await Assert.ThrowsAnyAsync<EngineException>(
+            () => engine.CommandExecutor.ExecuteAsync(
+                new ModifyProcessInstanceCommand(
+                    instanceId,
+                    [
+                        new ModifyInstruction(
+                            ModifyInstructionType.SetVariable,
+                            ActivityId: "manager_approve",
+                            VariableName: "note",
+                            VariableValue: "x",
+                            VariableScope: ModifyVariableScope.Task),
+                    ])).AsTask());
+
+        Assert.Contains("没有等待中的待办", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Modify_EmptyInstructions_ShouldRejectUpfront()
+    {
+        var engine = TestEngine.Create();
+        var instanceId = await engine.StartProcessAsync(TwoStepProcess);
+
+        Assert.Throws<ArgumentException>(
+            () => new ModifyProcessInstanceCommand(instanceId, []));
+    }
+
     [Fact]
     public async Task StartBeforeActivity_NonFlowNode_ShouldThrow()
     {

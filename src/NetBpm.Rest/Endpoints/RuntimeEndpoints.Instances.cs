@@ -1,3 +1,4 @@
+using NetBpm.Engine.Command;
 using NetBpm.Rest.Security;
 using NetBpm.Rest.Services;
 using NetBpm.Runtime;
@@ -197,6 +198,61 @@ public static partial class RuntimeEndpoints
 
         return Results.NoContent();
     }
+
+    /// <summary>
+    /// 指令式修改流程实例（Camunda <c>ProcessInstanceModification</c> 的裁剪版）。
+    /// <para>
+    /// 一组指令在<b>一个事务</b>里按序执行：要么整批生效，要么一条都不生效。
+    /// 这是它与 <c>/process-instances/batch/*</c> 的分界线 —— 批量是「逐项执行、每项独立成败」，
+    /// 而 modify 的语义是「这一组改动是一个决定」。
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> ModifyProcessInstanceAsync(
+        string processInstanceId,
+        ModifyProcessInstanceRequest? request,
+        RequestContext requestContext,
+        IInstanceCommandService instances,
+        CancellationToken ct)
+    {
+        if (request?.Instructions is null || request.Instructions.Count == 0)
+        {
+            return InvalidRequest("instructions 不能为空：至少给一条指令（cancel / startBefore / startAfter / setVariable / removeVariable）。");
+        }
+
+        var instructions = new List<ModifyInstruction>(request.Instructions.Count);
+
+        foreach (var item in request.Instructions)
+        {
+            if (string.IsNullOrWhiteSpace(item.Type))
+            {
+                return InvalidRequest("每条指令都要有 type。");
+            }
+
+            instructions.Add(new ModifyInstruction(
+                item.Type.Trim(),
+                NullIfBlank(item.ActivityId),
+                NullIfBlank(item.VariableName),
+                JsonVariableReader.ReadScalar(item.VariableName ?? "variable", item.VariableValue),
+                NullIfBlank(item.VariableScope)));
+        }
+
+        var applied = await instances
+            .ModifyAsync(
+                processInstanceId,
+                instructions,
+                NullIfBlank(request.Reason),
+                NullIfBlank(request.CommandId),
+                requestContext,
+                ct)
+            .ConfigureAwait(false);
+
+        return Results.Ok(new ModifyProcessInstanceResponse(
+            processInstanceId,
+            [.. applied.Select(result => new ModifyInstructionResultResponse(result.Type, result.Target))]));
+    }
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>
     /// 流程实例迁移（定义升级后的存量实例处置）。

@@ -594,6 +594,11 @@ public static class AdminAuditActions
     /// <summary>在指定活动之前启动新令牌（modify：多开一条分支）。</summary>
     public const string InstanceActivityStart = "instance.activity_start";
 
+    /// <summary>
+    /// 指令式修改流程实例（cancel / startBefore / startAfter / 变量指令，整批原子）。
+    /// </summary>
+    public const string InstanceModify = "instance.modify";
+
     /// <summary>删除（撤销）流程实例。</summary>
     public const string InstanceDelete = "instance.delete";
 

@@ -56,6 +56,18 @@ public interface IInstanceCommandService
         RequestContext context,
         CancellationToken ct);
 
+    /// <summary>
+    /// 指令式修改（cancel / startBefore / startAfter / 变量指令）：整批在一个事务里执行，
+    /// 任一条失败则整批不生效。返回每条指令的执行结果（给响应看）。
+    /// </summary>
+    Task<IReadOnlyList<ModifyInstructionResult>> ModifyAsync(
+        string processInstanceId,
+        IReadOnlyList<ModifyInstruction> instructions,
+        string? reason,
+        string? commandId,
+        RequestContext context,
+        CancellationToken ct);
+
     /// <summary>在指定活动之前额外启动一个令牌；活动非法时抛 409。</summary>
     Task StartBeforeActivityAsync(
         string processInstanceId,
@@ -336,6 +348,47 @@ internal sealed class InstanceCommandService(
                     .ConfigureAwait(false);
 
                 return true;
+            },
+            ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// 指令式修改：一组指令在<b>引擎的一个命令（一个事务）</b>里按序执行。
+    /// </summary>
+    /// <remarks>
+    /// 与 <c>BatchXxx</c> 的差别就在原子性上：批量是「逐项执行、每项独立成败」，
+    /// 而 modify 要么整批生效、要么一条都不生效 —— 所以这里只发<b>一个</b>命令，
+    /// 不在服务层循环调引擎（那样中间失败就回滚不了了）。
+    /// </remarks>
+    public async Task<IReadOnlyList<ModifyInstructionResult>> ModifyAsync(
+        string processInstanceId,
+        IReadOnlyList<ModifyInstruction> instructions,
+        string? reason,
+        string? commandId,
+        RequestContext context,
+        CancellationToken ct) =>
+        await audit.RunAsync(
+            context,
+            AdminAuditActions.InstanceModify,
+            AdminAuditTargets.ProcessInstance,
+            processInstanceId,
+            processInstanceId,
+            new { instructions, reason },
+            async () =>
+            {
+                try
+                {
+                    return await engine
+                        .ExecuteAsync(
+                            new ModifyProcessInstanceCommand(processInstanceId, instructions, reason, commandId),
+                            ct)
+                        .ConfigureAwait(false);
+                }
+                catch (EngineException exception) when (exception is not EngineObjectNotFoundException)
+                {
+                    // 与取消活动 / 启动前同口径：指令不适用（活动已结束、令牌不在该节点、目标不唯一）是 409，
+                    // 调用方应据此刷新而不是盲目重试
+                    throw new EngineConflictException(exception.Message);
+                }
             },
             ct).ConfigureAwait(false);
 
