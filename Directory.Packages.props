@@ -42,10 +42,22 @@
 
   <ItemGroup Label="Observability">
     <!-- 可选 OTel 接线：宿主按配置决定是否经 OTLP 导出管理治理指标（Meter 本身零依赖） -->
-    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.9.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.9.0" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.20.1" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.1" />
     <!-- HTTP 入口链路追踪（WithTracing），默认关闭、随 OTel 开关一起启用 -->
-    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.9.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.20.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="SecurityPinning">
+    <!--
+      传递依赖的安全版本固定：CentralPackageTransitivePinningEnabled=true 会把传递依赖自动提到这里，
+      不需要（也不应该）在被引用的工程里逐个加 PackageReference。
+      Microsoft.Data.SqlClient 7.1.1 拖进的是 System.Security.Cryptography.Pkcs 9.0.18，
+      该版本有已知漏洞（GHSA-846f-f764-76mx 高危 / GHSA-2fmv-rv2c-59x7 中危）。
+      CI 每次全新还原会拉到最新漏洞库，把 NU1902/NU1903 升级成错误（NuGetAudit + TreatWarningsAsErrors）；
+      本地因为漏洞库走缓存，一直看不到——所以这一项必须显式固定，否则「本地绿、CI 红」还会再发生。
+    -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup Label="JobQueue">

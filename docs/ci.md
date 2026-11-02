@@ -47,6 +47,15 @@ remote 已存在但地址不同时直接报错，不擅自改指向。
   所以「跳过很多」不等于绿，要对照跳过数。
 - **单测红**：与本地一致；注意已知的跨测试并发抖动（`OutboxBacklogMetricsTests` 的 MeterListener
   静态状态、`WorkflowServiceTests` 与 `EngineFacadeTests`），单类复跑若绿则大概率是抖动，别急着改代码。
+- **三个 .NET Job 全挂在 `Build` 步，日志里是 `NU1902` / `NU1903`**：这不是编译错误，是 **NuGet 审计**
+  把「依赖树里有已知漏洞的包」报成还原警告，`TreatWarningsAsErrors=true` 再把它升级成 error。
+  最容易踩的地方是：CI 每次全新还原都会拉最新漏洞库，而**本地因为漏洞库走缓存往往一直看不到**，
+  于是「本地绿、CI 红」，还很容易误判成代码问题。定位只需在本地做一次等价还原：
+  `dotnet restore NetBpm.slnx --no-cache --force`（要更彻底就加 `--packages <全新目录>` 强制重下）。
+  修法是**提升版本**，不要用 `NoWarn` 盖掉：
+  直接依赖 → 在 `Directory.Packages.props` 升版本；
+  传递依赖 → 加一条 `PackageVersion` 即可（`CentralPackageTransitivePinningEnabled=true` 会把它提到该版本，
+  不用在被引用的工程里加 `PackageReference`）。
 
 ## 4. 为什么不做 Gitee Go
 
