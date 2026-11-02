@@ -63,6 +63,21 @@ jobs:
 
   build-and-unit-tests:
     runs-on: ubuntu-latest
+
+    services:
+      # Redis 作业队列的用例（RedisJobQueue*、启动自检）对着真 Redis 跑。
+      # 没有它，这些用例是**静默跳过**的 —— 绿灯里藏着一整条没验证过的路径。
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+          --health-start-period 10s
+
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +90,8 @@ jobs:
         run: dotnet build NetBpm.slnx --nologo
 
       - name: Unit tests
+        env:
+          NETBPM_TEST_REDIS: "127.0.0.1:6379"
         run: dotnet run --project tests/NetBpm.UnitTests --no-build
 
   contract-governance:
@@ -169,9 +186,28 @@ jobs:
           --health-timeout 3s
           --health-retries 24
           --health-start-period 30s
+      redis:
+        # 与单测 Job 同一个理由：RedisRateLimitTests 等对着真 Redis 才有意义
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+          --health-start-period 10s
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Pre-pull SqlServer image
+        # Testcontainers 会在测试里自己拉 mssql/server:2022（约 1.5GB）。
+        # 提前拉有两个好处：① 拉镜像的失败早暴露，不会混进「测试超时」里；
+        # ② 少一点 Testcontainers 默认超时被大镜像拖爆的概率。
+        # 失败不阻断：SqlServer 那一路会正常跳过，由 Coverage statement 标出来。
+        continue-on-error: true
+        run: docker pull mcr.microsoft.com/mssql/server:2022-latest
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -210,6 +246,7 @@ jobs:
         # xUnit 的失败明细在 job 日志里，而 Review 页面只看得到 exit code。
         env:
           NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
+          NETBPM_TEST_REDIS: "127.0.0.1:6379"
         run: |
           set +e
           output=$(dotnet run --project tests/NetBpm.IntegrationTests --no-build -- -noColor 2>&1)
@@ -230,17 +267,23 @@ jobs:
           fi
 
       - name: Coverage statement (skipped / 未覆盖的可选路径)
-        # 为什么要有这一步：集成测试里约 130 处 Assert.Skip*（Redis 靠环境变量、SqlServer 靠
-        # Testcontainers、MySQL 靠本机/服务容器）。跳过是**静默**的 —— exit code 是绿的，
-        # 但「本轮其实没验证过双库矩阵与 Redis 路径」这件事没人看见。
-        # 这里把它显式写进 job summary：绿就绿得明白，缺什么一眼可见。
+        # 为什么要有这一步：约 130 处 Assert.Skip* 是**静默**的 —— exit code 是绿的，
+        # 但「本轮其实没验证过某些路径」这件事没人看见。这里把它们显式写进 job summary：
+        # 绿就绿得明白，缺什么一眼可见。
+        #
+        # Redis 与 SqlServer 现在都有服务容器 / 预热步骤（见本 Job 顶部与 Pre-pull 步骤），
+        # 因此这里主要起**复核**作用：真没跑成就标黄，而不是默认「应该跑了」。
         if: always()
         env:
           NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
+          NETBPM_TEST_REDIS: "127.0.0.1:6379"
         run: |
-          redis=${REDIS_CONNECTIONSTRING:-${NETBPM_REDIS_CONNECTION:-}}
           docker_ok="否"
           if docker version >/dev/null 2>&1; then docker_ok="是"; fi
+
+          # 真探一次，而不是看环境变量有没有设：环境变量设了但 Redis 没起来，跳过照样发生
+          redis_ok="否"
+          if (exec 3<>/dev/tcp/127.0.0.1/6379) 2>/dev/null; then redis_ok="是"; exec 3<&-; fi
 
           {
             echo "### 可选依赖覆盖情况"
@@ -248,18 +291,15 @@ jobs:
             echo "| 依赖 | 本轮是否覆盖 | 说明 |"
             echo "|---|---|---|"
             echo "| MySQL（真库集成测试） | ✅ 是 | 服务容器 mysql:8.4 |"
-            if [ -n "$redis" ]; then
-              echo "| Redis（作业队列 / 缓存） | ✅ 是 | 连接串已配置 |"
-            else
-              echo "| Redis（作业队列 / 缓存） | ⚠️ 否 | 未配置连接串，相关用例跳过 |"
-            fi
-            echo "| SqlServer（双库功能矩阵） | $([ "$docker_ok" = "是" ] && echo '⚠️ 视 Testcontainers 能否拉起镜像' || echo '❌ 否') | docker 可用=$docker_ok |"
+            echo "| Redis（作业队列 / 限流） | $([ "$redis_ok" = "是" ] && echo '✅ 是' || echo '⚠️ 否') | 服务容器 redis:7-alpine，端口探活=$redis_ok |"
+            echo "| SqlServer（双库功能矩阵） | $([ "$docker_ok" = "是" ] && echo '✅ 视 Testcontainers 拉起结果' || echo '⚠️ 否') | docker 可用=$docker_ok |"
             echo
-            echo "> 跳过不算通过：这些路径的回归靠本地或专用流水线，CI 只负责把它们**标出来**。"
+            echo "> 跳过不算通过。Redis 现在有服务容器；SqlServer 靠 Testcontainers —— 拉不起镜像时"
+            echo "> 那一路会静默跳过，所以这一步是它的**唯一**可见信号。"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ -z "$redis" ]; then
-            echo "::warning title=Redis 路径未覆盖::未配置 REDIS_CONNECTIONSTRING，依赖 Redis 的用例本轮被跳过"
+          if [ "$redis_ok" != "是" ]; then
+            echo "::warning title=Redis 路径未覆盖::6379 探活失败，依赖 Redis 的用例本轮被跳过"
           fi
           if [ "$docker_ok" != "是" ]; then
             echo "::warning title=SqlServer 路径未覆盖::Docker 不可用，双库功能矩阵本轮被跳过"
