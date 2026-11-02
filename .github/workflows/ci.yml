@@ -199,6 +199,17 @@ jobs:
           fi
 
       - name: Integration tests
+        # 同 Create schema：把失败的用例名写进 annotation。
+        # xUnit 的失败明细在 job 日志里，而 Review 页面只看得到 exit code。
         env:
           NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
-        run: dotnet run --project tests/NetBpm.IntegrationTests --no-build
+        run: |
+          set +e
+          output=$(dotnet run --project tests/NetBpm.IntegrationTests --no-build 2>&1)
+          status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            detail=$(printf '%s' "$output" | grep -E '\[FAIL\]|Failed!|失败' | head -n 12 | tr '\n' ' ' | cut -c1-1500)
+            echo "::error title=集成测试失败::exit=${status} ${detail}"
+            exit "$status"
+          fi
