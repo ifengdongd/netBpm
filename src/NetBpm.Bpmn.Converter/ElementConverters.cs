@@ -6,7 +6,8 @@ namespace NetBpm.Bpmn.Converter;
 /// <summary>开始事件（<c>startEvent</c>）转换器。对应 Activiti 的 <c>StartEventXMLConverter</c>。</summary>
 public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
 {
-    private static readonly HashSet<string> KnownAttributes = new(StringComparer.Ordinal) { "initiator" };
+    private static readonly HashSet<string> KnownAttributes =
+        new(StringComparer.Ordinal) { "initiator", "formKey" };
 
     public override string ElementName => "startEvent";
 
@@ -19,6 +20,9 @@ public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
         // 发起人变量名（activiti:initiator）—— 实例启动时引擎把认证用户写进该变量
         element.Initiator = Attr(reader, "initiator", BpmnConstants.ActivitiNamespace);
 
+        // 起始表单 key：只落 ACT_RE_PROCDEF.HAS_START_FORM_KEY_ 标记（0/1），表单本身不在子集内
+        element.FormKey = Attr(reader, "formKey", BpmnConstants.ActivitiNamespace);
+
         // 定时/消息等启动事件仍不支持：记录下来，由校验层显式拒绝，
         // 而不是只认属性、把 <timerEventDefinition/> 静默丢掉。
         ReadEventDefinitions(reader, element);
@@ -29,6 +33,7 @@ public sealed class StartEventXmlConverter : BaseBpmnXmlConverter<StartEvent>
         writer.WriteStartElement("startEvent", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteActivitiAttribute(writer, "initiator", element.Initiator);
+        WriteActivitiAttribute(writer, "formKey", element.FormKey);
         WriteExtensionElements(writer, element);
         WriteEventDefinitions(writer, element);
         writer.WriteEndElement();
@@ -103,9 +108,18 @@ public sealed class ExclusiveGatewayXmlConverter : BaseBpmnXmlConverter<Exclusiv
 
     protected override ExclusiveGateway CreateElement() => new();
 
+    private static readonly HashSet<string> KnownAttributes =
+        new(StringComparer.Ordinal) { "async", "asyncBefore", "asyncAfter", "exclusive" };
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
+
     protected override void ConvertXmlToElement(XmlReader reader, ExclusiveGateway element, Process process)
     {
         element.DefaultFlow = Attr(reader, "default");
+
+        // 网关也有异步语义（Activiti 的 async 写在网关上会真的停在网关前）
+        ReadAsyncJobAttributes(reader, element);
+
         ReadChildren(reader, element, _ => { });
     }
 
@@ -114,6 +128,7 @@ public sealed class ExclusiveGatewayXmlConverter : BaseBpmnXmlConverter<Exclusiv
         writer.WriteStartElement("exclusiveGateway", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteAsyncJobAttributes(writer, element);
         WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
@@ -126,9 +141,15 @@ public sealed class ParallelGatewayXmlConverter : BaseBpmnXmlConverter<ParallelG
 
     protected override ParallelGateway CreateElement() => new();
 
+    private static readonly HashSet<string> KnownAttributes =
+        new(StringComparer.Ordinal) { "async", "asyncBefore", "asyncAfter", "exclusive" };
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
+
     protected override void ConvertXmlToElement(XmlReader reader, ParallelGateway element, Process process)
     {
         element.DefaultFlow = Attr(reader, "default");
+        ReadAsyncJobAttributes(reader, element);
         ReadChildren(reader, element, _ => { });
     }
 
@@ -137,6 +158,7 @@ public sealed class ParallelGatewayXmlConverter : BaseBpmnXmlConverter<ParallelG
         writer.WriteStartElement("parallelGateway", BpmnConstants.BpmnNamespace);
         WriteFlowElementAttributes(writer, element);
         WriteAttributeIfPresent(writer, "default", element.DefaultFlow);
+        WriteAsyncJobAttributes(writer, element);
         WriteExtensionElements(writer, element);
         writer.WriteEndElement();
     }
@@ -149,9 +171,15 @@ public sealed class InclusiveGatewayXmlConverter : BaseBpmnXmlConverter<Inclusiv
 
     protected override InclusiveGateway CreateElement() => new();
 
+    private static readonly HashSet<string> KnownAttributes =
+        new(StringComparer.Ordinal) { "async", "asyncBefore", "asyncAfter", "exclusive" };
+
+    protected override IReadOnlySet<string> KnownActivitiAttributes => KnownAttributes;
+
     protected override void ConvertXmlToElement(XmlReader reader, InclusiveGateway element, Process process)
     {
         element.DefaultFlow = Attr(reader, "default");
+        ReadAsyncJobAttributes(reader, element);
         ReadChildren(reader, element, _ => { });
     }
 

@@ -249,6 +249,49 @@ public sealed class BpmnXmlConverterTests
     }
 
     [Fact]
+    public void Gateway_ShouldParseAsyncJobAttributes()
+    {
+        // 异步断点是令牌推进层面的语义，**网关上也可以配**（Activiti 的 activiti:async 写在
+        // exclusiveGateway 上会真的停在网关前）。只让活动读它就变成「配置了但没做」。
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:activiti="http://activiti.org/bpmn"
+                         targetNamespace="http://netbpm/test">
+              <process id="asyncGw" isExecutable="true">
+                <startEvent id="start" />
+                <exclusiveGateway id="gw" default="flow2" activiti:async="true" />
+                <userTask id="a" />
+                <userTask id="b" />
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="gw" />
+                <sequenceFlow id="flow2" sourceRef="gw" targetRef="b" />
+                <sequenceFlow id="f2" sourceRef="gw" targetRef="a" />
+                <sequenceFlow id="f3" sourceRef="a" targetRef="end" />
+                <sequenceFlow id="f4" sourceRef="b" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var model = Parse(xml);
+        var gateway = Assert.IsType<ExclusiveGateway>(model.GetMainProcess()!.GetFlowElement("gw"));
+
+        Assert.True(gateway.AsyncBefore);      // activiti:async 等价于 asyncBefore
+        Assert.False(gateway.AsyncAfter);
+        Assert.True(gateway.Exclusive);        // 缺省独占
+
+        // 往返：旧写法 async 转成 asyncBefore 写回，语义不变
+        using var buffer = new MemoryStream();
+        new BpmnXmlConverter().ConvertToXml(model, buffer);
+
+        var reparsed = Assert.IsType<ExclusiveGateway>(
+            Parse(Encoding.UTF8.GetString(buffer.ToArray())).GetMainProcess()!.GetFlowElement("gw"));
+
+        Assert.True(reparsed.AsyncBefore);
+        Assert.Equal("flow2", reparsed.DefaultFlow);
+    }
+
+    [Fact]
     public void Documentation_ShouldNotSwallowFollowingSiblingElements()
     {
         // 回归：读文本用 ReadElementContentAsString 会把 reader 推进到结束标签之后，

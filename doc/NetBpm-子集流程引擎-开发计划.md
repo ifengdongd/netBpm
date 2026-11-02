@@ -740,6 +740,8 @@ Activiti 9 默认使用 **`DbIdGenerator`**（`ProcessEngineConfigurationImpl.in
 | 17 | 查询语句省略 `SUPER_EXEC_` 的 `LEFT JOIN` | 该 JOIN 只为取"父流程实例 id"（调用活动场景）而存在；本子集不支持调用活动，省略不改变选取的列与行内容 |
 | 18 | `documentation`（任务描述） | ✅ **2026-11-02 改为采集**（不再是有意偏离）：流程级 → `ACT_RE_PROCDEF.DESCRIPTION_`，userTask 级 → `ACT_HI_TASKINST.DESCRIPTION_`，与 Activiti 同值。`ACT_RU_TASK.DESCRIPTION_` 仍恒为 `null` —— Activiti 的运行任务行这一列也是 null，两侧零差异，因此文档用**独立载体**（`TaskEntity.Documentation`）而不是复用 `Description`，避免污染运行行。解析挂在 `BaseElement` 上（任意元素都读，只为往返不丢），多段时后写覆盖，文本 Trim 首尾、内部换行与缩进保留 |
 | 19 | `activiti:owner` | §1.2 的 `userTask` 属性清单未列出，但 Activiti 的 `handleAssignments` 会处理它、且 `OWNER_` 列存在，故**已实现**（模型 / 转换器 / 行为三处） |
+| 19.1 | `ACT_RE_PROCDEF.HAS_START_FORM_KEY_` | ✅ **2026-11-02 改为采集**：`startEvent` 上带 `activiti:formKey` 写 1，否则 0。表单内容本身不在子集内（不渲染、不校验），但「发起前要不要填表」这个标记要对得上 Activiti（此前 7 条语料差在这一位） |
+| 19.2 | **网关上的异步**（`activiti:async` / `asyncBefore`） | ✅ **2026-11-02 补齐**：异步断点是令牌推进层面的语义，Activiti 允许写在网关上并真的停在网关前。此前异步字段只挂在 `Activity` 上（转换器注释明写「网关没有异步语义」），网关上的配置被静默忽略 ⇒ 流程一路跑完，对拍上表现为 `isEnded` 与历史事件行数整片不一致。现把 `AsyncBefore` / `AsyncAfter` / `Exclusive` 上移到 `FlowNode`，网关转换器解析、异步作业落库与 `AsyncJobRule` 校验同步放宽 |
 | 20 | 任务行不做脏检查 | Activiti 靠 `DbSqlSession` 的脏检查在 flush 时统一写库；本实现对任务采用**即时写**，因此"只改了 `CLAIM_TIME_`"的场景需显式调用 `UpdateTaskAsync`（内部 API，已注明） |
 | 21 | 清表顺序 | `ACT_RU_IDENTITYLINK.TASK_ID_ → ACT_RU_TASK.ID_`（`ACT_FK_TSKASS_TASK`）要求**身份关系先于任务删除** —— 开发/测试用清表工具必须遵守 |
 

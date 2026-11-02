@@ -383,6 +383,11 @@ public sealed class UnsupportedCapabilityRule : IProcessValidationRule
 /// 多实例与 <c>exclusive=false</c> 会让同一命令内并行推进多条令牌，
 /// 与当前执行树模型冲突 —— 部署期显式拒绝，而不是按独占语义静默执行。
 /// </para>
+/// <para>
+/// 2026-11-02：判定范围从 <c>Task</c> 放宽到<b>所有流节点</b> —— 异步是令牌推进层面的语义，
+/// <b>网关上也可以配</b>（Activiti 的 <c>activiti:async</c> 写在 <c>exclusiveGateway</c> 上会真的停在网关前）。
+/// 只查 Task 时，网关上的 <c>exclusive=false</c> 会绕过这条规则静默按独占执行。
+/// </para>
 /// </summary>
 public sealed class AsyncJobRule : IProcessValidationRule
 {
@@ -394,28 +399,29 @@ public sealed class AsyncJobRule : IProcessValidationRule
     {
         ArgumentNullException.ThrowIfNull(process);
 
-        foreach (var task in process.FindFlowElementsOfType<NetBpm.Bpmn.Model.Task>())
+        foreach (var node in process.FlowElements.OfType<FlowNode>())
         {
-            if (!task.AsyncBefore && !task.AsyncAfter)
+            if (!node.AsyncBefore && !node.AsyncAfter)
             {
                 continue;
             }
 
-            if (task.LoopCharacteristics is not null)
+            // 多实例只有活动才有（网关不存在这一说）
+            if (node is NetBpm.Bpmn.Model.Task { LoopCharacteristics: not null })
             {
                 yield return new ValidationError(
                     Name,
-                    task.Id,
-                    task.GetType().Name,
+                    node.Id,
+                    node.GetType().Name,
                     "多实例活动暂不支持 asyncBefore / asyncAfter。");
             }
 
-            if (!task.Exclusive)
+            if (!node.Exclusive)
             {
                 yield return new ValidationError(
                     Name,
-                    task.Id,
-                    task.GetType().Name,
+                    node.Id,
+                    node.GetType().Name,
                     "异步作业只支持 exclusive=\"true\"（并发异步作业未实现）。");
             }
         }

@@ -94,6 +94,17 @@ public class StartEvent : Event
     /// </para>
     /// </summary>
     public string? Initiator { get; set; }
+
+    /// <summary>
+    /// 起始表单 key（<c>activiti:formKey</c>）。
+    /// <para>
+    /// 有没有这一列决定 <c>ACT_RE_PROCDEF.HAS_START_FORM_KEY_</c> 写 1 还是 0 ——
+    /// Activiti 用这个标记告诉调用方「发起这个流程要先填一张表单」。
+    /// 表单内容本身不在子集内（不渲染、不校验），但<b>这个标记要如实落库</b>：
+    /// 对拍里 7 条语料就差在这一位上。
+    /// </para>
+    /// </summary>
+    public string? FormKey { get; set; }
 }
 
 /// <summary>

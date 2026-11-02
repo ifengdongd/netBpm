@@ -3,13 +3,6 @@
     "caseName": "*",
     "dimension": "tables",
     "table": "ACT_RE_PROCDEF",
-    "column": "HAS_START_FORM_KEY_",
-    "reason": "起始表单 Key（activiti:formKey on startEvent）不在 §1.2 属性清单内，本实现恒写 0"
-  },
-  {
-    "caseName": "*",
-    "dimension": "tables",
-    "table": "ACT_RE_PROCDEF",
     "column": "HAS_GRAPHICAL_NOTATION_",
     "reason": "个别语料的 DI 判定差异（1 例）：我们以 shape/edge 是否存在判定，Activiti 另有坐标有效性校验；不影响任何运行时行为，待逐条分析后决定是否跟进（§15.10 R4 挂账）"
   },

@@ -108,19 +108,49 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
 
     /// <summary>
     /// 读取活动公共属性：<c>default</c> 与异步作业配置（<c>asyncBefore</c> / <c>asyncAfter</c> / <c>exclusive</c>）。
-    /// <para>各任务转换器共用；事件与网关没有异步语义，不调用它。</para>
     /// </summary>
     protected static void ReadActivityAttributes(XmlReader reader, Activity element)
     {
         ArgumentNullException.ThrowIfNull(element);
 
         element.DefaultFlow ??= Attr(reader, "default");
-        element.AsyncBefore = IsTrue(Attr(reader, "asyncBefore", BpmnConstants.ActivitiNamespace));
+        ReadAsyncJobAttributes(reader, element);
+    }
+
+    /// <summary>
+    /// 读取异步作业配置（<c>asyncBefore</c> / <c>asyncAfter</c> / <c>exclusive</c>，含旧写法 <c>async</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 参数类型是 <see cref="FlowNode"/> 而不是 <c>Activity</c>：异步断点是令牌推进层面的语义，
+    /// <b>网关也有</b>（Activiti 允许 <c>&lt;exclusiveGateway activiti:async="true"/&gt;</c>，
+    /// 对拍语料就是这么写的，Activiti 会真的停在网关前）。只让活动读它，网关上的配置就被静默忽略了。
+    /// </remarks>
+    protected static void ReadAsyncJobAttributes(XmlReader reader, FlowNode element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+
+        // activiti:async 是 Activiti 的旧写法，等价于 asyncBefore
+        var legacyAsync = IsTrue(Attr(reader, "async", BpmnConstants.ActivitiNamespace));
+
+        element.AsyncBefore = legacyAsync
+            || IsTrue(Attr(reader, "asyncBefore", BpmnConstants.ActivitiNamespace));
         element.AsyncAfter = IsTrue(Attr(reader, "asyncAfter", BpmnConstants.ActivitiNamespace));
         element.Exclusive = !string.Equals(
             Attr(reader, "exclusive", BpmnConstants.ActivitiNamespace),
             "false",
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>写出异步作业配置（往返保真）：只在为 true 时写 <c>asyncBefore</c> / <c>asyncAfter</c>。</summary>
+    protected static void WriteAsyncJobAttributes(XmlWriter writer, FlowNode element)
+    {
+        WriteActivitiAttribute(writer, "asyncBefore", element.AsyncBefore ? "true" : null);
+        WriteActivitiAttribute(writer, "asyncAfter", element.AsyncAfter ? "true" : null);
+
+        if (!element.Exclusive)
+        {
+            WriteActivitiAttribute(writer, "exclusive", "false");
+        }
     }
 
     /// <summary>写出活动公共属性（往返保真）：只在为 true 时写 <c>asyncBefore</c> / <c>asyncAfter</c>。</summary>

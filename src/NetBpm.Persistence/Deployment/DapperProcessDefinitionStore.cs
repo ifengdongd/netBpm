@@ -142,6 +142,12 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
             // 3) 流程定义
             var hasGraphicalNotation = bpmnModel.Shapes.Count > 0 || bpmnModel.Edges.Count > 0;
 
+            // 起始表单标记：startEvent 上带 activiti:formKey 就写 1。
+            // 表单内容不在子集内（不渲染、不校验），但「发起前要不要填表」这个标记要对得上 Activiti。
+            var hasStartFormKey = process.FlowElements
+                .OfType<StartEvent>()
+                .Any(start => !string.IsNullOrEmpty(start.FormKey));
+
             await connection.ExecuteAsync(
                 new CommandDefinition(
                     InsertProcessDefinitionSql,
@@ -156,6 +162,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                         deploymentId,
                         resourceName,
                         hasGraphicalNotation = hasGraphicalNotation ? 1 : 0,
+                        hasStartFormKey = hasStartFormKey ? 1 : 0,
                         engineVersion,
                         tenantId = tenant,
                     },
@@ -604,7 +611,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
             SUSPENSION_STATE_, TENANT_ID_, ENGINE_VERSION_, APP_VERSION_)
         values (
             @id, 1, @category, @name, @key, @version, @deploymentId, @resourceName,
-            null, @description, 0, @hasGraphicalNotation,
+            null, @description, @hasStartFormKey, @hasGraphicalNotation,
             1, @tenantId, @engineVersion, null)
         """;
 

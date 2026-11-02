@@ -15,6 +15,7 @@ using NetBpm.Persistence.Database;
 using NetBpm.Persistence.Deployment;
 using NetBpm.Persistence.Execution;
 using NetBpm.Persistence.History;
+using NetBpm.Persistence.Jobs;
 using NetBpm.Persistence.Tasks;
 using NetBpm.Runtime;
 
@@ -111,6 +112,10 @@ public sealed class DifferentialEngine
         IEngineServices? holder = null;
         var behaviorFactory = new ActivityBehaviorFactory(() => holder!);
 
+        // 异步作业存储：不注册的话，配了 async 的节点（含**网关**）会直接抛
+        // 「宿主未注册 IAsyncJobManager」，语料变成"跑不动"而不是"停在异步断点上"。
+        AsyncJobs = new DapperAsyncJobManager(sessions);
+
         var services = EngineServices.Create(
             Executions,
             Trace,
@@ -119,7 +124,8 @@ public sealed class DifferentialEngine
             behaviorFactory,
             _delegates,
             TaskManager,
-            new ProcessDefinitionResolver(Definitions));
+            new ProcessDefinitionResolver(Definitions),
+            asyncJobManager: AsyncJobs);
 
         holder = services;
 
@@ -155,6 +161,9 @@ public sealed class DifferentialEngine
     public TraceRecordingHistoryManager Trace { get; }
 
     public DapperProcessDefinitionStore Definitions { get; }
+
+    /// <summary>异步作业存储（asyncBefore / asyncAfter，网关上的异步同样落这里）。</summary>
+    public DapperAsyncJobManager AsyncJobs { get; }
 
     public ICommandExecutor Executor { get; }
 

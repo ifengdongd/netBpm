@@ -14,22 +14,22 @@ namespace NetBpm.Engine.Operations;
 /// </summary>
 internal static class AsyncJobScheduler
 {
-    /// <summary>为执行上的活动落一条异步作业。</summary>
+    /// <summary>为执行上的节点落一条异步作业（活动与网关都可能配异步）。</summary>
     /// <exception cref="EngineException">宿主未注册 <see cref="IAsyncJobManager"/>。</exception>
     public static async ValueTask CreateAsync(
         IEngineServices services,
         IExecutionEntity execution,
-        Activity activity,
+        FlowNode node,
         AsyncJobPhase phase,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(execution);
-        ArgumentNullException.ThrowIfNull(activity);
+        ArgumentNullException.ThrowIfNull(node);
 
         var manager = services.AsyncJobManager
             ?? throw new EngineException(
-                $"活动 '{activity.Id}' 配置了 {(phase == AsyncJobPhase.Before ? "asyncBefore" : "asyncAfter")}，" +
+                $"节点 '{node.Id}' 配置了 {(phase == AsyncJobPhase.Before ? "asyncBefore" : "asyncAfter")}，" +
                 "但宿主未注册 IAsyncJobManager（见 AddNetBpmAsyncJobExecutor）。");
 
         var now = services.Clock.UtcNow;
@@ -43,7 +43,7 @@ internal static class AsyncJobScheduler
                 ExecutionId = execution.Id,
                 ProcessInstanceId = execution.ProcessInstanceId ?? string.Empty,
                 ProcessDefinitionId = execution.ProcessDefinitionId,
-                ActivityId = activity.Id ?? string.Empty,
+                ActivityId = node.Id ?? string.Empty,
                 Phase = phase,
                 DueDate = now,
                 TenantId = execution.TenantId,

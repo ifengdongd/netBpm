@@ -43,6 +43,30 @@ public abstract class FlowNode : FlowElement, IFlowNode
     /// <summary>按 id 取出流。</summary>
     public SequenceFlow? GetOutgoingFlow(string id) =>
         OutgoingFlows.FirstOrDefault(flow => string.Equals(flow.Id, id, StringComparison.Ordinal));
+
+    /// <summary>
+    /// 进入节点前先落一条异步作业（<c>activiti:asyncBefore</c>，旧写法 <c>activiti:async</c>）：
+    /// 命令提交后由 JobExecutor 在独立事务里继续推进。
+    /// </summary>
+    /// <remarks>
+    /// 为什么放在 <b>FlowNode</b> 而不是 <c>Activity</c>：异步断点是<b>令牌推进</b>层面的语义，
+    /// Activiti 允许它写在网关上（对拍语料 <c>ExclusiveGatewayTest.testAsyncExclusiveGateway</c>
+    /// 就在 <c>exclusiveGateway</c> 上写了 <c>activiti:async="true"</c>，Activiti 会真的停在网关前）。
+    /// 只挂在 Activity 上时，网关上的异步配置会被静默忽略 —— 属于「配置了但没做」这类最危险的差异。
+    /// </remarks>
+    public bool AsyncBefore { get; set; }
+
+    /// <summary>
+    /// 节点执行完成后不立即离开，而是落一条异步作业（<c>activiti:asyncAfter</c>）。
+    /// </summary>
+    public bool AsyncAfter { get; set; }
+
+    /// <summary>
+    /// 是否独占作业（<c>activiti:exclusive</c>，默认 true）。
+    /// <para>本子集只支持独占：并发作业（exclusive=false）会让同一实例的多条令牌并行推进，</para>
+    /// <para>与当前「一个命令一棵执行树」的并发模型冲突，由 <c>AsyncJobRule</c> 部署期拒绝。</para>
+    /// </summary>
+    public bool Exclusive { get; set; } = true;
 }
 
 /// <summary>

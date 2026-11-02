@@ -58,8 +58,10 @@ public sealed class ContinueProcessOperation : IOperation
 
         // asyncBefore：命令提交时就停在这里，活动行为（含历史开始、任务创建、服务调用）
         // 交给 JobExecutor 在独立事务里执行。作业与「执行停在活动上」在同一事务，天然一致。
+        // 用 FlowNode 而不是 Activity 判定：异步断点也可以写在**网关**上（Activiti 的 async 语义），
+        // 只认 Activity 会让网关上的配置静默失效。
         if (!_skipAsyncBefore
-            && currentFlowElement is Activity { AsyncBefore: true } asyncActivity)
+            && currentFlowElement is FlowNode { AsyncBefore: true } asyncActivity)
         {
             await AsyncJobScheduler.CreateAsync(
                 _services,

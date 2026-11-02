@@ -60,7 +60,7 @@ public sealed class TakeOutgoingSequenceFlowsOperation : IOperation
         // asyncAfter：活动行为已经执行完（例如服务调用、脚本），但「离开节点」推迟到作业里。
         // 这样历史结束、节点结束监听器与后续推进都在作业事务中完成，失败可重试。
         if (!_skipAsyncAfter
-            && currentFlowElement is Activity { AsyncAfter: true } asyncActivity)
+            && currentFlowElement is FlowNode { AsyncAfter: true } asyncActivity)
         {
             await AsyncJobScheduler.CreateAsync(
                 _services,
