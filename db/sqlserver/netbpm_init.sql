@@ -1024,10 +1024,6 @@ if not exists (select 1 from sys.indexes where name = 'ACT_IDX_IDENT_LNK_PROCINS
 create index ACT_IDX_IDENT_LNK_PROCINST_USER on ACT_RU_IDENTITYLINK (PROC_INST_ID_, USER_ID_);
 go
 
-if not exists (select 1 from sys.indexes where name = 'ACT_IDX_OUTBOX_CLAIM' and object_id = object_id('ACT_EVT_OUTBOX'))
-create index ACT_IDX_OUTBOX_CLAIM on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, NEXT_ATTEMPT_);
-go
-
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_BYTEARRAY_DEPLOYMENT' and object_id = object_id('ACT_GE_BYTEARRAY'))
 create index ACT_IDX_BYTEARRAY_DEPLOYMENT on ACT_GE_BYTEARRAY (DEPLOYMENT_ID_);
 go
@@ -1295,6 +1291,9 @@ go
 
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_OUTBOX_PENDING' and object_id = object_id('ACT_EVT_OUTBOX'))
 create index ACT_IDX_OUTBOX_PENDING on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, CREATE_TIME_);
+go
+if not exists (select 1 from sys.indexes where name = 'ACT_IDX_OUTBOX_CLAIM' and object_id = object_id('ACT_EVT_OUTBOX'))
+create index ACT_IDX_OUTBOX_CLAIM on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, NEXT_ATTEMPT_);
 go
 if not exists (select 1 from sys.indexes where name = 'ACT_IDX_OUTBOX_PROC_INST' and object_id = object_id('ACT_EVT_OUTBOX'))
 create index ACT_IDX_OUTBOX_PROC_INST on ACT_EVT_OUTBOX (PROCESS_INSTANCE_ID_);

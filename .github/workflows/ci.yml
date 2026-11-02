@@ -174,11 +174,29 @@ jobs:
       - name: Build
         run: dotnet build NetBpm.slnx --nologo
 
-      - name: Create schema
+      - name: Verify MySQL connectivity
+        # 独立一步：这步绿、下一步红，就能立刻把「连不上库」和「迁移脚本本身报错」分开
         run: >
-          dotnet run --project tools/NetBpm.DbMigrate --no-build --
-          migrate --create-database --provider mysql
-          --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
+          dotnet run --project tools/NetBpm.DbMigrate --no-build -- probe
+          --provider mysql
+          --connection "Server=127.0.0.1;Port=3306;User ID=root;Password=netbpm;"
+
+      - name: Create schema
+        # 手动捕获输出：失败原因必须落到 check-run annotation 里。
+        # 否则 Review 时只看得到「Process completed with exit code 1」，
+        # 而真实错误埋在需要凭据才能下载的 job 日志里。
+        run: |
+          set +e
+          output=$(dotnet run --project tools/NetBpm.DbMigrate --no-build -- migrate --create-database \
+            --provider mysql \
+            --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;" 2>&1)
+          status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            detail=$(printf '%s' "$output" | grep -iE 'error|exception|fail|denied|unknown|syntax|invalid|does not exist' | tail -n 5 | tr '\n' ' ' | cut -c1-1500)
+            echo "::error title=DbMigrate migrate 失败::exit=${status} ${detail}"
+            exit "$status"
+          fi
 
       - name: Integration tests
         env:

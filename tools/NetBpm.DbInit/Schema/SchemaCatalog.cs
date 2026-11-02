@@ -389,8 +389,9 @@ internal static class SchemaCatalog
         TI("ACT_IDX_HI_TASK_ASSIGNEE_START", "ACT_HI_TASKINST", ["ASSIGNEE_", "START_TIME_"]),
         // 办人变更时按「实例 + 用户」count 候选人 / 办理人，原索引只有 PROC_INST_ID_ 前缀
         TI("ACT_IDX_IDENT_LNK_PROCINST_USER", "ACT_RU_IDENTITYLINK", ["PROC_INST_ID_", "USER_ID_"]),
-        // outbox 待发布扫描：过滤 PUBLISHED_ / DEAD_LETTER_ / NEXT_ATTEMPT_（NEXT_ATTEMPT_ 兼作发布租约）
-        TI("ACT_IDX_OUTBOX_CLAIM", "ACT_EVT_OUTBOX", ["PUBLISHED_", "DEAD_LETTER_", "NEXT_ATTEMPT_"]),
+        // 注意：outbox 的待发布索引（ACT_IDX_OUTBOX_CLAIM）**不能放这里** —— 表 ACT_EVT_OUTBOX
+        // 在 ⑤ 才建，而本节在 ④ 渲染，全新库会先建索引再见表，直接报 "Table doesn't exist"。
+        // 它已随 EventOutboxTable 的表定义走（与下面 ACT_HI_MIGRATION 同一条规则）。
         // 注意：ACT_HI_MIGRATION 由 0007 建表，索引必须跟着表的脚本走，
         // 否则新库按 0004 → 0007 顺序执行时会在不存在的表上建索引而失败。
         TI("ACT_IDX_BYTEARRAY_DEPLOYMENT", "ACT_GE_BYTEARRAY", ["DEPLOYMENT_ID_"]),
@@ -1432,6 +1433,9 @@ internal static class SchemaCatalog
         ["ID_"],
         [
             new IndexDef("ACT_IDX_OUTBOX_PENDING", ["PUBLISHED_", "DEAD_LETTER_", "CREATE_TIME_"]),
+            // 待发布领取：过滤 PUBLISHED_ / DEAD_LETTER_，按 NEXT_ATTEMPT_（兼作发布租约）排序。
+            // 定义在表上而不是 PerfIndexes（④）：④ 先于 ⑤ 的建表执行，否则全新库建索引时表还不存在。
+            new IndexDef("ACT_IDX_OUTBOX_CLAIM", ["PUBLISHED_", "DEAD_LETTER_", "NEXT_ATTEMPT_"]),
             new IndexDef("ACT_IDX_OUTBOX_PROC_INST", ["PROCESS_INSTANCE_ID_"]),
         ],
         [], [],

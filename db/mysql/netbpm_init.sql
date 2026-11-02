@@ -1301,15 +1301,6 @@ deallocate prepare stmt;
 
 
 set @ddl = (select if(count(*) = 0,
-        'create index ACT_IDX_OUTBOX_CLAIM on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, NEXT_ATTEMPT_)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'ACT_EVT_OUTBOX' and index_name = 'ACT_IDX_OUTBOX_CLAIM');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-
-set @ddl = (select if(count(*) = 0,
         'create index ACT_IDX_BYTEARRAY_DEPLOYMENT on ACT_GE_BYTEARRAY (DEPLOYMENT_ID_)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'ACT_GE_BYTEARRAY' and index_name = 'ACT_IDX_BYTEARRAY_DEPLOYMENT');
@@ -1703,6 +1694,7 @@ create table if not exists ACT_EVT_OUTBOX (
     PUBLISHED_TIME_ datetime(3) comment '发布时间（UTC）',
     primary key (ID_),
     index ACT_IDX_OUTBOX_PENDING (PUBLISHED_, DEAD_LETTER_, CREATE_TIME_),
+    index ACT_IDX_OUTBOX_CLAIM (PUBLISHED_, DEAD_LETTER_, NEXT_ATTEMPT_),
     index ACT_IDX_OUTBOX_PROC_INST (PROCESS_INSTANCE_ID_)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE utf8_bin COMMENT='事务性事件 outbox：引擎事件与业务写入同事务落库，由发布器至少一次投递';
 
@@ -1710,6 +1702,14 @@ set @ddl = (select if(count(*) = 0,
         'create index ACT_IDX_OUTBOX_PENDING on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, CREATE_TIME_)',
         'select 1')
     from information_schema.statistics where table_schema = database() and table_name = 'ACT_EVT_OUTBOX' and index_name = 'ACT_IDX_OUTBOX_PENDING');
+prepare stmt from @ddl;
+execute stmt;
+deallocate prepare stmt;
+
+set @ddl = (select if(count(*) = 0,
+        'create index ACT_IDX_OUTBOX_CLAIM on ACT_EVT_OUTBOX (PUBLISHED_, DEAD_LETTER_, NEXT_ATTEMPT_)',
+        'select 1')
+    from information_schema.statistics where table_schema = database() and table_name = 'ACT_EVT_OUTBOX' and index_name = 'ACT_IDX_OUTBOX_CLAIM');
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
