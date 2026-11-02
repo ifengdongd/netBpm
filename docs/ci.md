@@ -45,6 +45,13 @@ remote 已存在但地址不同时直接报错，不擅自改指向。
 - **集成测试红**：先看是不是**环境**（MySQL service 没起来 → 连接失败；runner 的 Docker 不可用 →
   SqlServer 用例会动态跳过而不是失败，跳过数变多是正常的）。数据库不可用时测试**动态跳过**，
   所以「跳过很多」不等于绿，要对照跳过数。
+- **只有 `sqlserver` 变体的用例红**：先别怀疑产品代码。CI 容器的默认 collation 是
+  `SQL_Latin1_General_CP1_CI_AS`，而中文版 SQL Server 本机通常是 `Chinese_PRC_CI_AS` ——
+  两者对「SQL 里的中文」处理不同：**无 `N` 前缀的 `'中文'` 字面量在 Latin1 下按 varchar 转成 `?`**，
+  于是 `like '%中文%'` 永远匹配不到；本机代码页 936 恰好能表示中文，所以本地永远绿。
+  规则：测试里的断言不要靠 SQL 匹配中文，把值读回来在 C# 里 `Contains`。
+  本地复现只需换个 collation：`create database x collate SQL_Latin1_General_CP1_CI_AS`，
+  再把 `NETBPM_SQLSERVER_CONNECTION` 指过去（本机装了 SQL Server 时比等 CI 快得多）。
 - **`Create schema` 步红（2 秒内就退出）**：几乎都不是迁移脚本的问题，而是**连不上库**。
   官方 `mysql` 镜像默认只建 `root@localhost`，而 service 容器把端口映射到宿主机后，
   连接来源是 docker 网关地址（`172.x.x.x`）——不是 `localhost`，于是 `Access denied`。

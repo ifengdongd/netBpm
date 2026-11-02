@@ -103,10 +103,17 @@ public sealed class ActivityModificationDualDatabaseTests
 
         using var session = harness.SessionFactory.Create();
 
-        // 历史：任务被删除带原因、实例已结束
-        var cancelledTasks = session.Connection.ExecuteScalar<long>(
-            "select count(*) from ACT_HI_TASKINST where DELETE_REASON_ like '%集成测试取消%'");
-        Assert.Equal(1, cancelledTasks);
+        // 历史：任务被删除带原因、实例已结束。
+        // 刻意不在 SQL 里 LIKE 中文：无 N 前缀的 '中文' 字面量在非中文 collation
+        // （CI 容器的默认 SQL_Latin1_General_CP1_CI_AS）下会被当 varchar 转成 ?，
+        // pattern 变成 %?????%，永远匹配不到；而本机 Chinese_PRC_CI_AS（代码页 936）
+        // 恰好能表示中文，所以这个坑只在 CI 暴露。读回值在 C# 里判断，
+        // 断言语义也就不再取决于数据库 collation。
+        var deleteReasons = session.Connection
+            .Query<string>("select DELETE_REASON_ from ACT_HI_TASKINST where DELETE_REASON_ is not null")
+            .ToList();
+
+        Assert.Single(deleteReasons, reason => reason.Contains("集成测试取消", StringComparison.Ordinal));
 
         var endedInstances = session.Connection.ExecuteScalar<long>(
             "select count(*) from ACT_HI_PROCINST where ID_ = @id and END_TIME_ is not null",
@@ -167,9 +174,13 @@ public sealed class ActivityModificationDualDatabaseTests
         Assert.Equal(0, harness.CountRows("ACT_RU_TASK"));
 
         using var session = harness.SessionFactory.Create();
-        var cancelledTasks = session.Connection.ExecuteScalar<long>(
-            "select count(*) from ACT_HI_TASKINST where DELETE_REASON_ like '%并发取消%'");
-        Assert.Equal(1, cancelledTasks);
+
+        // 同上：不在 SQL 里 LIKE 中文，否则断言结论取决于数据库 collation
+        var deleteReasons = session.Connection
+            .Query<string>("select DELETE_REASON_ from ACT_HI_TASKINST where DELETE_REASON_ is not null")
+            .ToList();
+
+        Assert.Single(deleteReasons, reason => reason.Contains("并发取消", StringComparison.Ordinal));
 
         var endedInstances = session.Connection.ExecuteScalar<long>(
             "select count(*) from ACT_HI_PROCINST where ID_ = @id and END_TIME_ is not null",
