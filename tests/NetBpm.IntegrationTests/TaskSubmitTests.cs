@@ -248,6 +248,35 @@ public sealed class TaskSubmitTests
     }
 
     [Fact]
+    public async Task Submit_ShouldReturnCompletedInstance_WhenLastStepEndsTheProcess()
+    {
+        using var host = BuildHost();
+        await DeployAsync(host);
+
+        using var client = host.CreateClient();
+        var secret = await RegisterAsync(
+            client, "oa-portal", [PlatformScopes.TaskRead, PlatformScopes.TaskSubmit, PlatformScopes.TaskSubmitOnBehalf, PlatformScopes.InstanceRead]);
+
+        var (_, notifyTaskId) = await StartAndAdvanceToNotifyAsync(host, client, secret);
+
+        // 归档是末环节：提交后实例结束。内存宿主历史关闭 ⇒ 结束的实例既没有运行态行也没有历史行，
+        // 读模型查不到是**预期**行为，提交结果必须照常返回终态，而不是 500。
+        using var response = await SendSubmitAsync(
+            client, notifyTaskId, secret, subject: "archivist", new { optionId = "1", comment = "归档完成" });
+
+        var body = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("COMPLETED", body.GetProperty("instance").GetProperty("status").GetString());
+        Assert.Empty(body.GetProperty("nextTasks").EnumerateArray());
+
+        var events = body.GetProperty("events").EnumerateArray().Select(element => element.GetString()).ToArray();
+
+        Assert.Contains("task.completed", events);
+        Assert.Contains("instance.completed", events);
+    }
+
+    [Fact]
     public async Task Submit_Should404_ForUnknownOrNotAssignee()
     {
         using var host = BuildHost();
@@ -456,6 +485,28 @@ public sealed class TaskSubmitTests
         HttpClient client,
         string secret) =>
         await AdvanceAsync(host, client, secret, "lisi", "task_approve");
+
+    /// <summary>发起并完成前两环节，返回实例 id 与停在归档环节的任务 id。</summary>
+    private static async Task<(string InstanceId, string TaskId)> StartAndAdvanceToNotifyAsync(
+        WebApplicationFactory<Program> host,
+        HttpClient client,
+        string secret)
+    {
+        var (instanceId, approveTaskId) = await AdvanceAsync(host, client, secret, "lisi", "task_approve");
+
+        using var response = await SendSubmitAsync(
+            client, approveTaskId, secret, subject: "manager", new { optionId = "1", comment = "同意" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var engine = host.Services.GetRequiredService<IProcessEngine>();
+        var notify = Assert.Single(await engine.FindTasksAsync(
+            new Runtime.TaskQuery(ProcessInstanceId: instanceId), Ct));
+
+        Assert.Equal("task_notify", notify.TaskDefinitionKey);
+
+        return (instanceId, notify.Id);
+    }
 
     private static async Task<(string InstanceId, string TaskId)> AdvanceAsync(
         WebApplicationFactory<Program> host,

@@ -684,6 +684,7 @@ v1.27 补齐管理面写路径、事件看板与单订阅限速、时间线轮�
 - [x] `POST /instances/{id}/terminate` ✅ v1.21（原因必填 + 乐观并发 + 落时间线，`InstanceTerminationTests` 5 项）
 - [x] `POST /tasks/{id}/claim` / `unclaim` / `transfer` ✅ v1.21（三个动作都落时间线，`TaskAssignmentTests` 8 项）
 - [x] **前置规矩**：跳转 / 终止 / 变量直写写时间线条目 ✅ v1.21（新增 `INSTANCE_JUMPED` kind；文档点名的「唯一有授权没记录」的口子已补）
+- [x] **审批驳回改道闭环** ✅ 2026-11-02（`submit` 带 `targetNodeId` 时完成任务后调 `MoveActivityToAsync` 并补 `INSTANCE_JUMPED`；改道失败不抛、结论照常生效；末环节提交在内存宿主下不再 500，改为合成终态视图。此前 `targetNodeId` 只做 422 校验不驱动流程。`TaskSubmitTests` 3 例）
 - [x] `GET /tasks/{id}/attachments`（只存引用，不做存储）✅ v1.22（复用表单快照，`TaskAttachmentReadTests` 2 项）
 - [x] `GET /instances/{id}/diagram.svg`（高亮流转状态图）✅ v1.22（`IInstanceDiagram`，`InstanceDiagramReadTests` 3 项含真库）
 - [x] `GET /instances/{id}/parameters`（参数快照）✅ v1.22（声明 + 值合并，`InstanceParameterReadTests` 2 项）

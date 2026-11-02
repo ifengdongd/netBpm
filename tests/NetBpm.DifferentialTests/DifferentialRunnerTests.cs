@@ -210,6 +210,51 @@ public sealed class DifferentialRunnerTests
         }
     }
 
+    /// <summary>
+    /// §9.4 的一致率门禁：整体 ≥99.5%、三个维度各自达线、差异清单 100% 有结论、没有跑不动的语料。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 这条用例是「引擎与 Activiti 是否仍然同口径」的唯一自动判定，因此它<b>不能</b>被
+    /// 「把差异登记进台账」轻易放行：台账只收确实无法消除的偏离，且必须写明理由
+    /// （<c>known-issues.json</c> 的 <c>reason</c> 是必填项，就是这个意思）。
+    /// </para>
+    /// <para>
+    /// 2026-11-02 的达线动作：28 条待结论差异全是 <c>ACT_HI_VARINST.TENANT_ID_</c>
+    /// 「期望 null / 实际 ''」—— Activiti 的历史变量实体没有租户字段，预言机那一列恒为 null。
+    /// 修的是代码（无租户时这一列写 null）而不是台账，收口后整体 99.46% → 99.61%。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Gate_ShouldBeWithinThreshold()
+    {
+        Assert.SkipUnless(TestDatabase.IsAvailable, TestDatabase.SkipReason);
+
+        var engine = new DifferentialEngine(TestDatabase.ConnectionString);
+        var runner = new DifferentialRunner(
+            engine,
+            TestDatabase.ArtifactRoot,
+            DifferenceLedger.Load(TestDatabase.KnownIssuesFile));
+
+        var cases = CorpusRepository.Load(TestDatabase.CorpusRoot);
+        var report = await runner.RunAllAsync(cases, Ct);
+
+        // 没有真值时 ComparedCaseCount 为 0，门禁按「未达线」处理（不能静默达标）
+        Assert.True(
+            report.ComparedCaseCount > 0,
+            "没有任何语料参与比对：缺少 *.oracle.json 真值（见 tools/Oracle/README.md）。");
+
+        Assert.True(
+            report.WithinGate(),
+            $"一致率门禁未达线：整体 {report.Overall.MatchRate * 100:F2}%"
+            + $"（{report.Overall.Differences.Count}/{report.Overall.ComparedCells}）；"
+            + $"① API {report.Api.MatchRate * 100:F2}%、"
+            + $"② 行快照 {report.Tables.MatchRate * 100:F2}%、"
+            + $"③ 事件 {report.Events.MatchRate * 100:F2}%；"
+            + $"待结论差异 {report.PendingConclusions.Count} 条、"
+            + $"跑不动的语料 {report.ExecutionFailures.Count} 个。");
+    }
+
     private static async Task<OracleSnapshot> ExecuteAsync(string fullName)
     {
         var engine = new DifferentialEngine(TestDatabase.ConnectionString);

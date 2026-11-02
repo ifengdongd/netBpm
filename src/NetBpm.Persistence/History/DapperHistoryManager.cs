@@ -452,7 +452,13 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
                     textValue2 = columns.TextValue2,
                     createTime = now,
                     lastUpdatedTime = now,
-                    tenantId = variable.TenantId ?? string.Empty,
+
+                    // ⚠️ 历史变量行<b>不携带租户</b>，无租户时写 null 而不是 ''：
+                    // Activiti 的 HistoricVariableInstance 实体根本没有 tenantId 字段，
+                    // 预言机跑出来的这一列恒为 null（对拍 2026-11-02：28 条差异全是这一列）。
+                    // 本引擎的 DDL 里有这列，但语义照预言机 —— 「变量行没有租户」用 null 表达，
+                    // 与其余历史表（无租户时 ''）不同，这是照搬时必须承认的不一致。
+                    tenantId = string.IsNullOrEmpty(variable.TenantId) ? null : variable.TenantId,
                 },
                 lease.Session.Transaction,
                 cancellationToken: ct)).ConfigureAwait(false);

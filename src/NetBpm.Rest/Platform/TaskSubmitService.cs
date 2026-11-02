@@ -325,6 +325,53 @@ public sealed class TaskSubmitService : ITaskSubmitService
     }
 
     /// <summary>
+    /// 合成终态实例视图：只在「提交后实例已结束、而历史未开启导致读模型查不到」时使用。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 只填<b>手上确有的</b>信息：实例 id / 流程与定义（来自待办视图）、结束时间（此刻）、
+    /// 结论（本次审批决定）。发起时间、发起人、参数值、环节聚合这些查不到的字段一律留空 ——
+    /// 宁可让字段空着，也不用引擎里已经不存在的东西去猜。
+    /// </para>
+    /// <para>
+    /// 结论源是 <see cref="ConclusionSource.LastDecision"/>：它就是「由最后一条审批决定推导」，
+    /// 与真库路径上三级回落的第二级同口径（真库里这一步拿得到变量，所以会用同样的结论）。
+    /// </para>
+    /// </remarks>
+    private static InstanceView BuildTerminalView(
+        TaskView view,
+        ApprovalOption option,
+        SubmitTaskRequest request)
+    {
+        var endedAt = DateTimeOffset.UtcNow;
+
+        return new InstanceView(
+            InstanceId: view.InstanceId,
+            ProcessKey: view.ProcessKey ?? string.Empty,
+            ProcessDefinitionId: view.ProcessDefinitionId ?? view.ProcessKey ?? string.Empty,
+            DefinitionVersion: view.DefinitionVersion ?? 0,
+            BusinessKey: null,
+            Title: null,
+            Status: InstanceStatus.Completed,
+            StartedAt: null,
+            StartedBy: null,
+            EndedAt: endedAt,
+            CurrentActivityIds: [],
+            Revision: 0,
+            Tasks: [],
+            Parameters: new ParameterSnapshot(
+                view.InstanceId,
+                0,
+                new Dictionary<string, string?>(StringComparer.Ordinal),
+                endedAt,
+                null),
+            NodeOutcomes: [],
+            Conclusion: option.Semantic is { } semantic
+                ? new InstanceConclusion(semantic, request.OptionId, option.Label, ConclusionSource.LastDecision)
+                : null);
+    }
+
+    /// <summary>
     /// 组装要写进引擎的流程变量：审批结论（<c>result</c>/<c>comment</c>）+ 本次参数（镜像裸名）。
     /// </summary>
     /// <remarks>
@@ -550,9 +597,20 @@ public sealed class TaskSubmitService : ITaskSubmitService
             }
         }
 
-        var instance = await _instanceCatalog.FindAsync(view.InstanceId, context, ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException(
-                $"流程实例 '{view.InstanceId}' 在提交后查不到（引擎历史也没有）。");
+        var instance = await _instanceCatalog.FindAsync(view.InstanceId, context, ct).ConfigureAwait(false);
+
+        // 提交走完了最后一步：实例已结束，且历史未开启（内存宿主）时运行态行与历史行都没有，
+        // 读模型如实返回 null。这不是错误 —— 结论、结束时间都在手边，
+        // 合成终态视图比抛 500 更诚实：调用方要的是「这次提交的结果」，不是「再查一次详情」。
+        if (instance is null)
+        {
+            _logger.LogWarning(
+                "提交后查不到实例 '{InstanceId}' 的运行态与历史行（历史未开启时结束的实例就是查不到）："
+                + "按本次审批决定合成终态视图返回。",
+                view.InstanceId);
+
+            instance = BuildTerminalView(view, option, request);
+        }
 
         var finished = instance.Status is InstanceStatus.Completed or InstanceStatus.Terminated;
 
