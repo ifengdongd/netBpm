@@ -66,6 +66,23 @@ public sealed class NetBpmHostOptions
     /// <summary>版本号来源程序集（<c>/health</c>、<c>/api/admin/info</c> 用）。</summary>
     public Assembly VersionAssembly { get; set; } = typeof(NetBpmHostOptions).Assembly;
 
+    /// <summary>
+    /// 允许跨域调用本服务的来源（<c>scheme://host[:port]</c>）；空列表 = 不启用 CORS。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 默认关闭不是遗漏：管理端与设计器由 Admin 工程的 <c>wwwroot</c> 托管，浏览器同源，
+    /// 不需要 CORS；内网 SDK / 服务间调用走服务端 HTTP，也不受同源策略约束。
+    /// 真正需要它的是「独立部署的前端（异源 SPA / 本地 dev server）直连 <c>/workflow/v1</c>」。
+    /// </para>
+    /// <para>
+    /// 必须逐个列出来源，不提供通配：本服务的鉴权是 <c>X-Api-Key</c> / JWT 请求头，
+    /// 虽然不像 Cookie 那样会被浏览器自动携带，但放开任意来源等于允许任意网页读取响应体，
+    /// 一旦密钥被前端写进产物，泄露面就不再可控。
+    /// </para>
+    /// </remarks>
+    public IList<string> CorsAllowedOrigins { get; } = [];
+
     /// <summary>OpenAPI 注册钩子（管理端用来收敛日期 / 数字的 schema 类型）。</summary>
     public Action<OpenApiOptions>? ConfigureOpenApi { get; set; }
 }
@@ -83,6 +100,33 @@ public sealed class NetBpmHostOptions
 /// </summary>
 public static class NetBpmHost
 {
+    /// <summary>跨域预检放行的方法。</summary>
+    private static readonly string[] CorsAllowedMethods =
+        ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+
+    /// <summary>
+    /// 跨域预检放行的请求头。
+    /// </summary>
+    /// <remarks>
+    /// 逐个列而不是 <c>AllowAnyHeader</c>：这份清单就是「本服务真正消费的头」，
+    /// 与 <see cref="AuthenticationMiddleware"/> 的常量、<c>IdempotencyMiddleware.HeaderName</c> 对照着看，
+    /// 新增一个头时不会漏。预检只影响浏览器肯不肯发请求，服务端仍照常校验。
+    /// </remarks>
+    private static readonly string[] CorsAllowedRequestHeaders =
+    [
+        "Authorization",
+        "Content-Type",
+        "X-Api-Key",
+        "X-User-Id",
+        "X-Subject-Id",
+        "X-Tenant-Id",
+        "X-Request-Id",
+        "Idempotency-Key",
+    ];
+
+    /// <summary>需要暴露给跨域调用方的响应头（默认只暴露 6 个 simple response headers）。</summary>
+    private static readonly string[] CorsExposedResponseHeaders = ["X-Total-Count", "X-Request-Id"];
+
     /// <summary>注册宿主全部服务，返回解析后的选项（后续 <see cref="UseNetBpmHost"/> / 映射端点都要用）。</summary>
     public static NetBpmHostOptions AddNetBpmHost(
         this WebApplicationBuilder builder,
@@ -105,6 +149,16 @@ public static class NetBpmHost
         options.MaxRequestBodySizeBytes = configuration.GetValue(
             "NetBpm:MaxRequestBodySizeBytes",
             options.MaxRequestBodySizeBytes);
+
+        // 跨域来源（NetBpm:Cors:AllowedOrigins）：逐项去空白后收下，空项直接丢弃，
+        // 免得配置里多写一个逗号就变成「允许空来源」这种查不出来的怪状态。
+        foreach (var origin in configuration.GetSection("NetBpm:Cors:AllowedOrigins").GetChildren())
+        {
+            if (!string.IsNullOrWhiteSpace(origin.Value))
+            {
+                options.CorsAllowedOrigins.Add(origin.Value.Trim());
+            }
+        }
 
         // OpenAPI（Swagger 全端点可用）
         builder.Services.AddOpenApi(openApi => options.ConfigureOpenApi?.Invoke(openApi));
@@ -200,6 +254,20 @@ public static class NetBpmHost
                 kestrel.Limits.MaxRequestBodySize = options.MaxRequestBodySizeBytes);
         }
 
+        // 跨域：配了来源才装（默认空 = 不启用，同源托管与内网调用都不需要）
+        if (options.CorsAllowedOrigins.Count > 0)
+        {
+            builder.Services.AddCors(cors => cors.AddDefaultPolicy(policy => policy
+                .WithOrigins([.. options.CorsAllowedOrigins])
+                .WithMethods(CorsAllowedMethods)
+                .WithHeaders(CorsAllowedRequestHeaders)
+                .WithExposedHeaders(CorsExposedResponseHeaders)
+                .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
+
+            // 刻意不调 AllowCredentials()：鉴权凭据走 X-Api-Key / Authorization 请求头，
+            // 不依赖浏览器自动携带 Cookie。带上它只会把「凭据随请求自动跨域发送」这扇门留着。
+        }
+
         if (options.RateLimitEnabled)
         {
             AddRateLimiting(builder, options);
@@ -232,6 +300,14 @@ public static class NetBpmHost
         ArgumentNullException.ThrowIfNull(options);
 
         app.UseExceptionHandler();
+
+        // 跨域必须先于鉴权：预检（OPTIONS）按浏览器规范<b>不携带</b>凭据头，
+        // 若先过鉴权，预检拿到的是 401，浏览器随即判定「CORS 失败」且不显示真实原因——
+        // 表现出来就是「跨域全挂、控制台只有一句 CORS error」，排查时会一路错怪前端配置。
+        if (options.CorsAllowedOrigins.Count > 0)
+        {
+            app.UseCors();
+        }
 
         // 鉴权 → 限流 → 幂等：未配置凭据时鉴权中间件放行，保持开发体验
         app.UseMiddleware<AuthenticationMiddleware>();

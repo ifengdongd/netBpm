@@ -63,7 +63,14 @@
 > **仍开放**：P1-6（内存宿主仍是 `AddSingleton`，但已补命令级快照 + `OnAborted` 回滚，风险从「脏树」降为
 > 「跨请求可见性」）、P1-7（解析器仍注册为单例并注入根 `IServiceProvider`，`Activator.CreateInstance`
 > 兜底仍在 —— Scoped 依赖会被静默解析到根作用域）、P1-10（监听器异常仍只记 warning，语义为「默认不阻断」）。
-> P1-8：限流与体积上限已做，CORS 仍未配置；P1-9 已按租户白名单收敛（白名单内仍是全权限）。
+> P1-8：限流、体积上限、CORS 均已落地（CORS 见下）；P1-9 已按租户白名单收敛（白名单内仍是全权限）。
+>
+> **P1-8 CORS 收口（v1.40）**：`NetBpmHostOptions.CorsAllowedOrigins` 读 `NetBpm:Cors:AllowedOrigins`，
+> 空 = 不启用（管理端与设计器由 `wwwroot` 同源托管，本来就不需要）。不支持通配来源，
+> 也不开 `AllowCredentials`（凭据走 `X-Api-Key` / `Authorization` 请求头，不依赖浏览器自动携带 Cookie）。
+> `UseCors()` 装在 `UseExceptionHandler()` 之后、`AuthenticationMiddleware` 之前 ——
+> 预检按浏览器规范不带凭据，若先过鉴权就只会得到 401，而浏览器不会把 401 的原因告诉前端。
+> 守门用例：`CorsTests`（未配即关 / 白名单内放行 / 白名单外不给许可 / 预检绕过鉴权，最后一条带「真实请求仍 401」的对照）。
 
 ---
 

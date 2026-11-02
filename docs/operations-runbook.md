@@ -41,6 +41,8 @@ NetBpm__Jobs__Queue__Redis__ConnectionString="redis:6379,password=***"
 # 多副本必须换成 Redis，否则实际配额 = 副本数 × 配置值
 NetBpm__RateLimit__Store=Redis
 NetBpm__RateLimit__Redis__ConnectionString="redis:6379,password=***"
+# 仅当「异源前端直连 /workflow/v1」才需要；管理端与设计器由 wwwroot 同源托管，不用配
+NetBpm__Cors__AllowedOrigins__0=https://approve.example.com
 ```
 
 启动自检（`PlatformServiceGuards`，**早于**引擎注册）会拒绝这四种配置：
@@ -302,6 +304,12 @@ NETBPM_RUN_LOAD_TESTS=1 \
 - **结论为空**：运行中的实例没有结论；三级回落只对结束实例生效。
 - **跨租户查询返回 404 而不是 403**：读操作不泄露「存在性」。写操作的租户就在请求里，
   调用方本来就知道它存在，所以跨租户**写**返回 `403 tenant.forbidden`。
+- **异源前端调接口全挂、控制台只有一句 CORS error**：CORS 默认**不启用**（同源托管不需要）。
+  必须显式配 `NetBpm:Cors:AllowedOrigins`（逗号分隔的数组，环境变量写 `__0` / `__1`），
+  逐个列来源；**不支持通配**，也不开 `AllowCredentials` —— 凭据走 `X-Api-Key` / `Authorization`
+  请求头，不依赖浏览器自动带 Cookie。白名单外的来源不会收到 `Access-Control-Allow-Origin`，
+  服务端照常返回业务结果（拦截由浏览器完成，不是 403）。
+  预检（`OPTIONS`）装在鉴权之前，所以它不带凭据也能过；真实请求仍然要凭据。
 
 ---
 
