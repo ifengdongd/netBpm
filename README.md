@@ -873,6 +873,10 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 }
 ```
 
+> **生命周期**：委托可以注册为 `Scoped`（依赖同样 Scoped 的服务，例如仓储 / `DbContext`）。
+> 引擎在**每条命令**自己的 DI 作用域内解析它，命令结束（含失败、含乐观锁重试换事务）即释放 —— 同一命令内的多次解析共用一份，
+> 跨命令不共享。没注册到 DI 的 `activiti:class` 仍按 Activiti 语义反射创建。
+
 ---
 
 ## REST API

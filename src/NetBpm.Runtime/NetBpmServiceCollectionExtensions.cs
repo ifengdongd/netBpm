@@ -793,7 +793,9 @@ public static class NetBpmServiceCollectionExtensions
             services.AddSingleton<Func<CommandContext>>(
                 provider => () => new CommandContext(
                     provider.GetRequiredService<IEngineServices>(),
-                    maxOperationsPerCommand: options.MaxOperationsPerCommand));
+                    maxOperationsPerCommand: options.MaxOperationsPerCommand,
+                    serviceScopeFactory: () => new CommandServiceScope(
+                        provider.GetRequiredService<IServiceScopeFactory>().CreateScope())));
 
             RegisterDefinitionResolver(services);
             RegisterHistory(services, options);
@@ -833,11 +835,13 @@ public static class NetBpmServiceCollectionExtensions
         {
             var engineServices = provider.GetRequiredService<IEngineServices>();
             var sessionFactory = provider.GetRequiredService<IDbSessionFactory>();
+            var serviceScopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
 
             return new CommandContext(
                 engineServices,
                 transactionFactory: () => sessionFactory.Create(),
-                maxOperationsPerCommand: options.MaxOperationsPerCommand);
+                maxOperationsPerCommand: options.MaxOperationsPerCommand,
+                serviceScopeFactory: () => new CommandServiceScope(serviceScopeFactory.CreateScope()));
         });
 
         RegisterDefinitionResolver(services);

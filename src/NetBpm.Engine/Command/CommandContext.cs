@@ -22,6 +22,9 @@ public sealed class CommandContext : ICommandContext
     private static readonly AsyncLocal<CommandContext?> CurrentHolder = new();
 
     private readonly Func<ICommandTransaction?>? _transactionFactory;
+    private readonly Func<ICommandServiceScope>? _serviceScopeFactory;
+    private readonly object _serviceScopeGate = new();
+    private ICommandServiceScope? _serviceScope;
     private int _nestedDepth;
 
     /// <param name="services">引擎服务（无状态，可跨命令共享）。</param>
@@ -37,12 +40,18 @@ public sealed class CommandContext : ICommandContext
     /// <param name="maxOperationsPerCommand">
     /// 本命令的议程操作预算（死循环护栏），默认 <see cref="EngineAgenda.DefaultMaxOperationsPerCommand"/>。
     /// </param>
+    /// <param name="serviceScopeFactory">
+    /// 命令级 DI 作用域工厂（服务任务委托 / 监听器在它里面解析）。<b>惰性</b>调用：
+    /// 不用委托的命令一次都不会创建作用域，省掉一条「每条命令都建 scope」的固定成本。
+    /// <see langword="null"/> 表示宿主没有 DI 容器（测试 harness），解析退回根容器。
+    /// </param>
     public CommandContext(
         IEngineServices services,
         ICommandTransaction? transaction = null,
         Func<ICommandTransaction?>? transactionFactory = null,
         string? commandId = null,
-        int maxOperationsPerCommand = EngineAgenda.DefaultMaxOperationsPerCommand)
+        int maxOperationsPerCommand = EngineAgenda.DefaultMaxOperationsPerCommand,
+        Func<ICommandServiceScope>? serviceScopeFactory = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -51,6 +60,7 @@ public sealed class CommandContext : ICommandContext
         Agenda = new EngineAgenda(() => services, maxOperations: maxOperationsPerCommand);
         CommandId = commandId;
         _transactionFactory = transactionFactory;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     /// <inheritdoc />
@@ -219,6 +229,58 @@ public sealed class CommandContext : ICommandContext
     /// <inheritdoc />
     public ICommandTransaction? Transaction { get; private set; }
 
+    /// <summary>
+    /// 命令级 DI 作用域内的服务提供者；宿主没配作用域（或不在命令内）时为 <see langword="null"/>。
+    /// </summary>
+    /// <remarks>
+    /// 惰性创建 + 双检锁：一条命令里多次解析委托必须拿到<b>同一个</b>作用域（否则同一个
+    /// <c>AddScoped</c> 依赖会在同一命令里被造出多份，事务内看到的状态就可能不一致）。
+    /// </remarks>
+    public IServiceProvider? ScopedServices
+    {
+        get
+        {
+            if (_serviceScopeFactory is null)
+            {
+                return null;
+            }
+
+            var scope = Volatile.Read(ref _serviceScope);
+
+            if (scope is not null)
+            {
+                return scope.Services;
+            }
+
+            lock (_serviceScopeGate)
+            {
+                scope = _serviceScope ??= _serviceScopeFactory();
+            }
+
+            return scope.Services;
+        }
+    }
+
+    /// <summary>
+    /// 释放命令级 DI 作用域（由 <see cref="CommandExecutor"/> 在命令结束时调用；未创建则无操作）。
+    /// </summary>
+    /// <remarks>
+    /// 🔑 必须在事务释放<b>之前</b>调用：作用域内的服务（仓储 / DbContext）Dispose 时可能还要用会话，
+    /// 顺序反了就会撞上已释放的连接。
+    /// </remarks>
+    internal void ReleaseServiceScope()
+    {
+        ICommandServiceScope? scope;
+
+        lock (_serviceScopeGate)
+        {
+            scope = _serviceScope;
+            _serviceScope = null;
+        }
+
+        scope?.Dispose();
+    }
+
     /// <inheritdoc />
     public IEngineAgenda Agenda { get; }
 
@@ -240,6 +302,10 @@ public sealed class CommandContext : ICommandContext
     /// </summary>
     internal void ResetForRetry()
     {
+        // 作用域里的服务可能已经抓着旧会话（如仓储缓存的 DbSession），换事务时一并换掉，
+        // 否则重试拿到的是「新事务 + 旧会话」的组合，写回的还是那条已回滚的连接。
+        ReleaseServiceScope();
+
         if (_transactionFactory is not null)
         {
             Transaction?.Dispose();

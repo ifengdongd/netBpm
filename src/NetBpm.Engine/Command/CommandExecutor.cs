@@ -116,15 +116,23 @@ public sealed class CommandExecutor : ICommandExecutor
             EngineDiagnostics.CommandsExecuted.Add(1, new KeyValuePair<string, object?>("command", commandName), new KeyValuePair<string, object?>("result", result));
             EngineDiagnostics.CommandDuration.Record(elapsedMs, new KeyValuePair<string, object?>("command", commandName));
 
-            // 命令级资源（数据库连接 / 事务）随命令结束一并释放。
-            // 重试拦截器可能已换过事务，这里释放的是「最后一次尝试」的那一个。
+            // 命令级资源（DI 作用域 / 数据库连接 / 事务）随命令结束一并释放。
+            // 顺序：先作用域后事务 —— 作用域里的服务（仓储 / DbContext）Dispose 时可能还要用会话。
+            // 重试拦截器可能已换过事务与作用域，这里释放的是「最后一次尝试」的那一份。
             try
             {
-                context.Transaction?.Dispose();
+                context.ReleaseServiceScope();
             }
             finally
             {
-                CommandContext.Swap(previous);
+                try
+                {
+                    context.Transaction?.Dispose();
+                }
+                finally
+                {
+                    CommandContext.Swap(previous);
+                }
             }
         }
     }
