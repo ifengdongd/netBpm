@@ -88,6 +88,9 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
   `netbpm.listener.failure`（tag：`event` / `kind`）并记 warning，宿主没注入 `ILogger` 时直接抛出。
   「事件没送达、流程照常走」是最难查的一类偏差：要么给监听器开 `throwOnFailure`，要么对这条指标配告警。
 - 监听器实现与服务任务委托走同一注册通道：类上标 `[ServiceTaskName("名字")]` + `AddServiceTaskDelegates` 扫描。
+- **关键监听器**：实现类标 `[CriticalEventListener(Reason = "…")]` 后，部署期自检要求流程上的 `activiti:eventListener`
+  必须写 `throwOnFailure="true"`，否则拒绝部署（`delegate-resolution`）。判据按**实现类型**，与 BPMN 里写
+  `class` 还是 `delegateExpression` 无关 —— 适用于「写审批记录 / 推送待办」这类失败即丢数据的监听器。
 - 部署期两道检查：`listener-configuration` 规则校验事件与实现必填（取值非法拒部署）；
   `ServiceTaskDelegateGuard` 预解析 class / delegateExpression（解析不到宿主起不来）。
 - 设计器可配置、保存 → 重开 → 落库往返不丢；顺序流上的 take 监听器同样可配。
@@ -1092,6 +1095,8 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 - `TreatWarningsAsErrors` 开启（测试工程除外），`EnforceCodeStyleInBuild` 开启
 - 通过 `BannedApiAnalyzers` + `BannedSymbols.txt` 将 `[ThreadStatic]` 变为编译期错误 —— 异步续体间线程静态状态会丢失或串号
 - 集中包版本管理（CPM），见 `Directory.Packages.props`
+- CI 定义在 `.github/workflows/ci.yml`（GitHub Actions，四个 Job）。主远端是 Gitee，而 Gitee 上没有流水线定义，
+  所以**不会有任何服务自动执行它** —— 要看到红绿灯需先镜像到 GitHub，步骤与「红了怎么读」见 [`docs/ci.md`](docs/ci.md)
 - 包源在 `NuGet.config` 中显式 `<clear />`，仅保留 nuget.org
 
 ---

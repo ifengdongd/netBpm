@@ -51,6 +51,7 @@ public static class ServiceTaskDelegateGuard
 
         var resolvable = new List<string>();
         var unresolved = new List<string>();
+        var notStrict = new List<string>();
 
         foreach (var task in serviceTasks)
         {
@@ -145,6 +146,16 @@ public static class ServiceTaskDelegateGuard
                 }
 
                 RecordListenerResult(process.Id ?? "?", "事件监听器", name, target, typeof(IEngineEventListener));
+
+                // 关键监听器按「实现类型」判定（见 CriticalEventListenerAttribute）：
+                // 这类监听器失败时事件会丢、流程却照常推进，所以必须显式声明失败即阻断。
+                if (target is not null
+                    && listener.ThrowOnFailure != true
+                    && IsCriticalEventTarget(target.GetType()))
+                {
+                    notStrict.Add(
+                        $"{process.Id}（事件监听器 \"{name}\" → {target.GetType().FullName}{ReasonOf(target.GetType())}）");
+                }
             }
         }
 
@@ -154,6 +165,14 @@ public static class ServiceTaskDelegateGuard
                 $"流程定义 {processDefinitionId} 里有委托无法解析：{string.Join("；", unresolved)}。"
                 + "请检查 BPMN 里写的名字，以及宿主是否已注册该委托"
                 + "（可用 [ServiceTaskName] 特性 + AddServiceTaskDelegates 扫描注册）。");
+        }
+
+        if (notStrict.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"流程定义 {processDefinitionId} 里的关键事件监听器没有声明失败即阻断：{string.Join("；", notStrict)}。"
+                + "这些监听器的实现标了 [CriticalEventListener]，失败时事件会丢失而流程照常推进。"
+                + "请在 BPMN 上把它们改成 <activiti:eventListener ... throwOnFailure=\"true\" />。");
         }
 
         logger.LogInformation(
@@ -205,6 +224,16 @@ public static class ServiceTaskDelegateGuard
                     $"{task.Id}（{attribute}=\"{name}\" 解析成了 {target.GetType().FullName}，不是 IServiceTaskDelegate）");
             }
         }
+
+        // 关键监听器判据只看实现类型自带的特性，不看流程配置或名字：
+        // 「失败了算不算丢数据」是实现的固有属性。
+        static bool IsCriticalEventTarget(Type type) =>
+            type.IsDefined(typeof(CriticalEventListenerAttribute), inherit: false);
+
+        static string ReasonOf(Type type) =>
+            Attribute.GetCustomAttribute(type, typeof(CriticalEventListenerAttribute)) is CriticalEventListenerAttribute { Reason: { Length: > 0 } reason }
+                ? $"，原因：{reason}"
+                : string.Empty;
 
         void RecordListenerResult(string elementId, string kind, string name, object? target, Type contract)
         {

@@ -459,7 +459,7 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 | 中 | **P1-6 内存宿主单例** | `InMemoryExecutionManager` 仍是 `AddSingleton`；但已补命令级快照 + `OnAborted` 回滚（§十一），失败不再留下半棵树 | 若要彻底解决需改 `IProcessEngine` 生命周期（连锁改动大），建议保持现状并在文档写明「内存宿主 = 单进程单租户演示」 |
 | 中 | **§四C 定义层四条** —— 其中「扩展元素往返保真」✅ **v1.36 已闭环**，其余三条维持现状 | 那份判断有一处过时：解析侧**早已**捕获未知扩展（`CaptureExtensionElement`）。真正的洞在写侧 —— `WriteExtensionElements` 只写已知四类（监听器 / 字段 / 表单属性），从不遍历 `element.ExtensionElements`，还会吐出空的 `<extensionElements/>`；流程级 `WriteProcess` 同理漏写 `Process.ExtensionElements`，且写出条件只看监听器。再叠加 `ExtensionElement` 只存前缀不存 URI、`xmlns` 被当属性收下 —— 三处一起构成「设计器保存一次，`netbpm:parameters` 就没了」（部署与模型保存都会重新序列化：`ProcessDefinitionStore.Serialize` / `AdminEndpoints.Models.cs:534`） | 新增 `ExtensionElement.NamespaceUri`；新增 `WriteExtensionElement`（递归写属性 / 文本 / 子树，前缀只作美化）；流程级补写。`Freeze()` / 单次遍历 / `IXmlLineInfo` 三条仍维持现状（重构收益低于风险） |
 | 中 | ~~**§四D-2 `ElResolver` 反射元数据缓存**~~ ✅ **v1.34 已闭环** | `MethodCache`（key 含参数个数）/ `MemberCache` / `IndexerCache` 三个 `ConcurrentDictionary`：属性与索引器缓存读取委托，方法缓存已过滤的候选集。**不设容量上限**——key 的基数是「类型 × 成员名 × 参数个数」，来自业务模型类型，天然有界；表达式缓存要上限是因为表达式文本来自 BPMN，用户能写出无限多不同文本，两者膨胀来源不同 | `MethodOverloads_ShouldResolveByArgumentCount_AcrossCachedCalls` 锁住「key 漏掉参数个数会错配重载」这条边界（这条错只在同类型先后用不同参数个数时出现，最容易漏测） |
-| 中 | ~~**P1-10 监听器异常默认吞**~~ ✅ **v1.37 已闭环（残留一条后续）** | 比「吞」更糟的是**彻底静默**：原写法 `services.Logger?.LogWarning(...)` 里的 `?.` 一短路，宿主没注入 `ILogger`（手工装配 `EngineServices` 的场景）时异常就消失了，与 `IEngineServices.Logger` 注释承诺的「未注入时响亮抛出」正好相反。现在：失败计入 `netbpm.listener.failure`（tag `event` / `kind`），有日志记 warning，无日志直接 `throw` | 仍保留的后续：部署期强制「关键监听器」`throwOnFailure=true` —— 但「关键」没有客观判据（要看监听器实现），强推会让现存流程无预警地开始失败，故本轮不做 |
+| 中 | ~~**P1-10 监听器异常默认吞**~~ ✅ **v1.37 闭环 + v1.38 补齐关键监听器强制** | 比「吞」更糟的是**彻底静默**：原写法 `services.Logger?.LogWarning(...)` 里的 `?.` 一短路，宿主没注入 `ILogger`（手工装配 `EngineServices` 的场景）时异常就消失了，与 `IEngineServices.Logger` 注释承诺的「未注入时响亮抛出」正好相反。v1.37：失败计入 `netbpm.listener.failure`（tag `event` / `kind`），有日志记 warning，无日志直接 `throw`。v1.38：新增 `[CriticalEventListener]`，判据挂在**实现类型**上（与 `class` / `delegateExpression` 写法无关），部署期自检（`ServiceTaskDelegateGuard`）要求这类监听器在 BPMN 上必须声明 `throwOnFailure="true"`，否则拒绝部署 | 判据放在实现类型而非流程配置：同一个实现会被不同流程引用，「失败算不算丢数据」是实现的固有属性。没有新增全局开关 —— 逐监听器的 `throwOnFailure` 已经能表达，再加全局开关会让同一份 BPMN 在不同宿主行为不同 |
 | 低 | ~~**错误码仍有 7 处无 `code`**~~ ✅ **v1.34 已闭环** | 新增 `EndpointResults`（400 `validation_error` / 404 `not_found`）作为唯一构造点：设计器 4 处（请求体空 ×2、部署不存在、定义不存在）、身份 2 处（组不存在）、登录 1 处（缺参数）全部改用它；`RuntimeEndpoints.InvalidRequest` 退化为薄委托，19 处调用点不动 | `EndpointErrorCodeTests` 2 项：登录 400 与未知组 404 都断言 `code`；设计器那几条在 `netbpm.admin.*` 管理 scope 下，由 `AdminGovernanceTests` 的 JWT 链路间接覆盖 |
 | 低 | **§四G 过度设计仍在** | `IOperation` 4 个实现 + 接口（`Operations/*.cs`）；`IJobQueue` 三件套（Redis/InMemory/JobQueue.cs） | 维持现状：这两处是「看得见调用链」的代价，裁掉的收益低于改错风险 |
 
@@ -486,7 +486,7 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 | 项 | 结果 |
 |---|---|
 | `dotnet build NetBpm.slnx -c Debug` | 0 error |
-| `NetBpm.UnitTests` | **840 用例，0 失败，13 跳过**（Redis 不可用） |
+| `NetBpm.UnitTests` | **843 用例，0 失败，13 跳过**（Redis 不可用） |
 | `NetBpm.IntegrationTests` 全量（真实 MySQL） | **473 用例：429 通过 / 44 跳过 / 0 失败**（跳过项：SqlServer Testcontainers、Redis） |
 | 契约治理三步 | `ContractSnapshotTests` 2 / 2、`CompatibilityTests` 2 / 2、`SdkGenerationTests` 5 / 5 |
 
