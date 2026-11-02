@@ -1,8 +1,8 @@
 using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 using NetBpm.Persistence;
-using NetBpm.Platform.Contracts;
 using NetBpm.Persistence.Platform;
+using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Platform;
 
 namespace NetBpm.IntegrationTests;

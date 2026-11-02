@@ -226,14 +226,14 @@ public sealed class InMemoryExternalTaskBroker(ExternalTaskOptions? options = nu
         var max = query.MaxResults <= 0 ? 100 : query.MaxResults;
         var nowUtc = DateTime.UtcNow;
 
-            lock (_gate)
-            {
-                IEnumerable<ExternalTask> rows = _tasks.Values;
+        lock (_gate)
+        {
+            IEnumerable<ExternalTask> rows = _tasks.Values;
 
-                if (query.TenantId is { Length: > 0 } tenantId)
-                {
-                    rows = rows.Where(task => MatchesTenant(task.TenantId, tenantId));
-                }
+            if (query.TenantId is { Length: > 0 } tenantId)
+            {
+                rows = rows.Where(task => MatchesTenant(task.TenantId, tenantId));
+            }
 
             if (query.Topic is { Length: > 0 } topic)
             {

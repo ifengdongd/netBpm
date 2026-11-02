@@ -1,3 +1,4 @@
+using System.Text;
 using Dapper;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -7,7 +8,6 @@ using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Platform;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
-using System.Text;
 
 namespace NetBpm.IntegrationTests;
 

@@ -1,7 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
-using NetBpm.Platform.Contracts;
 using NetBpm.Persistence.Platform;
+using NetBpm.Platform.Contracts;
 using NetBpm.Rest.Security;
 using NetBpm.Runtime;
 
