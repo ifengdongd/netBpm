@@ -1,0 +1,57 @@
+# CI 在哪里跑、跑什么、红了怎么读
+
+## 0. 一句话
+
+流水线定义只有 **GitHub Actions**（`.github/workflows/ci.yml`）；主远端是 **Gitee**，Gitee 上没有
+`.workflow/` 目录，因此**没有任何服务会自动跑这些 Job**。要看到红绿灯，必须把仓库镜像到 GitHub。
+
+## 1. 四个 Job
+
+| Job | 跑什么 | 需要什么 |
+|---|---|---|
+| `frontend` | `web/designer` 构建；`web/admin` lint + typecheck + 单测 + 构建；产物 `wwwroot` 作为 artifact | Node 20 |
+| `build-and-unit-tests` | `dotnet build NetBpm.slnx` + `NetBpm.UnitTests` | .NET 10 |
+| `contract-governance` | 契约快照 diff、基线兼容、SDK 产物一致；**再编译**生成的 TS / Java SDK | .NET 10 + Node 20 + JDK 21（`setup-java` temurin） |
+| `integration-tests` | `DbMigrate` 建 MySQL 库 → `NetBpm.IntegrationTests` | MySQL 8.4 service container；SqlServer 由测试用 Testcontainers 拉起（runner 自带 Docker） |
+
+触发器是 `push: branches: ["*"]` 与 `pull_request` —— 镜像推上去就会跑，不需要改 workflow。
+
+## 2. 镜像到 GitHub
+
+前置（需要仓库属主的账号，脚本不代劳）：
+
+1. GitHub 上建**空仓库**（不要勾 README / .gitignore / license，否则首次 push 会冲突）；
+2. 本机有凭据：HTTPS 走 `git config --global credential.helper manager`，或把 `~/.ssh/id_rsa.pub` 加到账号。
+
+然后：
+
+```powershell
+./tools/ci/mirror-to-github.ps1 -RepositoryUrl https://github.com/<owner>/<repo>.git
+```
+
+脚本是**幂等且不破坏性**的：不 `--force`、不用 `--mirror`（那会删掉 GitHub 侧多出来的分支）；
+remote 已存在但地址不同时直接报错，不擅自改指向。
+
+推完去仓库 **Settings → Actions → General** 确认 workflow 未被禁用，Actions 页面应已出现一次 `ci` 运行。
+
+## 3. 红了怎么读
+
+- **契约 Job 红**：`ContractSnapshotTests` 是快照 diff，`CompatibilityTests` 是「上一版基线还被满足」。
+  确需变更契约时，本地 `NETBPM_UPDATE_CONTRACTS=1` 重跑 `ContractSnapshotTests`，把
+  `contracts/openapi/workflow-v1.json` 的改动当代码一起评审提交（破坏性变更先走
+  `docs/platform-api-refactoring-plan.md` §7.2 的公告流程）。**不要**靠改基线放行。
+- **SDK 编译红**：生成器是字符串模板，`SdkGenerationTests` 只证明「与快照一致」，证明不了「能编译」。
+  TS 子步骤红 → 看 `sdk/typescript` 生成的类型；Java 子步骤红 → 看 `sdk/java`。
+- **集成测试红**：先看是不是**环境**（MySQL service 没起来 → 连接失败；runner 的 Docker 不可用 →
+  SqlServer 用例会动态跳过而不是失败，跳过数变多是正常的）。数据库不可用时测试**动态跳过**，
+  所以「跳过很多」不等于绿，要对照跳过数。
+- **单测红**：与本地一致；注意已知的跨测试并发抖动（`OutboxBacklogMetricsTests` 的 MeterListener
+  静态状态、`WorkflowServiceTests` 与 `EngineFacadeTests`），单类复跑若绿则大概率是抖动，别急着改代码。
+
+## 4. 为什么不做 Gitee Go
+
+Gitee 的流水线要在 `.workflow/` 下写自己的 YAML 方言（触发器、stage/step 结构与 GitHub Actions 不同），
+等于维护两套等价流水线。当前选择是「一份定义 + 镜像执行」，代价是需要手动或定时把提交推到 GitHub。
+
+如果以后要自动化同步，两种做法：GitHub 侧加定时拉取（pull mirror），或 Gitee 侧加一个 push 后
+`git push github` 的流水线 —— 后者又回到了双份配置，所以优先推荐前者。
