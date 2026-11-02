@@ -55,6 +55,23 @@ public sealed class IdempotencyMiddleware
     /// <summary>回放标记响应头。</summary>
     public const string ReplayedHeaderName = "Idempotency-Replayed";
 
+    /// <summary>
+    /// 读本次请求的幂等键（已 trim，没带则返回 <see langword="null"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 端点用它把 HTTP 层的键<b>下沉</b>成引擎命令的 <c>CommandId</c>：
+    /// 中间件只能回放打到同一实例的同键 HTTP 请求，而 outbox 重投 / 作业重试 /
+    /// 消息重复消费会绕过 HTTP 直接驱动引擎，那时只有命令自带幂等键才挡得住。
+    /// </remarks>
+    public static string? ReadKey(HttpRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var raw = request.Headers[HeaderName].ToString().Trim();
+
+        return string.IsNullOrWhiteSpace(raw) ? null : raw;
+    }
+
     private const int MaxKeyLength = 120;
 
     /// <summary>

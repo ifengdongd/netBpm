@@ -1,3 +1,4 @@
+using System.Text.Json;
 using NetBpm.Bpmn.Model;
 using NetBpm.Engine.Execution;
 using NetBpm.Engine.Services;
@@ -78,6 +79,11 @@ public sealed record ModifyInstructionResult(string Type, string? Target);
 /// <c>startAfter</c> 由出流推导目标活动：只有一条出流才可执行，多条出流时明确拒绝
 /// （与「并行分支跳转」同一条口径 —— 分支语义不该由运维命令替流程定义猜）。
 /// </para>
+/// <para>
+/// <b>幂等</b>：给了 <c>commandId</c>（或平台面透传的 <c>Idempotency-Key</c>）时，
+/// 同一键重复改同一个实例只生效一次 —— 重投会回放首次的指令结果列表。
+/// 占位行与业务写入同事务：整批回滚时占位一起消失，调用方可以用同键重试。
+/// </para>
 /// </remarks>
 public sealed class ModifyProcessInstanceCommand : ICommand<IReadOnlyList<ModifyInstructionResult>>
 {
@@ -123,6 +129,42 @@ public sealed class ModifyProcessInstanceCommand : ICommand<IReadOnlyList<Modify
         ArgumentNullException.ThrowIfNull(context);
 
         var services = context.Services;
+
+        // ── 0) 引擎层幂等：同一 commandId 重复改同一实例 ⇒ 回放首次结果，不重复生效 ──
+        // 占位必须在读数据之前写：占位与业务写入同事务，命令回滚时占位一起消失。
+        var dedup = services.CommandIdempotency;
+        var commandId = context.CommandId ?? CommandId;
+        var dedupKey = dedup is not null && !string.IsNullOrWhiteSpace(commandId)
+            ? CommandIdempotencyKeys.ForModify(commandId, _processInstanceId)
+            : null;
+
+        if (dedup is not null && dedupKey is not null)
+        {
+            var existing = await dedup.FindAsync(dedupKey, ct).ConfigureAwait(false);
+
+            if (existing is not null)
+            {
+                return DecodeResults(existing.ResultPayload);
+            }
+
+            var claimed = await dedup
+                .TryRecordAsync(
+                    new CommandExecutionRecord(
+                        dedupKey,
+                        nameof(ModifyProcessInstanceCommand),
+                        ResultPayload: string.Empty,
+                        CreatedAt: services.Clock.UtcNow,
+                        ExpiresAt: services.Clock.UtcNow + CommandIdempotencyKeys.DefaultRetention),
+                    ct)
+                .ConfigureAwait(false);
+
+            if (!claimed)
+            {
+                // 并发的另一方已占位（首次仍在执行）⇒ 同样不重复生效
+                return [];
+            }
+        }
+
         var executionManager = services.ExecutionManager;
         var resolver = services.ProcessDefinitionResolver
             ?? throw new EngineNotImplementedException(
@@ -155,7 +197,35 @@ public sealed class ModifyProcessInstanceCommand : ICommand<IReadOnlyList<Modify
                 target ?? instruction.VariableName ?? instruction.ActivityId));
         }
 
+        // 回填结果快照：重投时回放同一份列表，而不是回一个「什么都没做」的空列表
+        if (dedup is not null && dedupKey is not null)
+        {
+            await dedup.CompleteAsync(dedupKey, EncodeResults(results), ct).ConfigureAwait(false);
+        }
+
         return results;
+    }
+
+    /// <summary>结果快照序列化：与 <see cref="DecodeResults"/> 用同一套默认选项。</summary>
+    private static string EncodeResults(IReadOnlyList<ModifyInstructionResult> results) =>
+        JsonSerializer.Serialize(results);
+
+    private static List<ModifyInstructionResult> DecodeResults(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<ModifyInstructionResult>>(payload) ?? [];
+        }
+        catch (JsonException)
+        {
+            // 快照坏了不该让重投失败：去重本身已经保证了「不会重复生效」，只是回放内容为空
+            return [];
+        }
     }
 
     private static async ValueTask<string?> ValidateAsync(

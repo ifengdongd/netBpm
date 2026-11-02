@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Dapper;
 using NetBpm.Persistence;
 using NetBpm.Persistence.Database;
@@ -54,8 +55,25 @@ internal static class TestDatabases
         AppDomain.CurrentDomain.ProcessExit += static (_, _) => StopSqlServerContainer();
     }
 
+    /// <summary>探测失败的真实原因（连不上 / 无建库权限 / 迁移失败 / 引擎表没建齐）。</summary>
+    private static readonly ConcurrentDictionary<string, string> FailureReasons = new();
+
     /// <summary>MySQL（既有测试的默认库，直连语义不变）。</summary>
     internal static TestDatabaseSpec? MySql => MySqlSpec.Value;
+
+    /// <summary>
+    /// 方言不可用时的跳过理由。
+    /// <para>
+    /// 带上真实失败原因，而不是一句「方言不可用」：CI 上 SqlServer 那一行被跳过时，
+    /// 要看得出是 Docker 没跑、镜像拉不下来，还是连上了但建表失败 ——
+    /// 这三种情况的处置完全不同，光看「跳过」只会让人以为跑过了。
+    /// </para>
+    /// </summary>
+    internal static string UnavailableReason(string provider) =>
+        $"方言 {provider} 不可用"
+        + (FailureReasons.TryGetValue(provider, out var reason)
+            ? $"：{reason}"
+            : "（未探测到可用实例；MySQL=localhost:3306，SqlServer=Testcontainers mssql/server:2022 或环境变量指向的实例）");
 
     /// <summary>SqlServer（环境变量优先，否则 Testcontainers；不可用返回 <see langword="null"/>）。</summary>
     internal static TestDatabaseSpec? SqlServer => SqlServerSpec.Value;
@@ -93,7 +111,16 @@ internal static class TestDatabases
                 : "Server=localhost;Port=3306;Database=" + DatabaseName
                     + ";User ID=root;Password=;Allow User Variables=true;");
 
-        var spec = new TestDatabaseSpec(DatabaseType.MySql, connectionString, "MySQL(localhost)");
+        // 环境变量可能只指向实例（没有 Database=）：补上库名，否则探测会话落在默认库上，
+        // 会把「库和表都建好了」误判成不可用（information_schema 查的是 database()）。
+        var mySqlBuilder = new MySqlConnector.MySqlConnectionStringBuilder(connectionString);
+
+        if (string.IsNullOrWhiteSpace(mySqlBuilder.Database))
+        {
+            mySqlBuilder.Database = DatabaseName;
+        }
+
+        var spec = new TestDatabaseSpec(DatabaseType.MySql, mySqlBuilder.ConnectionString, "MySQL(localhost)");
 
         try
         {
@@ -101,10 +128,19 @@ internal static class TestDatabases
 
             using var session = CreateSessionFactory(spec).Create();
 
-            return HasEngineTables(session) ? spec : null;
+            if (HasEngineTables(session))
+            {
+                return spec;
+            }
+
+            FailureReasons["mysql"] = "库连上了但引擎表没建齐（迁移可能只跑了一半）";
+
+            return null;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            FailureReasons["mysql"] = exception.Message;
+
             return null;
         }
     }
@@ -177,9 +213,11 @@ internal static class TestDatabases
 
             return prepared;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // Docker 未运行 / 镜像拉不下来 / 容器起不来 → 方言不可用，测试动态跳过（与 MySQL 同一策略）
+            FailureReasons["sqlserver"] = exception.Message;
+
             try
             {
                 container?.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -196,17 +234,35 @@ internal static class TestDatabases
     /// <summary>建库 + 迁移 + 确认引擎表存在；任何一步失败都视为该方言不可用。</summary>
     private static TestDatabaseSpec? TryPrepareSqlServer(TestDatabaseSpec spec)
     {
+        // 与 MySQL 同一条：连接串常常只指向实例。补上库名（缺省 netbpm）后再建表与探测，
+        // 否则 sys.tables 查的是默认库（master），结果同样是「建好了却判成不可用」。
+        var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(spec.ConnectionString)
+        {
+            InitialCatalog = ResolveSqlServerDatabaseName(spec.ConnectionString),
+        };
+
+        var prepared = new TestDatabaseSpec(DatabaseType.SqlServer, builder.ConnectionString, spec.DisplayName);
+
         try
         {
-            EnsureSqlServerSchema(spec);
+            EnsureSqlServerSchema(prepared);
 
-            using var session = CreateSessionFactory(spec).Create();
+            using var session = CreateSessionFactory(prepared).Create();
 
-            return HasEngineTables(session) ? spec : null;
+            if (HasEngineTables(session))
+            {
+                return prepared;
+            }
+
+            FailureReasons["sqlserver"] = "库连上了但引擎表没建齐（迁移可能只跑了一半）";
+
+            return null;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // 连不上 / 无建库权限 / 迁移失败都视为「不可用」
+            FailureReasons["sqlserver"] = exception.Message;
+
             return null;
         }
     }

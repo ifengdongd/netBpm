@@ -416,6 +416,48 @@ select count(*) from ACT_IDEMPOTENCY;
 select count(*) from ACT_HI_ACTINST;
 ```
 
+### 13.6 多副本演练（两个副本 + 同一个库）
+
+单副本演练证明的是「进程死了，数据还在」。多副本要回答的是另一件事：
+**别人做了一半的活，另一个副本会不会再做一遍**。
+
+前提（见 §1）：`NetBpm__Jobs__Queue__Provider=Redis`、`NetBpm__RateLimit__Store=Redis`。
+这两个不换，多副本下同一作业会被每个副本各执行一次，实际配额也变成「副本数 × 配置值」。
+
+```powershell
+# 1) 起两个副本（不同端口，同一个库）
+dotnet run --project src/NetBpm.Rest -- --urls http://127.0.0.1:5199   # 副本 A
+dotnet run --project src/NetBpm.Rest -- --urls http://127.0.0.1:5299   # 副本 B
+
+# 2) 造在途状态（同 13.1），记下作业 id 与租约到期时间
+# 3) 只强杀 A（等价 kill -9）—— 脚本只认库与进程 id，两副本场景照用
+./tools/drills/crash-recovery.ps1 -Connection "$CS" -ProcessId <A 的 pid> `
+  -StartCommand .\tools\drills\restart-replica-a.cmd
+```
+
+> ⚠️ 别用 `-ProcessName dotnet`：两个副本同名，会把 B 一起杀掉，那就退化成单副本演练了。
+
+判定表（查同一张库，不查进程）：
+
+| 判定项 | 通过条件 | 说明 |
+|---|---|---|
+| 崩溃副本的租约不会永久占位 | 租约到期后 `LOCK_OWNER_` 被另一副本接走 | 抢租约的条件是「无人持有 / 已过期 / 本来就是自己」，所以刚崩溃那一会儿别人**抢不到是对的** |
+| 作业不被执行两次 | 目标活动在 `ACT_HI_ACTINST` 里只多一行 | 靠 `LOCK_EXP_TIME_` 到期 + `ACT_CMD_IDEMPOTENCY` 去重双保险 |
+| outbox 事件不被投两次 | 该行 `PUBLISHED_=1`，订阅侧按事件 id 去重 | `NEXT_ATTEMPT_` 兼作租约；失败累计 5 次才进死信 |
+| 外锁可被另一副本接管 | `lock_expires_at` 过期后能被重新 fetch | 迟到的旧持有者回执会被拒 |
+
+⚠️ **本机未能实跑的部分（如实记录，别当成已验证）**：这台机器没有 Docker，也没有 Redis，
+所以 `Jobs__Queue__Provider=Redis` 这条路径（Redis 分发 + 在途集合）没被真跑过；
+13.4 那轮覆盖的是**数据库租约语义**（`DapperJobStoreBase` 的 acquire / renew / release），
+它不是 Redis 队列本身。要补齐：
+
+```powershell
+# 单元测试：给了连接串，RedisJobQueueTests 整组自动参与（否则整组跳过）
+$env:NETBPM_TEST_REDIS = "127.0.0.1:6379"     # 带口令："127.0.0.1:6379,password=***"
+```
+
+宿主侧再按 §1 配好队列与限流，把 13.2 的脚本原样跑一遍即可（脚本只认库与进程，不认副本数）。
+
 ---
 
 ## 14. 附：常用命令
@@ -439,6 +481,49 @@ dotnet run --project tools/NetBpm.DbMigrate -- purge --provider mysql --connecti
 # ⚠️ 绝不能不带 -class 全跑：EngineTableCleaner.Purge 会清库
 ./NetBpm.IntegrationTests.exe -class NetBpm.IntegrationTests.DualModeTests -noLogo
 ```
+
+---
+
+## 15. 双库矩阵：让 SqlServer 那一行真的跑起来
+
+B1/B2 的功能矩阵要在 MySQL 与 SqlServer 上各跑一遍（`DualDatabaseFeatureMatrixTests` 等六组）。
+SqlServer 那一行**默认可能整行跳过** —— 跳过不是通过，CI 里那片绿要看得出来是跑过的绿。
+
+供给方式按序探测：
+
+1. `NETBPM_SQLSERVER_CONNECTION`（指向已有实例）——最省事，不需要 Docker；
+2. Testcontainers 拉 `mcr.microsoft.com/mssql/server:2022-latest`（需要 Docker 在跑）；
+3. 都没有 → 该方言动态跳过。
+
+**没有 Docker 的 Windows 机器上，用 LocalDB 顶上**（`sqllocaldb` 随 SQL Server 工具装好）：
+
+```powershell
+sqllocaldb create "NetBpmTest" 17.0 -s        # 17.0 = SQL Server 2025；-s 立即启动
+$env:NETBPM_SQLSERVER_CONNECTION = "Server=(localdb)\NetBpmTest;Integrated Security=True;TrustServerCertificate=True;"
+```
+
+库与表会自动创建（连接串没带 `Database=` 时按 `netbpm` 兜底）。先探一眼：
+
+```bash
+dotnet run --project tools/NetBpm.DbMigrate -- check --provider sqlserver \
+  --connection "Server=(localdb)\NetBpmTest;Database=netbpm;Integrated Security=True;TrustServerCertificate=True;"
+```
+
+### 15.1 本机实跑记录（2026-11-02）
+
+环境：SQL Server LocalDB `17.0.4025.3`，MySQL 走默认 `localhost`。
+
+| 范围 | 结果 |
+|---|---|
+| `DualDatabaseFeatureMatrixTests` | 32/32（mysql + sqlserver 各 16） |
+| 全量集成套件（SqlServer 参与后） | 486：通过 481 / 跳过 5（全是 Redis）/ 失败 0 |
+
+这一轮顺手修了两个「假绿 / 假跳过」：
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| 跳过理由不可诊断 | 只说「方言 sqlserver 不可用」，看不出是 Docker 没跑、连不上，还是建表只跑了一半 | `TestDatabases.UnavailableReason` 带上真实异常；六处跳过文案统一改用它 |
+| 连接串不带库名时误判不可用 | 库建好了、表也迁移完了，探测会话却落在默认库（master）上查 `sys.tables` → 判成不可用 | 探测前把 `InitialCatalog` / `Database` 补成引擎库名（MySQL 同口径） |
 
 看板模板与告警规则在 `deploy/observability/`（Grafana JSON + Prometheus 规则），指标名以你采集链路的
 实际规整规则为准，见该目录的 README。

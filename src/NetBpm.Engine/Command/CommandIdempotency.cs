@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace NetBpm.Engine.Command;
 
 /// <summary>
@@ -47,20 +50,71 @@ public interface ICommandIdempotencyStore
 
     /// <summary>删除占位（业务失败回滚用）。</summary>
     ValueTask DeleteAsync(string key, CancellationToken ct = default);
+
+    /// <summary>
+    /// 把首次执行的结果快照回填到已占位的行上（与占位同一个事务）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 只有「结果里带内容」的命令需要它：<c>Unit</c> 型命令记一句「执行过」就够了，
+    /// 而 modify 这类要返回每条指令执行结果的命令，必须把首次结果存下来，
+    /// 重投时才能回放同一份结果而不是回一个空列表（空列表会被读成「这次什么都没做」）。
+    /// </para>
+    /// <para>
+    /// 默认实现为空操作：不覆盖它时，重复调用仍然<b>不会重复生效</b>，只是回放结果为空。
+    /// 去重的安全性不依赖这个方法。
+    /// </para>
+    /// </remarks>
+    ValueTask CompleteAsync(string key, string resultPayload, CancellationToken ct = default) => default;
 }
 
 /// <summary>
 /// 去重键的构造规则。
 /// </summary>
 /// <remarks>
-/// 键里必须带上命令目标（此处是任务 id），否则「同一幂等键去完成两个不同任务」
+/// 键里必须带上命令目标（任务 id / 流程实例 id），否则「同一幂等键去改两个不同目标」
 /// 会被误判成重复。
 /// </remarks>
 public static class CommandIdempotencyKeys
 {
+    /// <summary>
+    /// 命令去重记录的保留时长。
+    /// <para>
+    /// 与 HTTP 幂等键的保留期保持一致（24h）：超过这个时间窗口的重复投递
+    /// 已经超出「网络重试」的合理范围，不应再被静默吞掉。
+    /// </para>
+    /// </summary>
+    public static readonly TimeSpan DefaultRetention = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// 列宽上限（<c>ACT_CMD_IDEMPOTENCY.COMMAND_KEY_ varchar(200)</c>）。
+    /// </summary>
+    private const int MaxKeyLength = 190;
+
     /// <summary>构造「完成某任务」的去重键。</summary>
     /// <param name="commandId">幂等键（HTTP 头 / 消息 id / outbox 事件 id）。</param>
     /// <param name="taskId">被完成的任务 id。</param>
     public static string ForTask(string commandId, string taskId) =>
         $"cmd:complete-task:{commandId}:{taskId}";
+
+    /// <summary>
+    /// 构造「修改某流程实例」的去重键。
+    /// </summary>
+    /// <param name="commandId">幂等键（HTTP <c>Idempotency-Key</c> / 消息 id / outbox 事件 id）。</param>
+    /// <param name="processInstanceId">被修改的流程实例 id。</param>
+    public static string ForModify(string commandId, string processInstanceId) =>
+        Compose("modify", commandId, processInstanceId);
+
+    /// <summary>
+    /// 拼键。键里塞了「幂等键 + 目标 id」两样可变长的内容，超宽时整体换成哈希：
+    /// 宁可不可读，也不能让 insert 撞上列宽（MySQL 严格模式下是报错，不是截断）。
+    /// </summary>
+    private static string Compose(string kind, string commandId, string targetId)
+    {
+        var plain = $"cmd:{kind}:{commandId}:{targetId}";
+
+        return plain.Length <= MaxKeyLength
+            ? plain
+            : $"cmd:{kind}:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(plain)))}";
+    }
 }

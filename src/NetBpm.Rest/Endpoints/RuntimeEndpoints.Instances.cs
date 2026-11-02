@@ -212,6 +212,7 @@ public static partial class RuntimeEndpoints
         ModifyProcessInstanceRequest? request,
         RequestContext requestContext,
         IInstanceCommandService instances,
+        HttpContext httpContext,
         CancellationToken ct)
     {
         if (request?.Instructions is null || request.Instructions.Count == 0)
@@ -236,12 +237,17 @@ public static partial class RuntimeEndpoints
                 NullIfBlank(item.VariableScope)));
         }
 
+        // 幂等键：请求体里显式给了就用它，否则回落到 Idempotency-Key 头。
+        // 后者是为了让「只按平台面约定带头」的调用方也拿到引擎层去重 ——
+        // 去重挡的是 outbox 重投 / 作业重试这些绕过 HTTP 的重复驱动。
+        var commandId = NullIfBlank(request.CommandId) ?? IdempotencyMiddleware.ReadKey(httpContext.Request);
+
         var applied = await instances
             .ModifyAsync(
                 processInstanceId,
                 instructions,
                 NullIfBlank(request.Reason),
-                NullIfBlank(request.CommandId),
+                commandId,
                 requestContext,
                 ct)
             .ConfigureAwait(false);

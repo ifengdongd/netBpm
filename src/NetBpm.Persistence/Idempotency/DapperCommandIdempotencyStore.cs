@@ -103,6 +103,21 @@ public sealed class DapperCommandIdempotencyStore : ICommandIdempotencyStore
     }
 
     /// <inheritdoc />
+    public async ValueTask CompleteAsync(string key, string resultPayload, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+        using var lease = _sessions.Acquire();
+
+        // 同一个会话 = 同一个事务：快照与业务写入一起提交 / 一起回滚
+        await lease.Session.Connection.ExecuteAsync(new CommandDefinition(
+            UpdateSql,
+            new { key, resultPayload = resultPayload ?? string.Empty },
+            lease.Session.Transaction,
+            cancellationToken: ct)).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async ValueTask DeleteAsync(string key, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -147,6 +162,10 @@ public sealed class DapperCommandIdempotencyStore : ICommandIdempotencyStore
         insert into ACT_CMD_IDEMPOTENCY
             (ID_, COMMAND_KEY_, COMMAND_NAME_, RESULT_PAYLOAD_, CREATED_AT_, EXPIRES_AT_)
         values (@id, @key, @commandName, @resultPayload, @createdAt, @expiresAt)
+        """;
+
+    private const string UpdateSql = """
+        update ACT_CMD_IDEMPOTENCY set RESULT_PAYLOAD_ = @resultPayload where COMMAND_KEY_ = @key
         """;
 
     private const string DeleteSql = "delete from ACT_CMD_IDEMPOTENCY where COMMAND_KEY_ = @key";

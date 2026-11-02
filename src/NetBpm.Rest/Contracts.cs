@@ -787,7 +787,9 @@ public sealed record StartBeforeActivityRequest(string? Reason = null);
 /// 类型：<c>cancel</c> / <c>startBefore</c> / <c>startAfter</c> / <c>setVariable</c> / <c>removeVariable</c>。
 /// </param>
 /// <param name="Reason">修改原因（写进任务历史与审计）。</param>
-/// <param name="CommandId">幂等键（可选）；破坏性写操作建议带上。</param>
+/// <param name="CommandId">
+/// 幂等键（可选）；不给时回落到 <c>Idempotency-Key</c> 请求头。二者都没有则不去重。
+/// </param>
 public sealed record ModifyProcessInstanceRequest(
     IReadOnlyList<ModifyInstructionRequest>? Instructions = null,
     string? Reason = null,

@@ -75,7 +75,7 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
                         nameof(CompleteTaskCommand),
                         ResultPayload: string.Empty,
                         CreatedAt: services.Clock.UtcNow,
-                        ExpiresAt: services.Clock.UtcNow + DefaultCommandRetention),
+                        ExpiresAt: services.Clock.UtcNow + CommandIdempotencyKeys.DefaultRetention),
                     ct)
                 .ConfigureAwait(false);
 
@@ -170,15 +170,6 @@ public sealed class CompleteTaskCommand : ICommand<Unit>
 
         return Unit.Value;
     }
-
-    /// <summary>
-    /// 命令去重记录的保留时长。
-    /// <para>
-    /// 与 HTTP 幂等键的保留期保持一致（24h）：超过这个时间窗口的重复投递
-    /// 已经超出「网络重试」的合理范围，不应再被静默吞掉。
-    /// </para>
-    /// </summary>
-    internal static readonly TimeSpan DefaultCommandRetention = TimeSpan.FromHours(24);
 
     /// <summary>
     /// 取任务所属的用户任务元素（拿它的任务监听器配置）。

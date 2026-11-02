@@ -155,7 +155,7 @@ public sealed class NestedCommandTransactionIntegrationTests
             _ => throw new InvalidOperationException($"未知方言 '{provider}'。"),
         };
 
-        Assert.SkipUnless(spec is not null, $"方言 {provider} 不可用。");
+        Assert.SkipUnless(spec is not null, TestDatabases.UnavailableReason(provider));
 
         var harness = new DatabaseEngineHarness(spec!);
         harness.Reset();

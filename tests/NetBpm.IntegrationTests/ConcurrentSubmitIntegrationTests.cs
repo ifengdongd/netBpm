@@ -302,9 +302,7 @@ public sealed class ConcurrentSubmitIntegrationTests
 
         Assert.SkipUnless(
             spec is not null,
-            $"方言 {provider} 不可用（NETBPM_MYSQL_CONNECTION / NETBPM_SQLSERVER_CONNECTION 或默认目标："
-            + "MySQL=127.0.0.1，SqlServer=Testcontainers mssql/server:2022；需要 Docker 正在运行）。"
-            + "库与表会自动创建。");
+            TestDatabases.UnavailableReason(provider));
 
         var harness = new DatabaseEngineHarness(spec!, retryPolicy);
         harness.Reset();

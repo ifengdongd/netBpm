@@ -89,6 +89,54 @@ public sealed class CommandIdempotencyTests
     }
 
     /// <summary>
+    /// modify 的引擎层幂等：同一 commandId 重复改同一实例只生效一次，重投回放首次的指令结果。
+    /// </summary>
+    [Fact]
+    public async Task Modify_WithSameCommandId_ShouldOnlyTakeEffectOnce()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var harness = new DatabaseEngineHarness();
+        harness.Reset();
+
+        var (_, processInstanceId) = await harness.DeployAndStartAsync(UserTaskProcess, ct: Ct);
+
+        // startBefore 的效果可数：每次生效会多出一个待办
+        var instructions = new[] { new ModifyInstruction(ModifyInstructionType.StartBefore, ActivityId: "approve") };
+
+        var first = await harness.Executor
+            .ExecuteAsync(new ModifyProcessInstanceCommand(processInstanceId, instructions, commandId: "mod-1"), Ct)
+            .ConfigureAwait(false);
+
+        Assert.Single(first);
+        Assert.Equal(2, (await harness.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId, Ct)).Count);
+
+        // 同键重投：不重复生效，且回放首次结果（而不是回一个「什么都没做」的空列表）
+        var replayed = await harness.Executor
+            .ExecuteAsync(new ModifyProcessInstanceCommand(processInstanceId, instructions, commandId: "mod-1"), Ct)
+            .ConfigureAwait(false);
+
+        Assert.Equal(first.Count, replayed.Count);
+        Assert.Equal(first[0].Target, replayed[0].Target);
+        Assert.Equal(2, (await harness.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId, Ct)).Count);
+
+        // 换一个键：证明上面的静默返回确实来自去重，而不是「第二次本来就无效」
+        await harness.Executor
+            .ExecuteAsync(new ModifyProcessInstanceCommand(processInstanceId, instructions, commandId: "mod-2"), Ct)
+            .ConfigureAwait(false);
+
+        Assert.Equal(3, (await harness.TaskManager.FindTasksByProcessInstanceIdAsync(processInstanceId, Ct)).Count);
+
+        // 结果快照落库：重投能回放靠的就是它
+        var record = await harness.CommandIdempotency
+            .FindAsync(CommandIdempotencyKeys.ForModify("mod-1", processInstanceId), Ct)
+            .ConfigureAwait(false);
+
+        Assert.NotNull(record);
+        Assert.False(string.IsNullOrWhiteSpace(record!.ResultPayload));
+    }
+
+    /// <summary>
     /// 幂等占位必须与业务写入同事务：命令失败回滚后，占位行也要消失，客户端可用同键重试。
     /// </summary>
     [Fact]

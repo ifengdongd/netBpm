@@ -61,8 +61,7 @@ public sealed class DualDatabaseConsoleApiTests
         var spec = ResolveProvider(provider);
         Assert.SkipUnless(
             spec is not null,
-            $"方言 {provider} 不可用（NETBPM_MYSQL_CONNECTION / NETBPM_SQLSERVER_CONNECTION 或默认目标："
-            + "MySQL=localhost，SqlServer=Testcontainers mssql/server:2022）。");
+            TestDatabases.UnavailableReason(provider));
 
         TestDatabases.EnsureSchema(spec!);
 
