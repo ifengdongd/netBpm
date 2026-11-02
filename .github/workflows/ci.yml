@@ -211,10 +211,12 @@ jobs:
           if [ "$status" -ne 0 ]; then
             # 只认 xUnit 的 [FAIL] 行：引擎日志里「失败」出现得太多，
             # 按关键词抓会把正常重试日志当成结论（上一轮就抓成满屏「对端超时」）。
-            detail=$(printf '%s' "$output" | grep -F '[FAIL]' | head -n 10 | tr '\n' ' ')
+            # 带上后续 3 行：断言失败时 Expected/Actual、抛异常时消息都在紧跟的几行里，
+            # 只有用例名等于还得再跑一轮才能知道「差在哪」。
+            detail=$(printf '%s' "$output" | grep -A3 -F '[FAIL]' | grep -v '^--$' | head -n 20 | tr '\n' ' ')
             if [ -z "$detail" ]; then
               # 兜底：xUnit 的失败清单与汇总（Total/Failed）在输出末尾
-              detail=$(printf '%s' "$output" | tail -n 20 | tr '\n' ' ')
+              detail=$(printf '%s' "$output" | tail -n 25 | tr '\n' ' ')
             fi
             echo "::error title=集成测试失败::exit=${status} ${detail:0:1500}"
             exit "$status"
