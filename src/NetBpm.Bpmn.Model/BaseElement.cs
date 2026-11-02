@@ -51,6 +51,16 @@ public class ExtensionElement : BaseElement
     /// <summary>元素所在命名空间（如 <c>http://activiti.org/bpmn</c>）。</summary>
     public string? NamespacePrefix { get; set; }
 
+    /// <summary>
+    /// 元素所在命名空间的 URI（如 <c>http://netbpm.io/schema</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 只存前缀不够：前缀是<b>文档内</b>的别名（同一 URI 在不同文件里可能叫 <c>netbpm</c> 也可能叫 <c>nb</c>），
+    /// 写回时没有 URI 就绑定不了前缀。Activiti 的 <c>ExtensionElement</c> 同样以 namespace 为准、
+    /// 前缀只作美化。
+    /// </remarks>
+    public string? NamespaceUri { get; set; }
+
     /// <summary>元素的文本内容。</summary>
     public string? ElementText { get; set; }
 }

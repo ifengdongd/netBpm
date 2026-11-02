@@ -457,7 +457,7 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 |---|---|---|---|
 | 高 | ~~**P1-7 委托解析仍走根容器**~~ ✅ **v1.35 已闭环** | `CommandContext` 新增 `ScopedServices`（惰性开命令级 DI 作用域）+ `ReleaseServiceScope()`；`CommandExecutor` 在 finally 里**先释放作用域再释放事务**（作用域里的仓储 Dispose 时还要用会话），`ResetForRetry` 也重建作用域（否则重试拿到「新事务 + 旧会话」）；`ServiceProviderActivityDelegateResolver` 改为 `CommandContext.Current?.ScopedServices ?? 根`，命令外（部署自检 / 诊断 / 测试 harness）退回根容器 | 反向验证过：把 `Provider` 临时改回根容器，`ScopedDelegateResolutionTests` 立刻红在 `Cannot resolve scoped service 'System.Object' from root provider.` —— 说明这条路径此前确实是坏的，不是「理论上可能坏」 |
 | 中 | **P1-6 内存宿主单例** | `InMemoryExecutionManager` 仍是 `AddSingleton`；但已补命令级快照 + `OnAborted` 回滚（§十一），失败不再留下半棵树 | 若要彻底解决需改 `IProcessEngine` 生命周期（连锁改动大），建议保持现状并在文档写明「内存宿主 = 单进程单租户演示」 |
-| 中 | **§四C 定义层四条全部未做** | `Process.cs:11` 仍是 public `IList<IFlowElement> FlowElements` + `AddFlowElement`；校验仍是 `foreach (rule) rule.Validate(process)`（`ProcessValidator.cs:76`），5 个规则文件里 34 处 `OfType<` 全扫；`ExtensionElements` **解析侧从不填充**（`BaseBpmnXmlConverter.cs:351-376` 只认已知子元素，未知扩展子元素被静默丢弃），写侧虽遍历该集合但集合恒为空 ⇒ 往返丢失仍在；转换器仍无 `IXmlLineInfo`（全项目 0 处） | 先做往返保真（收集未知扩展子元素）—— 它直接导致设计器保存一次就丢自定义扩展；`Freeze()` 与单次遍历属重构，收益低于风险 |
+| 中 | **§四C 定义层四条** —— 其中「扩展元素往返保真」✅ **v1.36 已闭环**，其余三条维持现状 | 那份判断有一处过时：解析侧**早已**捕获未知扩展（`CaptureExtensionElement`）。真正的洞在写侧 —— `WriteExtensionElements` 只写已知四类（监听器 / 字段 / 表单属性），从不遍历 `element.ExtensionElements`，还会吐出空的 `<extensionElements/>`；流程级 `WriteProcess` 同理漏写 `Process.ExtensionElements`，且写出条件只看监听器。再叠加 `ExtensionElement` 只存前缀不存 URI、`xmlns` 被当属性收下 —— 三处一起构成「设计器保存一次，`netbpm:parameters` 就没了」（部署与模型保存都会重新序列化：`ProcessDefinitionStore.Serialize` / `AdminEndpoints.Models.cs:534`） | 新增 `ExtensionElement.NamespaceUri`；新增 `WriteExtensionElement`（递归写属性 / 文本 / 子树，前缀只作美化）；流程级补写。`Freeze()` / 单次遍历 / `IXmlLineInfo` 三条仍维持现状（重构收益低于风险） |
 | 中 | ~~**§四D-2 `ElResolver` 反射元数据缓存**~~ ✅ **v1.34 已闭环** | `MethodCache`（key 含参数个数）/ `MemberCache` / `IndexerCache` 三个 `ConcurrentDictionary`：属性与索引器缓存读取委托，方法缓存已过滤的候选集。**不设容量上限**——key 的基数是「类型 × 成员名 × 参数个数」，来自业务模型类型，天然有界；表达式缓存要上限是因为表达式文本来自 BPMN，用户能写出无限多不同文本，两者膨胀来源不同 | `MethodOverloads_ShouldResolveByArgumentCount_AcrossCachedCalls` 锁住「key 漏掉参数个数会错配重载」这条边界（这条错只在同类型先后用不同参数个数时出现，最容易漏测） |
 | 中 | **P1-10 监听器异常默认吞** | `EngineEventDispatcher.cs:87` 仍是 `catch (Exception) when (listener.ThrowOnFailure != true)` + `LogWarning` | 语义已文档化；建议在部署期校验里对「关键监听器」强制 `throwOnFailure=true` |
 | 低 | ~~**错误码仍有 7 处无 `code`**~~ ✅ **v1.34 已闭环** | 新增 `EndpointResults`（400 `validation_error` / 404 `not_found`）作为唯一构造点：设计器 4 处（请求体空 ×2、部署不存在、定义不存在）、身份 2 处（组不存在）、登录 1 处（缺参数）全部改用它；`RuntimeEndpoints.InvalidRequest` 退化为薄委托，19 处调用点不动 | `EndpointErrorCodeTests` 2 项：登录 400 与未知组 404 都断言 `code`；设计器那几条在 `netbpm.admin.*` 管理 scope 下，由 `AdminGovernanceTests` 的 JWT 链路间接覆盖 |
@@ -486,7 +486,7 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
 | 项 | 结果 |
 |---|---|
 | `dotnet build NetBpm.slnx -c Debug` | 0 error |
-| `NetBpm.UnitTests` | **836 用例，0 失败，13 跳过**（Redis 不可用） |
+| `NetBpm.UnitTests` | **837 用例，0 失败，13 跳过**（Redis 不可用） |
 | `NetBpm.IntegrationTests` 全量（真实 MySQL） | **473 用例：429 通过 / 44 跳过 / 0 失败**（跳过项：SqlServer Testcontainers、Redis） |
 | 契约治理三步 | `ContractSnapshotTests` 2 / 2、`CompatibilityTests` 2 / 2、`SdkGenerationTests` 5 / 5 |
 

@@ -403,6 +403,7 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         {
             ElementName = reader.LocalName,
             NamespacePrefix = reader.Prefix,
+            NamespaceUri = reader.NamespaceURI,
             Id = Attr(reader, "id"),
             Name = Attr(reader, "name"),
         };
@@ -411,12 +412,14 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         {
             while (reader.MoveToNextAttribute())
             {
-                // xmlns:* 是命名空间声明而不是数据，记下来只会污染 round-trip
-                if (reader.Prefix.Length == 0
-                    || !string.Equals(reader.LocalName, "xmlns", StringComparison.Ordinal))
+                // xmlns / xmlns:* 是命名空间声明而不是数据：URI 已由 NamespaceUri 承载，
+                // 再把声明当属性收下来，写回时就会重复声明（XmlWriter 直接抛「同名属性已存在」）。
+                if (IsNamespaceDeclaration(reader))
                 {
-                    element.AddAttribute(reader.NamespaceURI, reader.LocalName, reader.Value);
+                    continue;
                 }
+
+                element.AddAttribute(reader.NamespaceURI, reader.LocalName, reader.Value);
             }
 
             reader.MoveToElement();
@@ -447,6 +450,11 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
 
         return element;
     }
+
+    /// <summary>是否为命名空间声明（<c>xmlns</c> 或 <c>xmlns:*</c>）。</summary>
+    private static bool IsNamespaceDeclaration(XmlReader reader) =>
+        reader.Prefix == "xmlns"
+        || (reader.Prefix.Length == 0 && string.Equals(reader.LocalName, "xmlns", StringComparison.Ordinal));
 
     private static FormProperty ReadFormProperty(XmlReader reader)
     {
@@ -702,6 +710,94 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
             {
                 WriteFormProperty(writer, property);
             }
+        }
+
+        // 预置条件里已经算了 ExtensionElements.Count，但写出侧此前没有对应循环 ——
+        // 于是「解析捕获了、写回时丢掉」，还会吐出一个空的 <extensionElements></extensionElements>。
+        foreach (var extensionElement in element.ExtensionElements)
+        {
+            WriteExtensionElement(writer, extensionElement);
+        }
+
+        writer.WriteEndElement();
+    }
+
+    /// <summary>
+    /// 写出一个被原样捕获的扩展元素（含属性、文本与子树）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <c>ReadExtensionElement</c> 严格对偶：解析时把「认不出来的扩展」整体收下，写出就照原样吐回。
+    /// 少了这一步，设计器保存一次，自定义扩展（平台自己的 <c>netbpm:parameters</c> 等）就永久丢失 ——
+    /// 不报错、不告警，只是回来时不见了。
+    /// </para>
+    /// <para>
+    /// 前缀只作美化：同一 URI 在不同文档里可能叫 <c>netbpm</c> 也可能叫 <c>nb</c>，
+    /// 真正决定语义的是 <see cref="ExtensionElement.NamespaceUri"/>，XmlWriter 会按给定前缀补 <c>xmlns</c> 声明。
+    /// </para>
+    /// </remarks>
+    internal static void WriteExtensionElement(XmlWriter writer, ExtensionElement element)
+    {
+        var localName = element.ElementName ?? "extension";
+        var namespaceUri = string.IsNullOrEmpty(element.NamespaceUri) ? null : element.NamespaceUri;
+
+        if (namespaceUri is null)
+        {
+            writer.WriteStartElement(localName);
+        }
+        else
+        {
+            writer.WriteStartElement(
+                string.IsNullOrEmpty(element.NamespacePrefix) ? null : element.NamespacePrefix,
+                localName,
+                namespaceUri);
+        }
+
+        // 解析时 id / name 既赋值给字段、又进了 Attributes；这里以 Attributes 为准写一遍即可，
+        // 字段只在「手工构造的扩展元素」里兜底 —— 否则同一个属性写两遍，XmlWriter 会抛异常。
+        var declaredNames = element.Attributes.Values
+            .SelectMany(attributes => attributes)
+            .Select(attribute => attribute.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (!string.IsNullOrEmpty(element.Id) && !declaredNames.Contains("id"))
+        {
+            writer.WriteAttributeString("id", element.Id);
+        }
+
+        if (!string.IsNullOrEmpty(element.Name) && !declaredNames.Contains("name"))
+        {
+            writer.WriteAttributeString("name", element.Name);
+        }
+
+        // 注意 Attributes 的 key 是 "<uri>:<name>"（见 BaseElement.AddAttribute），
+        // 真正的命名空间要读 ExtensionAttribute.NamespaceUri，不能拿字典的 key 当 URI 用。
+        foreach (var attributes in element.Attributes.Values)
+        {
+            foreach (var attribute in attributes)
+            {
+                if (string.IsNullOrEmpty(attribute.NamespaceUri))
+                {
+                    writer.WriteAttributeString(attribute.Name, attribute.Value);
+                    continue;
+                }
+
+                writer.WriteAttributeString(
+                    writer.LookupPrefix(attribute.NamespaceUri),
+                    attribute.Name,
+                    attribute.NamespaceUri,
+                    attribute.Value);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(element.ElementText))
+        {
+            writer.WriteString(element.ElementText);
+        }
+
+        foreach (var child in element.ExtensionElements)
+        {
+            WriteExtensionElement(writer, child);
         }
 
         writer.WriteEndElement();

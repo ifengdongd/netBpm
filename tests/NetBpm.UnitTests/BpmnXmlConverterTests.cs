@@ -376,6 +376,101 @@ public sealed class BpmnXmlConverterTests
         Assert.Single(roundTripped.GetMainProcess()!.EventListeners);
     }
 
+    /// <summary>
+    /// 未知扩展元素必须原样往返：解析捕获 → 序列化写回 → 再解析结构一致。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 回归：解析侧早就把「认不出来的扩展」整体收下了（<c>CaptureExtensionElement</c>），
+    /// 但写侧 <c>WriteExtensionElements</c> 只写已知的四类（执行/任务监听器、字段注入、表单属性），
+    /// 从不遍历 <c>ExtensionElements</c> —— 于是设计器每保存一次，平台自定义扩展
+    /// （<c>netbpm:parameters</c> 这类）就静默丢一次，而且还会吐出一个空的 <c>&lt;extensionElements/&gt;</c>。
+    /// </para>
+    /// <para>
+    /// 断言打在「三层结构」上（元素名 / 命名空间 URI / 属性 / 文本 / 子元素），
+    /// 只断言 <c>Contains("netbpm:parameters")</c> 的话，丢了属性或文本一样能过。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void UnknownExtensionElements_ShouldRoundTripWithoutLoss()
+    {
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         xmlns:netbpm="http://netbpm.io/schema"
+                         targetNamespace="http://netbpm/test">
+              <process id="ext" isExecutable="true">
+                <extensionElements>
+                  <netbpm:catalog category="leave" />
+                </extensionElements>
+                <startEvent id="start" />
+                <userTask id="approve" name="审批">
+                  <extensionElements>
+                    <netbpm:parameters>
+                      <netbpm:parameter key="amount" required="true">金额</netbpm:parameter>
+                    </netbpm:parameters>
+                  </extensionElements>
+                </userTask>
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="approve" />
+                <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var model = Parse(xml);
+        var process = model.GetMainProcess()!;
+        var task = Assert.IsType<UserTask>(process.GetFlowElement("approve"));
+
+        // ① 解析侧：流程级与元素级的未知扩展都被捕获（不能静默丢）
+        var catalog = Assert.Single(process.ExtensionElements);
+        Assert.Equal("catalog", catalog.ElementName);
+        Assert.Equal("http://netbpm.io/schema", catalog.NamespaceUri);
+
+        var parameters = Assert.Single(task.ExtensionElements);
+        Assert.Equal("parameters", parameters.ElementName);
+        Assert.Equal("http://netbpm.io/schema", parameters.NamespaceUri);
+
+        var parameter = Assert.Single(parameters.ExtensionElements);
+        Assert.Equal("parameter", parameter.ElementName);
+        Assert.Equal("金额", parameter.ElementText);
+        Assert.Equal("amount", Attribute(parameter, "key"));
+        Assert.Equal("true", Attribute(parameter, "required"));
+
+        // ② 写侧：原样写回
+        using var buffer = new MemoryStream();
+        new BpmnXmlConverter().ConvertToXml(model, buffer);
+        var converted = Encoding.UTF8.GetString(buffer.ToArray());
+
+        Assert.Contains("netbpm:parameters", converted, StringComparison.Ordinal);
+        Assert.Contains("netbpm:parameter", converted, StringComparison.Ordinal);
+        Assert.Contains("netbpm:catalog", converted, StringComparison.Ordinal);
+        Assert.Contains("金额", converted, StringComparison.Ordinal);
+
+        // 命名空间声明不能混进 Attributes：否则写回时同一个元素上会再声明一次 xmlns，
+        // XmlWriter 会直接抛「同名属性已存在」（这也是解析侧过滤 xmlns 的原因）。
+        Assert.DoesNotContain(
+            parameters.Attributes.Values.SelectMany(attributes => attributes),
+            attribute => attribute.Name is "xmlns" or "netbpm");
+
+        // ③ 再解析：三层结构仍然一致
+        var roundTripped = Parse(converted).GetMainProcess()!;
+        var roundTask = Assert.IsType<UserTask>(roundTripped.GetFlowElement("approve"));
+
+        Assert.Single(roundTripped.ExtensionElements);
+        var roundParameters = Assert.Single(roundTask.ExtensionElements);
+        Assert.Equal("http://netbpm.io/schema", roundParameters.NamespaceUri);
+
+        var roundParameter = Assert.Single(roundParameters.ExtensionElements);
+        Assert.Equal("金额", roundParameter.ElementText);
+        Assert.Equal("amount", Attribute(roundParameter, "key"));
+        Assert.Equal("true", Attribute(roundParameter, "required"));
+    }
+
+    /// <summary>取扩展元素上「无命名空间前缀」属性的值。</summary>
+    private static string? Attribute(ExtensionElement element, string name) =>
+        element.GetAttribute(string.Empty, name).FirstOrDefault()?.Value;
+
     private static BpmnModel Parse(string xml) =>
         new BpmnXmlConverter().ConvertToBpmnModel(new MemoryStream(Encoding.UTF8.GetBytes(xml)));
 }

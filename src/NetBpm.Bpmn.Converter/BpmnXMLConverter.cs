@@ -526,7 +526,9 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         WriteAttributeIfPresent(writer, "name", process.Name);
         writer.WriteAttributeString("isExecutable", process.IsExecutable ? "true" : "false");
 
-        if (process.EventListeners.Count > 0 || process.ExecutionListeners.Count > 0)
+        if (process.EventListeners.Count > 0
+            || process.ExecutionListeners.Count > 0
+            || process.ExtensionElements.Count > 0)
         {
             writer.WriteStartElement("extensionElements", BpmnConstants.BpmnNamespace);
 
@@ -538,6 +540,12 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
             foreach (var listener in process.EventListeners)
             {
                 BaseBpmnXmlConverter<FlowElement>.WriteEventListener(writer, listener);
+            }
+
+            // 流程级未知扩展（设计器写在 Process 上的自定义组）同样要原样吐回
+            foreach (var extensionElement in process.ExtensionElements)
+            {
+                BaseBpmnXmlConverter<FlowElement>.WriteExtensionElement(writer, extensionElement);
             }
 
             writer.WriteEndElement();
