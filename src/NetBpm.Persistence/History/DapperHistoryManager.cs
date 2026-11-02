@@ -911,6 +911,13 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
             parameters.Add("definitionIds", filter.ProcessDefinitionIds);
         }
 
+        if (filter.ProcessInstanceIds is { Count: > 0 })
+        {
+            // 历史实例表的实例 id 列是 PROC_INST_ID_（不是 ID_），与运行态写法不同是表结构决定的
+            conditions.Add("PROC_INST_ID_ in @instanceIds");
+            parameters.Add("instanceIds", filter.ProcessInstanceIds);
+        }
+
         if (!string.IsNullOrWhiteSpace(filter.BusinessKey))
         {
             conditions.Add("BUSINESS_KEY_ = @businessKey");

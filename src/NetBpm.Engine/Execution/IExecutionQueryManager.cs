@@ -8,6 +8,14 @@ namespace NetBpm.Engine.Execution;
 public sealed record ProcessInstanceFilter(
     string? ProcessDefinitionId = null,
     IReadOnlyCollection<string>? ProcessDefinitionIds = null,
+    /// <summary>
+    /// 实例 id 白名单（<c>in</c> 语义，落在 <c>ACT_RU_EXECUTION.ID_</c> 上）。
+    /// </summary>
+    /// <remarks>
+    /// 给「我参与过的单据」这类<b>应用层已算出精确集合</b>的过滤用：
+    /// 没有它就只能在应用侧把全部候选拉回来再筛，实例上万后翻页就是全表扫描。
+    /// </remarks>
+    IReadOnlyCollection<string>? ProcessInstanceIds = null,
     string? BusinessKey = null,
     string? StartUserId = null,
     string? TenantId = null,

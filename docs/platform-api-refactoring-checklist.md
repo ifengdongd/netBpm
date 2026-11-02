@@ -778,8 +778,14 @@ v1.27 补齐管理面写路径、事件看板与单订阅限速、时间线轮�
       没有采用新索引表：`ACT_HI_PROCINST` / `ACT_RU_EXECUTION` 的列与索引本就够用，
       缺的是**查询条件**（`TenantIds` / `ProcessDefinitionIds`）与**翻页下推**；建索引表等于把已有一份数据再抄一遍，
       还要解决「引擎内部结束（定时器 / 消息）时索引谁来更新」的一致性问题。
-- 仍只有 `involvedUser`（我参与过）在平台侧二次过滤：它需要按人展开实例集合，下推要 JOIN `ACT_HI_IDENTITYLINK`，
-      属于下一轮的事；该路径已显式不做 `limit`（宁慢不错）。
+- [x] **`involvedUser`（我参与过）也已下推**（v1.39）：参与集合本来就是 `IInstanceParticipation` 在应用层
+      算出的**精确**实例 id 列表（发起人 / 审批人 / 身份关系三路并集），把它当 `ID_ in (...)` /
+      `PROC_INST_ID_ in (...)` 交给存储层，就替代了原来「`maxResults = null` 全量拉回 + 内存逐条筛」。
+      没有改成 JOIN `ACT_HI_IDENTITYLINK`：那等于把同一套参与语义在 SQL 里再实现一遍，
+      两处口径一旦分叉，就会出现「列表里有这张单、`myRoles` 却是空的」这类极难定位的差异。
+      集合按 1000 一块切（SQL Server 单语句参数上限 2100），每批各取 `limit+1` 条后合并排序 ——
+      并集必然覆盖全局前 `limit` 条，与游标口径一致；空集合落成「零匹配」而不是「不过滤」。
+      配套守门用例：`InvolvedUser_ShouldPageWithoutDuplicates`（参与过滤真的生效 + 翻页不重不漏）。
 
 配套守门用例：`Quotas_ShouldPageClientsWithCursor`（翻页不重不漏 + `clientCount` 不退化成页大小）、
 `Quotas_Should400_ForMalformedCursor`（坏游标 400，不静默当第一页）、

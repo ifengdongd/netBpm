@@ -124,6 +124,79 @@ public sealed class ParticipantIndexTests : IClassFixture<RestEngineFactory>
     }
 
     /// <summary>
+    /// 「我参与过的单据」与分页 / 游标一起用：参与过滤必须真的生效（不是「返回全部」），
+    /// 且翻页不重不漏。
+    /// </summary>
+    /// <remarks>
+    /// 这个组合是「参与集合下推成 in 条件」之后最容易出错的位置：
+    /// 每批取 <c>limit + 1</c> 条再合并排序，必须与游标口径逐字对应，否则会在页边界重复或漏行。
+    /// 而且它<b>只在「参与集合小于候选集合」时才暴露</b>——用「全部实例都归这个人」的数据测不出来，
+    /// 所以这里刻意造了 2 张 lisi 不参与的单据。
+    /// </remarks>
+    [Fact]
+    public async Task InvolvedUser_ShouldPageWithoutDuplicates()
+    {
+        SkipUnlessReady();
+        Reset();
+
+        var engine = _factory.Services.GetRequiredService<IProcessEngine>();
+        await DeployAsync(engine);
+
+        for (var index = 0; index < 3; index++)
+        {
+            await StartAsync(engine, "zhangsan", $"BILL-L{index}", "lisi");
+        }
+
+        for (var index = 0; index < 2; index++)
+        {
+            await StartAsync(engine, "zhangsan", $"BILL-W{index}", "wangwu");
+        }
+
+        using var client = _factory.CreateClient();
+        var secret = await RegisterAsync(client, "participant-page", [PlatformScopes.InstanceRead]);
+
+        var seen = new List<string>();
+        string? cursor = null;
+        var pages = 0;
+
+        while (pages < 5)
+        {
+            var path = cursor is null
+                ? "/workflow/v1/instances?involvedUser=lisi&limit=2"
+                : $"/workflow/v1/instances?involvedUser=lisi&limit=2&cursor={Uri.EscapeDataString(cursor)}";
+
+            using var response = await SendGetAsync(client, path, secret);
+            var body = await ReadJsonAsync(response);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var items = body.GetProperty("items").EnumerateArray().ToList();
+
+            foreach (var item in items)
+            {
+                Assert.Contains("APPROVER", Roles(item));
+            }
+
+            seen.AddRange(items.Select(item => item.GetProperty("instanceId").GetString()!));
+            pages++;
+
+            if (!body.GetProperty("hasMore").GetBoolean())
+            {
+                break;
+            }
+
+            cursor = body.GetProperty("nextCursor").GetString();
+
+            Assert.False(string.IsNullOrWhiteSpace(cursor), "hasMore=true 时必须给出 nextCursor。");
+        }
+
+        // 只有 lisi 经手的那 3 张：参与过滤没下推就会变成 5 张
+        Assert.Equal(3, seen.Count);
+        Assert.Equal(3, seen.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(2, pages);
+    }
+
+    /// <summary>
     /// 「我的已办」：<c>GET /workflow/v1/tasks?scope=DONE</c> 只回来自己办过的任务，且带办结时间。
     /// </summary>
     [Fact]

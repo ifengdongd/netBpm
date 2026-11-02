@@ -11,6 +11,11 @@ public sealed record HistoricProcessInstanceFilter(
     string? ProcessInstanceId = null,
     string? ProcessDefinitionId = null,
     IReadOnlyCollection<string>? ProcessDefinitionIds = null,
+    /// <summary>
+    /// 实例 id 白名单（<c>in</c> 语义，落在 <c>ACT_HI_PROCINST.PROC_INST_ID_</c> 上）。
+    /// </summary>
+    /// <remarks>与运行态的 <c>ProcessInstanceFilter.ProcessInstanceIds</c> 同一用途，两者口径必须一致。</remarks>
+    IReadOnlyCollection<string>? ProcessInstanceIds = null,
     string? BusinessKey = null,
     string? StartUserId = null,
     bool? Finished = null,

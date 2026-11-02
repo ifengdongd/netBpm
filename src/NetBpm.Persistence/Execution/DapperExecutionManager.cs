@@ -668,6 +668,13 @@ public sealed class DapperExecutionManager : IExecutionManager, IExecutionQueryM
             parameters.Add("definitionIds", filter.ProcessDefinitionIds);
         }
 
+        if (filter.ProcessInstanceIds is { Count: > 0 })
+        {
+            // 根执行的实例 id 就是 ID_（子执行的 PARENT_ID_ 非空，已被上面的固定条件挡掉）
+            conditions.Add("ID_ in @instanceIds");
+            parameters.Add("instanceIds", filter.ProcessInstanceIds);
+        }
+
         if (!string.IsNullOrWhiteSpace(filter.BusinessKey))
         {
             conditions.Add("BUSINESS_KEY_ = @businessKey");

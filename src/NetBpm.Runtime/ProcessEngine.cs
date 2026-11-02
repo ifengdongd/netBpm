@@ -749,6 +749,16 @@ public sealed class ProcessEngine : IProcessEngine
         ProcessInstanceQuery query,
         CancellationToken ct)
     {
+        // 空集合的语义是「跟任何实例都无关」，必须落成「零匹配」。
+        // 不能把它当成「没有这个过滤条件」下传：Dapper 侧的 `Count > 0` 判断会让它悄悄消失，
+        // 结果是「我参与过的单据」变成「全部单据」——这是越权，不是性能问题。
+        // 定义 id 白名单同理（平台侧目前会在更早的地方拦掉，但这层契约不该依赖调用方自觉）。
+        if (query.ProcessInstanceIds is { Count: 0 }
+            || query.ProcessDefinitionIds is { Count: 0 })
+        {
+            return null;
+        }
+
         IReadOnlyCollection<string>? definitionIds = null;
 
         if (!string.IsNullOrWhiteSpace(query.ProcessDefinitionKey))
@@ -782,6 +792,7 @@ public sealed class ProcessEngine : IProcessEngine
         return new ProcessInstanceFilter(
             ProcessDefinitionId: query.ProcessDefinitionId,
             ProcessDefinitionIds: effectiveIds,
+            ProcessInstanceIds: query.ProcessInstanceIds,
             BusinessKey: query.BusinessKey,
             StartUserId: query.StartUserId,
             TenantId: query.TenantId,
@@ -825,6 +836,7 @@ public sealed class ProcessEngine : IProcessEngine
         && (definitionIds is null || definitionIds.Contains(instance.ProcessDefinitionId ?? string.Empty))
         && (query.ProcessDefinitionIds is null
             || query.ProcessDefinitionIds.Contains(instance.ProcessDefinitionId ?? string.Empty))
+        && (query.ProcessInstanceIds is null || query.ProcessInstanceIds.Contains(instance.Id))
         && (string.IsNullOrWhiteSpace(query.BusinessKey)
             || string.Equals(instance.BusinessKey, query.BusinessKey, StringComparison.Ordinal))
         && (string.IsNullOrWhiteSpace(query.StartUserId)
@@ -1969,6 +1981,13 @@ public sealed class ProcessEngine : IProcessEngine
         HistoricProcessInstanceQuery query,
         CancellationToken ct)
     {
+        // 同运行态：空集合 = 「跟任何实例都无关」，必须落成零匹配，不能退化成不过滤。
+        if (query.ProcessInstanceIds is { Count: 0 }
+            || query.ProcessDefinitionIds is { Count: 0 })
+        {
+            return null;
+        }
+
         IReadOnlyCollection<string>? definitionIds = null;
 
         if (!string.IsNullOrWhiteSpace(query.ProcessDefinitionKey))
@@ -2002,6 +2021,7 @@ public sealed class ProcessEngine : IProcessEngine
         return new HistoricProcessInstanceFilter(
             ProcessDefinitionId: query.ProcessDefinitionId,
             ProcessDefinitionIds: effectiveIds,
+            ProcessInstanceIds: query.ProcessInstanceIds,
             BusinessKey: query.BusinessKey,
             StartUserId: query.StartUserId,
             Finished: query.Finished,
@@ -2047,6 +2067,7 @@ public sealed class ProcessEngine : IProcessEngine
             || string.Equals(instance.ProcessDefinitionId, query.ProcessDefinitionId, StringComparison.Ordinal))
         && (definitionIds is null || definitionIds.Contains(instance.ProcessDefinitionId))
         && (query.ProcessDefinitionIds is null || query.ProcessDefinitionIds.Contains(instance.ProcessDefinitionId))
+        && (query.ProcessInstanceIds is null || query.ProcessInstanceIds.Contains(instance.Id))
         && (string.IsNullOrWhiteSpace(query.BusinessKey)
             || string.Equals(instance.BusinessKey, query.BusinessKey, StringComparison.Ordinal))
         && (string.IsNullOrWhiteSpace(query.StartUserId)

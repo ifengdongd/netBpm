@@ -45,7 +45,16 @@ public sealed record ProcessInstanceQuery(
     /// </remarks>
     IReadOnlyCollection<string>? ProcessDefinitionIds = null,
     /// <summary>按租户白名单过滤（<c>in</c> 语义，用于「本租户 + 全局共享」）。</summary>
-    IReadOnlyCollection<string>? TenantIds = null);
+    IReadOnlyCollection<string>? TenantIds = null,
+    /// <summary>
+    /// 按实例 id 白名单过滤（<c>in</c> 语义）。
+    /// </summary>
+    /// <remarks>
+    /// 平台面「我参与过的单据」在应用层就已经算出精确的实例集合（发起人 / 审批人 / 身份关系三路并集，
+    /// 见 <c>IInstanceParticipation</c>）。把集合下推成 <c>ID_ in (...)</c>，
+    /// 就能让「时间窗口 + 分页」照常走索引，而不是把这个人的全部单据拉回内存再逐条筛。
+    /// </remarks>
+    IReadOnlyCollection<string>? ProcessInstanceIds = null);
 
 /// <summary>
 /// 历史流程实例的查询条件（已办结检索 / 审计 / 报表）。
@@ -93,7 +102,12 @@ public sealed record HistoricProcessInstanceQuery(
     /// <summary>按流程定义 id 白名单过滤（平台面的客户端流程白名单落成 SQL）。</summary>
     IReadOnlyCollection<string>? ProcessDefinitionIds = null,
     /// <summary>按租户白名单过滤（<c>in</c> 语义，用于「本租户 + 全局共享」）。</summary>
-    IReadOnlyCollection<string>? TenantIds = null);
+    IReadOnlyCollection<string>? TenantIds = null,
+    /// <summary>
+    /// 按实例 id 白名单过滤（<c>in</c> 语义，落在 <c>PROC_INST_ID_</c> 上）。
+    /// </summary>
+    /// <remarks>与 <see cref="ProcessInstanceQuery.ProcessInstanceIds"/> 同一用途：让平台面「我参与过的单据」不必全量回捞。</remarks>
+    IReadOnlyCollection<string>? ProcessInstanceIds = null);
 
 /// <summary>
 /// 流程定义的查询条件（定义列表 / 按 key 查全部版本）。

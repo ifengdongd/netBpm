@@ -97,6 +97,13 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
     /// </remarks>
     private const int MaxConcurrency = 4;
 
+    /// <summary>下推「我参与过的单据」时单条 SQL 最多带多少个实例 id。</summary>
+    /// <remarks>
+    /// SQL Server 单语句参数上限 2100，而这条语句还有时间、租户、定义白名单等参数，
+    /// 取 1000 留出余量。MySQL 没有硬限制，同一份代码按同一口径切，行为才可预期。
+    /// </remarks>
+    private const int MaxInstanceIdsPerQuery = 1000;
+
     private readonly IProcessEngine _engine;
     private readonly IProcessDefinitionStore _definitionStore;
     private readonly IInstanceParticipation _participation;
@@ -143,7 +150,7 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         // 「我参与过的单据」：一次算出「这个人 → 实例 id → 角色」，既做过滤也用来回填 myRoles
         var involvement = await LoadInvolvementAsync(query.InvolvedUser, context, ct).ConfigureAwait(false);
 
-        var candidates = await LoadCandidatesAsync(query, startedBy, cursor, descending, limit, involvement is null, context, ct)
+        var candidates = await LoadCandidatesAsync(query, startedBy, cursor, descending, limit, involvement, context, ct)
             .ConfigureAwait(false);
 
         var filtered = new List<Candidate>(candidates.Count);
@@ -328,6 +335,12 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
     /// <b>合并规则</b>：历史提供结束时间与删除原因（状态判定必需），运行态提供挂起状态与
     /// 更及时的业务主键 / 发起人（历史这几列在实例运行期间可能为空）。
     /// </para>
+    /// <para>
+    /// <b>过滤全部下推</b>：租户边界、流程白名单、「我参与过的实例集合」都变成 SQL 的
+    /// <c>in</c> / 等值条件，应用层不再「先把候选全拉回来再逐条筛」。
+    /// 参与集合按 <see cref="MaxInstanceIdsPerQuery"/> 分批，批次之间是并集关系，
+    /// 每批各取前 <c>limit + 1</c> 条后合并排序——这个并集必然覆盖全局前 <c>limit</c> 条。
+    /// </para>
     /// </remarks>
     private async ValueTask<Dictionary<string, Candidate>> LoadCandidatesAsync(
         InstanceQuery query,
@@ -335,7 +348,7 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
         CursorPosition? cursor,
         bool descending,
         int limit,
-        bool canLimit,
+        InstanceInvolvement? involvement,
         RequestContext context,
         CancellationToken ct)
     {
@@ -365,86 +378,136 @@ public sealed class InstanceListCatalog : IInstanceListCatalog
             return merged;
         }
 
-        // 每源多取一条判断 hasMore。两个源的排序口径（时间 + id 升序 tie-break）与内存合并完全一致，
-        // 所以「各取前 N 条再合并」与「取全量再排序」得到的前 N 条相同。
-        int? maxResults = canLimit ? limit + 1 : null;
+        // ── 把「我参与过的单据」也下推 ──
+        // 参与集合是应用层算出来的<b>精确</b>实例 id 列表（发起人 / 审批人 / 身份关系三路并集，
+        // 见 InstanceParticipation），直接当 in 过滤交给存储层就够了。
+        // 不下推时这里只能 `maxResults = null` 把该用户的全部单据拉回来逐条筛，
+        // 实例上万之后「翻一页」就是一次全量扫描。
+        var batches = BuildInstanceIdBatches(involvement);
 
-        if (NeedsHistoric(query.Status))
+        if (batches.Count == 0)
         {
-            var historicQuery = new HistoricProcessInstanceQuery(
-                ProcessDefinitionKey: NullIfBlank(query.ProcessKey),
-                ProcessDefinitionIds: definitionIds,
-                BusinessKey: NullIfBlank(query.BusinessKey),
-                StartUserId: startedBy,
-                // Status 明确指向「已结束」时由引擎侧筛掉运行中的行：
-                // 这一条能把历史表里绝大部分在办实例挡在门外，是最划算的下推。
-                Finished: query.Status is InstanceStatus.Completed or InstanceStatus.Terminated ? true : null,
-                StartedAfter: startedAfter,
-                StartedBefore: startedBefore,
-                MaxResults: maxResults,
-                TenantIds: tenantIds,
-                Descending: descending);
-
-            foreach (var historic in await _engine
-                .FindHistoricProcessInstancesAsync(historicQuery, ct)
-                .ConfigureAwait(false))
-            {
-                merged[historic.Id] = new Candidate(
-                    InstanceId: historic.Id,
-                    ProcessDefinitionId: historic.ProcessDefinitionId,
-                    BusinessKey: historic.BusinessKey,
-                    StartTime: historic.StartTime,
-                    StartUserId: historic.StartUserId,
-                    EndTime: historic.EndTime,
-                    DeleteReason: historic.DeleteReason,
-                    TenantId: historic.TenantId,
-                    HasExecution: false,
-                    SuspensionState: null);
-            }
+            // 参与集合为空 = 「这个人跟任何单据都无关」：语义是零匹配，
+            // 绝不能退化成「不加过滤」（那就是把全租户的单据当成他的）。
+            return merged;
         }
 
-        if (NeedsExecution(query.Status))
-        {
-            var executionQuery = new ProcessInstanceQuery(
-                ProcessDefinitionKey: NullIfBlank(query.ProcessKey),
-                ProcessDefinitionIds: definitionIds,
-                BusinessKey: NullIfBlank(query.BusinessKey),
-                StartUserId: startedBy,
-                StartedAfter: startedAfter,
-                StartedBefore: startedBefore,
-                MaxResults: maxResults,
-                TenantIds: tenantIds,
-                Descending: descending);
+        // 每源每批多取一条判断 hasMore。两个源的排序口径（时间 + id 升序 tie-break）与内存合并完全一致，
+        // 所以「各取前 N 条再合并」与「取全量再排序」得到的前 N 条相同；
+        // 跨批同理：每批取前 N 条，它们的并集必然覆盖全局前 N 条。
+        var maxResults = limit + 1;
 
-            foreach (var execution in await _engine
-                .FindProcessInstancesAsync(executionQuery, ct)
-                .ConfigureAwait(false))
+        foreach (var instanceIds in batches)
+        {
+            if (NeedsHistoric(query.Status))
             {
-                // 运行态优先：实例在跑，业务主键 / 发起人以运行态为准（历史那几列可能还没写）
-                merged[execution.Id] = merged.TryGetValue(execution.Id, out var existing)
-                    ? existing with
-                    {
-                        BusinessKey = execution.BusinessKey ?? existing.BusinessKey,
-                        StartTime = execution.StartTime ?? existing.StartTime,
-                        StartUserId = execution.StartUserId ?? existing.StartUserId,
-                        HasExecution = true,
-                        SuspensionState = execution.SuspensionState,
-                    }
-                    : new Candidate(
-                        InstanceId: execution.Id,
-                        ProcessDefinitionId: execution.ProcessDefinitionId ?? string.Empty,
-                        BusinessKey: execution.BusinessKey,
-                        StartTime: execution.StartTime,
-                        StartUserId: execution.StartUserId,
-                        EndTime: null,
-                        DeleteReason: null,
-                        TenantId: execution.TenantId,
-                        HasExecution: true,
-                        SuspensionState: execution.SuspensionState);
+                var historicQuery = new HistoricProcessInstanceQuery(
+                    ProcessDefinitionKey: NullIfBlank(query.ProcessKey),
+                    ProcessDefinitionIds: definitionIds,
+                    ProcessInstanceIds: instanceIds,
+                    BusinessKey: NullIfBlank(query.BusinessKey),
+                    StartUserId: startedBy,
+                    // Status 明确指向「已结束」时由引擎侧筛掉运行中的行：
+                    // 这一条能把历史表里绝大部分在办实例挡在门外，是最划算的下推。
+                    Finished: query.Status is InstanceStatus.Completed or InstanceStatus.Terminated ? true : null,
+                    StartedAfter: startedAfter,
+                    StartedBefore: startedBefore,
+                    MaxResults: maxResults,
+                    TenantIds: tenantIds,
+                    Descending: descending);
+
+                foreach (var historic in await _engine
+                    .FindHistoricProcessInstancesAsync(historicQuery, ct)
+                    .ConfigureAwait(false))
+                {
+                    merged[historic.Id] = new Candidate(
+                        InstanceId: historic.Id,
+                        ProcessDefinitionId: historic.ProcessDefinitionId,
+                        BusinessKey: historic.BusinessKey,
+                        StartTime: historic.StartTime,
+                        StartUserId: historic.StartUserId,
+                        EndTime: historic.EndTime,
+                        DeleteReason: historic.DeleteReason,
+                        TenantId: historic.TenantId,
+                        HasExecution: false,
+                        SuspensionState: null);
+                }
+            }
+
+            if (NeedsExecution(query.Status))
+            {
+                var executionQuery = new ProcessInstanceQuery(
+                    ProcessDefinitionKey: NullIfBlank(query.ProcessKey),
+                    ProcessDefinitionIds: definitionIds,
+                    ProcessInstanceIds: instanceIds,
+                    BusinessKey: NullIfBlank(query.BusinessKey),
+                    StartUserId: startedBy,
+                    StartedAfter: startedAfter,
+                    StartedBefore: startedBefore,
+                    MaxResults: maxResults,
+                    TenantIds: tenantIds,
+                    Descending: descending);
+
+                foreach (var execution in await _engine
+                    .FindProcessInstancesAsync(executionQuery, ct)
+                    .ConfigureAwait(false))
+                {
+                    // 运行态优先：实例在跑，业务主键 / 发起人以运行态为准（历史那几列可能还没写）
+                    merged[execution.Id] = merged.TryGetValue(execution.Id, out var existing)
+                        ? existing with
+                        {
+                            BusinessKey = execution.BusinessKey ?? existing.BusinessKey,
+                            StartTime = execution.StartTime ?? existing.StartTime,
+                            StartUserId = execution.StartUserId ?? existing.StartUserId,
+                            HasExecution = true,
+                            SuspensionState = execution.SuspensionState,
+                        }
+                        : new Candidate(
+                            InstanceId: execution.Id,
+                            ProcessDefinitionId: execution.ProcessDefinitionId ?? string.Empty,
+                            BusinessKey: execution.BusinessKey,
+                            StartTime: execution.StartTime,
+                            StartUserId: execution.StartUserId,
+                            EndTime: null,
+                            DeleteReason: null,
+                            TenantId: execution.TenantId,
+                            HasExecution: true,
+                            SuspensionState: execution.SuspensionState);
+                }
             }
         }
 
         return merged;
+    }
+
+    /// <summary>
+    /// 把「我参与过的单据」的实例集合切成可下推的批次；不按参与过滤时返回单个 <see langword="null"/> 批次。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 必须分块：<c>ID_ in (...)</c> 的每个 id 都是一个 SQL 参数，而 SQL Server 单语句参数上限是 2100。
+    /// 一次把几万个 id 塞进去不是「慢」而是直接报错，所以按 <see cref="MaxInstanceIdsPerQuery"/> 切。
+    /// </para>
+    /// <para>
+    /// 返回<i>空列表</i>与返回「一个空批次」是两件不同的事：前者是「这个人什么都没参与」（零匹配），
+    /// 后者是「不做这个过滤」。参与关系为空时必须是前者。
+    /// </para>
+    /// </remarks>
+    private static List<IReadOnlyCollection<string>?> BuildInstanceIdBatches(InstanceInvolvement? involvement)
+    {
+        if (involvement is null)
+        {
+            return [null];
+        }
+
+        var batches = new List<IReadOnlyCollection<string>?>();
+
+        foreach (var chunk in involvement.InstanceIds.Chunk(MaxInstanceIdsPerQuery))
+        {
+            batches.Add(chunk);
+        }
+
+        return batches;
     }
 
     /// <summary>该状态是否需要查历史侧。</summary>
