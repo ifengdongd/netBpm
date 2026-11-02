@@ -374,6 +374,19 @@ public interface IProcessEngine
     ValueTask<int> CountHistoricTasksAsync(HistoricTaskQuery query, CancellationToken ct = default);
 
     /// <summary>
+    /// 分页取历史任务 + 同口径总数，<b>一次会话租借</b>内完成。
+    /// </summary>
+    /// <remarks>
+    /// 与「<see cref="FindHistoricTasksAsync(HistoricTaskQuery, CancellationToken)"/> +
+    /// <see cref="CountHistoricTasksAsync"/>」语义一致，但不让调用方付两次连接租借的代价：
+    /// 支持下推的宿主在同一条连接上完成「取页 + count(*)」，两份结果也来自同一时刻。
+    /// 没有下推能力时退化为两次调用。
+    /// </remarks>
+    ValueTask<PagedQueryResult<HistoricTaskInstance>> FindHistoricTasksWithCountAsync(
+        HistoricTaskQuery query,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// 查历史身份关系（<c>ACT_HI_IDENTITYLINK</c>）——「谁与这条单据有关」的参与者索引。
     /// </summary>
     /// <remarks>
@@ -401,6 +414,18 @@ public interface IProcessEngine
 
     /// <summary>数历史流程实例（分页配套查询）。</summary>
     ValueTask<int> CountHistoricProcessInstancesAsync(
+        HistoricProcessInstanceQuery query,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// 分页取历史流程实例 + 同口径总数，<b>一次会话租借</b>内完成。
+    /// </summary>
+    /// <remarks>
+    /// 分页响应天然要「页 + 总数」：分成两次调用就是两次连接租借、多一次往返，
+    /// 且两份结果来自两个时刻，并发写入时会出现「总数 21、当页 20 行」这种对不上的响应。
+    /// 没有下推能力时退化为两次调用，语义不变。
+    /// </remarks>
+    ValueTask<PagedQueryResult<HistoricProcessInstance>> FindHistoricProcessInstancesWithCountAsync(
         HistoricProcessInstanceQuery query,
         CancellationToken ct = default);
 

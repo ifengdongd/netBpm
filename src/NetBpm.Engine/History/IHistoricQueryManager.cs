@@ -53,6 +53,11 @@ public sealed record HistoricTaskFilter(
     string SortBy = "startTime",
     bool Descending = false);
 
+/// <summary>分页查询结果：当前页 + 同口径总数（总数不受分页影响）。</summary>
+/// <param name="Items">当前页行。</param>
+/// <param name="Total">满足过滤条件的总行数。</param>
+public sealed record PagedQueryResult<T>(IReadOnlyList<T> Items, int Total);
+
 /// <summary>
 /// 历史查询的服务端下推端口（<b>可选能力</b>）。
 /// <para>
@@ -99,4 +104,39 @@ public interface IHistoricQueryManager
     ValueTask<IReadOnlyList<HistoricIdentityLink>> QueryIdentityLinksAsync(
         HistoricIdentityLinkFilter filter,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// 分页取页 + 同口径总数，在<b>一次会话租借</b>内完成。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 默认实现退化为「两次独立调用」，语义与 <see cref="QueryProcessInstancesAsync"/> +
+    /// <see cref="CountProcessInstancesAsync"/> 完全一致；数据库宿主覆盖它以复用同一条连接。
+    /// </para>
+    /// <para>
+    /// 为什么值得单独一个方法：分页接口天然要「页 + 总数」，分两次调用在命令外就是两次连接租借——
+    /// 多一次往返，且两次结果来自两个不同时刻，并发写入时会产出「Total=21、当页却只有 20 行」这种
+    /// 对不上的响应。
+    /// </para>
+    /// </remarks>
+    async ValueTask<PagedQueryResult<HistoricProcessInstance>> QueryProcessInstancesWithCountAsync(
+        HistoricProcessInstanceFilter filter,
+        CancellationToken ct = default)
+    {
+        var items = await QueryProcessInstancesAsync(filter, ct).ConfigureAwait(false);
+        var total = await CountProcessInstancesAsync(filter with { MaxResults = null }, ct).ConfigureAwait(false);
+
+        return new PagedQueryResult<HistoricProcessInstance>(items, total);
+    }
+
+    /// <summary>分页取历史任务 + 总数，一次会话租借内完成（同 <see cref="QueryProcessInstancesWithCountAsync"/>）。</summary>
+    async ValueTask<PagedQueryResult<HistoricTaskInstance>> QueryTaskInstancesWithCountAsync(
+        HistoricTaskFilter filter,
+        CancellationToken ct = default)
+    {
+        var items = await QueryTaskInstancesAsync(filter, ct).ConfigureAwait(false);
+        var total = await CountTaskInstancesAsync(filter with { MaxResults = null }, ct).ConfigureAwait(false);
+
+        return new PagedQueryResult<HistoricTaskInstance>(items, total);
+    }
 }

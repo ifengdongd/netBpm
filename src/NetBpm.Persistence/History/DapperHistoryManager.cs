@@ -676,7 +676,50 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
         ArgumentNullException.ThrowIfNull(filter);
 
         using var lease = _sessions.Acquire();
+
+        return await QueryProcessInstancesCoreAsync(lease.Session, filter, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> CountProcessInstancesAsync(
+        HistoricProcessInstanceFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+
+        return await CountProcessInstancesCoreAsync(lease.Session, filter, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 覆盖默认实现：取页与计数共用<b>同一次</b>会话租借（同一条连接、同一个事务），
+    /// 命令外因此只有一次租借/一次往返开销，且两份结果来自同一时刻。
+    /// </remarks>
+    public async ValueTask<PagedQueryResult<HistoricProcessInstance>> QueryProcessInstancesWithCountAsync(
+        HistoricProcessInstanceFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
         var session = lease.Session;
+
+        var items = await QueryProcessInstancesCoreAsync(session, filter, ct).ConfigureAwait(false);
+
+        // 计数必须与「过滤条件」同口径、但不带分页：MaxResults 只作用于当页。
+        var total = await CountProcessInstancesCoreAsync(session, filter with { MaxResults = null }, ct)
+            .ConfigureAwait(false);
+
+        return new PagedQueryResult<HistoricProcessInstance>(items, total);
+    }
+
+    private static async ValueTask<IReadOnlyList<HistoricProcessInstance>> QueryProcessInstancesCoreAsync(
+        IDbSession session,
+        HistoricProcessInstanceFilter filter,
+        CancellationToken ct)
+    {
         var parameters = new DynamicParameters();
         var where = BuildProcessInstanceWhere(filter, parameters);
         var direction = filter.Descending ? "desc" : "asc";
@@ -707,15 +750,11 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
         return result;
     }
 
-    /// <inheritdoc />
-    public async ValueTask<int> CountProcessInstancesAsync(
+    private static async ValueTask<int> CountProcessInstancesCoreAsync(
+        IDbSession session,
         HistoricProcessInstanceFilter filter,
-        CancellationToken ct = default)
+        CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(filter);
-
-        using var lease = _sessions.Acquire();
-        var session = lease.Session;
         var parameters = new DynamicParameters();
         var where = BuildProcessInstanceWhere(filter, parameters);
 
@@ -734,7 +773,45 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
         ArgumentNullException.ThrowIfNull(filter);
 
         using var lease = _sessions.Acquire();
+
+        return await QueryTaskInstancesCoreAsync(lease.Session, filter, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<int> CountTaskInstancesAsync(
+        HistoricTaskFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
+
+        return await CountTaskInstancesCoreAsync(lease.Session, filter, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>覆盖默认实现：取页与计数共用同一次会话租借（见 <see cref="QueryProcessInstancesWithCountAsync"/>）。</remarks>
+    public async ValueTask<PagedQueryResult<HistoricTaskInstance>> QueryTaskInstancesWithCountAsync(
+        HistoricTaskFilter filter,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        using var lease = _sessions.Acquire();
         var session = lease.Session;
+
+        var items = await QueryTaskInstancesCoreAsync(session, filter, ct).ConfigureAwait(false);
+        var total = await CountTaskInstancesCoreAsync(session, filter with { MaxResults = null }, ct)
+            .ConfigureAwait(false);
+
+        return new PagedQueryResult<HistoricTaskInstance>(items, total);
+    }
+
+    private static async ValueTask<IReadOnlyList<HistoricTaskInstance>> QueryTaskInstancesCoreAsync(
+        IDbSession session,
+        HistoricTaskFilter filter,
+        CancellationToken ct)
+    {
         var parameters = new DynamicParameters();
         var where = BuildHistoricTaskWhere(filter, parameters);
         var direction = filter.Descending ? "desc" : "asc";
@@ -765,15 +842,11 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
         return result;
     }
 
-    /// <inheritdoc />
-    public async ValueTask<int> CountTaskInstancesAsync(
+    private static async ValueTask<int> CountTaskInstancesCoreAsync(
+        IDbSession session,
         HistoricTaskFilter filter,
-        CancellationToken ct = default)
+        CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(filter);
-
-        using var lease = _sessions.Acquire();
-        var session = lease.Session;
         var parameters = new DynamicParameters();
         var where = BuildHistoricTaskWhere(filter, parameters);
 

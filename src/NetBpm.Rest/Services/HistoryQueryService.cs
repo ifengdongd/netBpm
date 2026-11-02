@@ -55,12 +55,12 @@ internal sealed class HistoryQueryService(IProcessEngine engine) : IHistoryQuery
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var instances = await engine.FindHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false);
-        var total = await engine.CountHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false);
+        // 页 + 总数一次会话租借内取回：分页响应不该为此付两次连接 / 两次往返
+        var page = await engine.FindHistoricProcessInstancesWithCountAsync(query, ct).ConfigureAwait(false);
 
         return new PagedItems<HistoricProcessInstanceResponse>(
-            [.. instances.Select(HistoricProcessInstanceResponse.From)],
-            total);
+            [.. page.Items.Select(HistoricProcessInstanceResponse.From)],
+            page.Total);
     }
 
     public async Task<HistoricProcessInstanceResponse?> FindInstanceAsync(
@@ -87,10 +87,11 @@ internal sealed class HistoryQueryService(IProcessEngine engine) : IHistoryQuery
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var tasks = await engine.FindHistoricTasksAsync(query, ct).ConfigureAwait(false);
-        var total = await engine.CountHistoricTasksAsync(query, ct).ConfigureAwait(false);
+        var page = await engine.FindHistoricTasksWithCountAsync(query, ct).ConfigureAwait(false);
 
-        return new PagedItems<HistoricTaskResponse>([.. tasks.Select(HistoricTaskResponse.From)], total);
+        return new PagedItems<HistoricTaskResponse>(
+            [.. page.Items.Select(HistoricTaskResponse.From)],
+            page.Total);
     }
 
     public async Task<IReadOnlyList<HistoricVariableResponse>> FindVariablesAsync(

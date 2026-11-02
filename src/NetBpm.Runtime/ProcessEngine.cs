@@ -1815,6 +1815,29 @@ public sealed class ProcessEngine : IProcessEngine
         return tasks.Count;
     }
 
+    /// <inheritdoc />
+    public async ValueTask<PagedQueryResult<HistoricTaskInstance>> FindHistoricTasksWithCountAsync(
+        HistoricTaskQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(query.FirstResult, query.MaxResults);
+        EnsureHistoricTaskCriteria(query);
+
+        if (_historyManager is IHistoricQueryManager pushdown)
+        {
+            // 取页与计数由持久化层在一次会话租借内完成（同一条连接、同一个事务）
+            return await pushdown
+                .QueryTaskInstancesWithCountAsync(ToFilter(query), ct)
+                .ConfigureAwait(false);
+        }
+
+        var tasks = await FindHistoricTasksAsync(query, ct).ConfigureAwait(false);
+        var total = await CountHistoricTasksAsync(query, ct).ConfigureAwait(false);
+
+        return new PagedQueryResult<HistoricTaskInstance>(tasks, total);
+    }
+
     private static void EnsureHistoricTaskCriteria(HistoricTaskQuery query)
     {
         if (!query.HasCriteria)
@@ -1971,6 +1994,33 @@ public sealed class ProcessEngine : IProcessEngine
         }
 
         return (await CollectHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false)).Count;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<PagedQueryResult<HistoricProcessInstance>> FindHistoricProcessInstancesWithCountAsync(
+        HistoricProcessInstanceQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ValidatePaging(query.FirstResult, query.MaxResults);
+
+        if (_historyManager is IHistoricQueryManager pushdown)
+        {
+            var filter = await BuildHistoricProcessInstanceFilterAsync(query, ct).ConfigureAwait(false);
+
+            // 零匹配（key 解析不出定义 / 白名单为空）：不必查库，页与总数一起归零
+            if (filter is null)
+            {
+                return new PagedQueryResult<HistoricProcessInstance>([], 0);
+            }
+
+            return await pushdown.QueryProcessInstancesWithCountAsync(filter, ct).ConfigureAwait(false);
+        }
+
+        var instances = await FindHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false);
+        var total = await CountHistoricProcessInstancesAsync(query, ct).ConfigureAwait(false);
+
+        return new PagedQueryResult<HistoricProcessInstance>(instances, total);
     }
 
     /// <summary>
