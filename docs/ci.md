@@ -45,6 +45,12 @@ remote 已存在但地址不同时直接报错，不擅自改指向。
 - **集成测试红**：先看是不是**环境**（MySQL service 没起来 → 连接失败；runner 的 Docker 不可用 →
   SqlServer 用例会动态跳过而不是失败，跳过数变多是正常的）。数据库不可用时测试**动态跳过**，
   所以「跳过很多」不等于绿，要对照跳过数。
+- **`Create schema` 步红（2 秒内就退出）**：几乎都不是迁移脚本的问题，而是**连不上库**。
+  官方 `mysql` 镜像默认只建 `root@localhost`，而 service 容器把端口映射到宿主机后，
+  连接来源是 docker 网关地址（`172.x.x.x`）——不是 `localhost`，于是 `Access denied`。
+  所以 `MYSQL_ROOT_HOST: "%"` 与固定的 `MYSQL_ROOT_PASSWORD` **缺一不可**；
+  health check 也必须带 `-u/-p`：`mysqladmin ping` 不带凭据时只要端口在监听就返回成功，
+  会出现「service 显示 healthy、一连就 Access denied」的假就绪。本地直连 localhost 复现不了这个。
 - **单测红**：与本地一致；注意已知的跨测试并发抖动（`OutboxBacklogMetricsTests` 的 MeterListener
   静态状态、`WorkflowServiceTests` 与 `EngineFacadeTests`），单类复跑若绿则大概率是抖动，别急着改代码。
 - **三个 .NET Job 全挂在 `Build` 步，日志里是 `NU1902` / `NU1903`**：这不是编译错误，是 **NuGet 审计**

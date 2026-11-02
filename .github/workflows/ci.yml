@@ -146,15 +146,22 @@ jobs:
       mysql:
         image: mysql:8.4
         env:
-          MYSQL_ROOT_PASSWORD: ""
-          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          # 必须是固定密码 + MYSQL_ROOT_HOST="%"：
+          # 官方镜像默认只建 root@localhost，而 service 容器把端口映射到宿主机后，
+          # 连接来源是 docker 网关（172.x.x.x）而不是 localhost，root 会被拒（Access denied）。
+          # 这在本地看不出来——本地是直连 localhost 上的 MySQL。
+          MYSQL_ROOT_PASSWORD: "netbpm"
+          MYSQL_ROOT_HOST: "%"
+          # 预建库；DbMigrate 的 --create-database 是 if not exists，仍会照跑一遍验证建库逻辑
+          MYSQL_DATABASE: "netbpm"
         ports:
           - 3306:3306
         options: >-
-          --health-cmd "mysqladmin ping -h localhost"
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pnetbpm"
           --health-interval 5s
           --health-timeout 3s
-          --health-retries 20
+          --health-retries 24
+          --health-start-period 30s
 
     steps:
       - uses: actions/checkout@v4
@@ -171,9 +178,9 @@ jobs:
         run: >
           dotnet run --project tools/NetBpm.DbMigrate --no-build --
           migrate --create-database --provider mysql
-          --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;"
+          --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
 
       - name: Integration tests
         env:
-          NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;"
+          NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
         run: dotnet run --project tests/NetBpm.IntegrationTests --no-build
