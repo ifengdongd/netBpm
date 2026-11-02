@@ -51,6 +51,18 @@ public sealed class TaskEntity
     /// <summary><c>DESCRIPTION_</c>。</summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// 任务文档（来自 <c>&lt;userTask&gt;&lt;documentation&gt;</c>），只落 <c>ACT_HI_TASKINST.DESCRIPTION_</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为什么不直接写 <see cref="Description"/>：那一个字段会同时进 <c>ACT_RU_TASK.DESCRIPTION_</c>，
+    /// 而 Activiti 的运行任务行这一列是 <b>null</b>（对拍两侧都空、零差异）——
+    /// 用它会凭空造出一批新差异。历史行与运行行在这一列上就是不一致的，两个载体分开才对得上。
+    /// </para>
+    /// </remarks>
+    public string? Documentation { get; set; }
+
     /// <summary><c>BUSINESS_KEY_</c>（取自流程实例）。</summary>
     public string? BusinessKey { get; set; }
 

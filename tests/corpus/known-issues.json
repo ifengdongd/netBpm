@@ -2,20 +2,6 @@
   {
     "caseName": "*",
     "dimension": "tables",
-    "table": "ACT_HI_TASKINST",
-    "column": "DESCRIPTION_",
-    "reason": "有意不采集 <documentation>（§15.3 第 18 条）：§1.2 的 userTask 属性清单不含它，ACT_RU_TASK.DESCRIPTION_ 恒为 null，历史行同样为 null；Activiti 会写入任务文档"
-  },
-  {
-    "caseName": "*",
-    "dimension": "tables",
-    "table": "ACT_RE_PROCDEF",
-    "column": "DESCRIPTION_",
-    "reason": "同上：流程级 <documentation> 不在 §1.2 采集范围内"
-  },
-  {
-    "caseName": "*",
-    "dimension": "tables",
     "table": "ACT_RE_PROCDEF",
     "column": "HAS_START_FORM_KEY_",
     "reason": "起始表单 Key（activiti:formKey on startEvent）不在 §1.2 属性清单内，本实现恒写 0"

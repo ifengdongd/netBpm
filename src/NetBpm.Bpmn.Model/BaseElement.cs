@@ -12,6 +12,23 @@ public abstract class BaseElement
     /// <summary>元素名称（对应 XML 属性 <c>name</c>）。</summary>
     public string? Name { get; set; }
 
+    /// <summary>
+    /// 元素的文档文本（对应子元素 <c>&lt;documentation&gt;</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Activiti 把 documentation 挂在 <c>BaseElement</c> 上（<b>任意元素都可以带</b>，不只是流程与任务），
+    /// 落库只取两处：<c>ACT_RE_PROCDEF.DESCRIPTION_</c>（流程级）与
+    /// <c>ACT_HI_TASKINST.DESCRIPTION_</c>（userTask 级）。本模型照此解析全部、落库只用这两处 ——
+    /// 解析多出来的那些（如 sequenceFlow 上的）只为<b>往返不丢</b>，不进任何表。
+    /// </para>
+    /// <para>
+    /// 多个 <c>&lt;documentation&gt;</c> 时<b>后写覆盖</b>（与 Activiti 的 <c>addDocumentation</c> 一致），
+    /// 文本只 Trim 首尾、内部换行与缩进原样保留（对拍真值里就是带内部换行的原文）。
+    /// </para>
+    /// </remarks>
+    public string? Documentation { get; set; }
+
     /// <summary>扩展元素（对应 <c>extensionElements</c>）。</summary>
     public IList<ExtensionElement> ExtensionElements { get; } = [];
 

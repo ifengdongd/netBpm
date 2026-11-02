@@ -150,6 +150,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                         id = definitionId,
                         category = bpmnModel.TargetNamespace,
                         name = process.Name,
+                        description = process.Documentation,
                         key,
                         version,
                         deploymentId,
@@ -166,7 +167,8 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
                 await session.CommitAsync(ct).ConfigureAwait(false);
             }
 
-            return new ProcessDefinition(definitionId, key, process.Name, version, deploymentId, resourceName);
+            return new ProcessDefinition(
+                definitionId, key, process.Name, process.Documentation, version, deploymentId, resourceName);
         }
         catch
         {
@@ -199,13 +201,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
 
         foreach (IDictionary<string, object?> row in rows)
         {
-            return new ProcessDefinition(
-                Text(row, "ID_")!,
-                Text(row, "KEY_")!,
-                Text(row, "NAME_"),
-                Number(row, "VERSION_") ?? 0,
-                Text(row, "DEPLOYMENT_ID_")!,
-                Text(row, "RESOURCE_NAME_")!);
+            return MapProcessDefinition(row);
         }
 
         return null;
@@ -234,13 +230,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
 
         foreach (IDictionary<string, object?> row in rows)
         {
-            return new ProcessDefinition(
-                Text(row, "ID_")!,
-                Text(row, "KEY_")!,
-                Text(row, "NAME_"),
-                Number(row, "VERSION_") ?? 0,
-                Text(row, "DEPLOYMENT_ID_")!,
-                Text(row, "RESOURCE_NAME_")!);
+            return MapProcessDefinition(row);
         }
 
         return null;
@@ -414,13 +404,7 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
 
         foreach (IDictionary<string, object?> row in rows)
         {
-            result.Add(new ProcessDefinition(
-                Text(row, "ID_")!,
-                Text(row, "KEY_")!,
-                Text(row, "NAME_"),
-                Number(row, "VERSION_") ?? 0,
-                Text(row, "DEPLOYMENT_ID_")!,
-                Text(row, "RESOURCE_NAME_")!));
+            result.Add(MapProcessDefinition(row));
         }
 
         return result;
@@ -551,8 +535,21 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
     private const string SelectSuspensionStateSql =
         "select SUSPENSION_STATE_ from ACT_RE_PROCDEF where ID_ = @processDefinitionId";
 
+    /// <summary>
+    /// 行 → 定义实体。三条 SELECT 共用一个映射，避免「加了一列只改两处、第三处查回来是 null」。
+    /// </summary>
+    private static ProcessDefinition MapProcessDefinition(IDictionary<string, object?> row) =>
+        new(
+            Text(row, "ID_")!,
+            Text(row, "KEY_")!,
+            Text(row, "NAME_"),
+            Text(row, "DESCRIPTION_"),
+            Number(row, "VERSION_") ?? 0,
+            Text(row, "DEPLOYMENT_ID_")!,
+            Text(row, "RESOURCE_NAME_")!);
+
     private const string SelectByDeploymentIdSql = """
-        select ID_, KEY_, NAME_, VERSION_, DEPLOYMENT_ID_, RESOURCE_NAME_
+        select ID_, KEY_, NAME_, DESCRIPTION_, VERSION_, DEPLOYMENT_ID_, RESOURCE_NAME_
         from ACT_RE_PROCDEF where DEPLOYMENT_ID_ = @deploymentId
         """;
 
@@ -607,17 +604,17 @@ public sealed class DapperProcessDefinitionStore : IProcessDefinitionStore
             SUSPENSION_STATE_, TENANT_ID_, ENGINE_VERSION_, APP_VERSION_)
         values (
             @id, 1, @category, @name, @key, @version, @deploymentId, @resourceName,
-            null, null, 0, @hasGraphicalNotation,
+            null, @description, 0, @hasGraphicalNotation,
             1, @tenantId, @engineVersion, null)
         """;
 
     private const string SelectByIdSql = """
-        select ID_, KEY_, NAME_, VERSION_, DEPLOYMENT_ID_, RESOURCE_NAME_
+        select ID_, KEY_, NAME_, DESCRIPTION_, VERSION_, DEPLOYMENT_ID_, RESOURCE_NAME_
         from ACT_RE_PROCDEF where ID_ = @processDefinitionId
         """;
 
     private const string SelectLatestByKeySql = """
-        select ID_, KEY_, NAME_, VERSION_, DEPLOYMENT_ID_, RESOURCE_NAME_
+        select ID_, KEY_, NAME_, DESCRIPTION_, VERSION_, DEPLOYMENT_ID_, RESOURCE_NAME_
         from ACT_RE_PROCDEF
         where KEY_ = @key and TENANT_ID_ = @tenantId
           and VERSION_ = (

@@ -192,6 +192,95 @@ public sealed class BpmnXmlConverterTests
     }
 
     [Fact]
+    public void Documentation_ShouldBeParsedAndRoundTripped()
+    {
+        // documentation 挂在**任意** BPMN 元素上，落库只用两处
+        // （ACT_RE_PROCDEF.DESCRIPTION_ = 流程级、ACT_HI_TASKINST.DESCRIPTION_ = userTask 级）。
+        // 解析必须全覆盖（否则往返丢字段），Trim 首尾但保留内部换行与缩进。
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         targetNamespace="http://netbpm/test">
+              <process id="doc" isExecutable="true">
+                <documentation>
+                  流程说明
+                    第二行缩进
+                </documentation>
+                <startEvent id="start" />
+                <userTask id="approve">
+                  <documentation>审批环节说明</documentation>
+                </userTask>
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="approve">
+                  <documentation>连线上的文档（不落任何表，但往返不能丢）</documentation>
+                </sequenceFlow>
+                <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var model = Parse(xml);
+        var process = model.GetMainProcess()!;
+
+        // Trim 首尾、内部换行与缩进原样保留（对拍真值里的文档就是这样带缩进的原文）
+        Assert.StartsWith("流程说明", process.Documentation, StringComparison.Ordinal);
+        Assert.EndsWith("第二行缩进", process.Documentation, StringComparison.Ordinal);
+        Assert.Contains('\n', process.Documentation!);
+        Assert.Equal(
+            "审批环节说明",
+            Assert.IsType<UserTask>(process.GetFlowElement("approve")).Documentation);
+        Assert.Equal(
+            "连线上的文档（不落任何表，但往返不能丢）",
+            Assert.IsType<SequenceFlow>(process.GetFlowElement("f1")).Documentation);
+
+        // 往返：写回后重新解析，三处文档都还在
+        using var buffer = new MemoryStream();
+        new BpmnXmlConverter().ConvertToXml(model, buffer);
+
+        var reparsed = Parse(Encoding.UTF8.GetString(buffer.ToArray())).GetMainProcess()!;
+
+        Assert.Equal(process.Documentation, reparsed.Documentation);
+        Assert.Equal(
+            "审批环节说明",
+            Assert.IsType<UserTask>(reparsed.GetFlowElement("approve")).Documentation);
+        Assert.Equal(
+            "连线上的文档（不落任何表，但往返不能丢）",
+            Assert.IsType<SequenceFlow>(reparsed.GetFlowElement("f1")).Documentation);
+    }
+
+    [Fact]
+    public void Documentation_ShouldNotSwallowFollowingSiblingElements()
+    {
+        // 回归：读文本用 ReadElementContentAsString 会把 reader 推进到结束标签之后，
+        // 外层扫描循环再 Read 一次就跳过了下一个兄弟元素 ——
+        // 表现为「紧随 <documentation> 之后的元素被当成子集外元素而拒绝」。
+        const string xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                         targetNamespace="http://netbpm/test">
+              <process id="docorder" isExecutable="true">
+                <documentation>流程说明</documentation>
+                <startEvent id="start" />
+                <userTask id="approve">
+                  <documentation>审批</documentation>
+                </userTask>
+                <endEvent id="end" />
+                <sequenceFlow id="f1" sourceRef="start" targetRef="approve" />
+                <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+              </process>
+            </definitions>
+            """;
+
+        var process = Parse(xml).GetMainProcess()!;
+
+        // start / approve / end + 两条连线
+        Assert.Equal(5, process.FlowElements.Count);
+        Assert.NotNull(process.GetFlowElement("start"));
+        Assert.NotNull(process.GetFlowElement("f1"));
+        Assert.NotNull(process.GetFlowElement("f2"));
+    }
+
+    [Fact]
     public void FormProperty_ShouldRoundTripWithoutLoss()
     {
         // 回归：表单属性（activiti:formProperty）保存后重新加载为空 ——

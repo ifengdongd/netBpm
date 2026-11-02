@@ -75,6 +75,10 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
         task.Category = await ResolveTextAsync(userTask.Category, execution, ct).ConfigureAwait(false);
         task.FormKey = await ResolveTextAsync(userTask.FormKey, execution, ct).ConfigureAwait(false);
 
+        // documentation 走历史行专用载体（见 TaskEntity.Documentation 的说明），
+        // 与 name / category 等一样支持表达式求值（Activiti 对文档文本同样求值）。
+        task.Documentation = await ResolveTextAsync(userTask.Documentation, execution, ct).ConfigureAwait(false);
+
         // 办理关系需要任务 id，因此必须「先插入、后分配」
         await taskManager.InsertTaskAsync(task, executionEntity, ct).ConfigureAwait(false);
 

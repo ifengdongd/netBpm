@@ -225,6 +225,12 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
                 // 拒绝与否由校验（unsupported-capability）给出准确原因。
                 BaseBpmnXmlConverter<FlowElement>.ReadExtensionElements(reader, process);
             }
+            else if (reader.LocalName == "documentation")
+            {
+                // 流程级 documentation → ACT_RE_PROCDEF.DESCRIPTION_。
+                // 必须排在下面的 IgnorableElements 之前：那里是「整棵跳过」，会把文本丢掉。
+                process.Documentation = BaseBpmnXmlConverter<FlowElement>.ReadDocumentationText(reader);
+            }
             else if (_elementReaders.TryGetValue(reader.LocalName, out var converter))
             {
                 var element = converter.Read(reader, process);
@@ -525,6 +531,10 @@ public sealed class BpmnXmlConverter : IBpmnXmlConverter
         WriteAttributeIfPresent(writer, "id", process.Id);
         WriteAttributeIfPresent(writer, "name", process.Name);
         writer.WriteAttributeString("isExecutable", process.IsExecutable ? "true" : "false");
+
+        // 必须先写回再落库字节：内存部署路径下流程定义是从序列化后的 BYTES_ 重新解析的，
+        // 写回缺失会让「部署时有的描述，运行时没了」。
+        BaseBpmnXmlConverter<FlowElement>.WriteDocumentation(writer, process);
 
         if (process.EventListeners.Count > 0
             || process.ExecutionListeners.Count > 0

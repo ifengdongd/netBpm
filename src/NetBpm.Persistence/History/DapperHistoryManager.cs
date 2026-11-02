@@ -291,7 +291,9 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
                     executionId = execution.Id,
                     name = task.Name,
                     parentTaskId = task.ParentTaskId,
-                    description = task.Description,
+                    // 历史行的 DESCRIPTION_ 取 BPMN documentation；运行行的 DESCRIPTION_ 恒 null
+                    // （Activiti 也是这样，两侧原本零差异）—— 不能拿 task.Description 顶替。
+                    description = task.Documentation ?? task.Description,
                     owner = task.Owner,
                     assignee = task.Assignee,
                     startTime,
@@ -364,7 +366,7 @@ public sealed class DapperHistoryManager : IHistoryManager, IHistoricQueryManage
                 {
                     id = task.Id,
                     name = task.Name,
-                    description = task.Description,
+                    description = task.Documentation ?? task.Description,
                     owner = task.Owner,
                     assignee = task.Assignee,
                     claimTime = task.ClaimTime,

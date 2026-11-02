@@ -1,3 +1,4 @@
+using System.Text;
 using System.Xml;
 using NetBpm.Bpmn.Model;
 
@@ -157,6 +158,14 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
             if (string.Equals(child.LocalName, "extensionElements", StringComparison.Ordinal))
             {
                 ReadExtensionElements(child, element);
+                return;
+            }
+
+            // documentation 同样由基类集中处理：它和 extensionElements 一样可以挂在任意元素上，
+            // 逐个转换器去处理必定漏（漏掉的那个就是「往返丢字段」这类最难查的差异）。
+            if (string.Equals(child.LocalName, "documentation", StringComparison.Ordinal))
+            {
+                element.Documentation = ReadDocumentationText(child);
                 return;
             }
 
@@ -661,10 +670,82 @@ public abstract class BaseBpmnXmlConverter<TElement> : IBpmnElementXmlConverter
         {
             writer.WriteAttributeString("name", element.Name);
         }
+
+    }
+
+    /// <summary>
+    /// 读取 <c>&lt;documentation&gt;</c> 的文本（Trim 首尾，内部空白原样保留）。
+    /// </summary>
+    /// <remarks>
+    /// <c>ReadElementContentAsString</c> 会一直读到该子元素的结束标签并消费它，
+    /// 因此外层扫描循环的 depth 判定不受影响（不会把结束标签再当作一个子元素回调出去）。
+    /// </remarks>
+    internal static string? ReadDocumentationText(XmlReader reader)
+    {
+        var text = ReadTextContent(reader);
+
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    /// <summary>
+    /// 读取当前元素的文本内容；返回时 reader <b>停在该元素的结束标签</b>。
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ 不能用 <see cref="XmlReader.ReadElementContentAsString"/>：它把 reader 推进到结束标签
+    /// <b>之后</b>的下一个节点，而外层扫描循环每次迭代都要再 <c>Read()</c> 一次 ——
+    /// 于是紧跟着的兄弟元素被整棵跳过，表现为「下一个元素莫名变成未知元素」
+    /// （调试时看到的现象正是 <c>&lt;outgoing&gt; 不在本子集支持范围内</c>）。
+    /// 子元素回调的契约是「自行消费到自己的结束标签为止」，本方法照此实现。
+    /// </remarks>
+    internal static string? ReadTextContent(XmlReader reader)
+    {
+        if (reader.IsEmptyElement)
+        {
+            return null;
+        }
+
+        var depth = reader.Depth;
+        var text = new StringBuilder();
+
+        while (reader.Read())
+        {
+            if (reader.NodeType == XmlNodeType.EndElement && reader.Depth == depth)
+            {
+                return text.ToString();
+            }
+
+            if (reader.NodeType is XmlNodeType.Text
+                or XmlNodeType.CDATA
+                or XmlNodeType.SignificantWhitespace
+                or XmlNodeType.Whitespace)
+            {
+                text.Append(reader.Value);
+            }
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>写回 <c>&lt;documentation&gt;</c>；没有就不写（保持 XML 原样）。</summary>
+    internal static void WriteDocumentation(XmlWriter writer, BaseElement element)
+    {
+        if (string.IsNullOrEmpty(element.Documentation))
+        {
+            return;
+        }
+
+        writer.WriteStartElement("documentation", BpmnConstants.BpmnNamespace);
+        writer.WriteString(element.Documentation);
+        writer.WriteEndElement();
     }
 
     protected static void WriteExtensionElements(XmlWriter writer, BaseElement element)
     {
+        // BPMN schema 里 documentation 排在 extensionElements 之前；写在这里两个好处：
+        // ① 属性已经写完（子元素插在属性之间是非法 XML）；
+        // ② 每一种元素都会调本方法，不必让 15 个转换器各自记得写 —— 漏掉的那个就是「往返丢字段」。
+        WriteDocumentation(writer, element);
+
         var taskListeners = (element as UserTask)?.TaskListeners;
         var hasTaskListeners = taskListeners is { Count: > 0 };
         var fields = (element as ServiceTask)?.Fields;

@@ -8,6 +8,10 @@ namespace NetBpm.Persistence.Deployment;
 /// <param name="Id">流程定义 id，形如 <c>{key}:{version}:{idGeneratorId}</c>（见 §7.4）。</param>
 /// <param name="Key">流程 key（XML 中的 <c>process/@id</c>）。</param>
 /// <param name="Name">流程名。</param>
+/// <param name="Description">
+/// 流程文档（<c>ACT_RE_PROCDEF.DESCRIPTION_</c>，来自 <c>&lt;process&gt;&lt;documentation&gt;</c>）。
+/// Activiti 落的就是这一列；对拍显示缺了它会造成 13 条 <c>DESCRIPTION_</c> 差异。
+/// </param>
 /// <param name="Version">同一 key 下 <c>max(VERSION_) + 1</c>。</param>
 /// <param name="DeploymentId">部署 id。</param>
 /// <param name="ResourceName">资源名（如 <c>designer.bpmn20.xml</c>）。</param>
@@ -15,6 +19,7 @@ public sealed record ProcessDefinition(
     string Id,
     string Key,
     string? Name,
+    string? Description,
     int Version,
     string DeploymentId,
     string ResourceName)
@@ -213,6 +218,7 @@ public sealed class InMemoryProcessDefinitionStore : IProcessDefinitionStore
                 definitionId,
                 process.Id!,
                 process.Name,
+                process.Documentation,
                 version,
                 deploymentId,
                 resourceName);

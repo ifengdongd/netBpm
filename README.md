@@ -65,7 +65,7 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - 流程 id（key）非空（`process-id` 规则）；不符合标识符习惯（如含冒号）只提示，不阻断（Activiti 允许任意 id）。
 - **一个 BPMN 文件只能有一个 `isExecutable="true"` 的流程**（不写 `isExecutable` 时按可执行处理）：
   多个会被部署/校验显式拒绝（非可执行流程不参与部署）。
-- 设计器属性面板为白名单接管，仅暴露子集支持的属性；documentation、子集外事件定义、candidateStarter 等填了也无效。
+- 设计器属性面板为白名单接管，仅暴露子集支持的属性；子集外事件定义、candidateStarter 等填了也无效。`<documentation>` 不在面板暴露，但 XML 里写了会落库（流程说明 / 任务说明两列）。
 
 ### 元素 ID
 
@@ -438,7 +438,7 @@ POST /api/runtime/process-instances/{id}/migrate
 
 - 必须保留 **Activiti 扩展命名空间 `http://activiti.org/bpmn`**，assignee、candidateUsers、class 等扩展属性均按此命名空间读取。
 - `targetNamespace` 可选，导出为空时自动回填默认命名空间。
-- 子集外的 BPMN 元素（子流程、中间事件、泳道等）会**显式拒绝部署**（提示「不在本子集支持范围内」）；仅 `extensionElements`、`documentation`、`textAnnotation`、`association` 等被容忍并忽略。
+- 子集外的 BPMN 元素（子流程、中间事件、泳道等）会**显式拒绝部署**（提示「不在本子集支持范围内」）；仅 `extensionElements`、`textAnnotation`、`association` 等被容忍并忽略；`<documentation>` **会被采集**（流程级 → `ACT_RE_PROCDEF.DESCRIPTION_`，userTask 级 → `ACT_HI_TASKINST.DESCRIPTION_`，与 Activiti 同值）。
 - 图形信息（`bpmndi:BPMNDiagram`）**可选**，没有也能部署；XML 必须格式合法（禁止 DTD），否则解析失败。
 
 ---

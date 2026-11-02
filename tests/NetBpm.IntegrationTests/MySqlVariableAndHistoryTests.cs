@@ -63,6 +63,35 @@ public sealed class MySqlVariableAndHistoryTests
     }
 
     [Fact]
+    public async Task Documentation_ShouldLandInDefinitionAndHistoricTask()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var harness = new DatabaseEngineHarness();
+        harness.Reset();
+
+        await harness.DeployAndStartAsync(DocumentedProcess(), null, Ct);
+
+        using var session = harness.SessionFactory.Create();
+
+        // ① 流程级 <documentation> → ACT_RE_PROCDEF.DESCRIPTION_
+        var definitions = RowValues.Query(session, "select KEY_, DESCRIPTION_ from ACT_RE_PROCDEF");
+
+        Assert.Equal("流程说明", RowValues.Text(Assert.Single(definitions), "DESCRIPTION_"));
+
+        // ② userTask 级 <documentation> → ACT_HI_TASKINST.DESCRIPTION_
+        var tasks = RowValues.Query(session, "select TASK_DEF_KEY_, DESCRIPTION_ from ACT_HI_TASKINST");
+
+        Assert.Equal("审批环节说明", RowValues.Text(Assert.Single(tasks), "DESCRIPTION_"));
+
+        // ③ 运行任务行的 DESCRIPTION_ 必须仍是 null：Activiti 的 ACT_RU_TASK 这一列也是 null，
+        //    文档只落历史行 —— 混用会凭空造出对拍差异
+        var running = RowValues.Query(session, "select DESCRIPTION_ from ACT_RU_TASK");
+
+        Assert.True(RowValues.IsNull(Assert.Single(running), "DESCRIPTION_"));
+    }
+
+    [Fact]
     public async Task Variables_ShouldMapClrTypesToActivitiColumns()
     {
         Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
@@ -418,6 +447,25 @@ public sealed class MySqlVariableAndHistoryTests
     }
 
     /// <summary>用户任务 → 排他网关（条件 ${approved} + 默认流）→ 两条手动任务 → 结束。</summary>
+    /// <summary>带 <c>&lt;documentation&gt;</c> 的两环节流程：流程级一段、userTask 级一段。</summary>
+    private static string DocumentedProcess() => """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="documented" isExecutable="true">
+            <documentation>流程说明</documentation>
+            <startEvent id="start" />
+            <userTask id="approve" name="审批" activiti:assignee="kermit">
+              <documentation>审批环节说明</documentation>
+            </userTask>
+            <endEvent id="end" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="approve" />
+            <sequenceFlow id="f2" sourceRef="approve" targetRef="end" />
+          </process>
+        </definitions>
+        """;
+
     private static string ApprovalProcess() => """
         <?xml version="1.0" encoding="UTF-8"?>
         <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"

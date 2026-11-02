@@ -738,7 +738,7 @@ Activiti 9 默认使用 **`DbIdGenerator`**（`ProcessEngineConfigurationImpl.in
 | 15 | `ENGINE_VERSION_` 列 | 写入 `netbpm-{版本}`，必然与 Activiti 的 `"9.0.0"` 不同 ⇒ 已列入 `SnapshotComparer` 的默认忽略列 |
 | 16 | 时间戳列 | `START_TIME_` / `END_TIME_` / `CREATE_TIME_` / `CLAIM_TIME_` / `DEPLOY_TIME_` 等列入默认忽略列（执行时刻必然不同） |
 | 17 | 查询语句省略 `SUPER_EXEC_` 的 `LEFT JOIN` | 该 JOIN 只为取"父流程实例 id"（调用活动场景）而存在；本子集不支持调用活动，省略不改变选取的列与行内容 |
-| 18 | `documentation`（任务描述） | §1.2 的 `userTask` 属性清单未含 `documentation`，故不采集，`ACT_RU_TASK.DESCRIPTION_` 恒为 `null`（解析时按 §1.3 第 8 条容忍并忽略） |
+| 18 | `documentation`（任务描述） | ✅ **2026-11-02 改为采集**（不再是有意偏离）：流程级 → `ACT_RE_PROCDEF.DESCRIPTION_`，userTask 级 → `ACT_HI_TASKINST.DESCRIPTION_`，与 Activiti 同值。`ACT_RU_TASK.DESCRIPTION_` 仍恒为 `null` —— Activiti 的运行任务行这一列也是 null，两侧零差异，因此文档用**独立载体**（`TaskEntity.Documentation`）而不是复用 `Description`，避免污染运行行。解析挂在 `BaseElement` 上（任意元素都读，只为往返不丢），多段时后写覆盖，文本 Trim 首尾、内部换行与缩进保留 |
 | 19 | `activiti:owner` | §1.2 的 `userTask` 属性清单未列出，但 Activiti 的 `handleAssignments` 会处理它、且 `OWNER_` 列存在，故**已实现**（模型 / 转换器 / 行为三处） |
 | 20 | 任务行不做脏检查 | Activiti 靠 `DbSqlSession` 的脏检查在 flush 时统一写库；本实现对任务采用**即时写**，因此"只改了 `CLAIM_TIME_`"的场景需显式调用 `UpdateTaskAsync`（内部 API，已注明） |
 | 21 | 清表顺序 | `ACT_RU_IDENTITYLINK.TASK_ID_ → ACT_RU_TASK.ID_`（`ACT_FK_TSKASS_TASK`）要求**身份关系先于任务删除** —— 开发/测试用清表工具必须遵守 |
