@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NetBpm.Engine.Behavior;
+using NetBpm.Engine.Diagnostics;
 using NetBpm.Engine.Events;
 using NetBpm.Engine.Execution;
 
@@ -86,9 +87,24 @@ public static class EngineEventDispatcher
             }
             catch (Exception exception) when (listener.ThrowOnFailure != true)
             {
-                services.Logger?.LogWarning(
+                // 这条失败不会让命令失败，等于「事件没送达、流程照常走」：
+                // 必须留下**可聚合**的痕迹（指标），不能只靠一条可能被采样掉的日志。
+                EngineDiagnostics.ListenerFailures.Add(
+                    1,
+                    new KeyValuePair<string, object?>("event", eventType),
+                    new KeyValuePair<string, object?>("kind", "event"));
+
+                if (services.Logger is not { } logger)
+                {
+                    // 兑现 IEngineServices.Logger 的契约：没有日志设施时不能静默吞掉。
+                    // 吞掉的是一条「业务侧监听器写失败了」的事实，事后无从追查。
+                    throw;
+                }
+
+                logger.LogWarning(
                     exception,
-                    "流程级事件监听器执行失败（事件 {EventType}，流程 {ProcessId}）—— throwOnFailure=false，继续流程。",
+                    "流程级事件监听器执行失败（事件 {EventType}，流程 {ProcessId}）—— throwOnFailure 未声明为 true，"
+                    + "已计入 netbpm.listener.failure 并继续流程；需要失败即阻断时请在 BPMN 上声明 activiti:throwOnFailure=\"true\"。",
                     eventType,
                     process.Id);
             }

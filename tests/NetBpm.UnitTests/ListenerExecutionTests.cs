@@ -1,8 +1,10 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NetBpm.Engine.Behavior;
+using NetBpm.Engine.Diagnostics;
 using NetBpm.Engine.Execution;
 using NetBpm.Runtime;
 
@@ -98,6 +100,148 @@ public sealed class ListenerExecutionTests
         Assert.StartsWith("event:TASK_COMPLETED:", listener.Events[2]);
         Assert.Equal("execution:end:task", listener.Events[3]);
         Assert.Equal($"event:PROCESS_COMPLETED:" + instanceId, listener.Events[4]);
+    }
+
+    /// <summary>
+    /// 事件监听器抛错、且 <c>throwOnFailure</c> 未声明：流程照走，但失败必须进指标。
+    /// </summary>
+    /// <remarks>
+    /// 回归：这条路径原先只写一条 warning 日志，若宿主没注入 <c>ILogger</c>
+    /// （<c>services.Logger?.LogWarning(...)</c> 的 <c>?.</c>）就<b>彻底静默</b> ——
+    /// 业务侧「写审批记录」失败，流程依然推进，且事后查不到任何痕迹。
+    /// 现在改为：计入 <c>netbpm.listener.failure</c>；没有日志设施时直接把异常抛出去。
+    /// </remarks>
+    [Fact]
+    public async Task EventListenerFailure_ShouldContinueAndBeCounted_WhenThrowOnFailureOmitted()
+    {
+        var observed = new ListenerFailureProbe();
+
+        using var provider = BuildThrowingProvider(withLogging: true);
+        var engine = provider.GetRequiredService<IProcessEngine>();
+
+        await using var xml = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(FailingBpmnXml(string.Empty)));
+        var definition = await engine.DeployAsync(xml, "failing-listener.bpmn20.xml", "失败监听器", default);
+
+        // 不抛：默认语义是「记录并继续」（对齐 Activiti 的 isFailOnException() = false）
+        var instanceId = await engine
+            .StartProcessInstanceAsync(definition.Id, businessKey: "BIZ-F", variables: null, ct: default);
+
+        Assert.False(string.IsNullOrEmpty(instanceId));
+        Assert.True(observed.Count >= 1, $"期望 netbpm.listener.failure 至少计数 1 次，实际 {observed.Count}。");
+    }
+
+    /// <summary>声明 <c>throwOnFailure="true"</c> 时，监听器失败必须让整条命令失败。</summary>
+    [Fact]
+    public async Task EventListenerFailure_ShouldFailCommand_WhenThrowOnFailureTrue()
+    {
+        using var provider = BuildThrowingProvider(withLogging: true);
+        var engine = provider.GetRequiredService<IProcessEngine>();
+
+        await using var xml = new MemoryStream(
+            System.Text.Encoding.UTF8.GetBytes(FailingBpmnXml("throwOnFailure=\"true\"")));
+        var definition = await engine.DeployAsync(xml, "failing-listener-strict.bpmn20.xml", "严格监听器", default);
+
+        var exception = await Assert.ThrowsAnyAsync<Exception>(
+            () => engine.StartProcessInstanceAsync(definition.Id, businessKey: "BIZ-S", variables: null, ct: default).AsTask());
+
+        Assert.Contains("监听器写失败", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 没有日志设施时不能静默：异常必须抛出来。
+    /// </summary>
+    /// <remarks>
+    /// 原先的写法是 <c>services.Logger?.LogWarning(...)</c> —— <c>?.</c> 一短路，异常就被吃干抹净，
+    /// 与 <c>IEngineServices.Logger</c> 注释承诺的「未注入时响亮抛出」正好相反。
+    /// </remarks>
+    [Fact]
+    public async Task EventListenerFailure_ShouldThrow_WhenNoLoggerConfigured()
+    {
+        using var provider = BuildThrowingProvider(withLogging: false);
+        var engine = provider.GetRequiredService<IProcessEngine>();
+
+        await using var xml = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(FailingBpmnXml(string.Empty)));
+        var definition = await engine.DeployAsync(xml, "failing-no-logger.bpmn20.xml", "无日志监听器", default);
+
+        await Assert.ThrowsAnyAsync<Exception>(
+            () => engine.StartProcessInstanceAsync(definition.Id, businessKey: "BIZ-N", variables: null, ct: default).AsTask());
+    }
+
+    /// <summary>抛错的事件监听器（模拟「业务侧写记录失败」）。</summary>
+    internal sealed class ThrowingListener : IEngineEventListener
+    {
+        public ValueTask OnEventAsync(WorkflowEngineEvent engineEvent, CancellationToken ct = default) =>
+            throw new InvalidOperationException($"监听器写失败：{engineEvent.Type}");
+    }
+
+    /// <summary>捕获 <c>netbpm.listener.failure</c> 的计数（只订阅本条指标，不碰进程级共享状态）。</summary>
+    private sealed class ListenerFailureProbe : IDisposable
+    {
+        private readonly MeterListener _listener;
+        private long _count;
+
+        public ListenerFailureProbe()
+        {
+            _listener = new MeterListener
+            {
+                InstrumentPublished = (instrument, listener) =>
+                {
+                    if (instrument.Meter.Name == EngineDiagnostics.MeterName
+                        && instrument.Name == "netbpm.listener.failure")
+                    {
+                        listener.EnableMeasurementEvents(instrument);
+                    }
+                },
+            };
+
+            _listener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
+            {
+                if (instrument.Name == "netbpm.listener.failure")
+                {
+                    Interlocked.Add(ref _count, measurement);
+                }
+            });
+
+            _listener.Start();
+        }
+
+        public long Count => Interlocked.Read(ref _count);
+
+        public void Dispose() => _listener.Dispose();
+    }
+
+    private static string FailingBpmnXml(string throwOnFailureAttribute) => $$"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                     xmlns:activiti="http://activiti.org/bpmn"
+                     targetNamespace="http://netbpm/test">
+          <process id="failing_listener_process" isExecutable="true">
+            <extensionElements>
+              <activiti:eventListener events="PROCESS_STARTED" delegateExpression="${boom.Listener}" {{throwOnFailureAttribute}} />
+            </extensionElements>
+            <startEvent id="start" />
+            <endEvent id="end" />
+            <sequenceFlow id="f1" sourceRef="start" targetRef="end" />
+          </process>
+        </definitions>
+        """;
+
+    private static ServiceProvider BuildThrowingProvider(bool withLogging)
+    {
+        var services = new ServiceCollection();
+
+        if (withLogging)
+        {
+            // 有日志设施时走「写 warning + 继续」；没有时应当抛出（见 IEngineServices.Logger 的契约）
+            services.AddLogging();
+        }
+
+        services.AddNetBpm(options => options.UseInMemoryExecutionTree = true);
+        services.AddKeyedSingleton<object>(
+            "boom.Listener",
+            (_, _) => new ThrowingListener());
+
+        return services.BuildServiceProvider();
     }
 
     private static ServiceProvider BuildProvider(RecordingListener listener)

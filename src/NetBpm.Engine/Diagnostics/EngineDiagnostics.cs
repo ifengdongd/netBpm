@@ -72,6 +72,19 @@ public static class EngineDiagnostics
         unit: "{alert}",
         description: "外部任务告警次数（tag: code / tenant）");
 
+    /// <summary>
+    /// 流程级事件监听器「失败但被放过」的次数（tag: <c>event</c> / <c>kind</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 只统计 <c>throwOnFailure != true</c> 的那一类：它不会让命令失败，等于「事件没送达但流程照常走」。
+    /// 不打点的话就只剩一条 warning 日志 —— 日志被采样、被聚合丢弃之后，事件就真的悄悄没了。
+    /// 需要失败即阻断的监听器应在 BPMN 上声明 <c>activiti:throwOnFailure="true"</c>（这类不计入本指标）。
+    /// </remarks>
+    public static readonly Counter<long> ListenerFailures = Meter.CreateCounter<long>(
+        "netbpm.listener.failure",
+        unit: "{failure}",
+        description: "流程级事件监听器执行失败但被放过的次数（tag: event / kind）");
+
     /// <summary>事件订阅投递结果（按成功 / 失败）。</summary>
     public static readonly Counter<long> EventDeliveries = Meter.CreateCounter<long>(
         "netbpm.event.delivery",

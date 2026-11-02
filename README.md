@@ -84,7 +84,9 @@ NetBpm 不是 Activiti 的移植，也不是从零发明语义，而是**以 Act
 - **流程级事件监听器 `activiti:eventListener`**：`events` 逗号分隔（`PROCESS_STARTED` / `PROCESS_COMPLETED` /
   `ACTIVITY_STARTED` / `ACTIVITY_COMPLETED` / `TASK_CREATED` / `TASK_COMPLETED`），实现契约
   `IEngineEventListener.OnEventAsync(WorkflowEngineEvent)`。`throwOnFailure=true` 时监听器抛错使命令失败
-  （对应 Java 端 `isFailOnException()`），缺省只记警告并继续。
+  （对应 Java 端 `isFailOnException()`），缺省继续流程 —— 但失败**不再静默**：计入指标
+  `netbpm.listener.failure`（tag：`event` / `kind`）并记 warning，宿主没注入 `ILogger` 时直接抛出。
+  「事件没送达、流程照常走」是最难查的一类偏差：要么给监听器开 `throwOnFailure`，要么对这条指标配告警。
 - 监听器实现与服务任务委托走同一注册通道：类上标 `[ServiceTaskName("名字")]` + `AddServiceTaskDelegates` 扫描。
 - 部署期两道检查：`listener-configuration` 规则校验事件与实现必填（取值非法拒部署）；
   `ServiceTaskDelegateGuard` 预解析 class / delegateExpression（解析不到宿主起不来）。
