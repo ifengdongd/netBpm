@@ -205,11 +205,17 @@ jobs:
           NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=netbpm;Allow User Variables=true;"
         run: |
           set +e
-          output=$(dotnet run --project tests/NetBpm.IntegrationTests --no-build 2>&1)
+          output=$(dotnet run --project tests/NetBpm.IntegrationTests --no-build -- -noColor 2>&1)
           status=$?
           printf '%s\n' "$output"
           if [ "$status" -ne 0 ]; then
-            detail=$(printf '%s' "$output" | grep -E '\[FAIL\]|Failed!|失败' | head -n 12 | tr '\n' ' ' | cut -c1-1500)
-            echo "::error title=集成测试失败::exit=${status} ${detail}"
+            # 只认 xUnit 的 [FAIL] 行：引擎日志里「失败」出现得太多，
+            # 按关键词抓会把正常重试日志当成结论（上一轮就抓成满屏「对端超时」）。
+            detail=$(printf '%s' "$output" | grep -F '[FAIL]' | head -n 10 | tr '\n' ' ')
+            if [ -z "$detail" ]; then
+              # 兜底：xUnit 的失败清单与汇总（Total/Failed）在输出末尾
+              detail=$(printf '%s' "$output" | tail -n 20 | tr '\n' ' ')
+            fi
+            echo "::error title=集成测试失败::exit=${status} ${detail:0:1500}"
             exit "$status"
           fi
