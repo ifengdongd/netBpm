@@ -319,8 +319,9 @@ NetBpm__Jobs__Queue__Redis__Auth=<password>
    4 处裸 `BeginTransaction` 改走 `Acquire()` + `BeginUnitOfWork()`。
 2. ~~`RuntimeEndpoints` 拆 Service + 授权 Filter~~ ✅ 已交付（§十二）。
 3. ~~作业存储抽 `DapperJobStore<T>`~~ / ~~bytearray 三步序列抽公共方法~~ ✅ 已交付（§十一）。
-4. **表达式缓存治理** ✅ 已交付；**`ElResolver` 反射元数据缓存** ⛔ 仍开放
-   （`ElResolver.cs:392` 每次方法调用都 `type.GetMethods()` 并 LINQ 过滤，热路径上的稳定开销）。
+4. **表达式缓存治理** ✅ 已交付；**`ElResolver` 反射元数据缓存** ✅ 已交付（2026-11-02 复核）：
+   `ElResolver.cs` 的 `MemberCache` / `MethodCache` / `IndexerCache` 三个 `ConcurrentDictionary` 把
+   `GetMethods()` 与 `GetProperty()` 挡在缓存后面，热路径上不再每次重扫元数据。
 5. `IClock` ✅、内存宿主去单例 ⛔（保留单例 + 快照兜底）、作业抢占合一 ✅、发布与快照同事务 ✅。
 
 ---

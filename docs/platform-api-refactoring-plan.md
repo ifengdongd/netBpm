@@ -804,8 +804,11 @@ public IReadOnlyList<string> ConflictingKeys() => Values.Keys.Where(BaseModelVar
 
 > ✅ **已落地（v1.13）**：快照端（`nb_approval_snapshot` + `IApprovalSnapshot` +
 > `GET /workflow/v1/tasks/{id}/form` + 提交时冻住「定义 + 值」）见 §7.6.11 与附录 P。
-> 仍未做的两条：`GET /tasks/{id}` 的 schema **按定义版本**返回（现在取的是当前生效定义），
-> 与 `/processes/{key}/form/schema`（整流程的表单规范端点）。
+> ~~仍未做的两条~~：
+> `GET /processes/{key}/form/schema` ✅ 已于 v1.22 交付（`ProcessCatalog.GetFormSchemaAsync`）。
+> `GET /tasks/{id}` 的 schema 按定义版本 ✅ 已满足 —— `TaskCatalog.ResolveUserTaskAsync` 用
+> 任务上的 `ProcessDefinitionId` 反查模型（`_engine.GetBpmnModelAsync`），取到的就是**该待办所属定义版本**的
+> `userTask`，不是目录里当前生效的版本。
 
 ### 4.6 标准六：审批记录（Append-only Timeline）
 
@@ -1955,12 +1958,21 @@ public sealed record CallerIdentity(
 |---|---|---|
 | `src/NetBpm.Rest/Platform/InstanceCatalog.cs` | `IInstanceCatalog` + 实现：执行树 + 历史 + 待办 → `InstanceView` | 存在性双查（执行树 + 历史）；`Status` 运行态优先；结论三级回落（`DECLARED` → `LAST_DECISION` → `FALLBACK`，见附录 M） |
 | `src/NetBpm.Rest/Platform/InstanceCatalogServiceExtensions.cs` | `AddNetBpmInstanceCatalog`（Scoped） | 实例读模型与待办读模型并列注册 |
-| `src/NetBpm.Rest/Platform/TaskSubmitService.cs` | `ITaskSubmitService` + 实现：校验链 → 落变量 → 完成任务 → 组装结果 | `result=optionId` + 参数剥 `param.` 前缀镜像；`expectedRevision` 乐观锁 409 |
+| `src/NetBpm.Rest/Platform/TaskSubmitService.cs` | `ITaskSubmitService` + 实现：校验链 → 落变量 → 完成任务 → **（驳回时）改道到 `targetNodeId`** → 组装结果 | `result=optionId` + 参数剥 `param.` 前缀镜像；`expectedRevision` 乐观锁 409；驳回改道见下 |
 | `src/NetBpm.Rest/Platform/TaskSubmitServiceExtensions.cs` | `AddNetBpmTaskSubmit`（Scoped） | 依赖引擎 + 待办读模型 + 实例读模型 |
 | `src/NetBpm.Rest/Endpoints/InstanceEndpoints.cs` | `GET /workflow/v1/instances/{id}` | scope `workflow:instance:read`；未授权 / 不存在 404 `InstanceNotFound` |
 | `src/NetBpm.Rest/Endpoints/TaskEndpoints.cs` | 增 `POST /workflow/v1/tasks/{id}/submit` | scope `workflow:task:submit`；捕获 `SubmitDecisionException` 转 RFC 9457 |
 | `src/NetBpm.Rest/Platform/PlatformProblems.cs` | 增 `InstanceNotFound`（404） | 与 `ProcessNotFound` / `TaskNotFound` 同口径 |
 | `src/NetBpm.Rest/Hosting/NetBpmHost.cs` | 注册 `AddNetBpmInstanceCatalog` + `AddNetBpmTaskSubmit` + `MapInstanceEndpoints` | 与目录 / 待办并列，变更纪律一致 |
+
+> **补记（2026-11-02）：驳回改道闭环。** 之前 `targetNodeId` 只做 422 校验、不驱动流程，
+> 「驳回到指定节点」在服务端是个空承诺。现在 `SubmitAsync` 在完成任务之后调用
+> `IProcessEngine.MoveActivityToAsync`，并额外落一条 `INSTANCE_JUMPED` 时间线。
+> **顺序是先完成、后改道**：反过来会让任务被「跳转」删掉而不是「审批完成」，结论与任务历史都落不下来。
+> 代价是改道的落点是「完成后的下一个等待点」——审批环节后面直接挂结束事件时（提交即结束），
+> 没有等待点可供改道，此时结论照常生效、改道失败只进日志，不自欺欺人地报成功。
+> 用例：`TaskSubmitTests.Submit_ShouldMoveBackToTargetNode_WhenDecisionCarriesTargetNode`
+> 与 `Submit_ShouldKeepDecision_WhenJumpNotPossible`（各钉住成功与失败两条路）。
 
 测试：`tests/NetBpm.IntegrationTests/InstanceCatalogTests.cs`（2 项，内存宿主）、
 `TaskSubmitTests.cs`（8 项，内存宿主）、`InstanceConclusionTests.cs`（MySQL + 历史宿主；

@@ -5,14 +5,21 @@
 # 「unknown option」拒绝，表现为「运行了零个测试」（exit code 5）—— 去掉即可正常。
 # 两个入口执行的是同一个测试程序集。
 #
-# 差分对拍（NetBpm.DifferentialTests）需要 JDK + Activiti 预言机（tools/Oracle），
-# 先在 CI 外准备好预言机产物后再开启该 Job；此处暂不执行（见任务清单 B1.4 的容器化备注）。
+# 差分对拍（NetBpm.DifferentialTests）单独成 Job：
+#   1. 只在 nightly / 手动触发跑（204 个语料各执行两遍 + 一次全批比对，太慢，不适合 push 触发）；
+#   2. 真值（<stem>.oracle.json）已随语料入库，因此**不需要 JDK / Maven** ——
+#      那两个只在「重新生成真值」时才用到（见 tools/Oracle/README.md）。
+# 断言口径见 Job 内注释：先跑批 + 出报告，一致率门禁待数字稳定后再开。
 name: ci
 
 on:
   push:
     branches: ["*"]
   pull_request:
+  schedule:
+    # 每天 03:17 UTC（避开整点的 runner 排队高峰）
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 jobs:
   frontend:
@@ -221,3 +228,76 @@ jobs:
             echo "::error title=集成测试失败::exit=${status} ${detail:0:1500}"
             exit "$status"
           fi
+
+  differential:
+    # 差分对拍：拿 Java 预言机（真 Activiti）产出的三维度真值，比 NetBpm 的实现。
+    #
+    # 🔑 为什么现在不需要 JDK / Maven：真值 <stem>.oracle.json 已随语料一起入库
+    # （tests/corpus/**，204 份），跑批只做「我方执行 + 与真值比对」。
+    # 重新生成真值才需要 JDK 21 + 本地 install 的 Activiti 9.0.0（tools/Oracle/README.md），
+    # 那是维护者手动做的动作，不是每次流水线都该付的成本。
+    #
+    # ⚠️ 门禁目前是「跑批不失败 + 产出报告」，**没有**开一致率断言 —— 这是有意的：
+    # 2026-11-02 本地实测整体 99.46%（目标 99.5%）、28 条差异待结论（多是 ACT_HI_VARINST.TENANT_ID_
+    # 这类空串/null 表达差异）。此时开 Assert.True(report.WithinGate()) 只会让门禁天天红，
+    # 而红的原因既不是「引擎退步」也不是「真值陈旧」，是差异还没收口 —— 天天红的门禁等于没有门禁。
+    # 收口动作：把 28 条逐条判成「口径差异（回写代码）」或「有意偏离（进 known-issues.json）」，
+    # 数字稳定达线后再把断言打开。在此之前，报告以 artifact 上传，由人看。
+    #
+    # 只在 nightly / 手动触发跑：每个语料要执行两遍（确定性用），全批 204 个，太慢。
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: "netbpm"
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pnetbpm"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 24
+          --health-start-period 30s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build NetBpm.slnx --nologo
+
+      - name: Differential run (against Activiti oracle)
+        # 对拍库是独立的 netbpm_diff（TestDatabase 自动建库建表）：与集成测试的 netbpm 分开，
+        # 因为每个语料跑之前都会 purge 引擎表，共用会互相清库。
+        env:
+          NETBPM_DIFF_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm_diff;User ID=root;Password=netbpm;Allow User Variables=true;"
+        run: |
+          set +e
+          output=$(dotnet run --project tests/NetBpm.DifferentialTests --no-build -- -noColor -class NetBpm.DifferentialTests.DifferentialRunnerTests 2>&1)
+          status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            detail=$(printf '%s' "$output" | grep -A3 -F '[FAIL]' | grep -v '^--$' | head -n 20 | tr '\n' ' ')
+            if [ -z "$detail" ]; then
+              detail=$(printf '%s' "$output" | tail -n 25 | tr '\n' ' ')
+            fi
+            echo "::error title=差分对拍失败::exit=${status} ${detail:0:1500}"
+            exit "$status"
+          fi
+
+      - name: Upload differential report
+        # 报告是给人看的差异清单：一致率达标与否在 CI 里是 exit code，
+        # 但「差在哪一行、归到哪个语料」只有 report.md 说清楚。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-report
+          path: artifacts/differential/
+          if-no-files-found: warn

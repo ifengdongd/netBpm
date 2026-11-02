@@ -160,6 +160,94 @@ public sealed class TaskSubmitTests
     }
 
     [Fact]
+    public async Task Submit_ShouldMoveBackToTargetNode_WhenDecisionCarriesTargetNode()
+    {
+        using var host = BuildHost();
+        await DeclareApproveReturnTargetAsync(host);
+
+        using var client = host.CreateClient();
+        var secret = await RegisterAsync(
+            client, "oa-portal", [PlatformScopes.TaskRead, PlatformScopes.TaskSubmit, PlatformScopes.TaskSubmitOnBehalf, PlatformScopes.InstanceRead]);
+
+        var (instanceId, approveTaskId) = await StartAndAdvanceToApproveAsync(host, client, secret);
+
+        // 审批环节驳回：选项 3（驳回修改）指定回到 task_apply
+        using var response = await SendSubmitAsync(
+            client, approveTaskId, secret, subject: "manager",
+            new { optionId = "3", comment = "材料不全，退回修改", targetNodeId = "task_apply" });
+
+        var body = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // 结论已经落地（驳回也是一次审批决定，必须留痕）
+        var engine = host.Services.GetRequiredService<IProcessEngine>();
+        var variables = await engine.GetVariablesAsync(instanceId, Ct);
+
+        Assert.Equal("3", variables["result"]);
+        Assert.Equal("材料不全，退回修改", variables["comment"]);
+
+        // 流程真的回到了申请环节，而不是继续往归档走
+        var nextTasks = body.GetProperty("nextTasks").EnumerateArray().ToList();
+
+        Assert.Single(nextTasks);
+        Assert.Equal("task_apply", nextTasks[0].GetProperty("activityId").GetString());
+        Assert.Equal("lisi", nextTasks[0].GetProperty("assignee").GetString());
+        Assert.Equal("RUNNING", body.GetProperty("instance").GetProperty("status").GetString());
+
+        var events = body.GetProperty("events").EnumerateArray().Select(element => element.GetString()).ToArray();
+
+        Assert.Contains("task.completed", events);
+        Assert.Contains("instance.jumped", events);
+
+        // 跳转单独成条：历史页要能回答「这张单为什么又回到填写环节」
+        var delta = body.GetProperty("timelineDelta").EnumerateArray().ToList();
+
+        Assert.Contains(
+            delta,
+            entry => entry.GetProperty("kind").GetString() == "INSTANCE_JUMPED"
+                && entry.GetProperty("targetNodeId").GetString() == "task_apply");
+    }
+
+    [Fact]
+    public async Task Submit_ShouldKeepDecision_WhenJumpNotPossible()
+    {
+        using var host = BuildHost();
+        await DeployAsync(host);
+
+        using var client = host.CreateClient();
+        var secret = await RegisterAsync(
+            client, "oa-portal", [PlatformScopes.TaskRead, PlatformScopes.TaskSubmit, PlatformScopes.TaskSubmitOnBehalf, PlatformScopes.InstanceRead]);
+
+        var (instanceId, approveTaskId) = await StartAndAdvanceToApproveAsync(host, client, secret);
+
+        // 目标节点不在流程定义里 → 引擎侧改道失败。取舍是：审批结论已生效，提交照常成功，
+        // 流程停在流转后的位置（归档环节），改道失败只体现在日志与「没有 instance.jumped」上。
+        using var response = await SendSubmitAsync(
+            client, approveTaskId, secret, subject: "manager",
+            new { optionId = "3", comment = "退回修改", targetNodeId = "nowhere" });
+
+        var body = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var engine = host.Services.GetRequiredService<IProcessEngine>();
+        var variables = await engine.GetVariablesAsync(instanceId, Ct);
+
+        Assert.Equal("3", variables["result"]);
+
+        var nextTasks = body.GetProperty("nextTasks").EnumerateArray().ToList();
+
+        Assert.Single(nextTasks);
+        Assert.Equal("task_notify", nextTasks[0].GetProperty("activityId").GetString());
+
+        var events = body.GetProperty("events").EnumerateArray().Select(element => element.GetString()).ToArray();
+
+        Assert.Contains("task.completed", events);
+        Assert.DoesNotContain("instance.jumped", events);
+    }
+
+    [Fact]
     public async Task Submit_Should404_ForUnknownOrNotAssignee()
     {
         using var host = BuildHost();
@@ -221,7 +309,15 @@ public sealed class TaskSubmitTests
             builder.UseSetting("NetBpm:Security:Tenants:Default", DefaultTenant);
         });
 
-    /// <summary>部署两环节流程：申请（assignee=applicant）→ 审批（assignee=approver）。</summary>
+    /// <summary>
+    /// 部署三环节流程：申请（assignee=applicant）→ 审批（assignee=approver）→ 归档（assignee=archivist）。
+    /// </summary>
+    /// <remarks>
+    /// 为什么要有第三环节：驳回是「完成当前任务 → 改道到目标节点」，改道的落点是完成后的
+    /// <b>下一个等待点</b>。审批环节后面直接挂结束事件的话，提交一完成实例就结束了，
+    /// 没有等待点可供改道（跳转只能失败）。归档环节既是真实流程里常见的「驳回也要走到的地方」，
+    /// 也是这条用例需要的改道落点。
+    /// </remarks>
     private static async Task DeployAsync(WebApplicationFactory<Program> host)
     {
         var engine = host.Services.GetRequiredService<IProcessEngine>();
@@ -258,7 +354,20 @@ public sealed class TaskSubmitTests
                   <bpmn:incoming>flow2</bpmn:incoming>
                   <bpmn:outgoing>flow3</bpmn:outgoing>
                 </bpmn:userTask>
-                <bpmn:sequenceFlow id="flow3" sourceRef="task_approve" targetRef="end" />
+                <bpmn:sequenceFlow id="flow3" sourceRef="task_approve" targetRef="task_notify" />
+                <bpmn:userTask id="task_notify" name="归档" activiti:assignee="archivist">
+                  <bpmn:extensionElements>
+                    <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
+                      <activiti:value id="1" name="通过" />
+                      <activiti:value id="2" name="拒绝" />
+                      <activiti:value id="3" name="驳回修改" />
+                    </activiti:formProperty>
+                    <activiti:formProperty id="comment" name="审批说明" type="string" variable="comment" />
+                  </bpmn:extensionElements>
+                  <bpmn:incoming>flow3</bpmn:incoming>
+                  <bpmn:outgoing>flow4</bpmn:outgoing>
+                </bpmn:userTask>
+                <bpmn:sequenceFlow id="flow4" sourceRef="task_notify" targetRef="end" />
                 <bpmn:endEvent id="end" name="End" />
               </bpmn:process>
             </bpmn:definitions>
@@ -323,6 +432,54 @@ public sealed class TaskSubmitTests
         Assert.Equal("task_apply", task.TaskDefinitionKey);
 
         return task.Id;
+    }
+
+    /// <summary>把<b>审批环节</b>的选项 3（驳回修改）声明为「必须指定目标节点」，白名单只有 task_apply。</summary>
+    private static async Task DeclareApproveReturnTargetAsync(WebApplicationFactory<Program> host)
+    {
+        await DeployAsync(host);
+        var store = Assert.IsType<InMemoryApprovalDictionaryStore>(
+            host.Services.GetRequiredService<IApprovalDictionaryStore>());
+
+        var now = DateTimeOffset.UtcNow;
+
+        store.Upsert(new ApprovalDictionaryEntry(
+            DefaultTenant, ApprovalKey, NodeId: "task_approve", "3",
+            ApprovalSemantic.Return, ApprovalOutcomeClass.Negative,
+            "驳回修改", RequiresComment: false, RequiresTargetNode: true,
+            AllowedTargetNodes: ["task_apply"], Attributes: null, now, now));
+    }
+
+    /// <summary>发起并完成申请环节，返回实例 id 与停在审批环节的任务 id。</summary>
+    private static async Task<(string InstanceId, string TaskId)> StartAndAdvanceToApproveAsync(
+        WebApplicationFactory<Program> host,
+        HttpClient client,
+        string secret) =>
+        await AdvanceAsync(host, client, secret, "lisi", "task_approve");
+
+    private static async Task<(string InstanceId, string TaskId)> AdvanceAsync(
+        WebApplicationFactory<Program> host,
+        HttpClient client,
+        string secret,
+        string subject,
+        string expectedActivityId)
+    {
+        var firstTaskId = await StartAndGetTaskAsync(host);
+
+        using var response = await SendSubmitAsync(client, firstTaskId, secret, subject, new { optionId = "1", comment = "提交" });
+        var body = await ReadJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var instanceId = body.GetProperty("instance").GetProperty("instanceId").GetString()!;
+
+        var engine = host.Services.GetRequiredService<IProcessEngine>();
+        var tasks = await engine.FindTasksAsync(new Runtime.TaskQuery(ProcessInstanceId: instanceId), Ct);
+        var next = Assert.Single(tasks);
+
+        Assert.Equal(expectedActivityId, next.TaskDefinitionKey);
+
+        return (instanceId, next.Id);
     }
 
     private static async Task<string> RegisterAsync(

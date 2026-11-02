@@ -819,10 +819,10 @@ public sealed partial class ProcessCatalog : IProcessCatalog, IProcessCatalogAdm
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 来源只有 <c>formProperty</c>（<c>activiti:extensionElements</c> 下挂在各 userTask 上的表单字段）。
-    /// <c>netbpm:parameters</c> 平台扩展留待后续——它提供 <c>apiName</c>/<c>constraints</c>/
-    /// <c>writableBy</c>/<c>visibleTo</c> 等覆盖字段，本阶段先用 formProperty 的
-    /// <c>id</c>/<c>type</c>/<c>required</c>/<c>variable</c>/<c>value</c> 把基础契约立起来。
+    /// 两个来源，后者覆盖前者：<c>formProperty</c>（<c>activiti:extensionElements</c> 下挂在各
+    /// userTask 上的表单字段）派生出基础契约（<c>id</c>/<c>type</c>/<c>required</c>/<c>variable</c>/<c>value</c>），
+    /// 再由 <c>netbpm:parameters</c> 平台扩展按 <c>parameter</c> 逐条覆盖 <c>apiName</c>/<c>type</c>/
+    /// <c>required</c>/<c>displayName</c>/<c>description</c>/<c>constraints</c>/<c>writableBy</c>/<c>visibleTo</c>。
     /// </para>
     /// <para>
     /// 两个刻意排除：<c>approvalResult</c> 字段是审批选项，属于语义字典（三码）范畴，不是业务参数；

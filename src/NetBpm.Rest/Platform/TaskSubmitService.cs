@@ -13,7 +13,7 @@ namespace NetBpm.Rest.Platform;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 职责边界：校验「这个决定合不合法」→ 落流程变量 → 完成引擎任务 → 组装提交结果。
+/// 职责边界：校验「这个决定合不合法」→ 落流程变量 → 完成引擎任务 →（驳回时）改道到目标节点 → 组装提交结果。
 /// 校验只依赖 <see cref="ITaskCatalog.FindAsync"/> 返回的 <see cref="TaskView.Options"/>
 /// （服务端已用语义字典算好），因此「调用方看到的按钮」与「服务端认可的按钮」是同一份，
 /// 不会出现「前端能点、后端 422」的分裂。
@@ -153,11 +153,14 @@ public sealed class TaskSubmitService : ITaskSubmitService
                 $"待办 '{taskId}' 已被办结。");
         }
 
+        // 驳回：结论已生效，再把流程搬回目标节点（只在提交带了 targetNodeId 时发生）
+        var jumpedToTarget = await MoveToTargetNodeAsync(view.InstanceId, request, ct).ConfigureAwait(false);
+
         // 任务已办结：参数变更另起一版修订（写失败不阻断——审批结论已经落地，
         // 这里抛错只会让调用方重试一次早已生效的提交）
         await AppendParameterRevisionAsync(view, request, context, ct).ConfigureAwait(false);
 
-        return await BuildResultAsync(view, option, request, context, ct).ConfigureAwait(false);
+        return await BuildResultAsync(view, option, request, jumpedToTarget, context, ct).ConfigureAwait(false);
     }
 
     /// <summary>把这次提交携带的参数落成新一版修订（没有参数就什么都不写）。</summary>
@@ -199,6 +202,62 @@ public sealed class TaskSubmitService : ITaskSubmitService
                 view.InstanceId,
                 view.TaskId);
         }
+    }
+
+    /// <summary>
+    /// 驳回落地：完成审批之后把流程改道到 <c>targetNodeId</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 顺序是刻意的：<b>先完成任务，再改道</b>。先改道会让本次任务被「跳转」删掉而不是「审批完成」，
+    /// 结论变量与任务历史都落不下来，审批页面就查无对证了。
+    /// </para>
+    /// <para>
+    /// 代价要说清楚：改道的落点是「完成后的<b>下一个等待点</b>」，因此在搬到目标节点之前，
+    /// 流程会照常从当前节点推进一步（这中间的 serviceTask 会照常执行）。
+    /// 本引擎的跳转就是「定位当前等待点 → 改道目标节点」，没有「回到过去某个节点」的第二套语义。
+    /// </para>
+    /// <para>
+    /// 搬不动时不回滚也不抛：结论已经生效，抛错只会让调用方重试一次「任务已不存在」的提交。
+    /// 三种实情（实例在提交后已结束 / 停在多个并行分支 / 目标节点不在定义里）都写进日志，
+    /// 时间线里的 <c>targetNodeId</c> 仍然记着「这次决定想去哪」—— 审计能看出「意图与结果不一致」。
+    /// </para>
+    /// </remarks>
+    private async ValueTask<bool> MoveToTargetNodeAsync(
+        string instanceId,
+        SubmitTaskRequest request,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.TargetNodeId))
+        {
+            return false;
+        }
+
+        try
+        {
+            await _engine
+                .MoveActivityToAsync(instanceId, request.TargetNodeId, request.Comment, ct)
+                .ConfigureAwait(false);
+
+            return true;
+        }
+        catch (EngineObjectNotFoundException)
+        {
+            _logger.LogWarning(
+                "审批后跳转未完成（实例 {InstanceId} → 节点 {TargetNodeId}）：提交后流程已结束。",
+                instanceId,
+                request.TargetNodeId);
+        }
+        catch (EngineException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "审批后跳转未完成（实例 {InstanceId} → 节点 {TargetNodeId}）：审批结论已生效，流程停在流转后的位置。",
+                instanceId,
+                request.TargetNodeId);
+        }
+
+        return false;
     }
 
     /// <summary>在服务端已算好的选项集里找调用方回传的选项；没有就是 422。</summary>
@@ -278,8 +337,15 @@ public sealed class TaskSubmitService : ITaskSubmitService
     /// 读不到参数规范时按「无 schema 放行」：目录不可用不该让审批提交不了，
     /// 那时唯一能守的只有下面的保留名冲突检查。
     /// </para>
-    /// <para><c>targetNodeId</c> 本轮只校验不落变量——退回 / 跳转的执行与时间线记录属于后续块。</para>
-    /// <para><c>formValues</c> 本轮不落库——表单值快照（<c>nb_approval_snapshot</c>）属于表单快照块（§4.5）。</para>
+    /// <para>
+    /// <c>targetNodeId</c> 不进流程变量：它是<b>改道指令</b>而不是业务数据，由
+    /// <see cref="MoveToTargetNodeAsync"/> 在任务完成后执行引擎跳转（完成前改道会让任务被「跳转」
+    /// 删掉而不是「审批完成」，结论落不下来）。
+    /// </para>
+    /// <para>
+    /// <c>formValues</c> 不进流程变量：提交后由 <see cref="IApprovalSnapshot"/> 连同当时的 schema
+    /// 一起冻进 <c>nb_approval_snapshot</c>，时间线条目只带 <c>formSnapshotTaskId</c> 引用它。
+    /// </para>
     /// </remarks>
     private async ValueTask<Dictionary<string, object?>> BuildVariablesAsync(
         TaskView view,
@@ -415,6 +481,7 @@ public sealed class TaskSubmitService : ITaskSubmitService
         TaskView view,
         ApprovalOption option,
         SubmitTaskRequest request,
+        bool jumpedToTarget,
         RequestContext context,
         CancellationToken ct)
     {
@@ -453,13 +520,48 @@ public sealed class TaskSubmitService : ITaskSubmitService
             delta.Add(completed);
         }
 
+        // 驳回是审批流上最容易「查无对证」的一类动作：目标节点单独成条，
+        // 历史页才能回答「这张单为什么又回到了填写环节」。跳转失败时不写这条（流程没动过）。
+        if (jumpedToTarget)
+        {
+            var jumped = await _timeline.AppendAsync(
+                view.InstanceId,
+                new TimelineEntry(
+                    Sequence: 0,
+                    InstanceId: view.InstanceId,
+                    Kind: TimelineEntryKind.InstanceJumped,
+                    ActivityId: null,
+                    ActivityName: null,
+                    TaskId: null,
+                    ActorId: context.SubjectId,
+                    ActorCallerId: null,
+                    OptionId: request.OptionId,
+                    Semantic: option.Semantic,
+                    Comment: request.Comment,
+                    TargetNodeId: request.TargetNodeId,
+                    FormSnapshotTaskId: null,
+                    OccurredAt: DateTimeOffset.UtcNow),
+                context,
+                ct).ConfigureAwait(false);
+
+            if (jumped is not null)
+            {
+                delta.Add(jumped);
+            }
+        }
+
         var instance = await _instanceCatalog.FindAsync(view.InstanceId, context, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException(
                 $"流程实例 '{view.InstanceId}' 在提交后查不到（引擎历史也没有）。");
 
         var finished = instance.Status is InstanceStatus.Completed or InstanceStatus.Terminated;
 
-        var events = new List<string> { "task.completed" };
+        var events = new List<string>(2) { "task.completed" };
+
+        if (jumpedToTarget)
+        {
+            events.Add("instance.jumped");
+        }
 
         if (finished)
         {
