@@ -29,6 +29,18 @@
       发起时写入：businessId / businessDeptId / applyUser / applyTime / applyDeptId
       审批时写入：result / comment
       ⚠️ assignee 用 ${applyUser}（申请人）而不是某个 Demo 内部变量名 —— 变量名是流程契约的一部分。
+      ⚠️ applyUser 的正常来源是开始事件的 activiti:initiator="applyUser"（引擎在启动时写入 startUserId）。
+         平台的引擎面发起（POST /api/runtime/process-instances）不会替你补这个变量，
+         缺了它 assignee 求值就抛 ElException；业务宿主自己写同名的值也是合法来源。
+
+    审批节点的候选人（演示口径）：
+      两个审批节点都用 assignee="${applyUser}"，即「发起人自己可批」，一个账号就能演完闭环。
+      ⚠️ 不要写 candidateUsers="${initiator}"：candidateUsers 求值要求字符串/集合变量，
+      而 initiator 不是流程变量（它启动时已被写成 applyUser），运行时会 400
+      "Expression did not resolve to a string or collection of strings"。
+      ⚠️ 不要照抄成 candidateGroups="leaders" 去演示：控制台默认没接 IUserGroupManager，
+         组展开是 0 人 —— 任务照样建出来，但任何人的「我的待办」里都看不到（静默卡住）。
+         接真实组织时改成具体用户 id，或继续用组并在宿主注册 IUserGroupManager。
 
     ⚠️ 三条排他网关都设置了 default 流：本子集「排他网关每条出流都带条件且无默认流」会被
        校验规则 exclusive-gateway-has-selectable-flow 拒部署（条件全假时选不出流）。
@@ -47,7 +59,12 @@
         <activiti:executionListener event="take" delegateExpression="${WorkFlowProcessListener}" />
         <activiti:executionListener event="end" delegateExpression="${WorkFlowProcessListener}" />
     </bpmn:extensionElements>
-    <bpmn:startEvent id="start" name="发起请假">
+    <!--
+      activiti:initiator="applyUser"：发起时引擎把 startUserId 写进变量 applyUser。
+      没有它，平台的引擎面发起（POST /api/runtime/process-instances）不会替你补这个变量，
+      下面 assignee="${applyUser}" 求值会抛 ElException（表现为 422 engine.expression_error）。
+    -->
+    <bpmn:startEvent id="start" name="发起请假" activiti:initiator="applyUser">
       <bpmn:outgoing>flow_start_apply</bpmn:outgoing>
     </bpmn:startEvent>
     <bpmn:userTask id="task_apply" name="提交请假申请" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
@@ -58,7 +75,7 @@
       <bpmn:incoming>flow_start_apply</bpmn:incoming>
       <bpmn:outgoing>flow_apply_leader</bpmn:outgoing>
     </bpmn:userTask>
-    <bpmn:userTask id="task_leader_approve" name="组长审批" activiti:candidateGroups="leaders" activiti:formKey="leave-approve">
+    <bpmn:userTask id="task_leader_approve" name="组长审批" activiti:assignee="${applyUser}" activiti:formKey="leave-approve">
       <bpmn:extensionElements>
         <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
           <activiti:value id="1" name="通过" />
@@ -93,7 +110,7 @@
       <bpmn:outgoing>flow_days_within3</bpmn:outgoing>
       <bpmn:outgoing>flow_days_modify</bpmn:outgoing>
     </bpmn:exclusiveGateway>
-    <bpmn:userTask id="task_manager_approve" name="经理审批" activiti:candidateGroups="managers" activiti:formKey="leave-approve">
+    <bpmn:userTask id="task_manager_approve" name="经理审批" activiti:assignee="${applyUser}" activiti:formKey="leave-approve">
       <bpmn:extensionElements>
         <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
           <activiti:value id="1" name="通过" />

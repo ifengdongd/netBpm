@@ -118,7 +118,13 @@ public static class ErrorCodes
     /// </summary>
     public const string IdempotencyInFlight = "idempotency.in_flight";
 
-    /// <summary>EL 表达式求值失败。<c>500</c></summary>
+    /// <summary>
+    /// EL 表达式求值失败（典型：<c>assignee="${applyUser}"</c> 引用了不存在的变量）。<c>422</c>
+    /// <para>
+    /// 不走 500：异常消息带着表达式原文与未解析的标识符，是建模/调用方能直接修的线索；
+    /// 按「未预期异常」处理会把普通笔误伪装成服务端故障。
+    /// </para>
+    /// </summary>
     public const string EngineExpressionError = "engine.expression_error";
 
     /// <summary>

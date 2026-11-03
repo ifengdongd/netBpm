@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using NetBpm.El;
 using NetBpm.Engine;
+using NetBpm.Platform.Contracts;
 using NetBpm.Rest;
 using NetBpm.Rest.Security;
 
@@ -39,7 +41,32 @@ public sealed class GlobalExceptionHandlerTests
             StatusCodes.Status501NotImplemented
         },
         { new ForbiddenException("租户与令牌不一致"), StatusCodes.Status403Forbidden },
+        // BPMN 表达式求值失败是 422 而不是 500：消息可行动，且不是服务端故障
+        { new ElException("表达式里用到了未知属性：${applyUser}（无法解析标识符 'applyUser'。）"), StatusCodes.Status422UnprocessableEntity },
     };
+
+    /// <summary>
+    /// EL 求值失败必须把异常原文透出（点名表达式与标识符），并带稳定的错误码。
+    /// </summary>
+    /// <remarks>
+    /// 反例就是 2026-11-03 那次：<c>assignee="${applyUser}"</c> 但发起没给变量，
+    /// 控制台只显示「服务器内部错误请提供 traceId」——线索全丢，只能翻服务端日志。
+    /// </remarks>
+    [Fact]
+    public async Task ExpressionError_ShouldSurfaceActionableMessageAndCode()
+    {
+        const string message = "表达式里用到了未知属性：${applyUser}（无法解析标识符 'applyUser'。）";
+
+        var (status, body) = await HandleAsync(new ElException(message));
+
+        Assert.Equal(StatusCodes.Status422UnprocessableEntity, status);
+
+        using var json = JsonDocument.Parse(body);
+
+        Assert.Equal(message, json.RootElement.GetProperty("message").GetString());
+        Assert.Equal(ErrorCodes.EngineExpressionError, json.RootElement.GetProperty("code").GetString());
+        Assert.Contains("applyUser", body, StringComparison.Ordinal);
+    }
 
     [Fact]
     public async Task UnhandledException_ShouldNotLeakInternalMessage()

@@ -46,6 +46,8 @@ public sealed class ExternalTaskActivityBehavior(IEngineServices services) : Flo
         // worker 的回执变量才会写回流程实例 —— 两侧各写各的，不会互相覆盖
         var payload = await execution.GetVariablesAsync(ct).ConfigureAwait(false);
 
+        var businessKey = await ResolveBusinessKeyAsync(execution, ct).ConfigureAwait(false);
+
         var now = Services.Clock.UtcNow;
 
         await broker.CreateAsync(
@@ -62,7 +64,7 @@ public sealed class ExternalTaskActivityBehavior(IEngineServices services) : Flo
                 ActivityName = serviceTask.Name,
                 Topic = serviceTask.Topic,
                 TenantId = ResolveTenantId(execution),
-                BusinessKey = ResolveBusinessKey(execution),
+                BusinessKey = businessKey,
                 Payload = new Dictionary<string, object?>(payload, StringComparer.Ordinal),
                 Priority = 0,
                 Retries = ExternalTaskRetryPolicy.DefaultRetries,
@@ -89,6 +91,51 @@ public sealed class ExternalTaskActivityBehavior(IEngineServices services) : Flo
     private static string? ResolveTenantId(IDelegateExecution execution) =>
         execution is IExecutionEntity entity ? entity.TenantId : null;
 
-    private static string? ResolveBusinessKey(IDelegateExecution execution) =>
-        execution is IExecutionEntity entity ? entity.BusinessKey : null;
+    /// <summary>
+    /// 取业务键（<c>BUSINESS_KEY_</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 🔑 <b>只读当前执行是拿不到的</b>：业务键只写在<b>根执行</b>上，而流程走到服务任务时执行已经
+    /// 下钻了一层（子执行、<c>PARENT_ID_</c> 指向根），子执行那一行的 <c>BUSINESS_KEY_</c> 是空的。
+    /// 直接读会让 <c>nb_external_task.business_key</c> 变成一列永远填不上的死字段，
+    /// worker 也就没法把回执对回业务单据 —— 这是外部任务唯一可靠的业务关联键。
+    /// </remarks>
+    /// <param name="execution">当前执行。</param>
+    /// <param name="ct">取消标记。</param>
+    /// <returns>业务键；没设过则为 <see langword="null"/>。</returns>
+    private async ValueTask<string?> ResolveBusinessKeyAsync(
+        IDelegateExecution execution,
+        CancellationToken ct)
+    {
+        if (execution is not IExecutionEntity entity)
+        {
+            return null;
+        }
+
+        // 沿父链上溯（带深度上限：数据异常成环时不能把引擎卡死在这里）。
+        var current = entity;
+
+        for (var depth = 0; current is not null && depth < 64; depth++)
+        {
+            if (!string.IsNullOrWhiteSpace(current.BusinessKey))
+            {
+                return current.BusinessKey;
+            }
+
+            current = current.Parent;
+        }
+
+        // 跨命令从库里读回的子执行只带 PARENT_ID_，父链没被加载时上溯会空转；
+        // 这时按流程实例 id 直接把根执行取回来再确认一次。
+        var instanceId = execution.ProcessInstanceId;
+
+        if (string.IsNullOrWhiteSpace(instanceId) || string.Equals(instanceId, entity.Id, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var root = await Services.ExecutionManager.FindByIdAsync(instanceId, ct).ConfigureAwait(false);
+
+        return string.IsNullOrWhiteSpace(root?.BusinessKey) ? null : root.BusinessKey;
+    }
 }

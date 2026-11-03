@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>NetBpm.ServerTaskWorker</RootNamespace>
+    <AssemblyName>NetBpm.ServerTaskWorker</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- 演示工程：不生成 OpenAPI 文档，避免给「这是个对外服务」的错觉 -->
+    <OpenApiGenerateDocumentsOnBuild>false</OpenApiGenerateDocumentsOnBuild>
+    <!--
+      有了它才能用 dotnet user-secrets 存客户端密钥（比写进 appsettings 或每次 export 都省事）：
+        dotnet user-secrets set "Worker:ClientKey" "nbc.xxx.yyy" （在本项目目录下执行）
+    -->
+    <UserSecretsId>netbpm-sample-server-task-worker</UserSecretsId>
+  </PropertyGroup>
+
+  <!--
+    🔑 与 NetBpm.ExternalWorker 同一条铁律：这里刻意【不引用任何 NetBpm 工程】。
+
+    外部任务的意义是「实现代码在客户系统里」，worker 与引擎之间只有 HTTP + JSON。
+    一旦引用了引擎，演示就会骗人 —— 看起来解耦了，实际把两边的部署绑回同一个二进制。
+  -->
+</Project>

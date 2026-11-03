@@ -27,6 +27,8 @@
     <Project Path="samples/NetBpm.Demo/NetBpm.Demo.csproj" />
     <!-- S4：外部任务 worker —— 刻意不引用任何 NetBpm 工程，只靠 HTTP + JSON 与平台通信 -->
     <Project Path="samples/NetBpm.ExternalWorker/NetBpm.ExternalWorker.csproj" />
+    <!-- 3007 侧完整形态：业务 HTTP 接口 + 幂等落账 + worker，同样不引用引擎 -->
+    <Project Path="samples/NetBpm.ServerTaskWorker/NetBpm.ServerTaskWorker.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/NetBpm.DbMigrate/NetBpm.DbMigrate.csproj" />

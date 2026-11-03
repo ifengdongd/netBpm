@@ -20,6 +20,7 @@ import {
   Modal,
   Popconfirm,
   Space,
+  Switch,
   Table,
   Tag,
   Tooltip,
@@ -40,6 +41,7 @@ import type {
   Variables,
 } from '../api/types';
 import { formatTime } from '../utils';
+import { splitDeploymentsByVersion } from './deployments';
 
 export default function DeploymentsPage() {
   const { message, modal } = App.useApp();
@@ -78,7 +80,20 @@ export default function DeploymentsPage() {
     setKeyword(trimmed);
   };
 
-  const filteredDeployments = deployments;
+  /** 是否把「历史部署」也铺在列表里。默认关：同一流程只留最新那次部署。 */
+  const [showHistoryDeployments, setShowHistoryDeployments] = useState(false);
+
+  /**
+   * 当前部署 / 历史部署。默认只显示前者 —— 发布新版本后，旧部署不再占一行。
+   * 旧版本仍可在行内「查看历史版本」逐版查看，打开开关也能看到对应的部署实体
+   *（删除部署、资源清单都按部署走，不能被真的合并掉）。
+   */
+  const { activeDeployments, historyDeployments } = useMemo(
+    () => splitDeploymentsByVersion(deployments),
+    [deployments],
+  );
+
+  const visibleDeployments = showHistoryDeployments ? deployments : activeDeployments;
 
   // 三个弹窗的数据源：target 为 null 时 enabled=false 不发请求；由 query 统一缓存 / 错误处理
   const [xmlTarget, setXmlTarget] = useState<DeploymentDefinitionResponse | null>(null);
@@ -429,7 +444,23 @@ export default function DeploymentsPage() {
         />
         <Typography.Text type="secondary">
           {keyword ? `匹配 ${deployments.length} 次部署（共 ${totalDeployments} 次）` : `共 ${totalDeployments} 次部署`}
+          {historyDeployments.length > 0 && !showHistoryDeployments
+            ? ` · 已折叠 ${historyDeployments.length} 次历史部署`
+            : ''}
         </Typography.Text>
+        <Tooltip title="每次发布都会新建一次部署。打开后连被新版本取代的旧部署一起列出（旧版本也可以只在行内「查看历史版本」里看）。">
+          <Space size={6} style={{ cursor: 'pointer' }}>
+            <Switch
+              size="small"
+              checked={showHistoryDeployments}
+              onChange={setShowHistoryDeployments}
+              aria-label="显示历史部署"
+            />
+            <Typography.Text type="secondary">
+              显示历史部署{historyDeployments.length > 0 ? `（${historyDeployments.length}）` : ''}
+            </Typography.Text>
+          </Space>
+        </Tooltip>
         <div style={{ flex: 1 }} />
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void deploymentsQuery.refetch()}>
           刷新
@@ -440,7 +471,7 @@ export default function DeploymentsPage() {
         // fixed：列宽按配置走，宽屏下「部署」列不会把其它列挤到两端
         tableLayout="fixed"
         columns={columns}
-        dataSource={filteredDeployments}
+        dataSource={visibleDeployments}
         loading={loading}
         locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有部署记录" /> }}
         expandable={{

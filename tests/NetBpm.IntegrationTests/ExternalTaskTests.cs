@@ -250,6 +250,31 @@ public sealed class ExternalTaskTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    /// <summary>
+    /// 业务键必须跟着外部任务走 —— 它是 worker 把回执对回业务单据的<b>唯一</b>可靠关联键。
+    /// </summary>
+    /// <remarks>
+    /// 回归点：<c>BUSINESS_KEY_</c> 只写在<b>根执行</b>上，而服务任务是在<b>子执行</b>上执行的
+    /// （执行到达节点时已下钻一层）。早先直接读当前执行，于是
+    /// <c>nb_external_task.business_key</c> 恒为 <c>null</c>，worker 只能退化用实例 id 兜底。
+    /// </remarks>
+    [Fact]
+    public async Task Fetch_ShouldCarryBusinessKeyFromRootExecution()
+    {
+        using var host = BuildHost();
+        await DeployAsync(host);
+        using var client = host.CreateClient();
+
+        var secret = await RegisterAsync(client, "ext-business-key", [PlatformScopes.ExternalTask]);
+        const string BusinessKey = "LEAVE-2026-1103-001";
+
+        await StartAsync(host, BusinessKey);
+
+        var task = Assert.Single(await FetchAsync(client, secret, "worker-a", Topic));
+
+        Assert.Equal(BusinessKey, task.GetProperty("businessKey").GetString());
+    }
+
     // ─────────────────────────── 测试基础设施 ───────────────────────────
 
     private static WebApplicationFactory<Program> BuildHost() =>
@@ -297,12 +322,16 @@ public sealed class ExternalTaskTests
         await engine.DeployAsync(stream, ProcessKey + ".bpmn20.xml", tenantId: DefaultTenant, ct: Ct);
     }
 
-    private static async Task<string> StartAsync(WebApplicationFactory<Program> host)
+    private static async Task<string> StartAsync(WebApplicationFactory<Program> host) =>
+        await StartAsync(host, businessKey: null);
+
+    private static async Task<string> StartAsync(WebApplicationFactory<Program> host, string? businessKey)
     {
         var engine = host.Services.GetRequiredService<IProcessEngine>();
 
         return await engine.StartProcessInstanceByKeyAsync(
             ProcessKey,
+            businessKey: businessKey,
             startUserId: "lisi",
             variables: new Dictionary<string, object?>(StringComparer.Ordinal) { ["days"] = "3" },
             tenantId: DefaultTenant,

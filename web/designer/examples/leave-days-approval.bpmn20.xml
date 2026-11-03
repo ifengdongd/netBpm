@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:activiti="http://activiti.org/bpmn"
+                  id="Definitions_LeaveDays"
+                  targetNamespace="http://netbpm/bpmn">
+  <!--
+    请假流程（按天数分级审批）—— processKey = leave_days_approval
+
+    流转规则：
+      发起 → 提交请假申请(task_apply) → 天数网关(gw_days)
+        days <= 3        → 组长审批(leaders)
+        3 < days <= 7    → 经理审批(managers)
+        days > 7         → 总监审批(directors)
+        days 缺失/非法   → 申请人修改(task_apply_modify) → 回「提交请假申请」重新分流（默认流兜底）
+
+      每个审批节点后各挂一个结果网关（default 均为「驳回修改」）：
+        result == 1 → 审批通过回写(svc_approve_complete，外部任务 topic=approveComplete) → end_approved
+        result == 2 → 拒绝结束(end_refused)
+        其它/未选    → 申请人修改(task_apply_modify)
+
+    为什么 serviceTask 只写 activiti:topic 而不写 URL：
+      NetBpm 的外部任务是「拉模式」——引擎只登记一条待办，等外部 worker 领取后回执；
+      topic 是给 worker 订阅用的逻辑名，BPMN 里没有任何「回调地址」的位置。
+      详细说明见 docs/leave-external-task-setup.md。
+
+    变量契约（BPMN 条件里用到的名字就是流程变量名）：
+      applyUser  发起人（activiti:initiator 落值，assignee="${applyUser}" 用它）
+      days       请假天数（发起时 param.days 镜像成裸名，long）
+      reason     事由（param.reason）
+      result     审批结果（formProperty approvalResult → variable="result"，取值 1/2/3）
+      comment    审批说明（formProperty comment → variable="comment"）
+
+    三条排他网关都写了 default 流（本子集要求：要么有默认流，要么至少一条无条件出流），
+    默认流上不写条件（写了也不参与判定），且兜底方向是「退回」而不是「通过」。
+  -->
+  <bpmn:process id="leave_approval" name="请假流程（按天数分级审批）" isExecutable="true">
+    <bpmn:startEvent id="start" name="发起请假" activiti:initiator="applyUser">
+      <bpmn:outgoing>flow_start_apply</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:userTask id="task_apply" name="提交请假申请" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
+        <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_start_apply</bpmn:incoming>
+      <bpmn:incoming>flow_modify_apply</bpmn:incoming>
+      <bpmn:outgoing>flow_apply_days</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="gw_days" name="请假天数" default="flow_days_retry">
+      <bpmn:incoming>flow_apply_days</bpmn:incoming>
+      <bpmn:outgoing>flow_days_le3</bpmn:outgoing>
+      <bpmn:outgoing>flow_days_le7</bpmn:outgoing>
+      <bpmn:outgoing>flow_days_gt7</bpmn:outgoing>
+      <bpmn:outgoing>flow_days_retry</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- ── 1~3 天：组长审批 ───────────────────────────────────────── -->
+    <bpmn:userTask id="task_approve_leader" name="组长审批" activiti:candidateGroups="leaders" activiti:formKey="leave-approve">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
+          <activiti:value id="1" name="通过" />
+          <activiti:value id="2" name="拒绝" />
+          <activiti:value id="3" name="驳回修改" />
+        </activiti:formProperty>
+        <activiti:formProperty id="comment" name="审批说明" type="string" variable="comment" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_days_le3</bpmn:incoming>
+      <bpmn:outgoing>flow_leader_gw</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="gw_leader" name="组长审批结果" default="flow_leader_modify">
+      <bpmn:incoming>flow_leader_gw</bpmn:incoming>
+      <bpmn:outgoing>flow_leader_pass</bpmn:outgoing>
+      <bpmn:outgoing>flow_leader_refuse</bpmn:outgoing>
+      <bpmn:outgoing>flow_leader_modify</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- ── 4~7 天：经理审批 ───────────────────────────────────────── -->
+    <bpmn:userTask id="task_approve_manager" name="经理审批" activiti:candidateGroups="managers" activiti:formKey="leave-approve">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
+          <activiti:value id="1" name="通过" />
+          <activiti:value id="2" name="拒绝" />
+          <activiti:value id="3" name="驳回修改" />
+        </activiti:formProperty>
+        <activiti:formProperty id="comment" name="审批说明" type="string" variable="comment" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_days_le7</bpmn:incoming>
+      <bpmn:outgoing>flow_manager_gw</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="gw_manager" name="经理审批结果" default="flow_manager_modify">
+      <bpmn:incoming>flow_manager_gw</bpmn:incoming>
+      <bpmn:outgoing>flow_manager_pass</bpmn:outgoing>
+      <bpmn:outgoing>flow_manager_refuse</bpmn:outgoing>
+      <bpmn:outgoing>flow_manager_modify</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- ── 超过 7 天：总监审批 ────────────────────────────────────── -->
+    <bpmn:userTask id="task_approve_director" name="总监审批" activiti:candidateGroups="directors" activiti:formKey="leave-approve">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
+          <activiti:value id="1" name="通过" />
+          <activiti:value id="2" name="拒绝" />
+          <activiti:value id="3" name="驳回修改" />
+        </activiti:formProperty>
+        <activiti:formProperty id="comment" name="审批说明" type="string" variable="comment" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_days_gt7</bpmn:incoming>
+      <bpmn:outgoing>flow_director_gw</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="gw_director" name="总监审批结果" default="flow_director_modify">
+      <bpmn:incoming>flow_director_gw</bpmn:incoming>
+      <bpmn:outgoing>flow_director_pass</bpmn:outgoing>
+      <bpmn:outgoing>flow_director_refuse</bpmn:outgoing>
+      <bpmn:outgoing>flow_director_modify</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- ── 申请人修改：驳回后回到这里改天数/事由，再重新分流 ────────── -->
+    <bpmn:userTask id="task_apply_modify" name="申请人修改" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
+        <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_days_retry</bpmn:incoming>
+      <bpmn:incoming>flow_leader_modify</bpmn:incoming>
+      <bpmn:incoming>flow_manager_modify</bpmn:incoming>
+      <bpmn:incoming>flow_director_modify</bpmn:incoming>
+      <bpmn:outgoing>flow_modify_apply</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <!--
+      审批通过回写：外部任务。
+      ⚠️ 只写 topic，不要写 class / delegateExpression / expression（四者互斥，混写部署 400）；
+         也不要写 activiti:type="external"（不在支持范围内，只会多一条告警）。
+    -->
+    <bpmn:serviceTask id="svc_approve_complete" name="审批通过回写" activiti:topic="approveComplete">
+      <bpmn:incoming>flow_leader_pass</bpmn:incoming>
+      <bpmn:incoming>flow_manager_pass</bpmn:incoming>
+      <bpmn:incoming>flow_director_pass</bpmn:incoming>
+      <bpmn:outgoing>flow_approve_end</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="end_approved" name="审批通过结束">
+      <bpmn:incoming>flow_approve_end</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="end_refused" name="审批拒绝结束">
+      <bpmn:incoming>flow_leader_refuse</bpmn:incoming>
+      <bpmn:incoming>flow_manager_refuse</bpmn:incoming>
+      <bpmn:incoming>flow_director_refuse</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="flow_start_apply" sourceRef="start" targetRef="task_apply" />
+    <bpmn:sequenceFlow id="flow_apply_days" sourceRef="task_apply" targetRef="gw_days" />
+    <bpmn:sequenceFlow id="flow_modify_apply" sourceRef="task_apply_modify" targetRef="task_apply" name="修改后重提" />
+
+    <bpmn:sequenceFlow id="flow_days_le3" name="3 天及以内" sourceRef="gw_days" targetRef="task_approve_leader">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${days <= 3}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_days_le7" name="4~7 天" sourceRef="gw_days" targetRef="task_approve_manager">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${days > 3 && days <= 7}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_days_gt7" name="超过 7 天" sourceRef="gw_days" targetRef="task_approve_director">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${days > 7}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_days_retry" name="天数缺失或非法 → 补填" sourceRef="gw_days" targetRef="task_apply_modify" />
+
+    <bpmn:sequenceFlow id="flow_leader_gw" sourceRef="task_approve_leader" targetRef="gw_leader" />
+    <bpmn:sequenceFlow id="flow_leader_pass" name="通过" sourceRef="gw_leader" targetRef="svc_approve_complete">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 1}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_leader_refuse" name="拒绝" sourceRef="gw_leader" targetRef="end_refused">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 2}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_leader_modify" name="驳回修改" sourceRef="gw_leader" targetRef="task_apply_modify" />
+
+    <bpmn:sequenceFlow id="flow_manager_gw" sourceRef="task_approve_manager" targetRef="gw_manager" />
+    <bpmn:sequenceFlow id="flow_manager_pass" name="通过" sourceRef="gw_manager" targetRef="svc_approve_complete">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 1}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_manager_refuse" name="拒绝" sourceRef="gw_manager" targetRef="end_refused">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 2}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_manager_modify" name="驳回修改" sourceRef="gw_manager" targetRef="task_apply_modify" />
+
+    <bpmn:sequenceFlow id="flow_director_gw" sourceRef="task_approve_director" targetRef="gw_director" />
+    <bpmn:sequenceFlow id="flow_director_pass" name="通过" sourceRef="gw_director" targetRef="svc_approve_complete">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 1}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_director_refuse" name="拒绝" sourceRef="gw_director" targetRef="end_refused">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 2}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_director_modify" name="驳回修改" sourceRef="gw_director" targetRef="task_apply_modify" />
+
+    <bpmn:sequenceFlow id="flow_approve_end" sourceRef="svc_approve_complete" targetRef="end_approved" />
+  </bpmn:process>
+</bpmn:definitions>

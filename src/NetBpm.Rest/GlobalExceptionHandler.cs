@@ -2,6 +2,7 @@ using System.Data.Common;
 using Microsoft.AspNetCore.Diagnostics;
 using NetBpm.Bpmn.Converter;
 using NetBpm.Bpmn.Validation;
+using NetBpm.El;
 using NetBpm.Engine;
 using NetBpm.Persistence;
 using NetBpm.Persistence.Platform;
@@ -19,6 +20,7 @@ namespace NetBpm.Rest;
 ///   <item><description>403：已认证，但身份或租户与令牌不一致；</description></item>
 ///   <item><description>404：目标对象不存在（含跨租户访问，避免存在性泄露）；</description></item>
 ///   <item><description>409：状态冲突（已认领 / 仍有运行实例 / 挂起 / 乐观锁失败 / 唯一约束冲突）；</description></item>
+///   <item><description>422：语义上不成立但语法没错（BPMN 表达式求值失败，如引用了不存在的变量）；</description></item>
 ///   <item><description>501：明确未实现的能力；</description></item>
 ///   <item><description>503：数据库暂时不可用（可重试，不回传连接串与 SQL）；</description></item>
 ///   <item><description>500：未预期异常，<b>不回传异常原文</b>，只给 traceId。</description></item>
@@ -149,6 +151,16 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
                 ex.Message,
                 null,
                 EngineErrorCode.NotFound),
+
+            // BPMN 表达式求值失败（典型：assignee="${applyUser}" 但该变量没有值）。
+            // 异常消息本身就点名了表达式和未解析的标识符，是调用方/建模方能直接行动的线索；
+            // 若按 500 处理，「变量名写错」会显示成「服务器内部错误」，排查方向被彻底带偏
+            // （2026-11-03 控制台发起请假流程实测：一次建模笔误查了整条链路）。
+            ElException ex => (
+                StatusCodes.Status422UnprocessableEntity,
+                ex.Message,
+                null,
+                ErrorCodes.EngineExpressionError),
 
             OptimisticLockingException ex => (
                 StatusCodes.Status409Conflict,
