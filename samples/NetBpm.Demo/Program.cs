@@ -1,4 +1,6 @@
+using NetBpm.Demo.Approval;
 using NetBpm.Demo.Common;
+using NetBpm.Demo.Dept;
 using NetBpm.Demo.ExternalTasks;
 using NetBpm.Demo.Leave;
 using NetBpm.Demo.Order;
@@ -32,6 +34,12 @@ builder.Services.AddDemoStores(builder.Configuration);
 // 业务流程接入：新建业务流程只需实现 IBusinessProcess（+ 两个收口委托 + BPMN + workflow_type 行）
 builder.Services.AddSingleton<IBusinessProcess, OrderBusinessProcess>();
 builder.Services.AddSingleton<IBusinessProcess, LeaveBusinessProcess>();
+builder.Services.AddSingleton<IBusinessProcess, DeptApprovalBusinessProcess>();
+
+// 动态审批人解析器：节点「未静态指定审批人」时，按 applyDeptId（申请部门）+ 节点 id（职位）
+// 查外部系统定位审批人（见 Approval/DynamicApproverResolver.cs）。
+// 这里用 DemoExternalApproverDirectory 当「假外部系统」；真实场景换成 HTTP/SQL 查询。
+builder.Services.AddNetBpmApproverResolver(new DynamicApproverResolver(DemoExternalApproverDirectory.FindAsync));
 
 // 身份与组织架构：随 AddDemoStores 按方言切换 ——
 //   MySQL：MySqlOrgDirectory 读真表（sys_dept / sys_emp / sys_emp_group / sys_emp_group_member）；
@@ -73,7 +81,7 @@ app.MapGet("/health", () => Results.Ok(new
     status = "ok",
     engine = "NetBpm",
     demo = "merged-approval",
-    processes = new[] { ConstField.OrderProcessKey, ConstField.LeaveProcessKey },
+    processes = new[] { ConstField.OrderProcessKey, ConstField.LeaveProcessKey, ConstField.DeptProcessKey },
 }));
 
 // 公共端点：流程信息枚举、跨流程的待办中心 / 申请单列表 / 组织架构
@@ -83,6 +91,9 @@ app.MapTaskCenterEndpoints();
 // 两条流程各自的业务端点（/api/order/*、/api/leave/*）
 app.MapOrderEndpoints();
 app.MapLeaveEndpoints();
+
+// 部门审批流程的业务端点（/api/dept/*，演示「审批人按部门从外部系统动态定位」）
+app.MapDeptEndpoints();
 
 // 外部任务 Demo：GET /api/external-task/handlers（注册信息）、
 // POST /api/external-task/case/run（跑一遍「注册 + 调用」闭环用例并返回分步断言）

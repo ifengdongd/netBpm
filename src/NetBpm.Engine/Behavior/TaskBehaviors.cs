@@ -341,7 +341,7 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
 
     /// <summary>
     /// 审批链预处理：把节点解析出的办理人集合交给可选的
-    /// <see cref="IApproverResolver"/> 做最终整形。
+    /// <see cref="IApproverResolver"/> 做最终整形 / 动态补人。
     /// </summary>
     /// <returns>最终办理人（空集合 ⇒ 自动跳过）；未配置钩子时返回 <see langword="null"/>。</returns>
     /// <remarks>
@@ -364,11 +364,18 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
 
         var entity = execution.AsEntity();
 
+        // 动态审批人来源：把 businessKey + 流程变量快照一起交给解析器，
+        // 让它能「按业务归属（部门）+ 节点（职位）」查外部系统定审批人。
+        var businessKey = await FindBusinessKeyAsync(entity, ct).ConfigureAwait(false);
+        var variables = await entity.GetVariablesAsync(ct).ConfigureAwait(false);
+
         var context = new ApprovalChainContext(
             entity.ProcessDefinitionId ?? string.Empty,
             userTask.Id ?? string.Empty,
             startUserId,
-            entity.TenantId);
+            entity.TenantId,
+            businessKey,
+            new Dictionary<string, object?>(variables, StringComparer.Ordinal));
 
         return await resolver.PostProcessAsync(context, approvers, ct).ConfigureAwait(false);
     }
@@ -450,6 +457,30 @@ public sealed class UserTaskActivityBehavior : FlowNodeActivityBehavior
 
                 await taskManager
                     .AddCandidateUsersAsync(task, SplitCandidates(text), ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        // 动态审批人来源：节点没静态指定任何办理人（无 assignee / owner / 候选组 / 候选用户），
+        // 仍把空集合交给 IApproverResolver —— 它可按 businessKey + 部门变量 + 节点（职位）查外部系统定人。
+        // 返回非空则写入候选用户（进「我的待办」候选池）；空集保持原样（节点按无审批人处理）。
+        if (string.IsNullOrEmpty(task.Assignee)
+            && string.IsNullOrEmpty(task.Owner)
+            && userTask.CandidateGroups.Count == 0
+            && userTask.CandidateUsers.Count == 0)
+        {
+            var entity = execution.AsEntity();
+            var dynamicApprovers = await PlanApprovalChainAsync(
+                userTask,
+                execution,
+                startUserId: entity.StartUserId,
+                approvers: [],
+                ct: ct).ConfigureAwait(false);
+
+            if (dynamicApprovers is { Count: > 0 })
+            {
+                await taskManager
+                    .AddCandidateUsersAsync(task, dynamicApprovers, ct)
                     .ConfigureAwait(false);
             }
         }

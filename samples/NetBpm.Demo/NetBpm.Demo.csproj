@@ -30,6 +30,9 @@
     <Content Include="..\..\web\designer\examples\leave-process.bpmn20.xml"
              Link="processes\leave-process.bpmn20.xml"
              CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\web\designer\examples\dept-approval-process.bpmn20.xml"
+             Link="processes\dept-approval-process.bpmn20.xml"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!--

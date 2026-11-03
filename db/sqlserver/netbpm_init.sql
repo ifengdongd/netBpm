@@ -686,6 +686,10 @@ if not exists (select 1 from workflow_type where id = '3a7c2f14-8d52-4b6e-9a01-c
     insert into workflow_type (tenant_id, id, name, [describe], view_url, approve_url, sort_order, enabled, create_time)
     values (1, '3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7', 'leave_process', N'请假申请流程', '/bill.html?process=leave_process&businessId={businessId}', '/approve.html?process=leave_process&taskId={taskId}', 2, 1, getutcdate());
 go
+if not exists (select 1 from workflow_type where id = '9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31')
+    insert into workflow_type (tenant_id, id, name, [describe], view_url, approve_url, sort_order, enabled, create_time)
+    values (1, '9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31', 'dept_approval_process', N'部门审批流程', '/bill.html?process=dept_approval_process&businessId={businessId}', '/approve.html?process=dept_approval_process&taskId={taskId}', 3, 1, getutcdate());
+go
 
 if object_id(N'bpmn_model', N'U') is null
     create table bpmn_model (

@@ -715,6 +715,7 @@ internal static class SchemaCatalog
         [
             [1L, "02830358-46ef-40e5-b3b9-4d5c4eb23f9f", "order_process", "订单审批流程", "/bill.html?process=order_process&businessId={businessId}", "/approve.html?process=order_process&taskId={taskId}", 1L, 1L, Now],
             [1L, "3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7", "leave_process", "请假申请流程", "/bill.html?process=leave_process&businessId={businessId}", "/approve.html?process=leave_process&taskId={taskId}", 2L, 1L, Now],
+            [1L, "9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31", "dept_approval_process", "部门审批流程", "/bill.html?process=dept_approval_process&businessId={businessId}", "/approve.html?process=dept_approval_process&taskId={taskId}", 3L, 1L, Now],
         ],
         ["id"],
         // 流程类型是「配置型」种子：重复执行时把可变字段同步成脚本里的值（create_time 保留）

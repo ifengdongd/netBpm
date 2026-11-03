@@ -811,7 +811,8 @@ deallocate prepare stmt;
 
 insert into workflow_type (tenant_id, id, name, `describe`, view_url, approve_url, sort_order, enabled, create_time)
 values (1, '02830358-46ef-40e5-b3b9-4d5c4eb23f9f', 'order_process', '订单审批流程', '/bill.html?process=order_process&businessId={businessId}', '/approve.html?process=order_process&taskId={taskId}', 1, 1, utc_timestamp()),
-       (1, '3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7', 'leave_process', '请假申请流程', '/bill.html?process=leave_process&businessId={businessId}', '/approve.html?process=leave_process&taskId={taskId}', 2, 1, utc_timestamp()) on duplicate key update name = values(name), `describe` = values(`describe`), view_url = values(view_url), approve_url = values(approve_url), sort_order = values(sort_order), enabled = values(enabled), modify_time = values(modify_time);
+       (1, '3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7', 'leave_process', '请假申请流程', '/bill.html?process=leave_process&businessId={businessId}', '/approve.html?process=leave_process&taskId={taskId}', 2, 1, utc_timestamp()),
+       (1, '9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31', 'dept_approval_process', '部门审批流程', '/bill.html?process=dept_approval_process&businessId={businessId}', '/approve.html?process=dept_approval_process&taskId={taskId}', 3, 1, utc_timestamp()) on duplicate key update name = values(name), `describe` = values(`describe`), view_url = values(view_url), approve_url = values(approve_url), sort_order = values(sort_order), enabled = values(enabled), modify_time = values(modify_time);
 
 create table if not exists bpmn_model (
     id varchar(64) not null comment '模型 ID（设计器 modelId，GUID 字符串）',

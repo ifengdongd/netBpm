@@ -73,8 +73,16 @@ public static class ProcessInfoEnum
         ViewUrl: "/bill.html?process=leave_process&businessId={businessId}",
         ApproveUrl: "/approve.html?process=leave_process&taskId={taskId}");
 
+    /// <summary>内置默认：部门审批流程（审批人按部门从外部系统动态定位）。</summary>
+    public static readonly ProcessInfo Dept = new(
+        Id: "9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31",
+        Name: ConstField.DeptProcessKey,
+        Describe: "部门审批流程",
+        ViewUrl: "/bill.html?process=dept_approval_process&businessId={businessId}",
+        ApproveUrl: "/approve.html?process=dept_approval_process&taskId={taskId}");
+
     /// <summary>内置默认清单。</summary>
-    public static IReadOnlyList<ProcessInfo> Defaults { get; } = [Order, Leave];
+    public static IReadOnlyList<ProcessInfo> Defaults { get; } = [Order, Leave, Dept];
 
     /// <summary>
     /// 当前清单（⚠️ 声明必须在 Defaults 之后：静态字段按声明顺序初始化）。

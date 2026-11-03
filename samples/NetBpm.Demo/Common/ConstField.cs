@@ -21,6 +21,9 @@ public static class ConstField
     /// <summary>请假审批流程 key。</summary>
     public const string LeaveProcessKey = "leave_process";
 
+    /// <summary>部门审批流程 key（演示「审批人从外部系统按部门定位」）。</summary>
+    public const string DeptProcessKey = "dept_approval_process";
+
     // ───────────────── BPMN 资源（设计器导出，csproj 链接进输出目录） ─────────────────
 
     /// <summary>BPMN 资源在输出目录下的子目录。</summary>
@@ -32,6 +35,9 @@ public static class ConstField
     /// <summary>请假审批流程定义资源名。</summary>
     public const string LeaveResourceName = "leave-process.bpmn20.xml";
 
+    /// <summary>部门审批流程定义资源名。</summary>
+    public const string DeptResourceName = "dept-approval-process.bpmn20.xml";
+
     // ───────────────── 部署名（ACT_RE_DEPLOYMENT.NAME_） ─────────────────
 
     /// <summary>订单审批流程的部署名。</summary>
@@ -40,6 +46,9 @@ public static class ConstField
     /// <summary>请假审批流程的部署名。</summary>
     public const string LeaveDeploymentName = "请假审批 Demo";
 
+    /// <summary>部门审批流程的部署名。</summary>
+    public const string DeptDeploymentName = "部门审批 Demo";
+
     // ───────────────── HTTP 前缀（流程端点组） ─────────────────
 
     /// <summary>订单流程的 HTTP 端点前缀。</summary>
@@ -47,6 +56,9 @@ public static class ConstField
 
     /// <summary>请假流程的 HTTP 端点前缀。</summary>
     public const string LeaveApiPrefix = "/api/leave";
+
+    /// <summary>部门审批流程的 HTTP 端点前缀。</summary>
+    public const string DeptApiPrefix = "/api/dept";
 
     // ───────────────── 流程图图片（发布即生成，落 wwwroot 下） ─────────────────
 
