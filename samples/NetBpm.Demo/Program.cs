@@ -1,4 +1,5 @@
 using NetBpm.Demo.Common;
+using NetBpm.Demo.ExternalTasks;
 using NetBpm.Demo.Leave;
 using NetBpm.Demo.Order;
 using NetBpm.Demo.Storage;
@@ -48,6 +49,16 @@ builder.Services.AddSingleton<ListenerStats>();
 // 名字写在委托类上（[ServiceTaskName]），AddServiceTaskDelegates 扫一遍程序集登记成 keyed 服务。
 builder.Services.AddServiceTaskDelegates(typeof(Program).Assembly);
 
+// 外部任务（activiti:topic）—— 「注册」在这里，与委托注册互相独立：
+//   PriceAuditHandler        → demo.priceAudit        审计：写回 auditPassed / taxAmount
+//   PriceArchiveHandler      → demo.priceAuditArchive 归档：挂在「审计通过」分支上
+// 内置 worker 在进程内领取并回执（真实部署应换成 samples/NetBpm.ExternalWorker 那样的独立 HTTP worker）。
+builder.Services.AddSingleton<IExternalTaskHandler, PriceAuditHandler>();
+builder.Services.AddSingleton<IExternalTaskHandler, PriceArchiveHandler>();
+builder.Services.AddSingleton<DemoExternalTaskWorker>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<DemoExternalTaskWorker>());
+builder.Services.AddScoped<ExternalTaskCaseRunner>();
+
 builder.Services.AddProblemDetails();
 
 var app = builder.Build();
@@ -72,6 +83,10 @@ app.MapTaskCenterEndpoints();
 // 两条流程各自的业务端点（/api/order/*、/api/leave/*）
 app.MapOrderEndpoints();
 app.MapLeaveEndpoints();
+
+// 外部任务 Demo：GET /api/external-task/handlers（注册信息）、
+// POST /api/external-task/case/run（跑一遍「注册 + 调用」闭环用例并返回分步断言）
+app.MapExternalTaskCaseEndpoints();
 
 // 每个业务流程的统一业务入口：POST {ApiPrefix}/business/start
 // （PrepareStart 业务处理 → 发起流程 → OnStartedAsync 收尾）

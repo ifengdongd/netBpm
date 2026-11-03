@@ -4,7 +4,7 @@
 
 | 目录 | 说明 | 运行 |
 |---|---|---|
-| [`NetBpm.Demo`](NetBpm.Demo/README.md) | 合并审批 Demo（订单 + 请假）：流程设计、发起、审批、业务回写、待办中心、任务转移、流程跳转 | `dotnet run --project samples/NetBpm.Demo` → http://localhost:5188 |
+| [`NetBpm.Demo`](NetBpm.Demo/README.md) | 合并审批 Demo（订单 + 请假）：流程设计、发起、审批、业务回写、待办中心、任务转移、流程跳转；另带一个**外部任务闭环用例**（`POST /api/external-task/case/run`） | `dotnet run --project samples/NetBpm.Demo` → http://localhost:22613 |
 | `NetBpm.ExternalWorker` | 外部任务 worker：拉取 `activiti:topic` 节点、回执完成/失败、超时回收与死信重投 | `dotnet run --project samples/NetBpm.ExternalWorker` |
 
 ## 从哪开始
@@ -15,6 +15,10 @@
 这份指引覆盖：控制台建模入口、保存与发布两步的差别、三条发布途径、
 serviceTask 的四种写法（委托三种 + 外部任务 `activiti:topic`）与注册方式、
 部署期委托自检为什么"部署成功不等于能跑"、委托失败的语义与重试边界、排错手册。
+
+- **不想先装 worker，只想确认"宿主里注册了 topic 之后流程能不能被推完"** →
+  跑 Demo 自带的外部任务用例：`curl -X POST http://localhost:22613/api/external-task/case/run`
+  （注册的 handler + 进程内 worker + 10 步断言，见 [Demo README](NetBpm.Demo/README.md#外部任务用例注册--调用自证闭环)）
 
 - **要让引擎进程之外的系统（Go/Java/Python 都行）来执行某个 serviceTask 节点** →
   [配置外部任务 worker](external-task-worker-guide.md)
@@ -32,6 +36,9 @@ serviceTask 的四种写法（委托三种 + 外部任务 `activiti:topic`）与
   让外部进程领取任务，适合跨语言/跨团队的服务调用。
   注意**不要**写 `activiti:type="external"`：它不是本子集支持的属性，部署能过但会被忽略，
   只留一条 `unknown-activiti-attribute` 告警（见 [配置外部任务 worker](external-task-worker-guide.md)）。
+- `NetBpm.Demo` 里另外藏了一个**外部任务闭环用例**（`ExternalTasks/` + `processes/external-task-case.bpmn20.xml`）：
+  两个 handler 用 DI 注册、内置 worker 进程内领取回执，`POST /api/external-task/case/run` 一把跑完
+  并逐步断言。它演示的是「注册 + 调用」的最小闭环，跨进程/跨语言仍以 `NetBpm.ExternalWorker` 为准。
 
 选型建议：能在本进程内同步完成的业务回写用 serviceTask（委托）；
 需要走外部系统、需要独立扩缩容或跨语言时用外部任务（external task）。

@@ -32,4 +32,12 @@
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!--
+    外部任务闭环用例的 BPMN：不属于业务流程（不进 workflow_type、不注册 IBusinessProcess），
+    只给 POST /api/external-task/case/run 用，所以留在 Demo 自己的 processes/ 下。
+  -->
+  <ItemGroup>
+    <Content Include="processes\external-task-case.bpmn20.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  外部任务闭环用例（不是业务流程：不进 workflow_type、不注册 IBusinessProcess）。
+
+  用意是把"外部任务能跑通"拆成一串可断言的步骤：
+    ① 引擎在 svc_price_audit 登记一条 topic=demo.priceAudit 的任务，流程原地不动；
+    ② 已注册的 worker 领取 → 执行 handler → 回执 auditPassed / taxAmount；
+    ③ 回执的变量推动排他网关走「通过」分支，登记第二条 topic=demo.priceAuditArchive 的任务；
+    ④ 第二条回执后流程结束。
+
+  第 ③ 步是这条流程的关键：如果回执变量没写回，网关会走默认流到「审计驳回」，
+  用例就能通过"有没有第二条外部任务"直接判定变量写回是否生效，不必去读实例变量。
+-->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:activiti="http://activiti.org/bpmn"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  id="definitions_external_task_case"
+                  targetNamespace="http://netbpm.demo/external-task">
+  <bpmn:process id="external_task_case" name="外部任务闭环用例" isExecutable="true">
+
+    <bpmn:startEvent id="case_start" name="用例开始" />
+    <bpmn:sequenceFlow id="flow_start_audit" sourceRef="case_start" targetRef="svc_price_audit" />
+
+    <bpmn:serviceTask id="svc_price_audit" name="价格审计（外部任务）" activiti:topic="demo.priceAudit" />
+    <bpmn:sequenceFlow id="flow_audit_gateway" sourceRef="svc_price_audit" targetRef="gw_price" />
+
+    <bpmn:exclusiveGateway id="gw_price" name="审计通过？" default="flow_rejected" />
+    <bpmn:sequenceFlow id="flow_approved" sourceRef="gw_price" targetRef="svc_archive">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${auditPassed}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_rejected" sourceRef="gw_price" targetRef="case_rejected" />
+
+    <bpmn:serviceTask id="svc_archive" name="归档（外部任务）" activiti:topic="demo.priceAuditArchive" />
+    <bpmn:sequenceFlow id="flow_archive_end" sourceRef="svc_archive" targetRef="case_approved" />
+
+    <bpmn:endEvent id="case_approved" name="审计通过" />
+    <bpmn:endEvent id="case_rejected" name="审计驳回" />
+
+  </bpmn:process>
+</bpmn:definitions>

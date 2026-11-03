@@ -353,6 +353,11 @@ curl "http://localhost:5081/api/runtime/tasks?processInstanceId=<id>"   -H "Auth
 也可以不开 curl：控制台侧栏「外部任务」（`http://localhost:5081/external-tasks`）能直接看到
 这两个任务的状态、锁与剩余次数，并在死信时一键重投。
 
+> 想先验证「宿主里注册了 handler 之后流程能不能被推完」，可以不装独立 worker：
+> `samples/NetBpm.Demo` 自带一条闭环用例（handler 用 DI 注册 + 进程内 worker 领取回执），
+> `curl -X POST http://localhost:22613/api/external-task/case/run` 会返回 10 步断言结果，
+> `Passed: true` 即链路通。细节见 [NetBpm.Demo README](NetBpm.Demo/README.md)。
+
 Linux / macOS 可直接跑现成脚本
 `samples/NetBpm.ExternalWorker/run-demo.sh`（起宿主、部署、起 worker、发起、
 演示失败与死信重投，并在最后断言“失败实例没有推进”）。
@@ -417,3 +422,4 @@ Linux / macOS 可直接跑现成脚本
 | 客户端注册 | `src/NetBpm.Rest/Endpoints/AdminClientEndpoints.cs:76` |
 | 控制台页面 | `web/admin/src/pages/ExternalTasksPage.tsx`（列表 / 重投 / 解锁）、`web/admin/src/api/externalTasks.ts`（前端契约） |
 | 样例 worker | `samples/NetBpm.ExternalWorker/`（`Program.cs`、`ExternalWorkerOptions.cs`、`ExternalTaskPollingService.cs`、`ExternalTaskHandlers.cs`） |
+| 闭环用例（Demo） | `samples/NetBpm.Demo/ExternalTasks/`（handler 注册、进程内 worker、用例执行器与端点）、`processes/external-task-case.bpmn20.xml` |

@@ -10,7 +10,7 @@
 
 ```bash
 dotnet run --project samples/NetBpm.Demo
-# 打开 http://localhost:5188（首页即流程发起入口；OpenAPI 见 /openapi/v1.json）
+# 打开 http://localhost:22613（首页即流程发起入口；OpenAPI 见 /openapi/v1.json）
 ```
 
 **存储落真库（默认 MySQL 127.0.0.1，库 `netbpm_demo`；可切 SQL Server）**：
@@ -101,6 +101,45 @@ StartupInitializer.InitializeAsync(app)        启动序列：建库迁移 → �
 参照实现：`Order/OrderBusinessProcess.cs`（有业务单表 + 状态回写）与
 `Leave/LeaveBusinessProcess.cs`（无业务单表，参数落流程参数表）。
 
+### 外部任务用例（注册 + 调用，自证闭环）
+
+Demo 里还带了一条**外部任务**（`activiti:topic`）的可执行用例，用来回答「宿主里注册了 worker 之后，
+流程能不能被推完」——它不是业务流程，不进 `workflow_type`、也不注册 `IBusinessProcess`：
+
+- **BPMN**：`processes/external-task-case.bpmn20.xml`（`external_task_case`）
+  `start → 价格审计(外部任务) → 排他网关(按 auditPassed) → 归档(外部任务) → end`
+- **注册**（`ExternalTasks/`）：
+  - `PriceAuditHandler` → topic `demo.priceAudit`（写回 `auditPassed` / `taxAmount` / `auditedBy`）
+  - `PriceArchiveHandler` → topic `demo.priceAuditArchive`（写回 `archiveNo` / `archived`）
+  - 两者在 `Program.cs` 里 `AddSingleton<IExternalTaskHandler, …>`，由 `DemoExternalTaskWorker`
+    （`BackgroundService`，`workerId=demo-inproc-worker`，1 秒轮询）领取并回执。
+    ⚠️ 真实部署里 worker 是客户系统的独立进程，用 `samples/NetBpm.ExternalWorker` 那种 HTTP 形态；
+    Demo 放进同一宿主只为让闭环在一台机器上跑通。
+- **调用 / 验收**：
+
+  ```bash
+  # 看注册了什么、worker 是否在跑
+  curl http://localhost:22613/api/external-task/handlers
+
+  # 跑一遍闭环用例，返回分步断言（Passed=true 表示链路当前是通的）
+  curl -X POST http://localhost:22613/api/external-task/case/run
+  ```
+
+- **用例怎么断言**（10 步）：注册检查 → 部署 → 发起 → **任务已登记（PENDING + payload 快照）**
+  → **回执前流程原地等待** → 恢复 worker → **流程结束** → 审计任务 COMPLETED
+  → **归档任务出现（证明 `auditPassed` 写回推动了网关）** → 归档任务 COMPLETED → 清理任务行。
+
+  第 8 步是整条用例的巧处：如果回执变量没写回，网关会走默认流到「审计驳回」，
+  归档任务根本不会出现——用例不用读实例变量就能判定写回是否生效。
+
+- **两个实现要点**：
+  - 用例先把内置 worker `Pause()`，才能稳定观察到「登记后原地等待」的中间态，`finally` 里一定 `Resume()`；
+  - 结束时用 `IExternalTaskBroker.DeleteByProcessInstanceAsync` 清掉本次的 `COMPLETED` 行——
+    引擎目前不随实例结束回收外部任务，反复跑用例不清理会一直堆表。
+
+- ⚠️ **变量类型**：引擎子集只接受 `string / int / long / double / bool / DateTime`，用 `decimal`
+  发起会直接报「本子集只支持 …」。用例里金额故意用 `double`。
+
 ### 审批结束后的业务回写（拒绝/通过的数据处理）
 
 - **订单**：`OrderCompletionDelegate` 基类 —— 先按流程变量 `businessId` 找到订单行、
@@ -188,6 +227,9 @@ NetBpm.Demo/
 │                         BusinessKeys（业务单号发号器）、ProcessListeners（流程监听器）、
 │                         ErrorResponse（统一错误响应）
 ├── Delegates/            服务任务委托（审批结束的业务回写）：leave.* 收口 / order.* 状态回写
+├── ExternalTasks/        外部任务用例：handler 契约与两个示例 handler（topic → 实现）、
+│                         进程内 worker（领取→执行→回执，可暂停）、用例执行器与端点
+├── processes/            外部任务用例的 BPMN（业务流的 BPMN 仍链接自 web/designer/examples）
 ├── Order/                订单契约 / JSON 业务存储 / 端点
 ├── Leave/                请假契约 / 端点
 ├── Storage/              双方言业务存储（逻辑下沉基类，方言收敛 SQL 常量层）：
