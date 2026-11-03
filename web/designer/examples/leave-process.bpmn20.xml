@@ -28,13 +28,16 @@
     流程变量（BaseModel，全部为扁平变量，见 Demo 的 Workflow/BaseModel.cs）：
       发起时写入：businessId / businessDeptId / applyUser / applyTime / applyDeptId
       审批时写入：result / comment
-      ⚠️ assignee 用 ${applyUser}（申请人）而不是某个 Demo 内部变量名 —— 变量名是流程契约的一部分。
+      ⚠️ candidateUsers 用 ${applyUser}（申请人）而不是某个 Demo 内部变量名 —— 变量名是流程契约的一部分。
       ⚠️ applyUser 的正常来源是开始事件的 activiti:initiator="applyUser"（引擎在启动时写入 startUserId）。
          平台的引擎面发起（POST /api/runtime/process-instances）不会替你补这个变量，
-         缺了它 assignee 求值就抛 ElException；业务宿主自己写同名的值也是合法来源。
+         缺了它 candidateUsers 求值就抛 ElException；业务宿主自己写同名的值也是合法来源。
 
     审批节点的候选人（演示口径）：
-      两个审批节点都用 assignee="${applyUser}"，即「发起人自己可批」，一个账号就能演完闭环。
+      两个审批节点都用 candidateUsers="${applyUser}"，即「发起人自己是候选审批人」，一个账号就能演完闭环。
+      ⚠️ 为什么用 candidateUsers 而不是 assignee：控制台「我的待办」（scope=MINE）查的是
+        候选用户池（ACT_RU_IDENTITYLINK，SQL 条件 ASSIGNEE_ is null + 候选关系），
+        直接 assignee 派给某人的任务不在候选池里，MINE 视图看不到 —— 待办会静默消失。
       ⚠️ 不要写 candidateUsers="${initiator}"：candidateUsers 求值要求字符串/集合变量，
       而 initiator 不是流程变量（它启动时已被写成 applyUser），运行时会 400
       "Expression did not resolve to a string or collection of strings"。
@@ -62,12 +65,12 @@
     <!--
       activiti:initiator="applyUser"：发起时引擎把 startUserId 写进变量 applyUser。
       没有它，平台的引擎面发起（POST /api/runtime/process-instances）不会替你补这个变量，
-      下面 assignee="${applyUser}" 求值会抛 ElException（表现为 422 engine.expression_error）。
+      下面 candidateUsers="${applyUser}" 求值会抛 ElException（表现为 422 engine.expression_error）。
     -->
     <bpmn:startEvent id="start" name="发起请假" activiti:initiator="applyUser">
       <bpmn:outgoing>flow_start_apply</bpmn:outgoing>
     </bpmn:startEvent>
-    <bpmn:userTask id="task_apply" name="提交请假申请" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
+    <bpmn:userTask id="task_apply" name="提交请假申请" activiti:candidateUsers="${applyUser}" activiti:formKey="leave-apply">
       <bpmn:extensionElements>
         <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
         <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
@@ -75,7 +78,7 @@
       <bpmn:incoming>flow_start_apply</bpmn:incoming>
       <bpmn:outgoing>flow_apply_leader</bpmn:outgoing>
     </bpmn:userTask>
-    <bpmn:userTask id="task_leader_approve" name="组长审批" activiti:assignee="${applyUser}" activiti:formKey="leave-approve">
+    <bpmn:userTask id="task_leader_approve" name="组长审批" activiti:candidateUsers="${applyUser}" activiti:formKey="leave-approve">
       <bpmn:extensionElements>
         <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
           <activiti:value id="1" name="通过" />
@@ -94,7 +97,7 @@
       <bpmn:outgoing>flow_leader_refuse</bpmn:outgoing>
       <bpmn:outgoing>flow_leader_modify</bpmn:outgoing>
     </bpmn:exclusiveGateway>
-    <bpmn:userTask id="task_apply_modify" name="申请人修改" activiti:assignee="${applyUser}" activiti:formKey="leave-apply">
+    <bpmn:userTask id="task_apply_modify" name="申请人修改" activiti:candidateUsers="${applyUser}" activiti:formKey="leave-apply">
       <bpmn:extensionElements>
         <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
         <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
@@ -110,7 +113,7 @@
       <bpmn:outgoing>flow_days_within3</bpmn:outgoing>
       <bpmn:outgoing>flow_days_modify</bpmn:outgoing>
     </bpmn:exclusiveGateway>
-    <bpmn:userTask id="task_manager_approve" name="经理审批" activiti:assignee="${applyUser}" activiti:formKey="leave-approve">
+    <bpmn:userTask id="task_manager_approve" name="经理审批" activiti:candidateUsers="${applyUser}" activiti:formKey="leave-approve">
       <bpmn:extensionElements>
         <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
           <activiti:value id="1" name="通过" />

@@ -5,7 +5,7 @@
 
 ## 0. 一句话结论
 
-**引擎只在「任务创建那一刻」用流程变量求值 BPMN 里写的 `assignee` / `candidateUsers` / `candidateGroups`，它不会在流程推进过程中发起任何外部 HTTP 调用，BPMN 里也没有"审批人接口地址"这种配置项。**
+**引擎只在「任务创建那一刻」用流程变量求值 BPMN 里写的 `assignee` / `candidateUsers` / `candidateGroups`，它不会在流程推进过程中自动发起任何外部 HTTP 调用，BPMN 里也没有"审批人接口地址"这种配置项。**（唯一例外：你在宿主里注册了 `IApproverResolver` 动态审批人钩子，见 §3.3——那是引擎进程内的扩展点，仍不是纯 BPMN 配置。）
 
 所以"审批人来自外部系统"这件事，必然落在下面两个位置之一：
 
@@ -173,21 +173,53 @@ public sealed class ResolveApproverListener : ITaskListener
 }
 ```
 
-**`IApproverResolver`（引擎级钩子，只在 assignee 分支生效）**
+**`IApproverResolver`（引擎级钩子：既可「后置整形」，也可「动态补人」）**
+
+这是「**根据业务查部门、定位某职位的人作为审批人**」的正解。节点**不写任何静态审批人**时，引擎仍会调用它，并把 `businessKey` + 流程变量（如 `applyDeptId`）+ 节点 id（表达「职位」）一起交过来：
 
 ```csharp
-// 注册：必须在宿主里显式调用，默认不注册
-builder.Services.AddNetBpmApproverResolver(new MyApproverResolver());
-// 或有内置规则（发起人本人跳过 / 连续相同合并 / 空审批人转管理员）：
+public sealed class DeptManagerApproverResolver : IApproverResolver
+{
+    public async ValueTask<IReadOnlyList<string>> PostProcessAsync(
+        ApprovalChainContext context,
+        IReadOnlyList<string> approvers,
+        CancellationToken ct = default)
+    {
+        // 节点已静态配人 → 透传（这里只做动态补人，不重复去重逻辑）
+        if (approvers.Count > 0)
+        {
+            return approvers;
+        }
+
+        // 按「部门 + 职位」查外部系统：部门从流程变量取，职位由节点 id 表达
+        var deptId = context.GetStringVariable("applyDeptId") ?? context.BusinessKey;
+
+        return await _hr.FindApproverAsync(deptId, context.ActivityId, ct);
+    }
+}
+
+// 注册（必须在宿主显式调用，默认不注册）：
+builder.Services.AddNetBpmApproverResolver(new DeptManagerApproverResolver(_hr));
+// 或叠加内置规则（发起人本人跳过 / 连续相同合并 / 空审批人转管理员）：
 builder.Services.AddNetBpmApproverDeduplication(o => o.FallbackAdminUserId = "admin");
 ```
 
-两个钩子的真实边界（`TaskBehaviors.PlanApprovalChainAsync`）：
+配套的 BPMN：该 userTask **不写** `assignee` / `candidateUsers` / `candidateGroups`（审批人完全动态）：
 
-- 只在 `assignee` 分支被调用，**`candidateUsers` / `candidateGroups` 完全不经过它**。
-- 返回值只取 `plan[0]`，即**单值**；多审批人场景用不上。
-- 同步阻塞在命令事务内 —— 在里面发 HTTP，等于把外部系统的延迟和故障注入到 `ACT_RU_*` 的写事务里，而且 `RetryInterceptor` 还会重放。真要用，必须自带超时 + 降级（失败就退回某个兜底审批人），不能抛。
-- `NetBpm.Rest` / `NetBpm.Admin` 宿主当前**都没有**注册 `IApproverResolver`，所以控制台上"发起人自动跳过"这类规则是不生效的。
+```xml
+<-- 节点不配任何办理人，审批人靠 IApproverResolver 按部门+职位动态定位 -->
+<bpmn:userTask id="task_manager_approve" name="经理审批" />
+```
+
+引擎行为（`TaskBehaviors.HandleAssignmentsAsync`）与两个钩子的真实边界：
+
+- 节点**配了** `assignee`：解析器作为「后置整形」在 assignee 求值后介入，返回值只取 `plan[0]`（单值）。
+- 节点**没配**任何静态审批人：解析器作为「动态审批人来源」，入参 `approvers` 为空集合，
+  返回非空则**全部写入候选用户**（进「我的待办」候选池，支持会签多人）；返回空集 = 跳过节点（自动通过）。
+- `ApprovalChainContext` 携带 `BusinessKey` + `Variables`（流程变量快照），`GetStringVariable("applyDeptId")` 取部门。
+- 同步阻塞在命令事务内 —— 在里面发 HTTP，等于把外部系统的延迟和故障注入到 `ACT_RU_*` 的写事务里，
+  且 `RetryInterceptor` 还会重放。真要用，必须自带超时 + 降级（失败就退回兜底审批人或抛错），不能裸发。
+- 想「查不到人就卡住」而非「放行」：解析器里抛异常即可，别返回空集合。
 
 ### 3.4 D：候选组 + `IUserGroupManager`（要改宿主）
 
@@ -221,7 +253,7 @@ builder.Services.AddNetBpmUserGroupManager<OpmsUserGroupManager>();
 | --- | --- | --- | --- | --- | --- |
 | A 变量预置 | 无 | 发起 / 上一环节提交时 | ✅（逗号分隔） | 调用方自己负责 | **默认首选** |
 | B 外部任务取人 | 无（写 worker） | 走到该节点时 | ✅ | ✅ 重试 + 死信 | 审批人要按当时数据算 |
-| C 监听器 / 钩子 | 改宿主发版 | 任务创建时 | ⚠️ 钩子只支持单人 | 只能靠日志 | 宿主就在你们手里 |
+| C 监听器 / 钩子 | 改宿主发版 | 任务创建时 | ✅（动态补人支持多人） | 只能靠日志 | 宿主就在你们手里，审批人要按部门/职位实时定位 |
 | D 候选组适配器 | 改宿主发版 | 查询待办时展开 | ✅ | 空集静默 | 已有权限中台 / AD |
 
 ## 4. 外部系统怎么"获取"审批人（读接口）
