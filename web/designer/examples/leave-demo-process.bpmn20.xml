@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:activiti="http://activiti.org/bpmn"
+                  id="Definitions_LeaveDemo"
+                  targetNamespace="http://netbpm/bpmn">
+  <!--
+    请假审批演示：发起 → 审批 → 跳转 → 结束服务任务。
+
+    与 leave-process.bpmn20.xml 的两点差别，都是为了在「平台面 + 控制台」上直接跑通：
+      1. 没有独立的「提交请假申请」userTask：平台面的发起本身就是申请（参数在发起时提交），
+         而平台面的 submit 表示「审批决策」，没有 optionId 的任务它推不动（422）。
+         示例 leave-process 保留该节点，是因为 Java 端 Demo 的交互如此。
+      2. 处理人同时写 candidateUsers="admin" 与 candidateGroups：不依赖 ${applyUser} 变量，
+         也不依赖宿主是否维护了组织架构。生产流程仍应使用变量表达式与候选组。
+
+    「申请人修改」只作为跳转目标存在：演示 jump 把审批节点跳到它、再跳回审批
+    （对应「审批人不在 / 需要补充材料」的真实场景）。
+
+    两条结束分支各挂一个 serviceTask（delegateExpression = leave.ApproveComplete / leave.RefuseComplete），
+    对应「审批结束回写业务系统」。控制台宿主内置了只记日志的占位实现
+    （NetBpm.Admin.Workflow.BuiltInApprovalCompletionDelegate），业务宿主接自己的实现即可。
+
+    验收点（见 tests/NetBpm.IntegrationTests/LeaveJumpAndServiceTaskTests）：
+      发起后停在 task_lead_approve → jump 到 task_apply_modify → jump 回 → 提交通过
+      → 历史里出现 serviceTask 活动 → 实例以 APPROVE 结论结束。
+  -->
+  <bpmn:process id="leave_demo" name="请假流程（演示）" isExecutable="true">
+    <bpmn:startEvent id="start" name="发起请假">
+      <bpmn:outgoing>flow_start_lead</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:userTask id="task_lead_approve" name="组长审批" activiti:candidateGroups="leaders" activiti:candidateUsers="admin" activiti:formKey="leave-approve">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="approvalResult" name="审批结果" type="enum" required="true" variable="result">
+          <activiti:value id="1" name="通过" />
+          <activiti:value id="2" name="拒绝" />
+          <activiti:value id="3" name="驳回修改" />
+        </activiti:formProperty>
+        <activiti:formProperty id="comment" name="审批说明" type="string" variable="comment" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_start_lead</bpmn:incoming>
+      <bpmn:incoming>flow_modify_lead</bpmn:incoming>
+      <bpmn:outgoing>flow_lead_gw</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:exclusiveGateway id="gw_lead" name="审批结果" default="flow_lead_modify">
+      <bpmn:incoming>flow_lead_gw</bpmn:incoming>
+      <bpmn:outgoing>flow_lead_pass</bpmn:outgoing>
+      <bpmn:outgoing>flow_lead_refuse</bpmn:outgoing>
+      <bpmn:outgoing>flow_lead_modify</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:userTask id="task_apply_modify" name="申请人修改" activiti:candidateGroups="staff" activiti:candidateUsers="admin" activiti:formKey="leave-apply">
+      <bpmn:extensionElements>
+        <activiti:formProperty id="days" name="请假天数" type="long" required="true" variable="days" />
+        <activiti:formProperty id="reason" name="请假事由" type="string" variable="reason" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>flow_lead_modify</bpmn:incoming>
+      <bpmn:outgoing>flow_modify_lead</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <bpmn:serviceTask id="svc_approve_complete" name="审批通过回写" activiti:delegateExpression="leave.ApproveComplete">
+      <bpmn:incoming>flow_lead_pass</bpmn:incoming>
+      <bpmn:outgoing>flow_pass_end</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="svc_refuse_complete" name="审批拒绝回写" activiti:delegateExpression="leave.RefuseComplete">
+      <bpmn:incoming>flow_lead_refuse</bpmn:incoming>
+      <bpmn:outgoing>flow_refuse_end</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="end_pass" name="审批通过结束">
+      <bpmn:incoming>flow_pass_end</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="end_refuse" name="审批拒绝结束">
+      <bpmn:incoming>flow_refuse_end</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="flow_start_lead" sourceRef="start" targetRef="task_lead_approve" />
+    <bpmn:sequenceFlow id="flow_lead_gw" sourceRef="task_lead_approve" targetRef="gw_lead" />
+    <bpmn:sequenceFlow id="flow_lead_pass" name="通过" sourceRef="gw_lead" targetRef="svc_approve_complete">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 1}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_lead_refuse" name="拒绝" sourceRef="gw_lead" targetRef="svc_refuse_complete">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"><![CDATA[${result == 2}]]></bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="flow_lead_modify" name="驳回修改" sourceRef="gw_lead" targetRef="task_apply_modify" />
+    <bpmn:sequenceFlow id="flow_modify_lead" sourceRef="task_apply_modify" targetRef="task_lead_approve" />
+    <bpmn:sequenceFlow id="flow_pass_end" sourceRef="svc_approve_complete" targetRef="end_pass" />
+    <bpmn:sequenceFlow id="flow_refuse_end" sourceRef="svc_refuse_complete" targetRef="end_refuse" />
+  </bpmn:process>
+</bpmn:definitions>

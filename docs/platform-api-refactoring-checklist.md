@@ -10,6 +10,33 @@
 
 ---
 
+## v1.42 本轮落地（2026-11-03，请假演示流程 + 「跳转 / 结束服务任务」端到端门禁）
+
+**起因**：在控制台上手工跑一遍「发起请假 → 跳转 → 审批通过 → 执行 serviceTask」时，
+发现示例流程有两条与平台面不兼容的写法，且这套链路没有任何自动化守门。
+
+| # | 项 | 落点 | 验证 |
+|---|---|---|---|
+| 1 | **演示流程入 examples** | `web/designer/examples/leave-demo-process.bpmn20.xml`（key `leave_demo`）：`start → 组长审批 → 网关`，通过 / 拒绝各接一个 serviceTask（`leave.ApproveComplete` / `leave.RefuseComplete`），默认流进「申请人修改」并回审批 | 设计器 `POST /api/designer/validate` 0 错误 0 警告；部署 v1–v3 均通过委托自检 |
+| 2 | **端到端门禁** | `tests/NetBpm.IntegrationTests/LeaveJumpAndServiceTaskTests`：直接部署 examples 里的那份 XML（不复制副本）→ 平台面发起 → jump 两次 → 平台面提交通过 | 断言：每次跳转后待办 id 会重建、委托执行痕迹为 `svc_approve_complete`、结论 `APPROVE`、无残留待办 |
+
+**手工联调证据**（真库 + 历史，实例 15029）：历史活动依次为
+`start → task_lead_approve → task_apply_modify → task_lead_approve → gw_lead → svc_approve_complete → end_pass`，
+serviceTask 耗时 4ms；时间线 5 条（`INSTANCE_STARTED` + 2×`INSTANCE_JUMPED` + `TASK_COMPLETED` + `INSTANCE_COMPLETED`）；
+委托日志：`内置占位委托：activity=svc_approve_complete，instance=15029，结论=approved`。
+
+**两个实测摩擦点**（记录在示例文件的注释里，不是欠账但接入方会撞上）：
+
+1. **`${applyUser}` 平台面给不了**：`/workflow/v1/instances` 只接受 `param.*`，示例 `leave-process` 的
+   `assignee="${applyUser}"` 会让发起直接 500（`ElException: 未知属性`）。演示流程改用
+   `candidateUsers` / `candidateGroups`；真实业务仍应使用变量表达式（变量名是流程契约的一部分）。
+2. **无审批选项的任务推不动**：平台面 `submit` 必须有 `optionId`（提交 = 审批决策），
+   像「提交请假申请」这种 `options=[]` 的填表节点提交会 422。要保留这类环节，
+   要么走引擎面 `complete`，要么在平台面补一个「只填参数、不做决策」的入口 —— 目前选择的是
+   「发起即申请」，不保留该节点。
+
+---
+
 ## v1.41 本轮落地（2026-11-03，代码 review 收口：3 个静默缺口 + 3 项门禁覆盖）
 
 **起因**：v1.30 的复盘是「按清单核对」，本轮是**按代码核对**。结论是 M 项与端点确实都收口了，
@@ -591,6 +618,7 @@ v1.14 / v1.15 两轮都跑在没有 MySQL 的机器上，v1.16 的
 | 改造项（M1–M16） | 16 | 16 | 0 |
 | 守门测试用例（§6 表内 26 项） | 26 | **26** | **0** ✅（`DualModeTests` 2 / `LoadTests` 2 于 v1.28 补齐） |
 | 补充门禁（v1.41：静默降级与面边界） | 14 | **14** | **0** ✅（`ParameterSchemaFailureTests` 3 / `AdminAuditFailureTests` 1 / `AdminSurfaceGuardTests` 3 / `AdminContractSnapshotTests` 2 / `SurfaceBoundaryTests` 5） |
+| 补充门禁（v1.42：跳转 + 结束服务任务） | 1 | **1** | **0** ✅（`LeaveJumpAndServiceTaskTests`：示例流程直接部署后跑完全链路） |
 | 业务面端点（`/workflow/v1`） | 23（另有 1 条已划掉） | 23 | 0 |
 | 管理面端点（`/admin/v1`） | 31 个操作 / 22 条路径（v1.31 把订阅写路径迁入后重算） | 31 | 0 |
 | 平台表（`nb_*`） | 14（12 已建 + 2 刻意不建） | 12 | 0（2 项是**决定不建**，不是欠账） |
