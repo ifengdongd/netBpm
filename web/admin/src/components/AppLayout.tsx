@@ -9,6 +9,7 @@ import {
   KeyOutlined,
   LogoutOutlined,
   NotificationOutlined,
+  PullRequestOutlined,
   ReadOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
@@ -45,6 +46,8 @@ const menuItems = [
   { key: '/subscriptions', icon: <NotificationOutlined />, label: '事件订阅' },
   { key: '/quotas', icon: <ThunderboltOutlined />, label: '配额总览' },
   { key: '/monitoring', icon: <EyeOutlined />, label: '实例监控' },
+  // 外部任务：activiti:topic 节点的拉模式队列，看状态 / 重投死信 / 释放锁
+  { key: '/external-tasks', icon: <PullRequestOutlined />, label: '外部任务' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
   { key: '/metrics', icon: <DashboardOutlined />, label: '管理指标' },
   // 运维诊断：作业队列走 Redis 时这里能直接看到键与连接状态（内存队列则如实提示「未使用 Redis」）

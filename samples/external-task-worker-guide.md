@@ -68,6 +68,20 @@
    （`ServiceTaskDelegateGuard` 对 `ExternalTopic` 明确跳过）。所以
    **部署成功 ≠ 能跑通**，只有 worker 真接到任务才验证得了。
 
+### 2.1 在控制台里怎么填
+
+两条路都行：
+
+1. **设计器里填**：`流程模型` → 编辑（内嵌设计器）→ 选中 serviceTask →右侧「服务任务」组里
+   填 **主题（外部任务）**，对应 `activiti:topic`。同组的「类名 / 表达式 / 代理的表达式」
+   保持为空——四个字段互斥，同时填会当场标红，后端也会拒绝部署。
+2. **导入现成 XML**：`流程模型` → 导入模型，选 `.bpmn20.xml`。设计器能打开、能保存，
+   `activiti:topic` 在 XML 往返中不会丢。
+
+填完用模型行内的「部署」发布（走服务端校验，`topic` 是合法实现方式）。
+⚠️ 不要用独立设计器（`/designer/`）列表里的「部署」——那条会跑前端即时校验，
+历史上不认 `topic` 会误拦（现已在 `validation.ts` 中对齐）。
+
 ---
 
 ## 3. 平台侧
@@ -282,6 +296,10 @@ POST /api/runtime/external-tasks/{taskId}/failure
 
 注意 unlock 与 complete 的失败码不同：**unlock 用 400，complete 用 409**（均实测）。
 
+查询 / 重投 / 解锁现在也有控制台入口：侧栏「外部任务」（`/external-tasks`）可按 topic、状态、
+流程实例筛选，死信一键重投、锁定任务释放锁、查看领取时的变量快照。
+页面**故意不提供领取与回执** —— 那会抢走 worker 的锁，控制台只做观察与干预。
+
 ### 5.5 状态机
 
 ```
@@ -332,6 +350,9 @@ curl "http://localhost:5081/api/runtime/external-tasks?processInstanceId=<id>" -
 curl "http://localhost:5081/api/runtime/tasks?processInstanceId=<id>"   -H "Authorization: Bearer $TOKEN"
 ```
 
+也可以不开 curl：控制台侧栏「外部任务」（`http://localhost:5081/external-tasks`）能直接看到
+这两个任务的状态、锁与剩余次数，并在死信时一键重投。
+
 Linux / macOS 可直接跑现成脚本
 `samples/NetBpm.ExternalWorker/run-demo.sh`（起宿主、部署、起 worker、发起、
 演示失败与死信重投，并在最后断言“失败实例没有推进”）。
@@ -366,7 +387,10 @@ Linux / macOS 可直接跑现成脚本
   `COMPLETED` 残留行（执行管理器只清定时作业与异步作业；
   `IExternalTaskBroker.DeleteByProcessInstanceAsync` 目前没有调用方）。
   这些残留行会占用同名 topic 的领取队列，建议按 `process_instance_id` 定期巡检/清理。
-- **控制台没有外部任务页面。** 运维只能走 `GET /api/runtime/external-tasks` 或直接查表。
+- **控制台只做观察与干预，不做领取。** 侧栏「外部任务」（`/external-tasks`）支持筛选、
+  死信重投、释放锁、看变量快照（见 §5.4）；页面不提供 fetch / complete —— 那是 worker 的活，
+  控制台代劳只会抢走锁。另外该页的数据源是 `GET /api/runtime/external-tasks`，
+  一次最多 200 条，**没有分页**，任务多了要用筛选收窄。
 - **样例 worker 的 `waitSeconds` 必须 > 0。** 若服务端立即返回空（`waitSeconds=0`），
   当前循环没有本地 delay 兜底，会退化成忙循环。
 
@@ -391,4 +415,5 @@ Linux / macOS 可直接跑现成脚本
 | 持久化 | `src/NetBpm.Persistence/Jobs/DapperExternalTaskBroker.cs` |
 | 表结构 | `tools/NetBpm.DbInit/Schema/SchemaCatalog.cs:1183`（`nb_external_task`） |
 | 客户端注册 | `src/NetBpm.Rest/Endpoints/AdminClientEndpoints.cs:76` |
+| 控制台页面 | `web/admin/src/pages/ExternalTasksPage.tsx`（列表 / 重投 / 解锁）、`web/admin/src/api/externalTasks.ts`（前端契约） |
 | 样例 worker | `samples/NetBpm.ExternalWorker/`（`Program.cs`、`ExternalWorkerOptions.cs`、`ExternalTaskPollingService.cs`、`ExternalTaskHandlers.cs`） |

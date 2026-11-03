@@ -18,6 +18,7 @@ const RedisPage = lazy(() => import('./pages/RedisPage'));
 const AccessPage = lazy(() => import('./pages/AccessPage'));
 const SemanticsPage = lazy(() => import('./pages/SemanticsPage'));
 const EventSubscriptionsPage = lazy(() => import('./pages/EventSubscriptionsPage'));
+const ExternalTasksPage = lazy(() => import('./pages/ExternalTasksPage'));
 const QuotasPage = lazy(() => import('./pages/QuotasPage'));
 
 /** 路由切换时的加载占位。 */
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/process-types" element={<ProcessTypesPage />} />
           <Route path="/deployments" element={<DeploymentsPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
+          <Route path="/external-tasks" element={<ExternalTasksPage />} />
           <Route path="/access" element={<AccessPage />} />
           <Route path="/semantics" element={<SemanticsPage />} />
           <Route path="/subscriptions" element={<EventSubscriptionsPage />} />

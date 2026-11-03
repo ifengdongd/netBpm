@@ -10,7 +10,7 @@
  * 可写性以「后端能读、也能写回」为准（见 §15.4 / §15.5 与 BpmnXmlConverter 的读写对称性）：
  *  - 安全读写：id/name；userTask 的 assignee/owner/candidateUsers/candidateGroups/formKey/
  *    dueDate/priority/category/skipExpression；serviceTask 的 class/delegateExpression/expression/
- *    resultVariableName；scriptTask 的 scriptFormat/script/resultVariable/autoStoreVariables；
+ *    topic/resultVariableName；scriptTask 的 scriptFormat/script/resultVariable/autoStoreVariables；
  *    顺序流的条件表达式；活动与排他网关的 default（默认流）；
  *  - **不暴露**：documentation、potentialStarter、process 级 candidateStarter*、自定义
  *    extensionElements、事件定义 —— 模型或转换器不支持，暴露就是"填了也白填"（风险 R5）。
@@ -358,9 +358,9 @@ function serviceTaskGroup(
   context: EntryContext,
   t: (text: string) => string,
 ): unknown {
-  // ⚠️ 对齐 Activiti 原版设计器：三个实现字段直接平铺（类名 / 表达式 / 代理的表达式），
-  // 不再做"实现方式"下拉。三项并存时后端按 class > delegateExpression > expression
-  // 静默取第一个，即时校验会给警告（见 validation.ts 规则 8）。
+  // ⚠️ 对齐 Activiti 原版设计器：实现字段直接平铺（类名 / 表达式 / 代理的表达式 / 主题），
+  // 不做"实现方式"下拉。四者只能填一个：同时填写会被后端 required-attributes 规则拒绝部署，
+  // 即时校验同步报错（见 validation.ts 规则 8）。
   return group('netbpm-service-task', t('服务任务'), [
     textEntry(
       {
@@ -390,6 +390,20 @@ function serviceTaskGroup(
         element,
         label: t('代理的表达式'),
         placeholder: '${someDelegateBean}',
+      },
+      context,
+    ),
+    textEntry(
+      {
+        id: 'impl-topic',
+        property: 'topic',
+        element,
+        label: t('主题（外部任务）'),
+        placeholder: 'invoice',
+        // 与上面三项互斥：填了就说明实现不在本进程，引擎只登记任务等 worker 回执
+        description: t(
+          'activiti:topic。填了它，本节点由外部 worker 领取并回执，引擎进程内不解析任何委托；与类名 / 表达式 / 代理的表达式只能填一个。',
+        ),
       },
       context,
     ),

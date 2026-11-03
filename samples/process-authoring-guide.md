@@ -189,7 +189,7 @@ await workflowBootstrapper.DeployProcessesAsync();
 
 ## 5. 在 BPMN 里写 serviceTask
 
-### 5.1 三种写法
+### 5.1 四种写法
 
 ```xml
 <!-- ① 推荐：按容器里的名字解析（与注册代码一一对应） -->
@@ -204,16 +204,21 @@ await workflowBootstrapper.DeployProcessesAsync();
 <bpmn:serviceTask id="svc_calc" name="算分"
                   activiti:expression="${scoringService.Weight(amount)}"
                   activiti:resultVariableName="score" />
+
+<!-- ④ 外部任务：不在引擎进程内执行，等外部 worker 领取并回执 -->
+<bpmn:serviceTask id="svc_invoice" name="开票" activiti:topic="invoice" />
 ```
 
-优先级（同时写了多个属性时以靠前者为准）：`class` > `delegateExpression` > `expression` > `topic`。
+**四种写法互斥**：同时写多个会被部署期 `required-attributes` 规则直接拒绝（400），
+不存在“按优先级取一个”的行为。设计器属性面板同样是四个平铺输入框
+（类名 / 表达式 / 代理的表达式 / 主题），校验会当场标红。
 
 只写 `activiti:topic="…"`（**不带** `activiti:type`）走的是**外部任务**，不是委托，见
 [配置外部任务 worker](external-task-worker-guide.md) 与 `NetBpm.ExternalWorker` 样例。
 再补 `activiti:type="external"` 是没有必要的：该属性不在支持范围，部署能过但只留一条
 `unknown-activiti-attribute` 告警，而只写 `type` 不写 `topic` 会被部署期直接拒绝。
 
-既没有 topic 也没有上述三种写法的 serviceTask，运行到该节点会报「未指定实现方式」。
+既没有 topic 也没有上述三种委托写法的 serviceTask，运行到该节点会报「未指定实现方式」。
 
 ### 5.2 字段注入
 

@@ -158,7 +158,7 @@ test('文本属性：写入时去掉首尾空白，空值清除属性', () => {
   assert.deepEqual(harness.updates.at(-1)?.properties, { assignee: undefined });
 });
 
-test('服务任务：类名/表达式/代理的表达式三个字段平铺（对齐 Activiti 原版）', () => {
+test('服务任务：类名/表达式/代理的表达式/主题四个字段平铺（对齐 Activiti 原版）', () => {
   const harness = createHarness();
   const element = {
     id: 'notify',
@@ -170,12 +170,39 @@ test('服务任务：类名/表达式/代理的表达式三个字段平铺（对
 
   assert.deepEqual(
     entries,
-    ['impl-class', 'impl-expression', 'impl-delegateExpression', 'resultVariableName', 'note-notify-默认流'],
+    [
+      'impl-class',
+      'impl-expression',
+      'impl-delegateExpression',
+      'impl-topic',
+      'resultVariableName',
+      'note-notify-默认流',
+    ],
   );
 
   // 类名条目读写 class 属性
   const classEntry = entryById(groupById(groupsOf(harness, element), 'netbpm-service-task'), 'impl-class');
   assert.equal(classEntry.getValue?.(element), 'NetBpm.Demo.Notify');
+});
+
+test('服务任务：主题条目读写 activiti:topic（外部任务）', () => {
+  const harness = createHarness();
+  const element = {
+    id: 'invoice',
+    type: 'bpmn:ServiceTask',
+    businessObject: { $type: 'bpmn:ServiceTask', id: 'invoice', topic: 'invoice' },
+  } as never;
+
+  const topic = entryById(groupById(groupsOf(harness, element), 'netbpm-service-task'), 'impl-topic');
+
+  assert.equal(topic.getValue?.(element), 'invoice');
+
+  topic.setValue?.(' billing ');
+  assert.deepEqual(harness.updates.at(-1)?.properties, { topic: 'billing' });
+
+  // 清空 ⇒ 属性被删掉（不是空字符串），否则 XML 会写出 activiti:topic=""
+  topic.setValue?.('   ');
+  assert.deepEqual(harness.updates.at(-1)?.properties, { topic: undefined });
 });
 
 test('默认流下拉：选项来自形状级出流连线；写入必须是引用对象（回归）', () => {
@@ -432,13 +459,19 @@ test('校验：无人办理的用户任务只告警（Activiti 允许，后端�
   assert.ok(!withCandidate.some((issue) => issue.message.includes('办理人')));
 });
 
-test('校验：服务任务实现方式缺失报错、重复只告警', () => {
+test('校验：服务任务实现方式缺失报错、混写也报错（与后端同口径）', () => {
   const missing = validateDiagram(
     registryOf([{ $type: 'bpmn:Process', id: 'p1', flowElements: [{ $type: 'bpmn:ServiceTask', id: 'svc' }] }]),
   );
 
-  assert.ok(missing.some((issue) => issue.severity === 'error' && issue.message.includes('class / delegateExpression / expression')));
+  assert.ok(
+    missing.some(
+      (issue) =>
+        issue.severity === 'error' && issue.message.includes('class / delegateExpression / expression / topic'),
+    ),
+  );
 
+  // class + expression：后端 required-attributes 直接 400，因此本地也应是阻断级
   const duplicated = validateDiagram(
     registryOf([
       {
@@ -451,7 +484,82 @@ test('校验：服务任务实现方式缺失报错、重复只告警', () => {
 
   const duplicateIssue = duplicated.find((issue) => issue.message.includes('同时设置了'));
 
-  assert.equal(duplicateIssue?.severity, 'warning');
+  assert.equal(duplicateIssue?.severity, 'error');
+  assert.ok(duplicateIssue?.message.includes('后端会拒绝部署'));
+});
+
+test('校验：只写 topic 的服务任务不报错（外部任务）', () => {
+  const issues = validateDiagram(
+    registryOf([
+      {
+        $type: 'bpmn:Process',
+        id: 'p1',
+        flowElements: [
+          { $type: 'bpmn:StartEvent', id: 'start' },
+          { $type: 'bpmn:SequenceFlow', id: 'f1', sourceRef: { id: 'start' }, targetRef: { id: 'svc' } },
+          { $type: 'bpmn:ServiceTask', id: 'svc', topic: 'invoice' },
+          { $type: 'bpmn:SequenceFlow', id: 'f2', sourceRef: { id: 'svc' }, targetRef: { id: 'end' } },
+          { $type: 'bpmn:EndEvent', id: 'end' },
+        ],
+      },
+    ]),
+  );
+
+  assert.deepEqual(issues.filter((issue) => issue.severity === 'error'), []);
+});
+
+test('校验：topic 与委托写法混写报错', () => {
+  const issues = validateDiagram(
+    registryOf([
+      { $type: 'bpmn:Process', id: 'p1', flowElements: [{ $type: 'bpmn:ServiceTask', id: 'svc', class: 'A', topic: 'invoice' }] },
+    ]),
+  );
+
+  const mixed = issues.find((issue) => issue.message.includes('同时设置了'));
+
+  assert.equal(mixed?.severity, 'error');
+  assert.ok(mixed?.message.includes('topic'));
+});
+
+test('外部任务样例：samples/external-task-demo 导入即零阻断错误，且 topic 往返不丢', async () => {
+  // 这份样例是新用户最可能直接导入的「外部任务」契约：控制台必须能打开、能发布，
+  // 而 topic 不在 moddle 描述符的已声明属性里，只能靠 $attrs 匿名保留 —— 一旦丢失，
+  // 保存后节点会退化成"未指定实现方式"，部署立刻被拒。
+  const moddle = new BpmnModdle({ activiti: activitiModdle as never });
+  // ⚠️ 测试被 esbuild 打包到 web/designer/.tmp/ 下再执行，import.meta.url 指向那里，
+  // 因此相对路径要多上跳一层（.tmp → designer → web → 仓库根）。
+  const xml = readFileSync(
+    new URL('../../../samples/NetBpm.ExternalWorker/processes/external-task-demo.bpmn20.xml', import.meta.url),
+    'utf8',
+  );
+
+  const { rootElement } = await moddle.fromXML(xml);
+  const process = rootElement.rootElements.find((element) => element.$type === 'bpmn:Process')!;
+  const invoice = process.flowElements.find((element) => element.id === 'svc_invoice')! as unknown as {
+    topic?: string;
+  };
+
+  assert.equal(invoice.topic, 'invoice');
+
+  const { xml: roundTripped } = await moddle.toXML(rootElement, { format: true });
+
+  assert.ok(roundTripped.includes('activiti:topic="notify"'));
+  assert.ok(roundTripped.includes('activiti:topic="invoice"'));
+
+  const all = [process, ...(process.flowElements ?? [])];
+  const issues = validateDiagram({
+    getAll: () =>
+      all.map((businessObject) => ({
+        id: businessObject.id,
+        type: businessObject.$type,
+        businessObject,
+      })),
+  } as never);
+
+  assert.deepEqual(
+    issues.filter((issue) => issue.severity === 'error'),
+    [],
+  );
 });
 
 test('校验：并行网关不得有默认流，排他网关不得"全条件且无默认流"', () => {

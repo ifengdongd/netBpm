@@ -12,7 +12,8 @@
 - **要在平台上新建一条流程、发布它，并让结束分支执行一段业务代码（serviceTask）** →
   [在 NetBpm 平台新建流程并配置 serviceTask](process-authoring-guide.md)
 
-这份指引覆盖：控制台建模入口、保存与发布两步的差别、三条发布途径、serviceTask 的三种写法与注册方式、
+这份指引覆盖：控制台建模入口、保存与发布两步的差别、三条发布途径、
+serviceTask 的四种写法（委托三种 + 外部任务 `activiti:topic`）与注册方式、
 部署期委托自检为什么"部署成功不等于能跑"、委托失败的语义与重试边界、排错手册。
 
 - **要让引擎进程之外的系统（Go/Java/Python 都行）来执行某个 serviceTask 节点** →

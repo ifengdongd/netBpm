@@ -38,7 +38,9 @@ const TYPE_LABELS: Record<string, string> = {
 
 const NODE_TYPES = new Set(Object.keys(NODE_LABELS));
 
-const IMPLEMENTATION_KEYS = ['class', 'delegateExpression', 'expression'] as const;
+// 四种实现方式（与后端 RequiredAttributesRule 的判定集合一致）：
+// 前三种在引擎进程内解析委托，topic 交给外部 worker 领取（外部任务）。
+const IMPLEMENTATION_KEYS = ['class', 'delegateExpression', 'expression', 'topic'] as const;
 
 /** ISO-8601 时长（PnYnMnDTnHnMnS），与后端 XmlConvert.ToTimeSpan 的口径一致。 */
 const ISO_DURATION = /^P(?!$)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$/;
@@ -477,13 +479,22 @@ function validateTasks(flowElements: ModdleElement[]): DraftIssue[] {
     if (node.$type === 'bpmn:ServiceTask') {
       const implementations = IMPLEMENTATION_KEYS.filter((key) => isSet(node[key]));
 
-      // 规则 8（服务任务）：实现方式至少一个
+      // 规则 8（服务任务）：四种实现方式必须恰好一种
       if (implementations.length === 0) {
-        issues.push(error(id, '服务任务必须指定 class / delegateExpression / expression 之一。'));
-      } else if (implementations.length > 1) {
-        // 面板补充校验：后端按 class > delegateExpression > expression 静默取值
         issues.push(
-          warning(id, `服务任务同时设置了 ${implementations.join(' / ')}；后端只按 class > delegateExpression > expression 取第一个，建议只保留一个。`),
+          error(
+            id,
+            '服务任务必须指定 class / delegateExpression / expression / topic 之一：'
+              + '前三种在引擎进程内执行，topic 交给外部 worker 领取。',
+          ),
+        );
+      } else if (implementations.length > 1) {
+        // 与后端 required-attributes 同口径：混写是**阻断**，不是"静默取第一个"
+        issues.push(
+          error(
+            id,
+            `服务任务只能指定一种实现方式，当前同时设置了 ${implementations.join(' / ')}；后端会拒绝部署。`,
+          ),
         );
       }
     }

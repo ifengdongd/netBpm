@@ -28,6 +28,7 @@
         { "name": "class", "isAttr": true, "type": "String" },
         { "name": "delegateExpression", "isAttr": true, "type": "String" },
         { "name": "expression", "isAttr": true, "type": "String" },
+        { "name": "topic", "isAttr": true, "type": "String" },
         { "name": "resultVariableName", "isAttr": true, "type": "String" }
       ]
     },
