@@ -155,7 +155,15 @@ ServerTaskWorkerService.cs   主循环：领取 → 处理 → 回执
 JsonLeaveBillStore.cs        幂等落账（JSON 文件替身，接口形状对齐真实仓储）
 Program.cs                   HTTP 入口 /api/serverTask/{name} + /healthz
 StartupMessages.cs           启动期直接打控制台的提示（降级说明）
+run-worker.ps1 / .sh         从独立发布目录启动（避开 IDE 重新生成时的文件锁）
+stop-worker.ps1 / .sh        按端口停掉运行中的 worker
 ```
+
+> **在 IDE 里点「重新生成」报 MSB3021 / MSB3027？** 那不是代码错误，是**文件被占用**：
+> `dotnet run` 把 exe 放在 `bin/Debug/net10.0/` 下，运行中的进程锁住了它，
+> MSBuild 覆盖不了 —— 错误列表里全是复制文件的红叉，看不出真实原因。
+> 用下面的 `run-worker.ps1`（先 publish 到 `artifacts/` 再从那里跑）就能根治：
+> 运行实例与 IDE 的编译输出彻底分离，worker 开着也能随时重新生成。
 
 ```bash
 cd samples/NetBpm.ServerTaskWorker
@@ -167,6 +175,15 @@ export PORT=3007
 
 dotnet run
 ```
+
+在 IDE 里开发时改用脚本更省事（Windows 用 `.ps1`，bash 用 `.sh`）：
+
+```
+samples/NetBpm.ServerTaskWorker/run-worker.ps1
+```
+
+它会先 `dotnet publish` 到 `artifacts/server-task-worker/` 再从那里启动；
+密钥来源优先级：`-ClientKey` 参数 > 环境变量 `NETBPM_CLIENT_KEY` > 用户机密 `Worker:ClientKey`。
 
 启动日志：
 

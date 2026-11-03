@@ -6,7 +6,7 @@
 |---|---|---|
 | [`NetBpm.Demo`](NetBpm.Demo/README.md) | 合并审批 Demo（订单 + 请假）：流程设计、发起、审批、业务回写、待办中心、任务转移、流程跳转；另带一个**外部任务闭环用例**（`POST /api/external-task/case/run`） | `dotnet run --project samples/NetBpm.Demo` → http://localhost:22613 |
 | `NetBpm.ExternalWorker` | 外部任务 worker：拉取 `activiti:topic` 节点、回执完成/失败、超时回收与死信重投 | `dotnet run --project samples/NetBpm.ExternalWorker` |
-| [`NetBpm.ServerTaskWorker`](NetBpm.ServerTaskWorker/README.md) | **外部系统一侧的完整形态**：3007 端口的业务接口 `POST /api/serverTask/{name}` + 幂等落账 + 后台 worker，请假流程开箱可跑 | `dotnet run --project samples/NetBpm.ServerTaskWorker` → http://localhost:3007/healthz |
+| [`NetBpm.ServerTaskWorker`](NetBpm.ServerTaskWorker/README.md) | **外部系统一侧的完整形态**：3007 端口的业务接口 `POST /api/serverTask/{name}` + 幂等落账 + 后台 worker，请假流程开箱可跑 | `.\samples\NetBpm.ServerTaskWorker\run-worker.ps1` → http://localhost:3007/healthz |
 
 ## 从哪开始
 
@@ -41,6 +41,8 @@ serviceTask 的四种写法（委托三种 + 外部任务 `activiti:topic`）与
   `POST /api/serverTask/{name}`（外部系统按老办法调用），又有 worker 领取回执，
   两者共用一套处理器，不会出现「接口一套、worker 一套」的漂移。请假流程 `leave_process`
   开箱可跑，是 [`docs/leave-worker-3007-integration.md`](../docs/leave-worker-3007-integration.md) 的配套代码。
+  用 `run-worker.ps1` 启动（而不是 `dotnet run`）：它先 publish 到 `artifacts/` 再从那里跑，
+  这样 IDE 点「重新生成」时不会撞上「exe 正被另一进程使用」的文件锁。
 - `NetBpm.Demo` 里另外藏了一个**外部任务闭环用例**（`ExternalTasks/` + `processes/external-task-case.bpmn20.xml`）：
   两个 handler 用 DI 注册、内置 worker 进程内领取回执，`POST /api/external-task/case/run` 一把跑完
   并逐步断言。它演示的是「注册 + 调用」的最小闭环，跨进程/跨语言仍以 `NetBpm.ExternalWorker` 为准。

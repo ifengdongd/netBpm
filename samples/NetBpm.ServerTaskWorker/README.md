@@ -27,7 +27,43 @@ ServerTaskWorkerService.cs主循环：领取 → 处理 → 回执
 JsonLeaveBillStore.cs     幂等落账（JSON 文件替身，接口形状对齐真实仓储）
 StartupMessages.cs        启动期直接打控制台的提示（没配密钥时的降级说明）
 Program.cs                HTTP 入口 /api/serverTask/{name} + /healthz
+run-worker.ps1 / .sh      从独立发布目录启动（避开 IDE 重新生成时的文件锁）
+stop-worker.ps1 / .sh     按端口停掉运行中的 worker
 ```
+
+## 在 IDE 里点「重新生成」报 MSB3021 / MSB3027
+
+**先认这条**：它不是代码错误，是 **文件被占用**。
+
+```text
+无法将文件 "...apphost.exe" 复制到 "...\bin\Debug\net10.0\NetBpm.ServerTaskWorker.exe"。
+文件 "...\bin\Debug\net10.0\NetBpm.ServerTaskWorker.exe" 正由另一进程使用。
+```
+
+`dotnet run`（含 IDE 的「运行」）把可执行文件放在 `bin\Debug\net10.0\` 下，而**运行中的进程锁住了自己的 exe**。
+MSBuild 重新生成时要覆盖同一个文件 → 覆盖失败 → 错误列表里全是复制文件的红叉。
+
+两种解法，**推荐第二种**：
+
+**① 临时绕开**：先停掉 worker 再重新生成
+
+```powershell
+.\samples\NetBpm.ServerTaskWorker\stop-worker.ps1
+```
+
+**② 根治**：让运行实例脱离编译输出目录
+
+```powershell
+.\samples\NetBpm.ServerTaskWorker\run-worker.ps1
+```
+
+这个脚本先 `dotnet publish` 到 `artifacts\server-task-worker\`（已被 `.gitignore` 忽略），
+再从那里启动。**运行时的文件与 IDE 的编译输出彻底分离**，两边不再抢同一个 exe ——
+worker 开着也能随时重新生成。
+
+> bash/macOS/Linux 用同名的 `run-worker.sh` / `stop-worker.sh`（脚本按 `.gitattributes` 保持 LF）。
+
+密钥来源优先级：`-ClientKey` 参数 > 环境变量 `NETBPM_CLIENT_KEY` > 用户机密 `Worker:ClientKey` > 降级启动。
 
 ## 启动
 
