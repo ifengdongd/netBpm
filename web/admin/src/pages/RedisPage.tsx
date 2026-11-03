@@ -57,6 +57,12 @@ export default function RedisPage() {
   const info = redisQuery.data ?? null;
   const loading = redisQuery.isFetching;
 
+  // 三态必须分开：「还没查回来 / 查失败」不是「不是 Redis」。
+  // 旧写法在 info 为 null 时落到「未使用 Redis」，把一次接口失败渲染成一条配置结论，
+  // 运维会照着黄条去改 NetBpm:Jobs:Queue:Provider —— 方向从一开始就错了。
+  const pending = redisQuery.isPending;
+  const queryFailed = info === null && !pending;
+
   useEffect(() => {
     if (redisQuery.isError) {
       message.error(`加载 Redis 诊断失败：${(redisQuery.error as Error).message}`);
@@ -170,11 +176,13 @@ export default function RedisPage() {
             {
               key: 'status',
               label: '连接状态',
-              children: info?.isRedis !== true
-                ? <Tag>未使用 Redis</Tag>
-                : info.reachable
-                  ? <Tag color="green">PING 成功</Tag>
-                  : <Tag color="red">连接不可用</Tag>,
+              children: info === null
+                ? (pending ? <Tag>查询中…</Tag> : <Tag color="red">诊断接口不可用</Tag>)
+                : info.isRedis !== true
+                  ? <Tag>未使用 Redis</Tag>
+                  : info.reachable
+                    ? <Tag color="green">PING 成功</Tag>
+                    : <Tag color="red">连接不可用</Tag>,
             },
             {
               key: 'latency',
@@ -186,7 +194,26 @@ export default function RedisPage() {
           ]}
         />
 
-        {info?.isRedis !== true && (
+        {queryFailed && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginTop: 16 }}
+            message="Redis 诊断接口不可用"
+            description={(
+              <Space direction="vertical" size={4}>
+                <span>{(redisQuery.error as Error | null)?.message ?? '请求 /api/admin/redis 失败。'}</span>
+                <span>
+                  这不代表「没配 Redis」——诊断本身没查出来。先确认登录态未过期、宿主在运行（
+                  <Typography.Text code>/health/ready</Typography.Text>
+                  ），再点右上角刷新。
+                </span>
+              </Space>
+            )}
+          />
+        )}
+
+        {info !== null && info.isRedis !== true && (
           <Alert
             type="warning"
             showIcon
@@ -194,7 +221,7 @@ export default function RedisPage() {
             message="当前宿主的作业队列不是 Redis"
             description={(
               <Space direction="vertical" size={4}>
-                <span>{info?.error ?? '作业队列走进程内优先队列，Redis 里不会出现任何 netbpm 键。'}</span>
+                <span>{info.error ?? '作业队列走进程内优先队列，Redis 里不会出现任何 netbpm 键。'}</span>
                 <Typography.Text code>
                   NetBpm:Jobs:Queue:Provider = Redis（并配好 NetBpm:Jobs:Queue:Redis）
                 </Typography.Text>
@@ -233,7 +260,7 @@ export default function RedisPage() {
             <Card size="small">
               <Statistic
                 title={card.title}
-                value={info?.isRedis === true ? card.value : '不可用'}
+                value={info?.isRedis === true ? card.value : info === null ? '—' : '不可用'}
                 valueStyle={{
                   color: info?.isRedis === true ? undefined : 'rgba(0, 0, 0, 0.25)',
                   fontSize: 24,
@@ -255,7 +282,13 @@ export default function RedisPage() {
         {keys.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={info?.isRedis === true ? '连不上 Redis，暂无键信息' : '未使用 Redis 队列'}
+            description={
+              info === null
+                ? '诊断接口未返回，暂无键信息'
+                : info.isRedis === true
+                  ? '连不上 Redis，暂无键信息'
+                  : '未使用 Redis 队列'
+            }
           />
         ) : (
           <Table<RedisQueueKeyInfo>
