@@ -162,15 +162,30 @@ groups:
           description: "通常是接入方配错 scope；若伴随陌生来源 IP，按扫接口处理。按 netbpm_admin_scope 分组能直接看出是哪个 scope。"
           runbook: "docs/operations-runbook.md §6"
 
-      - alert: NetBpmAdminAuditNotRecorded
+      # 这条说的是「管理动作本身失败」（success=false），不是「审计写不进去」。
+      # 两者此前共用一个名字，导致值班时看到 AlertName 以为是审计故障。
+      - alert: NetBpmAdminActionFailed
         expr: increase(netbpm_admin_audit_recorded_total{netbpm_audit_success="false"}[30m]) > 0
         for: 0m
         labels:
           severity: ticket
           component: admin
         annotations:
-          summary: "管理审计留痕失败"
-          description: "有管理动作没留下痕迹。审计是「谁在什么时候改了什么」的唯一凭据，写不进去比动作失败更隐蔽——动作失败调用方会立刻知道，审计失败谁都不知道。先查磁盘与 admin_audit_log 的写入权限。"
+          summary: "管理动作失败（动作本身没有成功）"
+          description: "有管理动作以失败结束（标签 netbpm_audit_success=false）。按 netbpm_admin_action 分组看是哪个动作；常见原因是目标不存在、状态冲突、跨租户写。"
+          runbook: "docs/operations-runbook.md §12"
+
+      # 审计写入是 fail-open（不阻断运维），所以「失败」只能靠这条告警被发现。
+      # 它比上一条更严重：动作已经生效，却没有任何痕迹留下。
+      - alert: NetBpmAdminAuditWriteFailing
+        expr: increase(netbpm_admin_audit_write_failures_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: page
+          component: admin
+        annotations:
+          summary: "管理审计落库失败（动作可能已生效）"
+          description: "审计写入存储失败，管理动作本身按 fail-open 继续成功。结果是「动作发生了、没人知道」——审计链断档，事后无法还原。先查 admin_audit_log 是否可写、表是否被删 / 满盘；恢复后这一段窗口内的动作只能靠访问日志回溯。"
           runbook: "docs/operations-runbook.md §12"
 
       - alert: NetBpmLegacySurfaceWrite

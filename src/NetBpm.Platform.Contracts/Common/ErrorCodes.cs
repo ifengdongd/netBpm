@@ -87,6 +87,19 @@ public static class ErrorCodes
     /// <summary>参数名与保留命名空间（<c>sys.</c> 等）冲突。<c>400</c></summary>
     public const string ParameterConflictWithReserved = "parameter.conflict_with_reserved";
 
+    /// <summary>
+    /// 参数规范读不出来，本次提交 / 发起未被受理。<c>503</c>
+    /// <para>
+    /// 与 <see cref="ParameterReadOnly"/> 分开：那里是「这个字段在这一环节不可写」，
+    /// 这里是「服务端此刻无法判断它可不可写」。前者调用方应改请求，后者只需重试。
+    /// </para>
+    /// <para>
+    /// 存在这个码的理由：写权限校验依赖参数规范，读不到规范时<b>不能</b>按「无 schema 放行」降级——
+    /// 那等于在存储故障期间静默关掉 <c>writableBy</c>，而响应仍是 200，谁都不会发现。
+    /// </para>
+    /// </summary>
+    public const string ParameterSchemaUnavailable = "parameter.schema_unavailable";
+
     /// <summary>乐观并发：<c>expectedRevision</c> 与当前值不符。<c>409</c></summary>
     public const string ConcurrencyRevisionMismatch = "concurrency.revision_mismatch";
 

@@ -160,7 +160,31 @@ public sealed class InstanceStartService : IInstanceStartService
         }
 
         // 参数：镜像 + 校验（保留名冲突 400，只读 / 必填缺失 / 类型不符 422）
-        var schema = await _catalog.GetParameterSchemaAsync(request.ProcessKey, context, ct).ConfigureAwait(false);
+        //
+        // 读规范失败 → 503，而不是按「无 schema 放行」。后者会把「申请人不可写的字段」在故障期间
+        // 变成可写，且响应仍是 201 —— 发起成功了，但这次发起跳过了写权限校验。
+        ParameterSchema? schema;
+
+        try
+        {
+            schema = await _catalog.GetParameterSchemaAsync(request.ProcessKey, context, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogError(
+                exception,
+                "读流程 {ProcessKey} 的参数规范失败：拒绝本次发起（不按「无 schema 放行」）。",
+                request.ProcessKey);
+
+            throw StartException(
+                ErrorCodes.ParameterSchemaUnavailable,
+                "参数规范暂不可用",
+                StatusCodes.Status503ServiceUnavailable,
+                $"读取流程 '{request.ProcessKey}' 的参数规范失败，本次发起未被受理。"
+                + "服务端不把「读失败」当作「流程没有参数约束」——那会跳过必填与 writableBy 校验。"
+                + "请稍后重试；持续失败请检查流程目录与参数索引存储。");
+        }
+
         var variables = BuildVariables(request, schema, PlatformIdentity.HasAdminPerspective(context));
 
         // 业务主键：调用方传入优先，否则发号

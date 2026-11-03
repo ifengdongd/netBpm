@@ -317,6 +317,10 @@ public static class NetBpmHost
             app.UseMiddleware<ClientRateLimitMiddleware>();
         }
 
+        // 管理面组级兜底：放在限流之后，403 也要计入配额（否则「无限试 scope」不花钱），
+        // 放在幂等之前，被拒的请求不写幂等记录。
+        app.UseMiddleware<AdminSurfaceGuardMiddleware>();
+
         app.UseMiddleware<IdempotencyMiddleware>();
 
         return app;

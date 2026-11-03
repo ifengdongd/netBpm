@@ -6,10 +6,16 @@
 ```
 contracts/
 ├── openapi/
-│   └── workflow-v1.json     # /workflow/v1 业务面的 OpenAPI 3.x 快照（当前实现）
+│   ├── workflow-v1.json     # /workflow/v1 业务面的 OpenAPI 3.x 快照（当前实现）
+│   └── admin-v1.json        # /admin/v1 管理面的快照（内部一致性，不是对外承诺）
 └── baseline/
     └── workflow-v1.json     # 上一个发版承诺过的同一份快照（CompatibilityTests 拿它打当前服务）
 ```
+
+`admin-v1.json` 与业务面那份的**性质不同**：它由 `AdminContractSnapshotTests` 守，
+用途是「后端删 / 改管理端点时，同仓库的控制台不会静默 404」。管理面仍然**不承诺**向后兼容，
+对外承诺只有 `workflow-v1.json`。要改管理面：改代码 → 设 `NETBPM_UPDATE_CONTRACTS=1`
+刷新这份快照 → 同步 `web/admin/src/api` → 一起提交。
 
 ## 一、为什么要有一份快照
 

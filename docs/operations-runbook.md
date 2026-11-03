@@ -279,6 +279,7 @@ NETBPM_RUN_LOAD_TESTS=1 \
 | `netbpm.event.delivery` | Counter | `subscription` / `result` |
 | `netbpm.admin.authorization.denied` | Counter | `netbpm.admin.scope` / `netbpm.auth.mode` |
 | `netbpm.admin.audit.recorded` / `.purged` | Counter | `netbpm.admin.action` / `netbpm.audit.success` |
+| `netbpm.admin.audit.write_failures` | Counter | `netbpm.admin.action` / `netbpm.auth.mode` |
 | `netbpm.platform.surface.denied` | Counter | `netbpm.admin.action` / `netbpm.auth.mode` |
 | `netbpm.outbox.pending` | Gauge | — |
 | `netbpm.outbox.dead_letter` | Gauge | — |
@@ -288,6 +289,15 @@ NETBPM_RUN_LOAD_TESTS=1 \
 积压四个 Gauge 由 `OutboxBacklogMetricsService` 按间隔采样写入（默认 15 秒，
 `NetBpm:Outbox:Metrics:IntervalSeconds`）：**看年龄不看条数**（`oldest_pending_age`），
 且 `backlog_stale=1` 时三个数都不可信 —— 采样停了之后，看板会一直显示最后一次的数字。
+
+**审计的两个指标不能混着看**：
+
+- `netbpm.admin.audit.recorded{netbpm.audit.success="false"}`：**动作本身失败**（目标不存在、状态冲突）。
+  对应 `NetBpmAdminActionFailed`（ticket）。
+- `netbpm.admin.audit.write_failures`：**审计没写进去**，而动作成功了。对应
+  `NetBpmAdminAuditWriteFailing`（**page**）。后者才是「动作发生了、没人知道」——
+  审计写入是 fail-open（不阻断运维），所以除了这条告警没有别的信号；
+  恢复之后，故障窗口内的动作只能靠访问日志回溯。
 
 导出默认**关闭**。打开方式二选一：`NetBpm__Otel__Enabled=true`，或直接设 `OTEL_EXPORTER_OTLP_ENDPOINT`
 （容器编排里注入端点即生效）。

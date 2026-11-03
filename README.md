@@ -675,6 +675,10 @@ dotnet run --project tools/NetBpm.DbMigrate -- users disable     --username admi
 `optimistic_lock_conflict` / `conflict` / `engine_rule_violation` / `internal_error` …），
 调用方应按 `code` 程序化分支，而不是匹配中文文案。
 
+`503` 表示「依赖的存储 / 配置此刻不可用，**本次请求未被受理**」，调用方应**重试**而不是改请求。
+平台面已用这个语义钉住一处关键降级：`parameter.schema_unavailable` —— 参数规范读不出来时
+**不做**「无 schema 放行」，否则存储故障期间 `writableBy` 校验会被静默跳过，而响应仍是 2xx。
+
 **幂等**：改变状态的请求可带 `Idempotency-Key`。同键同请求回放首次响应（`Idempotency-Replayed: true`），
 同键不同请求返回 409。数据库宿主使用 `ACT_IDEMPOTENCY` 表跨实例去重；过期记录由宿主每小时清理一次
 （`IdempotencyCleanupService`，启动后延迟 1 分钟首轮执行）。`ACT_IDEMPOTENCY` 表由初始化脚本建，
@@ -888,6 +892,28 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 
 对外有两组面，**变更纪律不同**：`/workflow/v1/**` 是平台业务面（对外契约，路径与错误体长期稳定，
 错误体是 RFC 9457），`/api/**` 是引擎原语面（随引擎演进，不承诺向后兼容）。
+`/admin/v1/**` 是运营配置面：同样是 RFC 9457，但**不承诺向后兼容**（形状随时可改，控制台与后端同仓库同步）。
+
+**面边界**（已由 `SurfaceBoundaryTests` 钉住，不是口头约定）：
+
+| 能力 | 走哪一面 | 理由 |
+|---|---|---|
+| 目录 / 待办 / 发起 / 提交 / 终止 / 时间线 / 参数与表单 schema | `/workflow/v1` | 业务语义，对外承诺 |
+| 租户 / 客户端 / 字典 / 目录精修 / 审计 / 订阅 / 配额 / 事件看板 | `/admin/v1` | 运营配置，不对外承诺 |
+| 跳转 / 迁移 / 挂起激活 / 删除 / 指令式 modify / 变量直写 / 外部任务领取回执 | `/api/runtime/**` | 引擎原语，按 `workflow:admin:*` / `workflow:external:task` 判定；**刻意不搬进平台面**（搬进去等于给外部接入方开管理通道） |
+
+> 新增管理端点时不需要手动挂「组级」判定：`AdminSurfaceGuardMiddleware` 对 `/admin/v1` 统一要求
+> 「至少一个管理类 scope」，漏写端点内的细粒度 `HasScope` 也不会变成匿名可调。
+
+**CORS**（v1.40）：默认关闭，按需在配置里逐个列来源，不提供通配：
+
+```json
+{ "NetBpm": { "Cors": { "AllowedOrigins": [ "https://oa.example.com" ] } } }
+```
+
+适用场景是「独立部署的异源 SPA 直连 `/workflow/v1`」；管理端与设计器由 Admin 工程托管，同源，不需要。
+不提供 `AllowAnyOrigin` 的理由：本服务用 `X-Api-Key` / `Authorization` 请求头鉴权，放开任意来源等于允许
+任意网页读取响应体，一旦密钥被写进前端产物，泄露面就不可控。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -937,7 +963,11 @@ public sealed class ApproveCompleteDelegate : IServiceTaskDelegate
 - 租户边界（`TENANT_ID_ in (本租户, '')`）、流程白名单（key 展开成定义 id 白名单）、发起人、业务主键、时间窗、
   `status` 的「运行 / 结束」粗筛与 `limit` **全部下推到 SQL**；两个数据源（运行态、历史）各取 `limit+1` 条再合并，
   排序与游标共用同一个全序（`START_TIME_` + `ID_` 升序 tie-break），所以翻页不重不漏。
-- 只有两种查询会在平台侧做二次过滤：`involvedUser`（「我参与过」需要按人展开实例集合）与 `status=失败`（引擎不产出，查一次确认为空）。
+- `involvedUser`（「我参与过」）也已下推：参与集合由 `IInstanceParticipation` 在应用层算出精确实例 id 后，
+  按 `ID_ in (...)` / `PROC_INST_ID_ in (...)` 交给存储层（每 1000 个一块，SQL Server 单语句参数上限 2100）。
+  没有改成 JOIN `ACT_HI_IDENTITYLINK`：那等于把同一套参与语义在 SQL 里再实现一遍，两处口径一旦分叉，
+  就会出现「列表里有这张单、`myRoles` 却是空」这类极难定位的差异。
+- 只剩 `status=失败` 一种查询在平台侧过滤（引擎不产出该状态，查一次确认为空）。
 - 单页上限 100；每行还要补「当前办理人 / 结论」，属于有界 N+1（并发 4），翻页不是导数据通道。
 
 **平台 scope 一览**（`workflow:*` 通配只覆盖**非** `:admin`、**非** `:onbehalf` 的项；`workflow:task:*` 这类前缀通配不生效）：

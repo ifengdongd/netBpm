@@ -11,8 +11,10 @@ namespace NetBpm.Rest.Auditing;
 /// <para>
 /// 约定：
 /// <list type="bullet">
-///   <item><description>审计写入失败<b>不影响</b>业务结果（只记 warning）——
-///     不能因为审计表缺失就让转办 / 跳转不可用；但会留下明显日志，便于及时发现。</description></item>
+///   <item><description>审计写入失败<b>不影响</b>业务结果（fail-open）——
+///     不能因为审计表缺失就让转办 / 跳转不可用。但 fail-open 只有在「有人会发现」时才成立，
+///     所以失败同时计 <c>netbpm.admin.audit.write_failures</c>（带动作标签）并配 page 级告警：
+///     业务成功、审计没写进去 = 「动作发生了、没人知道」，这是本类唯一不能静默的分支。</description></item>
 ///   <item><description><c>detail</c> 只放动作元数据（目标节点 / 原办理人 / 变量名），
 ///     <b>不放变量值</b>：变量可能是敏感业务数据，且会让审计表膨胀。</description></item>
 /// </list>
@@ -93,9 +95,16 @@ public sealed class AdminActionAuditor
         }
         catch (Exception exception)
         {
+            // fail-open 的唯一代价：动作已经生效，审计却没留下。这条计数就是它的告警依据，
+            // 不能只写日志——日志在「审计表整体不可用」时通常也在同一条故障链上。
+            AdminDiagnostics.AuditWriteFailures.Add(
+                1,
+                new(AdminDiagnostics.TagAction, action),
+                new(AdminDiagnostics.TagAuthMode, AdminDiagnostics.AuthModeTag(context.AuthMode)));
+
             _logger.LogWarning(
                 exception,
-                "管理动作审计写入失败：{Action} {TargetType}/{TargetId}（actor={Actor}）",
+                "管理动作审计写入失败（动作可能已生效）：{Action} {TargetType}/{TargetId}（actor={Actor}）",
                 action,
                 targetType,
                 targetId,

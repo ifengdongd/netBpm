@@ -130,6 +130,21 @@ jobs:
           dotnet run --project tests/NetBpm.IntegrationTests --no-build --
           -class NetBpm.IntegrationTests.CompatibilityTests
 
+      - name: Admin surface snapshot diff (internal consistency)
+        # 管理面不对外承诺兼容，但它与同仓库的控制台是一份契约：
+        # 后端删 / 改端点时，控制台不会编译失败，只会在某次点击时 404。
+        # 这一步守的是「静默漂移」，不是「禁止不兼容」。
+        run: >
+          dotnet run --project tests/NetBpm.IntegrationTests --no-build --
+          -class NetBpm.IntegrationTests.AdminContractSnapshotTests
+
+      - name: Surface boundary (engine vs platform surface)
+        # 钉住「管理干预 / 变量直写 / 外部任务只在 /api/**」这个决策；
+        # 将来要搬到平台面，先改决策与这份用例，而不是悄悄加端点。
+        run: >
+          dotnet run --project tests/NetBpm.IntegrationTests --no-build --
+          -class NetBpm.IntegrationTests.SurfaceBoundaryTests
+
       - name: SDK artifacts match snapshot
         run: >
           dotnet run --project tests/NetBpm.UnitTests --no-build --
@@ -304,6 +319,95 @@ jobs:
           if [ "$docker_ok" != "是" ]; then
             echo "::warning title=SqlServer 路径未覆盖::Docker 不可用，双库功能矩阵本轮被跳过"
           fi
+
+  load-tests:
+    # 性能门禁：默认不跑，只在 nightly / 手动触发跑。
+    #
+    # 🔑 为什么不放进 integration-tests：
+    #   ① 它的数字随机器跳动，挂在每个 PR 上会变成「今天红明天绿」，最后没人敢动；
+    #   ② 它必须先清库 —— 列表读的耗时与历史单条数强相关，和真库集成用例共用一个库时
+    #      测的是「这台 runner 上堆了多少数据」，不是代码有没有回归（v1.28 踩过：p95 ≈ 10s）。
+    #
+    # 阈值：详情读 80ms / 列表读 300ms（回归线，不是达标线）/ 写 200ms，
+    # 可用 NETBPM_LOAD_*_P95_MS 覆盖。列表读的 300ms 是有意放宽的：
+    # 租户过滤与排序仍在内存里做，根治要自建实例索引表（另一个项目），
+    # 给它套 80ms 只会得到一条永远红的用例。
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: "netbpm"
+          MYSQL_ROOT_HOST: "%"
+          MYSQL_DATABASE: "netbpm_load"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pnetbpm"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 24
+          --health-start-period 30s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build NetBpm.slnx --nologo
+
+      - name: Verify MySQL connectivity
+        run: >
+          dotnet run --project tools/NetBpm.DbMigrate --no-build -- probe
+          --provider mysql
+          --connection "Server=127.0.0.1;Port=3306;User ID=root;Password=netbpm;"
+
+      - name: Create schema (dedicated load database)
+        run: >
+          dotnet run --project tools/NetBpm.DbMigrate --no-build -- migrate --create-database
+          --provider mysql
+          --connection "Server=127.0.0.1;Port=3306;Database=netbpm_load;User ID=root;Password=netbpm;Allow User Variables=true;"
+
+      - name: Load gate
+        # 单独一步：性能红了要一眼看到是「性能」，而不是「集成测试」红了之后翻日志。
+        env:
+          NETBPM_RUN_LOAD_TESTS: "1"
+          NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm_load;User ID=root;Password=netbpm;Allow User Variables=true;"
+          NETBPM_LOAD_READ_P95_MS: "80"
+          NETBPM_LOAD_LIST_P95_MS: "300"
+          NETBPM_LOAD_WRITE_P95_MS: "200"
+        run: |
+          set +e
+          output=$(dotnet run --project tests/NetBpm.IntegrationTests --no-build -- \
+            -class NetBpm.IntegrationTests.LoadTests -noColor 2>&1)
+          status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            detail=$(printf '%s' "$output" | grep -A3 -F '[FAIL]' | head -n 20 | tr '\n' ' ')
+            echo "::error title=性能门禁失败::exit=${status} ${detail:0:1500}"
+            exit "$status"
+          fi
+
+      - name: Gate summary
+        if: always()
+        run: |
+          {
+            echo "## 性能门禁（串行压，5s 并发兜底）"
+            echo
+            echo "| 场景 | 门禁 | 口径 |"
+            echo "|---|---|---|"
+            echo "| 详情读 | p95 < 80ms | 真实目标 |"
+            echo "| 列表读 | p95 < 300ms | **回归线**（租户过滤与排序仍在内存） |"
+            echo "| 写 | p95 < 200ms | 真实目标 |"
+            echo
+            echo "> 并发只留 5s 兜底：并发下的 p95 主要反映 .NET 线程池扩线程速率与机器排队，"
+            echo "> 把它当代码性能指标会得到一条没人敢动的红用例。"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   differential:
     # 差分对拍：拿 Java 预言机（真 Activiti）产出的三维度真值，比 NetBpm 的实现。

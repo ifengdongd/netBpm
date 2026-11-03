@@ -17,6 +17,8 @@ namespace NetBpm.Rest.Diagnostics;
 ///     （<c>netbpm.admin.scope</c> / <c>netbpm.auth.mode</c>）；</description></item>
 ///   <item><description><c>netbpm.admin.audit.recorded</c>：审计留痕条数
 ///     （<c>netbpm.admin.action</c> / <c>netbpm.audit.success</c> / <c>netbpm.auth.mode</c>）；</description></item>
+///   <item><description><c>netbpm.admin.audit.write_failures</c>：审计落库失败的条数
+///     （<c>netbpm.admin.action</c>）—— fail-open 的告警依据；</description></item>
 ///   <item><description><c>netbpm.admin.audit.purged</c>：保留策略清理删除的条数；</description></item>
 ///   <item><description><c>netbpm.platform.surface.denied</c>：注册客户端在引擎原语面做业务写入被拒的次数
 ///     （<c>netbpm.admin.action</c> / <c>netbpm.auth.mode</c>）。</description></item>
@@ -46,6 +48,26 @@ public static class AdminDiagnostics
             "netbpm.admin.audit.recorded",
             unit: "{record}",
             description: "写入管理动作审计的记录数。");
+
+    /// <summary>
+    /// 审计<b>落库</b>失败次数。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="AuditRecorded"/> 的 <c>netbpm.audit.success</c> 标签不是一回事：那个标签说的是
+    /// 「这次管理动作成功了没有」，本指标说的是「这条审计记录写进去了没有」。
+    /// 业务成功但审计写失败，是「动作发生了、没人知道」——只有这条指标能看见它。
+    /// </para>
+    /// <para>
+    /// 审计写入保持 <b>fail-open</b>（不让审计表故障阻断运维），所以这条指标必须配 page 级告警：
+    /// fail-open 的前提是「有人会发现」，没人发现时它等价于静默关闭审计。
+    /// </para>
+    /// </remarks>
+    public static readonly Counter<long> AuditWriteFailures =
+        Meter.CreateCounter<long>(
+            "netbpm.admin.audit.write_failures",
+            unit: "{record}",
+            description: "管理动作审计写入存储失败的次数（动作本身可能已经生效）。");
 
     /// <summary>审计保留策略清理。</summary>
     public static readonly Counter<long> AuditPurged =

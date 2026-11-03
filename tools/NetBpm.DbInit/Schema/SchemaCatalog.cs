@@ -851,9 +851,9 @@ internal static class SchemaCatalog
         [],
         EngineCharset: false);
 
-    // 平台接入三表（见 docs/platform-api-refactoring-plan.md §2.5 / §7）
+    // 平台表（12 张，见 docs/platform-api-refactoring-plan.md §2.5 / §7.1）
     //
-    // 命名一律 nb_ 前缀，与 ACT_*（引擎表）严格分开：引擎升级永远不会碰到这三张表，
+    // 命名一律 nb_ 前缀，与 ACT_*（引擎表）严格分开：引擎升级永远不会碰到这些表，
     // 跨表 join 只允许「平台表 → 引擎表」单向进行（引擎表不认识 nb_*）。
     //
     // 状态列一律存对外 JSON 词汇（ACTIVE / SUSPENDED ...），不存枚举序号：

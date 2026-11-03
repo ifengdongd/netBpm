@@ -468,7 +468,21 @@ public sealed class TaskSubmitService : ITaskSubmitService
             + $"（可写角色：{ParameterWritePolicy.DescribeWriters(definition, ParameterWriteStage.Approve)}）。");
     }
 
-    /// <summary>取参数规范；读不到返回 <see langword="null"/>（由调用方按「无 schema 放行」降级）。</summary>
+    /// <summary>
+    /// 取参数规范。<see langword="null"/> 只表示「这个流程没有参数规范」，调用方按「无 schema 放行」。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 读失败<b>不</b>回落成 <see langword="null"/>，而是 503。两者在类型上都是「拿不到规范」，
+    /// 但语义完全不同：没有规范 = 这个流程本来就不约束字段；读失败 = 本来有约束，此刻判断不了。
+    /// 把后者当成前者，等于在存储故障期间静默关掉 <c>writableBy</c>——
+    /// 「审批人不可写的字段」变成可写，响应还是 200，调用方与审计都看不出这次提交跳过了校验。
+    /// </para>
+    /// <para>
+    /// 这类降级只能往「读不到就拒绝」的方向错：拒绝会让调用方重试，放行会在故障窗口里留下一批
+    /// 越权写入，而故障恢复后没有任何线索能把它们找回来。
+    /// </para>
+    /// </remarks>
     private async ValueTask<ParameterSchema?> TryLoadSchemaAsync(
         string? processKey,
         RequestContext context,
@@ -485,9 +499,18 @@ public sealed class TaskSubmitService : ITaskSubmitService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            _logger.LogWarning(exception, "读流程 {ProcessKey} 的参数规范失败：本次不做写侧授权校验。", processKey);
+            _logger.LogError(
+                exception,
+                "读流程 {ProcessKey} 的参数规范失败：拒绝本次提交（不按「无 schema 放行」，否则写权限校验被跳过）。",
+                processKey);
 
-            return null;
+            throw new SubmitDecisionException(
+                ErrorCodes.ParameterSchemaUnavailable,
+                "参数规范暂不可用",
+                StatusCodes.Status503ServiceUnavailable,
+                $"读取流程 '{processKey}' 的参数规范失败，本次提交未被受理。"
+                + "服务端不把「读失败」当作「流程没有参数约束」——那会跳过 writableBy 校验。"
+                + "请稍后重试；持续失败请检查流程目录与参数索引存储。");
         }
     }
 
