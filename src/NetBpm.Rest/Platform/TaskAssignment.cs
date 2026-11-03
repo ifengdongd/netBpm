@@ -50,6 +50,28 @@ public interface ITaskAssignment
     Task<TaskView> UnclaimAsync(string taskId, RequestContext context, CancellationToken ct = default);
 
     /// <summary>转办：把待办交给指定的人（可覆盖现有办理人）。</summary>
+    /// <remarks>
+    /// <para>
+    /// 门槛是<b>三选一</b>：管理视角、当前办理人本人、或在候选范围内（候选人命中，
+    /// 或候选项中的组与令牌里的组声明有交集）。它与 <see cref="ClaimAsync"/> 的差别在于
+    /// <b>不</b>要求「待办尚未被认领」：认领是「没人拿我才拿」，转办是「协调改派」。
+    /// </para>
+    /// <para>
+    /// 因此候选范围内的非办理人<b>可以</b>把已认领给别人的待办改派出去，这是有意保留的语义：
+    /// 模板把候选人定义成一个协作组，组内换人不必先 unclaim 再 claim，也就不会在时间线上
+    /// 留下一条「某人放弃过」的假记录（<see cref="UnclaimAsync"/> 明确只允许本人操作，
+    /// 正是为了让「谁放弃了这单」保持真实）。要限制这种覆盖，应当收紧候选范围本身，
+    /// 而不是加一条「仅未认领可转」的分支 —— 那会让管理员在待办被认领后反而失去改派能力。
+    /// </para>
+    /// <para>
+    /// 越权统一回答 404 而不是 403：调用方既不是办理人也不在候选范围时，说明它本就不该
+    /// 看见这条待办，回答 403 等于确认了待办的存在。
+    /// </para>
+    /// <para>
+    /// 转办<b>不改认领时间</b>（<c>CLAIM_TIME_</c>）：被转办的人没有主动认领过，
+    /// 把时间刷成现在等于伪造一次认领动作。
+    /// </para>
+    /// </remarks>
     /// <param name="taskId">任务 id。</param>
     /// <param name="request">转办请求（新办理人 + 原因）。</param>
     /// <param name="context">调用方身份。</param>
@@ -231,7 +253,9 @@ internal sealed class TaskAssignment(
             return view;
         }
 
-        // 转办能覆盖别人的办理人，所以门槛更高：管理视角、当前办理人本人、或候选范围内的人
+        // 门槛三选一：管理视角、当前办理人本人、或在候选范围内。
+        // 与 claim 的差异只有一条 —— 这里不校验 view.Assignee 是否为空，所以已认领给他人的
+        // 待办也能被候选人改派（协作组的协调语义，详见该方法的 remarks）；不满足任一条则 404。
         if (!PlatformIdentity.HasAdminPerspective(context)
             && !string.Equals(view.Assignee, subject, StringComparison.Ordinal)
             && !CanTake(view, subject, context))
