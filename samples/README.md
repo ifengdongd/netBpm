@@ -1,11 +1,11 @@
 # samples
 
-两个可以直接跑的样例宿主，以及一份建模/接入操作指引。
+两个可以直接跑的样例宿主，以及两份接入操作指引。
 
 | 目录 | 说明 | 运行 |
 |---|---|---|
 | [`NetBpm.Demo`](NetBpm.Demo/README.md) | 合并审批 Demo（订单 + 请假）：流程设计、发起、审批、业务回写、待办中心、任务转移、流程跳转 | `dotnet run --project samples/NetBpm.Demo` → http://localhost:5188 |
-| `NetBpm.ExternalWorker` | 外部任务 worker：拉取 `externalTask` 节点、回执完成/失败、超时重投 | `dotnet run --project samples/NetBpm.ExternalWorker` |
+| `NetBpm.ExternalWorker` | 外部任务 worker：拉取 `activiti:topic` 节点、回执完成/失败、超时回收与死信重投 | `dotnet run --project samples/NetBpm.ExternalWorker` |
 
 ## 从哪开始
 
@@ -15,13 +15,22 @@
 这份指引覆盖：控制台建模入口、保存与发布两步的差别、三条发布途径、serviceTask 的三种写法与注册方式、
 部署期委托自检为什么"部署成功不等于能跑"、委托失败的语义与重试边界、排错手册。
 
+- **要让引擎进程之外的系统（Go/Java/Python 都行）来执行某个 serviceTask 节点** →
+  [配置外部任务 worker](external-task-worker-guide.md)
+
+这份指引覆盖：`activiti:topic` 的正确写法（以及为什么别写 `activiti:type="external"`）、
+平台侧存储与配置项、worker 的凭据/scope、fetch/complete/failure/unlock/retry 的实际契约、
+锁与重试语义、排错手册与已知边界。
+
 ## 两个样例的分工
 
 - `NetBpm.Demo` 演示**业务宿主**怎么接：自己的 `IBusinessProcess`、自己的 serviceTask 委托、
   自己的业务表，以及 `AddServiceTaskDelegates(typeof(Program).Assembly)` 的注册方式。
   流程定义不在 Demo 里维护，唯一来源是 `web/designer/examples/{order,leave}-process.bpmn20.xml`。
-- `NetBpm.ExternalWorker` 演示**外部系统**怎么接：不注册委托，用 `activiti:type="external"` +
-  `topic` 让外部进程领取任务，适合跨语言/跨团队的服务调用。
+- `NetBpm.ExternalWorker` 演示**外部系统**怎么接：不注册委托，只写 `activiti:topic`
+  让外部进程领取任务，适合跨语言/跨团队的服务调用。
+  注意**不要**写 `activiti:type="external"`：它不是本子集支持的属性，部署能过但会被忽略，
+  只留一条 `unknown-activiti-attribute` 告警（见 [配置外部任务 worker](external-task-worker-guide.md)）。
 
 选型建议：能在本进程内同步完成的业务回写用 serviceTask（委托）；
 需要走外部系统、需要独立扩缩容或跨语言时用外部任务（external task）。

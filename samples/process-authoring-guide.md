@@ -208,7 +208,11 @@ await workflowBootstrapper.DeployProcessesAsync();
 
 优先级（同时写了多个属性时以靠前者为准）：`class` > `delegateExpression` > `expression` > `topic`。
 
-`activiti:type="external"` + `topic` 走的是**外部任务**，不是委托，见 `NetBpm.ExternalWorker` 样例。
+只写 `activiti:topic="…"`（**不带** `activiti:type`）走的是**外部任务**，不是委托，见
+[配置外部任务 worker](external-task-worker-guide.md) 与 `NetBpm.ExternalWorker` 样例。
+再补 `activiti:type="external"` 是没有必要的：该属性不在支持范围，部署能过但只留一条
+`unknown-activiti-attribute` 告警，而只写 `type` 不写 `topic` 会被部署期直接拒绝。
+
 既没有 topic 也没有上述三种写法的 serviceTask，运行到该节点会报「未指定实现方式」。
 
 ### 5.2 字段注入
