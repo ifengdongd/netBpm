@@ -31,6 +31,9 @@ dotnet run --project src/NetBpm.Admin
 > 运行实例与 IDE 的编译输出彻底分离，**控制台常驻也能随时重新生成**。
 
 数据库连接取 `src/NetBpm.Admin/appsettings.Development.json`（默认 `MySql` + `netbpm_admin` 库，`AutoMigrate: true` 会自动建表）。
+**这是本机唯一的业务库**：平台宿主 `NetBpm.Rest`（5080）的开发配置也指向同一个 `netbpm_admin`，
+两边共享流程模型、实例、审计与接入客户端（否则控制台发布的模型在 `/workflow/v1` 里看不到）。
+集成测试走独立的 `netbpm_ittest`（`EngineTableCleaner.Purge` 会清引擎表，绝不能指到业务库）。
 控制台前端由该宿主托管（`wwwroot`），改过 `web/admin` 前端源码后需要 `npm run build` 才会生效；开发期可用 `npm run dev`（默认代理到 5081，可用 `NETBPM_API_TARGET` 改目标）。
 
 > 🔑 **控制台与 worker 是两个进程**：控制台在 5081（引擎 + 控制台前端 + 外部任务接口），

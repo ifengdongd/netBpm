@@ -17,7 +17,7 @@ internal sealed record TestDatabaseSpec(DatabaseType Type, string ConnectionStri
 /// <para>
 /// 供给策略（<b>惰性</b>探测，MemberData 发现阶段不付连接成本）：
 /// <list type="number">
-///   <item><description><b>MySQL</b>：环境变量 <c>NETBPM_MYSQL_CONNECTION</c> → 本机默认库（<c>localhost:3306/netbpm</c>）；</description></item>
+///   <item><description><b>MySQL</b>：环境变量 <c>NETBPM_MYSQL_CONNECTION</c> → 本机测试库（<c>localhost:3306/netbpm_ittest</c>）；</description></item>
 ///   <item><description><b>SqlServer</b>：环境变量 <c>NETBPM_SQLSERVER_CONNECTION</c> 优先（指向已有实例）→
 ///     否则由 <b>Testcontainers</b> 拉起 <c>mcr.microsoft.com/mssql/server:2022-latest</c>。</description></item>
 /// </list>
@@ -33,7 +33,7 @@ internal sealed record TestDatabaseSpec(DatabaseType Type, string ConnectionStri
 /// </summary>
 internal static class TestDatabases
 {
-    internal const string DatabaseName = "netbpm";
+    internal const string DatabaseName = "netbpm_ittest";
     private const string SqlServerEnvironmentVariable = "NETBPM_SQLSERVER_CONNECTION";
     private const string MySqlEnvironmentVariable = "NETBPM_MYSQL_CONNECTION";
 
@@ -194,11 +194,15 @@ internal static class TestDatabases
             Database = string.Empty,
         };
 
+        // 建的是「实际要连的库」而不是默认常量：NETBPM_MYSQL_CONNECTION 指向别的库时（CI 就是这么用的）
+        // 不该再额外造一个空的默认库出来。
+        var targetDatabase = new MySqlConnector.MySqlConnectionStringBuilder(spec.ConnectionString).Database;
+
         using (var bootstrap = new MySqlConnector.MySqlConnection(builder.ConnectionString))
         {
             bootstrap.Open();
             bootstrap.Execute(
-                $"create database if not exists `{DatabaseName}` character set utf8 collate utf8_bin");
+                $"create database if not exists `{targetDatabase}` character set utf8 collate utf8_bin");
         }
 
         new DatabaseMigrator(

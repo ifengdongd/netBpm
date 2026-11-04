@@ -108,7 +108,7 @@ dotnet run --project tools/NetBpm.DbInit -- \
 # 1. 工具（推荐）：建库 + 建表 + 初值 + 结构版本校验，幂等可反复跑
 dotnet run --project tools/NetBpm.DbMigrate -- migrate --create-database \
   --provider mysql \
-  --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;"
+  --connection "Server=127.0.0.1;Port=3306;Database=netbpm_admin;User ID=root;Password=;Allow User Variables=true;"
 
 # 2. 只校验结构版本
 dotnet run --project tools/NetBpm.DbMigrate -- check --provider mysql --connection "<连接串>"

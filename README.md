@@ -514,7 +514,7 @@ dotnet format NetBpm.slnx --verify-no-changes --no-restore
 # 一步初始化：生成脚本 → 建结构 → 灌种子数据 → 校验 schema.version（幂等）
 dotnet run --project tools/NetBpm.DbInit -- \
   --provider mysql \
-  --connection "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;" \
+  --connection "Server=127.0.0.1;Port=3306;Database=netbpm_admin;User ID=root;Password=;Allow User Variables=true;" \
   --create-database
 ```
 
@@ -535,7 +535,8 @@ start.bat stop   :: 按端口停掉这两个服务
 脚本先 `dotnet publish` 到 `artifacts\rest-api` / `artifacts\admin-console` 再启动 ——
 与 `run-admin.ps1` / `run-worker.ps1` 同一口径：常驻进程不占 `src\**\bin`，
 IDE 里点「重新生成」不会报 MSB3021 / MSB3027。
-依赖本机 MySQL（库 `netbpm` / `netbpm_admin`，`AutoMigrate` 自动建表）；
+依赖本机 MySQL（单库 `netbpm_admin`，Rest 5080 与 Admin 5081 共用同一个库，`AutoMigrate` 自动建表；
+集成测试另有独立的 `netbpm_ittest`，不会碰业务数据）；
 管理台页面还需先在 `web/admin`、`web/designer` 各执行一次 `npm run build`，否则 404。
 
 ### 启动 REST 服务

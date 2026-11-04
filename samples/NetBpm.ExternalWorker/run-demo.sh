@@ -10,7 +10,7 @@
 #   ./samples/NetBpm.ExternalWorker/run-demo.sh
 #
 # 环境变量：
-#   NETBPM_MYSQL_CONNECTION  流程库连接串（默认本机 root/空密码 的 netbpm 库）
+#   NETBPM_MYSQL_CONNECTION  流程库连接串（默认本机 root/空密码 的 netbpm_demo 示例库）
 #   NETBPM_PORT              platform 监听端口（默认 5199）
 #   NETBPM_PY                解析 JSON 用的 python（默认 python）
 #
@@ -19,7 +19,7 @@ set -uo pipefail
 PY="${NETBPM_PY:-python}"
 PORT="${NETBPM_PORT:-5199}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CONN="${NETBPM_MYSQL_CONNECTION:-Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;}"
+CONN="${NETBPM_MYSQL_CONNECTION:-Server=127.0.0.1;Port=3306;Database=netbpm_demo;User ID=root;Password=;Allow User Variables=true;}"
 BASE="http://127.0.0.1:${PORT}"
 BPMN="${REPO_ROOT}/samples/NetBpm.ExternalWorker/processes/external-task-demo.bpmn20.xml"
 

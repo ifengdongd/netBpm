@@ -15,12 +15,12 @@ namespace NetBpm.IntegrationTests;
 internal static class MySqlTestDatabase
 {
     internal const string DefaultConnectionString =
-        "Server=127.0.0.1;Port=3306;Database=netbpm;User ID=root;Password=;Allow User Variables=true;";
+        "Server=127.0.0.1;Port=3306;Database=netbpm_ittest;User ID=root;Password=;Allow User Variables=true;";
 
     internal const string SkipReason =
-        "本机 MySQL（数据库 netbpm）不可用。请先建库并执行 db/mysql 脚本：" +
+        "本机 MySQL（数据库 netbpm_ittest）不可用。请先建库并执行 db/mysql 脚本：" +
         "dotnet run --project tools/NetBpm.DbMigrate -- migrate --create-database " +
-        "--provider mysql --connection \"Server=127.0.0.1;Database=netbpm;User ID=root;Password=;\"";
+        "--provider mysql --connection \"Server=127.0.0.1;Database=netbpm_ittest;User ID=root;Password=;\"";
 
     private static readonly Lazy<bool> Available = new(Probe);
 
