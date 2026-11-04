@@ -238,6 +238,25 @@ curl -s "$BASE/admin/v1/events/stats?since=1h" -H "X-Api-Key: $ADMIN_KEY"
 
 配额现状：`GET /admin/v1/quotas`（scope `workflow:admin:client`，返回租户级与客户端级两层）。
 
+### 9.1 `503 database_unavailable` 的两种含义
+
+`GlobalExceptionHandler` 把**除唯一约束冲突之外的 `DbException`** 一律映射成
+`503` + `database_unavailable`（「数据库暂时不可用，请稍后重试」）。它有两种完全不同的成因：
+
+| 现象 | 先确认 | 说明 |
+|---|---|---|
+| 偶发 503，低谷期不出现，只在峰值 | 连接池上限 vs 峰值并发 | 默认 `Maximum Pool Size=100`。**连接池耗尽**抛的是 `MySqlException`，同样走 503 |
+| 持续 503 | MySQL 是否可达 / `max_connections` | 库挂了或拒连；`probe` 与 `DbMigrate migrate` 能立刻区分「连不上」与「脚本报错」 |
+
+排池耗尽的办法：把并发压到可以复现的规模，看服务端日志里 `未处理异常` 那条的异常消息
+（`The connection pool has been exhausted` 就是它）。**已实测**：把连接串改成
+`Maximum Pool Size=4` 再跑 100 并发压测，98/100 请求立刻变成 503
+（= `tests/NetBpm.IntegrationTests/LoadTests`）。
+
+所以容量规划的硬约束是：**连接串里的 `Maximum Pool Size` 必须大于峰值并发请求数**，
+并且留 20% 余量；同时确认它不超过数据库端的 `max_connections`（官方 MySQL 镜像默认 151）。
+官方镜像的 `max_connections` 与连接池是两套账，任何一边卡住都表现为同一个 503。
+
 ---
 
 ## 10. SLO 与度量口径

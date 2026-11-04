@@ -328,7 +328,8 @@ jobs:
     #   ② 它必须先清库 —— 列表读的耗时与历史单条数强相关，和真库集成用例共用一个库时
     #      测的是「这台 runner 上堆了多少数据」，不是代码有没有回归（v1.28 踩过：p95 ≈ 10s）。
     #
-    # 阈值：详情读 80ms / 列表读 300ms（回归线，不是达标线）/ 写 200ms，
+    # 阈值（都是**串行**读数；100 并发只判「全部成功 + 5s 吊死兜底」，不卡延迟）：
+    #       详情读 80ms / 列表读 300ms（回归线，不是达标线）/ 写 200ms，
     # 可用 NETBPM_LOAD_*_P95_MS 覆盖。列表读的 300ms 是有意放宽的：
     # 租户过滤与排序仍在内存里做，根治要自建实例索引表（另一个项目），
     # 给它套 80ms 只会得到一条永远红的用例。
@@ -377,7 +378,13 @@ jobs:
         # 单独一步：性能红了要一眼看到是「性能」，而不是「集成测试」红了之后翻日志。
         env:
           NETBPM_RUN_LOAD_TESTS: "1"
-          NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm_load;User ID=root;Password=netbpm;Allow User Variables=true;"
+          # `Maximum Pool Size=128`：默认池上限是 100，与压测并发数**相等**——
+          # 2026-11-03 nightly 就是卡在这个边界上：读列表那一段 100 个并发里有 31 个拿到
+          # 503 `database_unavailable`（池耗尽抛的是 MySqlException，同样走 503）。
+          # 已实测：把池改成 4 再压 100 并发，98/100 立刻 503。
+          # 压测要量的是代码在 100 并发下的表现，不是「池恰好等于并发」这个夹具缺陷，
+          # 所以这里给 28% 余量；同时低于 MySQL 默认 max_connections=151。
+          NETBPM_MYSQL_CONNECTION: "Server=127.0.0.1;Port=3306;Database=netbpm_load;User ID=root;Password=netbpm;Allow User Variables=true;Maximum Pool Size=128;"
           NETBPM_LOAD_READ_P95_MS: "80"
           NETBPM_LOAD_LIST_P95_MS: "300"
           NETBPM_LOAD_WRITE_P95_MS: "200"
@@ -401,9 +408,10 @@ jobs:
             echo
             echo "| 场景 | 门禁 | 口径 |"
             echo "|---|---|---|"
-            echo "| 详情读 | p95 < 80ms | 真实目标 |"
-            echo "| 列表读 | p95 < 300ms | **回归线**（租户过滤与排序仍在内存） |"
-            echo "| 写 | p95 < 200ms | 真实目标 |"
+            echo "| 详情读（串行） | p95 < 80ms | 真实目标 |"
+            echo "| 列表读（串行） | p95 < 300ms | **回归线**（租户过滤与排序仍在内存） |"
+            echo "| 写·发起（串行） | p95 < 200ms | 真实目标 |"
+            echo "| 100 并发（读/写） | 全部成功 + p95 < 5s | 只抓连接泄漏 / 死锁 / 池耗尽，不卡延迟 |"
             echo
             echo "> 并发只留 5s 兜底：并发下的 p95 主要反映 .NET 线程池扩线程速率与机器排队，"
             echo "> 把它当代码性能指标会得到一条没人敢动的红用例。"

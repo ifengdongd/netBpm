@@ -78,8 +78,47 @@ internal static class TestDatabases
     /// <summary>SqlServer（环境变量优先，否则 Testcontainers；不可用返回 <see langword="null"/>）。</summary>
     internal static TestDatabaseSpec? SqlServer => SqlServerSpec.Value;
 
-    /// <summary>建库（若缺）+ 执行对应方言脚本（幂等）。</summary>
+    /// <summary>
+    /// 建库（若缺）+ 执行对应方言脚本（幂等）——<b>同一连接串在本进程内只真正执行一次</b>，
+    /// 后续调用直接返回（见下方「为什么不能并发迁移」）。
+    /// </summary>
     internal static void EnsureSchema(TestDatabaseSpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+
+        // 单飞：Lazy(ExecutionAndPublication) 保证只有一个线程执行迁移，其余线程阻塞等结果。
+        // 迁移失败时异常被 Lazy 记住并对所有等待者原样重抛 —— 与「每个调用者各自失败」等效，
+        // 但不会出现「A 已经迁移成功、B 却拿到一个半路失败」的错位。
+        var migrated = SchemaMigrations.GetOrAdd(
+            spec.ConnectionString,
+            _ => new Lazy<bool>(
+                () =>
+                {
+                    MigrateSchema(spec);
+                    return true;
+                },
+                LazyThreadSafetyMode.ExecutionAndPublication));
+
+        _ = migrated.Value;
+    }
+
+    /// <summary>每个连接串「已经迁移过 / 正在迁移」的哨兵。</summary>
+    private static readonly ConcurrentDictionary<string, Lazy<bool>> SchemaMigrations =
+        new(StringComparer.Ordinal);
+
+    /// <summary>真正执行迁移（按方言分派）。</summary>
+    /// <remarks>
+    /// 🔑 <b>为什么不能并发迁移</b>：迁移脚本是「建库 + 全量 DDL」的<b>单个事务</b>
+    /// （<see cref="DatabaseMigrator"/> 一次 <c>Begin/Commit</c> 跑完整份脚本）。
+    /// 每个测试类各自调用 <see cref="EnsureSchema"/>，而 xUnit 默认<b>类间并行</b>；
+    /// 于是一个类在跑 DDL 事务、另一个类的用例正对着同一批表做 DML，
+    /// SQL Server 直接判定循环等待并回滚牺牲品 ——
+    /// CI 2026-11-03 就是这么红的：<c>error 1205 deadlock victim</c> 落在
+    /// <c>ClientRegistryDatabaseTests</c> / <c>AdminUserStoreDatabaseTests</c> 的写事务上，
+    /// 而本地永远看不出来（本机没有 SqlServer，那一半恒被跳过）。
+    /// 串行化之后「迁移期间的 DML」不再可能发生：三个类的用例都在这道闸门后面才开始跑。
+    /// </remarks>
+    private static void MigrateSchema(TestDatabaseSpec spec)
     {
         switch (spec.Type)
         {
@@ -124,7 +163,9 @@ internal static class TestDatabases
 
         try
         {
-            EnsureMySqlSchema(spec);
+            // 走单飞入口：探测时的这次迁移就是本进程唯一一次，
+            // 之后各测试类的 EnsureSchema 直接命中缓存（否则每个类都要重跑一遍全量 DDL）
+            EnsureSchema(spec);
 
             using var session = CreateSessionFactory(spec).Create();
 
@@ -245,7 +286,7 @@ internal static class TestDatabases
 
         try
         {
-            EnsureSqlServerSchema(prepared);
+            EnsureSchema(prepared);
 
             using var session = CreateSessionFactory(prepared).Create();
 
