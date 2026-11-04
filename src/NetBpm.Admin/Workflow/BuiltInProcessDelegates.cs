@@ -25,6 +25,10 @@ namespace NetBpm.Admin.Workflow;
 [ServiceTaskName("leave.RefuseComplete")]
 [ServiceTaskName("order.ApproveComplete")]
 [ServiceTaskName("order.RefuseComplete")]
+// 通用别名：示例请假流程的收口节点直接写 ${approveComplete} / ${refuseComplete}
+// （不绑流程 key，接入方在自己的宿主里注册同名委托即可替换）。
+[ServiceTaskName("approveComplete")]
+[ServiceTaskName("refuseComplete")]
 public sealed class BuiltInApprovalCompletionDelegate : IServiceTaskDelegate
 {
     private readonly ILogger<BuiltInApprovalCompletionDelegate> _logger;

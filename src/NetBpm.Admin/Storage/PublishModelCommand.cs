@@ -31,6 +31,7 @@ internal sealed class PublishModelCommand : ICommand<ProcessDefinition>
     private readonly byte[] _bpmnXml;
     private readonly SaveBpmnModelRequest _snapshot;
     private readonly string? _operatorId;
+    private readonly string? _tenantId;
 
     public PublishModelCommand(
         IProcessEngine engine,
@@ -38,7 +39,8 @@ internal sealed class PublishModelCommand : ICommand<ProcessDefinition>
         string modelId,
         byte[] bpmnXml,
         SaveBpmnModelRequest snapshot,
-        string? operatorId)
+        string? operatorId,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(store);
@@ -52,6 +54,7 @@ internal sealed class PublishModelCommand : ICommand<ProcessDefinition>
         _bpmnXml = bpmnXml;
         _snapshot = snapshot;
         _operatorId = operatorId;
+        _tenantId = tenantId;
     }
 
     /// <summary>部署时产生的提示级校验结果（提交后由调用方取用）。</summary>
@@ -72,6 +75,9 @@ internal sealed class PublishModelCommand : ICommand<ProcessDefinition>
                 stream,
                 $"{_modelId}.bpmn20.xml",
                 $"模型发布：{_snapshot.Name}",
+                // 🔑 必须带租户：引擎按 (KEY_, TENANT_ID_) 取最新定义，
+                // 不带的话定义落在空租户，租户化的运行侧（tenant=default）永远看不到这次发布。
+                tenantId: _tenantId,
                 ct: ct)
             .ConfigureAwait(false);
 

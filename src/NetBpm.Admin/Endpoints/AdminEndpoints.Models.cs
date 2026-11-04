@@ -903,7 +903,10 @@ public static partial class AdminEndpoints
                         // 没有新 SVG 时沿用主表现有预览，避免把已有图清空
                         Svg = string.IsNullOrWhiteSpace(request?.Svg) ? model.Svg : request.Svg,
                     },
-                    requestContext.UserId);
+                    requestContext.UserId,
+                    // 与设计器部署同口径：按操作人所属租户落定义。
+                    // 平台默认租户就是 default（引擎里 null 也按 default 处理），所以缺省回落到它。
+                    ResolveTenant(null, requestContext) ?? "default");
 
                 // 部署 + publish 快照在同一个命令（同一个事务）里完成：
                 // 任一步失败整体回滚，不会出现「部署了但发布历史里没有」。
