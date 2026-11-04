@@ -16,8 +16,27 @@ dotnet run --project src/NetBpm.Admin
 # 浏览器打开 http://localhost:5081/ ，未登录会跳到 /login
 ```
 
+> ⚠️ **在 IDE 里开发时改用脚本启动**（Windows 用 `.ps1`，bash 用 `.sh`）：
+>
+> ```
+> src/NetBpm.Admin/run-admin.ps1        # 发布到 artifacts/admin-console 再从那里启动
+> src/NetBpm.Admin/stop-admin.ps1       # 按端口停掉运行中的控制台
+> ```
+>
+> 原因与 worker 那边的 `run-worker.ps1` 完全一样：`dotnet run` 把 exe 放在
+> `src/NetBpm.Admin/bin/Debug/net10.0/` 下，运行中的进程锁住了它，
+> IDE 点「重新生成」时 MSBuild 覆盖不了 —— 报 **MSB3021 / MSB3027「文件正由另一进程使用」**，
+> 错误列表里全是复制文件的红叉，看不出真实原因。
+> 脚本先 `dotnet publish` 到 `artifacts/admin-console/` 再从那里启动，
+> 运行实例与 IDE 的编译输出彻底分离，**控制台常驻也能随时重新生成**。
+
 数据库连接取 `src/NetBpm.Admin/appsettings.Development.json`（默认 `MySql` + `netbpm_admin` 库，`AutoMigrate: true` 会自动建表）。
 控制台前端由该宿主托管（`wwwroot`），改过 `web/admin` 前端源码后需要 `npm run build` 才会生效；开发期可用 `npm run dev`（默认代理到 5081，可用 `NETBPM_API_TARGET` 改目标）。
+
+> 🔑 **控制台与 worker 是两个进程**：控制台在 5081（引擎 + 控制台前端 + 外部任务接口），
+> worker 在 3007（去 5081 领任务）。只起控制台不起 worker，外部任务会一直停在 `PENDING`，
+> 并在控制台日志里刷 `external_task.no_worker` 告警。启动方式见 `docs/leave-worker-3007-integration.md`。
+
 
 ### 0.2 建一个管理员账号
 
