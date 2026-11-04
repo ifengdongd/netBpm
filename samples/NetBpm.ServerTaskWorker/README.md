@@ -101,6 +101,15 @@ dotnet user-secrets set "Worker:ClientKey" "nbc.cl_xxxxxxxx.yyyyyyyy" --project 
 dotnet run --project samples/NetBpm.ServerTaskWorker
 ```
 
+> 🔑 **密钥只放用户机密，不要写回 `appsettings.json`**：
+> `appsettings.json` 是**被 git 跟踪**的，仓库又推到了 GitHub / Gitee 的公开远端 ——
+> 写进去等于把可用的客户端密钥公开出去（别人拿它就能以你的名义领任务、回执）。
+> `appsettings.json` 里的 `Worker:ClientKey` 因此留空，真实密钥只存在于
+> 用户机密（`%APPDATA%/Microsoft/UserSecrets/`，不进仓库）或环境变量。
+>
+> 密钥一旦进过 git 历史，**轮换才是正解**（仓库里删掉不等于失效）：
+> 控制台「接入管理 → 客户端 → 轮换密钥」签发新密钥 → 换到用户机密 → 旧密钥按宽限期自动作废。
+
 PowerShell：
 
 ```powershell

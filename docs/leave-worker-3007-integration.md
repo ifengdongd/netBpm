@@ -69,6 +69,23 @@ v4 里应该正好是这两行，**没有** `activiti:delegateExpression`：
 - 丢了不要重建客户端 —— 行内 **「轮换密钥」** 会给新密钥，且**旧密钥还能用 7 天**（`RotationGraceDays`），足够滚动发布；
 - 密钥过期时间在客户端列表里能看，建议设个提前一周的提醒。
 
+> 🔑 **密钥只能进「用户机密」或环境变量，绝不能进仓库**：
+>
+> ```bash
+> dotnet user-secrets set "Worker:ClientKey" "nbc.cl_xxxxxxxx.yyyyyyyy" \
+>   --project samples/NetBpm.ServerTaskWorker
+> ```
+>
+> `samples/NetBpm.ServerTaskWorker/appsettings.json` 是**被 git 跟踪**的，
+> 而本仓库推到了 GitHub / Gitee 的**公开远端** —— 明文密钥写进去等于公开可用凭据
+> （别人拿它就能以你的名义领任务、回执业务单）。
+> 该文件的 `Worker:ClientKey` 因此留空，真实密钥只存在于用户机密（`%APPDATA%/Microsoft/UserSecrets/`，不进仓库）或环境变量。
+>
+> ⚠️ **密钥一旦进过 git 历史，删掉文件里的明文不等于失效**（历史里还在）：
+> 正解是 **轮换** —— 控制台「接入管理 → 客户端 → 轮换密钥」签发新密钥 → 换进用户机密 → 旧密钥自动作废。
+> 本机已于 2026-11-04 实测做过一次：旧密钥在轮换后立即 `401`，新密钥 fetch 正常。
+
+
 ### 1.4 观察与干预：侧栏「外部任务」
 
 | 列 / 操作 | 含义 |
