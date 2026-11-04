@@ -194,7 +194,7 @@
 |---|---|---|---|
 | T8.1 | 任务实体与查询 | `TaskEntity` / `ITaskManager` / `TaskQuery` | 任务行**不做脏检查**（即时写）⇒ "只改了 `CLAIM_TIME_`"必须显式 `UpdateTaskAsync` |
 | T8.2 | 身份关系 | `IdentityLink`（人/组）、claim / 取消 claim | 候选组展开需要 `IUserGroupManager`，**只有应用层做得了**，别塞进引擎 |
-| T8.3 | 身份端口可替换 | `EmptyUserGroupManager` / `IOrgDirectory` / `InMemoryOrgDirectory` | 端口设计要能被真库实现 —— **2026-10-20 已兑现**：Demo 的 `MySqlOrgDirectory` 读 `sys_dept` / `sys_emp` / `sys_emp_group` / `sys_emp_group_member` 四张真表（随 `AddDemoStores` 按方言切换；SqlServer / JSON 模式仍用内存版） |
+| T8.3 | 身份端口可替换 | `EmptyUserGroupManager` / `IOrgDirectory` / `InMemoryOrgDirectory` | 端口设计要能被真库实现 —— **2026-10-20 已兑现**（当时 Demo 的 `MySqlOrgDirectory` 读四张 `sys_*` 真表）；**2026-11-04 平台化收尾**：`sys_*` 表下线，该实现随之删除，示例统一用 `InMemoryOrgDirectory`，接真库改为自行实现端口 |
 
 ### WP9 设计器前端（P8）
 

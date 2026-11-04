@@ -139,32 +139,13 @@ internal static class SqlGenerator
         }
 
         lines.AddRange(RenderTableSection(SchemaCatalog.WorkflowTypeTable, dialect));
-        lines.AddRange(RenderSeed(SchemaCatalog.WorkflowTypeSeeds, dialect, idempotent: true));
+        lines.AddRange(RenderSeed(SchemaCatalog.WorkflowTypeSeeds, dialect));
         lines.AddRange(RenderTableSection(SchemaCatalog.BpmnModelTable, dialect));
 
-        // ③ Demo 业务表 + 组织架构
-        lines.AddRange(BlankSection("③ Demo 业务表与组织架构（含演示种子数据）"));
+        // ③ 流程参数表（Demo 业务的键值存储；表单本身由接入方的库承载）
+        lines.AddRange(BlankSection("③ 流程参数表（Demo 业务键值存储）"));
         lines.AddRange(DemoNotes);
-        foreach (var table in new[]
-        {
-            SchemaCatalog.LeaveBillTable,
-            SchemaCatalog.OrderBillTable,
-            SchemaCatalog.WorkflowParametersTable,
-        })
-        {
-            lines.AddRange(RenderTableSection(table, dialect));
-        }
-
-        foreach (var table in SchemaCatalog.OrgTables)
-        {
-            lines.AddRange(RenderTableSection(table, dialect));
-        }
-
-        lines.AddRange(BlankSection("③-1 组织架构种子数据"));
-        foreach (var seed in SchemaCatalog.OrgSeeds)
-        {
-            lines.AddRange(RenderSeed(seed, dialect, idempotent: true));
-        }
+        lines.AddRange(RenderTableSection(SchemaCatalog.WorkflowParametersTable, dialect));
 
         // ④ 运行期查询索引
         lines.AddRange(BlankSection("④ 运行期查询索引（性能增强，不影响行内容）"));
@@ -193,6 +174,11 @@ internal static class SqlGenerator
             lines.AddRange(BlankSection("⑦ 表与列注释（扩展属性 MS_Description，已存在则跳过）"));
             lines.AddRange(RenderTableComments(AllTables));
         }
+
+        // ⑧ 已下线表清理
+        lines.AddRange(BlankSection("⑧ 已下线表清理（幂等；新库执行为空操作）"));
+        lines.AddRange(RetiredTablesNotes);
+        lines.AddRange(RenderRetiredTables(dialect));
 
         lines.AddRange(Footer(dialect));
         return lines;
@@ -232,10 +218,7 @@ internal static class SqlGenerator
         .. SchemaCatalog.InstanceTables,
         SchemaCatalog.WorkflowTypeTable,
         SchemaCatalog.BpmnModelTable,
-        SchemaCatalog.LeaveBillTable,
-        SchemaCatalog.OrderBillTable,
         SchemaCatalog.WorkflowParametersTable,
-        .. SchemaCatalog.OrgTables,
         .. ExtensionTables,
     ];
 
@@ -357,6 +340,31 @@ internal static class SqlGenerator
             idempotent: true));
         lines.Add(string.Empty);
 
+        return lines;
+    }
+
+    /// <summary>
+    /// ⑧ 已下线表清理：把 <see cref="SchemaCatalog.RetiredTables"/> 里的表 <c>drop table if exists</c>。
+    /// <para>
+    /// 幂等：表不存在时整句是空操作（MySQL 靠 <c>if exists</c>，SQL Server 靠 <c>object_id</c> 守卫），
+    /// 所以新库跑这一段什么都不会发生，老库跑一次就把残留表清掉。
+    /// </para>
+    /// <para>
+    /// ⚠️ 这是脚本里唯一一处**破坏性**语句：表连同数据一起删。下线表时务必确认它真的不该再存在。
+    /// </para>
+    /// </summary>
+    private static List<string> RenderRetiredTables(Dialect dialect)
+    {
+        var lines = new List<string>();
+
+        foreach (var table in SchemaCatalog.RetiredTables)
+        {
+            lines.Add(dialect == Dialect.MySql
+                ? $"drop table if exists `{table}`;"
+                : $"if object_id(N'{table}', N'U') is not null drop table {table};");
+        }
+
+        lines.Add(string.Empty);
         return lines;
     }
 
@@ -901,59 +909,53 @@ internal static class SqlGenerator
         return lines;
     }
 
-    private static List<string> RenderSeed(SeedTable seed, Dialect dialect, bool idempotent)
+    /// <summary>
+    /// 渲染种子数据：**只在目标表为空时**插入。
+    /// <para>
+    /// 判空必须和插入在**同一条语句**里（MySQL <c>insert … select … where not exists</c>、
+    /// SQL Server <c>if not exists (select 1 from 表)</c>），逐行判重不行：第一行插进去之后表就不空了，
+    /// 后面几行会被自己的守卫挡掉。两种写法都满足「表空 → 全部插入；表非空 → 一行不插，也不补回删掉的行」。
+    /// </para>
+    /// </summary>
+    private static List<string> RenderSeed(SeedTable seed, Dialect dialect)
     {
         var lines = new List<string>();
         var columns = string.Join(", ", seed.Columns.Select(name => Quote(name, dialect)));
 
         if (dialect == Dialect.MySql)
         {
-            var values = string.Join(",\n       ", seed.Rows.Select(row => $"({string.Join(", ", RowValues(row, dialect))})"));
+            // 派生表让「一次判空 + 多行」成为可能，但要求列名唯一：MySQL 5.7 对重名列直接报
+            // 1060 Duplicate column name（workflow_type 首行的 tenant_id / sort_order / enabled 都是 1），
+            // 所以首行必须显式按列名起别名，不能靠字面量当列名。
+            lines.Add($"insert into {seed.TableName} ({columns})");
+            lines.Add("select * from (");
 
-            if (idempotent && seed.UpsertUpdateColumns.Count == 0)
+            for (var row = 0; row < seed.Rows.Count; row++)
             {
-                // 没有「可更新字段」的种子（如组织架构成员关系）只需保证存在
-                lines.Add($"insert ignore into {seed.TableName} ({columns})");
-            }
-            else
-            {
-                lines.Add($"insert into {seed.TableName} ({columns})");
-            }
+                var values = string.Join(", ", seed.Rows[row].Select((value, column) =>
+                    row == 0
+                        ? $"{Literal(value, dialect)} as {Quote(seed.Columns[column], dialect)}"
+                        : Literal(value, dialect)));
 
-            lines.Add($"values {values}");
-
-            if (idempotent && seed.UpsertUpdateColumns.Count > 0)
-            {
-                // 列名必须按方言转义：workflow_type 的 `describe` 在 MySQL 里是保留字
-                var updateClauses = string.Join(", ", seed.UpsertUpdateColumns.Select(column =>
-                    $"{Quote(column, dialect)} = values({Quote(column, dialect)})"));
-                lines[^1] += $" on duplicate key update {updateClauses}";
+                lines.Add($"    {(row == 0 ? "select" : "union all select")} {values}");
             }
 
-            lines[^1] += ";";
+            lines.Add($") as {seed.TableName}_seed");
+            lines.Add($"where not exists (select 1 from {seed.TableName});");
         }
         else
         {
-            var columnIndex = seed.Columns
-                .Select((name, index) => (name, index))
-                .ToDictionary(pair => pair.name, pair => pair.index);
+            lines.Add($"if not exists (select 1 from {seed.TableName})");
+            lines.Add($"    insert into {seed.TableName} ({columns})");
 
-            foreach (var row in seed.Rows)
+            for (var row = 0; row < seed.Rows.Count; row++)
             {
-                if (idempotent)
-                {
-                    var guard = string.Join(" and ", seed.GuardColumns.Select(column =>
-                        $"{column} = {Literal(row[columnIndex[column]], dialect)}"));
-                    lines.Add($"if not exists (select 1 from {seed.TableName} where {guard})");
-                    lines.Add($"    insert into {seed.TableName} ({columns})");
-                    lines.Add($"    values ({string.Join(", ", RowValues(row, dialect))});");
-                    lines.Add("go");
-                    continue;
-                }
-
-                lines.Add($"insert into {seed.TableName} ({columns})");
-                lines.Add($"values ({string.Join(", ", RowValues(row, dialect))});");
+                var prefix = row == 0 ? "    values " : "           ";
+                var suffix = row == seed.Rows.Count - 1 ? ";" : ",";
+                lines.Add($"{prefix}({string.Join(", ", RowValues(seed.Rows[row], dialect))}){suffix}");
             }
+
+            lines.Add("go");
         }
 
         lines.Add(string.Empty);
@@ -1069,11 +1071,12 @@ internal static class SqlGenerator
         "--    ⓪ 建库 / 选库（仅手工执行时生效）",
         "--    ① 引擎基础表 13 张 ACT_*（Activiti 子集）+ 索引 / 唯一约束 / 外键 + ACT_GE_PROPERTY 初值",
         "--    ② 流程实例业务表（instances / instance_current_task / deal_history）+ 流程类型 + 流程模型",
-        "--    ③ Demo 业务表（leave_bill / order_bill / workflow_parameters）+ 组织架构 + 演示种子数据",
+        "--    ③ 流程参数表（workflow_parameters，Demo 业务的键值存储）",
         "--    ④ 运行期查询索引（性能增强）",
         "--    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox / 平台接入（nb_*）",
         "--    ⑥ 老库兼容补齐（大文本扩容、定时作业可靠性列）",
         "--    ⑦ 表与列注释（SQL Server 扩展属性；MySQL 注释内联在建表语句里）",
+        "--    ⑧ 已下线表清理（drop table if exists：平台化后不再持有的 Demo 业务表）",
         "--",
         "--  执行方式：",
         "--    · 工具（推荐，一步建库 + 建表 + 校验结构版本）：",
@@ -1149,21 +1152,30 @@ internal static class SqlGenerator
 
     private static string[] DemoNotes =>
     [
-        "--  来源：**本项目新增** —— 订单审批 + 请假审批两条 Demo 的业务数据表。",
+        "--  来源：**本项目新增** —— Demo 业务的流程参数键值存储（表单本身不在这里）。",
         "--",
-        "--    leave_bill          请假单（days / reason 真列 + ext_params JSON 扩展参数）",
-        "--    order_bill          订单单（status 随审批回写：1=审批中，-1=拒绝，100=通过）",
         "--    workflow_parameters 流程参数键值表（「实例 × 参数名」；param_value 用 text / nvarchar(max)）",
-        "--    sys_*               组织架构表（部门 / 员工 / 审批组 / 组成员）+ 演示种子数据",
         "--",
-        "--  与流程实例表的关系：",
-        "--    instances.business_id          → leave_bill.business_id / order_bill.business_id",
-        "--    instances.workflow_instance_id → workflow_parameters.workflow_instance_id",
-        "--    instances.apply_emp_id         → sys_emp.domain_account（申请人在流程里的用户 ID）",
-        "--    instances.apply_dept_id        → sys_dept.dept_id",
+        "--  平台化边界：",
+        "--    平台只负责「流程怎么走」，不持有业务表单与组织主数据。",
+        "--    请假单 / 订单单（leave_bill / order_bill）与 sys_* 组织架构表已下线，",
+        "--    改由接入方自己的库承载；流程侧通过 businessKey、流程参数与 candidateUsers / candidateGroups 对接。",
+        "--    老库里残留的这 6 张表会在本节之后的 ⑧ 段被 drop（幂等）。",
         "--",
-        "--  ⚠️ 这一组是 Demo / 示例业务表：只接引擎、不要业务表的环境可按需忽略本节的表，",
-        "--     但脚本整体执行（含本节的表）对引擎功能无影响。",
+        "--  ⚠️ 仍需要它们的演示环境（samples/NetBpm.Demo 的 MySQL 存储模式）应把表建在自己的库，",
+        "--     不要往平台库里加回来。",
+        string.Empty,
+    ];
+
+    /// <summary>⑧ 段说明：为什么「下线一张表」必须同时改建表清单与这份清理清单。</summary>
+    private static string[] RetiredTablesNotes =>
+    [
+        "--  本平台没有迁移记录表：Migrate() 每次只整篇重跑幂等脚本，",
+        "--  从建表清单里删掉一张表，只能让「新库」不建它，老库里那张表仍在。",
+        "--  所以下线 = ① 从 SchemaCatalog 建表清单移除 ② 加进 RetiredTables，由本段 drop。",
+        "--",
+        "--  ⚠️ 本段是**破坏性**的：表与数据一并删除，且每次迁移都会执行（幂等，删过即空操作）。",
+        "--     确需保留历史数据的，先自行导出再迁移。",
         string.Empty,
     ];
 

@@ -878,7 +878,7 @@ await WorkflowProcessBootstrapper.DeployAsync(app.Services, new WorkflowDeployOp
 | `IWorkflowDataStore` | 应用层与宿主之间唯一的缝：实例登记 / 审批结论 / 流程参数 / 审批记录 / 当前待办 |
 | `JsonWorkflowDataStore` | 端口的**参考实现**：五个区块直接落一个 JSON 文件（零落库跑通全链路，换真库时数据形状不变） |
 | `WorkflowCompletionDelegate` | 「结束收口」委托基类：派生一个类只需声明 `[ServiceTaskName]` 与结论名 |
-| `IOrgDirectory` / `InMemoryOrgDirectory` | 组织架构查询（部门 / 员工 / 按候选组找审批人）：内置演示实现（SqlServer / JSON 模式）+ MySQL 真表实现 `MySqlOrgDirectory`（Demo 存储层，读 `sys_dept` / `sys_emp` 等四张 `sys_*` 表，随业务存储按方言切换） |
+| `IOrgDirectory` / `InMemoryOrgDirectory` | 组织架构查询（部门 / 员工 / 按候选组找审批人）：内置演示实现。原先读 `sys_dept` / `sys_emp` 等四张 `sys_*` 表的 `MySqlOrgDirectory` 已随这些表**删除** —— 平台不再持有组织主数据，接入方自己实现本端口即可 |
 | `ApprovalFormGuard` | 部署期自检：审批表单约定（`approvalResult` 枚举 ↔ `result` 变量） |
 | `ListenerStats` | 监听器触发计数（端到端断言「监听器真的被调到了」） |
 

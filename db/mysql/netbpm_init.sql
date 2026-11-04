@@ -16,11 +16,12 @@
 --    ⓪ 建库 / 选库（仅手工执行时生效）
 --    ① 引擎基础表 13 张 ACT_*（Activiti 子集）+ 索引 / 唯一约束 / 外键 + ACT_GE_PROPERTY 初值
 --    ② 流程实例业务表（instances / instance_current_task / deal_history）+ 流程类型 + 流程模型
---    ③ Demo 业务表（leave_bill / order_bill / workflow_parameters）+ 组织架构 + 演示种子数据
+--    ③ 流程参数表（workflow_parameters，Demo 业务的键值存储）
 --    ④ 运行期查询索引（性能增强）
 --    ⑤ 应用层扩展表：幂等键 / 定时作业 / 迁移审计 / 模型历史 / 管理审计与归档 / 异步作业 / outbox / 平台接入（nb_*）
 --    ⑥ 老库兼容补齐（大文本扩容、定时作业可靠性列）
 --    ⑦ 表与列注释（SQL Server 扩展属性；MySQL 注释内联在建表语句里）
+--    ⑧ 已下线表清理（drop table if exists：平台化后不再持有的 Demo 业务表）
 --
 --  执行方式：
 --    · 工具（推荐，一步建库 + 建表 + 校验结构版本）：
@@ -810,9 +811,12 @@ execute stmt;
 deallocate prepare stmt;
 
 insert into workflow_type (tenant_id, id, name, `describe`, view_url, approve_url, sort_order, enabled, create_time)
-values (1, '02830358-46ef-40e5-b3b9-4d5c4eb23f9f', 'order_process', '订单审批流程', '/bill.html?process=order_process&businessId={businessId}', '/approve.html?process=order_process&taskId={taskId}', 1, 1, utc_timestamp()),
-       (1, '3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7', 'leave_process', '请假申请流程', '/bill.html?process=leave_process&businessId={businessId}', '/approve.html?process=leave_process&taskId={taskId}', 2, 1, utc_timestamp()),
-       (1, '9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31', 'dept_approval_process', '部门审批流程', '/bill.html?process=dept_approval_process&businessId={businessId}', '/approve.html?process=dept_approval_process&taskId={taskId}', 3, 1, utc_timestamp()) on duplicate key update name = values(name), `describe` = values(`describe`), view_url = values(view_url), approve_url = values(approve_url), sort_order = values(sort_order), enabled = values(enabled), modify_time = values(modify_time);
+select * from (
+    select 1 as tenant_id, '02830358-46ef-40e5-b3b9-4d5c4eb23f9f' as id, 'order_process' as name, '订单审批流程' as `describe`, '/bill.html?process=order_process&businessId={businessId}' as view_url, '/approve.html?process=order_process&taskId={taskId}' as approve_url, 1 as sort_order, 1 as enabled, utc_timestamp() as create_time
+    union all select 1, '3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7', 'leave_process', '请假申请流程', '/bill.html?process=leave_process&businessId={businessId}', '/approve.html?process=leave_process&taskId={taskId}', 2, 1, utc_timestamp()
+    union all select 1, '9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31', 'dept_approval_process', '部门审批流程', '/bill.html?process=dept_approval_process&businessId={businessId}', '/approve.html?process=dept_approval_process&taskId={taskId}', 3, 1, utc_timestamp()
+) as workflow_type_seed
+where not exists (select 1 from workflow_type);
 
 create table if not exists bpmn_model (
     id varchar(64) not null comment '模型 ID（设计器 modelId，GUID 字符串）',
@@ -846,82 +850,20 @@ execute stmt;
 deallocate prepare stmt;
 
 
--- ─────────────────────────── ③ Demo 业务表与组织架构（含演示种子数据） ───────────────────────────
+-- ─────────────────────────── ③ 流程参数表（Demo 业务键值存储） ───────────────────────────
 
---  来源：**本项目新增** —— 订单审批 + 请假审批两条 Demo 的业务数据表。
+--  来源：**本项目新增** —— Demo 业务的流程参数键值存储（表单本身不在这里）。
 --
---    leave_bill          请假单（days / reason 真列 + ext_params JSON 扩展参数）
---    order_bill          订单单（status 随审批回写：1=审批中，-1=拒绝，100=通过）
 --    workflow_parameters 流程参数键值表（「实例 × 参数名」；param_value 用 text / nvarchar(max)）
---    sys_*               组织架构表（部门 / 员工 / 审批组 / 组成员）+ 演示种子数据
 --
---  与流程实例表的关系：
---    instances.business_id          → leave_bill.business_id / order_bill.business_id
---    instances.workflow_instance_id → workflow_parameters.workflow_instance_id
---    instances.apply_emp_id         → sys_emp.domain_account（申请人在流程里的用户 ID）
---    instances.apply_dept_id        → sys_dept.dept_id
+--  平台化边界：
+--    平台只负责「流程怎么走」，不持有业务表单与组织主数据。
+--    请假单 / 订单单（leave_bill / order_bill）与 sys_* 组织架构表已下线，
+--    改由接入方自己的库承载；流程侧通过 businessKey、流程参数与 candidateUsers / candidateGroups 对接。
+--    老库里残留的这 6 张表会在本节之后的 ⑧ 段被 drop（幂等）。
 --
---  ⚠️ 这一组是 Demo / 示例业务表：只接引擎、不要业务表的环境可按需忽略本节的表，
---     但脚本整体执行（含本节的表）对引擎功能无影响。
-
-create table if not exists leave_bill (
-    tenant_id bigint not null comment '多租户id',
-    business_id bigint not null comment '业务id（请假单号，由业务侧生成）',
-    apply_user varchar(50) not null comment '申请人',
-    apply_dept_id varchar(50) not null comment '申请部门',
-    business_dept_id varchar(50) comment '业务部门',
-    days smallint comment '请假天数（对应流程参数 days）；NULL = 还没填',
-    reason varchar(500) comment '请假事由（对应流程参数 reason）',
-    ext_params varchar(2000) comment '扩展流程参数（JSON 对象）：除 days / reason 外的键值对',
-    create_time datetime not null comment '创建时间',
-    modify_time datetime comment '最后修改时间',
-    primary key (business_id),
-    index ix_leave_bill_apply_user (tenant_id, apply_user)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='请假单（业务表单；days/reason 对应请假流程参数；流程类型id=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）';
-
-set @ddl = (select if(count(*) = 0,
-        'create index ix_leave_bill_apply_user on leave_bill (tenant_id, apply_user)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'leave_bill' and index_name = 'ix_leave_bill_apply_user');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-create table if not exists order_bill (
-    tenant_id bigint not null comment '多租户id',
-    business_id bigint not null comment '业务id（订单单号，由业务侧生成）',
-    product_name varchar(200) comment '订购产品（对应流程参数 product_name）',
-    amount decimal(18,2) comment '订单金额（对应流程参数 amount）',
-    remark varchar(500) comment '备注（对应流程参数 remark）',
-    status smallint not null default 1 comment '状态：1=审批中，-1=审批拒绝，100=审批通过',
-    approve_comment varchar(500) comment '最终审批意见（审批结束时随状态一起写回）',
-    apply_user varchar(50) not null comment '申请人',
-    apply_dept_id varchar(50) not null comment '申请部门',
-    business_dept_id varchar(50) comment '业务部门',
-    process_instance_id varchar(64) comment '流程实例 id（提交申请后回填，用于反查审批进度）',
-    create_time datetime not null comment '创建时间',
-    modify_time datetime comment '最后修改时间',
-    deleted_flag tinyint not null default 0 comment '伪删除标志（0 正常 / 1 已删除；公共数据操作接口 DeleteAsync 置位，列表与明细自动过滤）',
-    primary key (business_id),
-    index ix_order_bill_apply_user (tenant_id, apply_user),
-    index ix_order_bill_status (tenant_id, status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='订单表（业务表单；状态随订单审批流程回写：1=审批中，-1=审批拒绝，100=审批通过；流程类型id=02830358-46ef-40e5-b3b9-4d5c4eb23f9f）';
-
-set @ddl = (select if(count(*) = 0,
-        'create index ix_order_bill_apply_user on order_bill (tenant_id, apply_user)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'order_bill' and index_name = 'ix_order_bill_apply_user');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-set @ddl = (select if(count(*) = 0,
-        'create index ix_order_bill_status on order_bill (tenant_id, status)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'order_bill' and index_name = 'ix_order_bill_status');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
+--  ⚠️ 仍需要它们的演示环境（samples/NetBpm.Demo 的 MySQL 存储模式）应把表建在自己的库，
+--     不要往平台库里加回来。
 
 create table if not exists workflow_parameters (
     tenant_id bigint not null comment '多租户id',
@@ -941,113 +883,6 @@ set @ddl = (select if(count(*) = 0,
 prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
-
-create table if not exists sys_dept (
-    dept_id bigint not null comment '部门ID',
-    tenant_id bigint not null comment '多租户ID',
-    dept_name varchar(100) not null comment '部门名称',
-    parent_id bigint comment '上级部门ID（NULL=顶级）',
-    sort_order int not null default 0 comment '排序号',
-    create_time datetime not null comment '创建时间',
-    primary key (dept_id),
-    index idx_sys_dept_tenant (tenant_id, parent_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='部门信息表';
-
-set @ddl = (select if(count(*) = 0,
-        'create index idx_sys_dept_tenant on sys_dept (tenant_id, parent_id)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'sys_dept' and index_name = 'idx_sys_dept_tenant');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-create table if not exists sys_emp (
-    emp_id bigint not null comment '员工ID',
-    tenant_id bigint not null comment '多租户ID',
-    emp_name varchar(50) not null comment '员工姓名',
-    domain_account varchar(50) not null comment '域账号（审批人/申请人在流程里的用户ID）',
-    dept_id bigint not null comment '所属部门ID（sys_dept.dept_id）',
-    create_time datetime not null comment '创建时间',
-    primary key (emp_id),
-    unique key uk_sys_emp_account (tenant_id, domain_account),
-    index idx_sys_emp_dept (dept_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='员工信息表';
-
-set @ddl = (select if(count(*) = 0,
-        'create unique index uk_sys_emp_account on sys_emp (tenant_id, domain_account)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'sys_emp' and index_name = 'uk_sys_emp_account');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-set @ddl = (select if(count(*) = 0,
-        'create index idx_sys_emp_dept on sys_emp (dept_id)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'sys_emp' and index_name = 'idx_sys_emp_dept');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-create table if not exists sys_emp_group (
-    group_id varchar(50) not null comment '组标识（流程定义 candidateGroups 引用的就是它）',
-    tenant_id bigint not null comment '多租户ID',
-    group_name varchar(100) not null comment '组名称（如：组长 / 经理）',
-    sort_order int not null default 0 comment '排序号',
-    create_time datetime not null comment '创建时间',
-    primary key (group_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='用户组表（审批组）';
-
-create table if not exists sys_emp_group_member (
-    member_id bigint not null comment '成员行ID',
-    tenant_id bigint not null comment '多租户ID',
-    group_id varchar(50) not null comment '组标识（sys_emp_group.group_id）',
-    emp_id bigint not null comment '员工ID（sys_emp.emp_id）',
-    create_time datetime not null comment '创建时间',
-    primary key (member_id),
-    unique key uk_sys_emp_group_member (group_id, emp_id),
-    index idx_sys_emp_group_member_emp (emp_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin COMMENT='用户组成员表';
-
-set @ddl = (select if(count(*) = 0,
-        'create unique index uk_sys_emp_group_member on sys_emp_group_member (group_id, emp_id)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'sys_emp_group_member' and index_name = 'uk_sys_emp_group_member');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-set @ddl = (select if(count(*) = 0,
-        'create index idx_sys_emp_group_member_emp on sys_emp_group_member (emp_id)',
-        'select 1')
-    from information_schema.statistics where table_schema = database() and table_name = 'sys_emp_group_member' and index_name = 'idx_sys_emp_group_member_emp');
-prepare stmt from @ddl;
-execute stmt;
-deallocate prepare stmt;
-
-
--- ─────────────────────────── ③-1 组织架构种子数据 ───────────────────────────
-
-insert into sys_dept (dept_id, tenant_id, dept_name, parent_id, sort_order, create_time)
-values (101, 1, '信息技术部', null, 1, utc_timestamp()),
-       (102, 1, '成本管理部', null, 2, utc_timestamp()),
-       (103, 1, '综合管理部', null, 3, utc_timestamp()) on duplicate key update dept_name = values(dept_name), parent_id = values(parent_id), sort_order = values(sort_order);
-
-insert into sys_emp (emp_id, tenant_id, emp_name, domain_account, dept_id, create_time)
-values (1001, 1, '王小爱', 'alice', 101, utc_timestamp()),
-       (1002, 1, '李小波', 'bob', 101, utc_timestamp()),
-       (1003, 1, '赵志强', 'leader1', 101, utc_timestamp()),
-       (1004, 1, '钱有为', 'leader2', 102, utc_timestamp()),
-       (1005, 1, '孙建国', 'manager1', 103, utc_timestamp()) on duplicate key update emp_name = values(emp_name), dept_id = values(dept_id);
-
-insert into sys_emp_group (group_id, tenant_id, group_name, sort_order, create_time)
-values ('leaders', 1, '组长', 1, utc_timestamp()),
-       ('managers', 1, '经理', 2, utc_timestamp()) on duplicate key update group_name = values(group_name), sort_order = values(sort_order);
-
-insert ignore into sys_emp_group_member (member_id, tenant_id, group_id, emp_id, create_time)
-values (1, 1, 'leaders', 1003, utc_timestamp()),
-       (2, 1, 'leaders', 1004, utc_timestamp()),
-       (3, 1, 'managers', 1005, utc_timestamp());
 
 
 -- ─────────────────────────── ④ 运行期查询索引（性能增强，不影响行内容） ───────────────────────────
@@ -2306,6 +2141,23 @@ prepare stmt from @ddl;
 execute stmt;
 deallocate prepare stmt;
 
+
+
+-- ─────────────────────────── ⑧ 已下线表清理（幂等；新库执行为空操作） ───────────────────────────
+
+--  本平台没有迁移记录表：Migrate() 每次只整篇重跑幂等脚本，
+--  从建表清单里删掉一张表，只能让「新库」不建它，老库里那张表仍在。
+--  所以下线 = ① 从 SchemaCatalog 建表清单移除 ② 加进 RetiredTables，由本段 drop。
+--
+--  ⚠️ 本段是**破坏性**的：表与数据一并删除，且每次迁移都会执行（幂等，删过即空操作）。
+--     确需保留历史数据的，先自行导出再迁移。
+
+drop table if exists `leave_bill`;
+drop table if exists `order_bill`;
+drop table if exists `sys_dept`;
+drop table if exists `sys_emp`;
+drop table if exists `sys_emp_group`;
+drop table if exists `sys_emp_group_member`;
 
 
 -- ─────────────────────────── 执行结果自检 ───────────────────────────

@@ -67,14 +67,19 @@ dotnet run --project tools/NetBpm.DbInit -- \
 | ⓪ | 建库 / 选库 | 默认库名 `netbpm`；仅手工执行时生效（工具执行会跳过，库名取连接串） |
 | ① | **引擎基础表** | Activiti 子集 13 张 `ACT_*` 表（执行树 / 任务 / 变量 / 历史 / 部署）+ 索引外键 + `schema.version` / `next.dbid` 等初值 |
 | ② | **流程实例业务表** | `instances` / `instance_current_task` / `deal_history` + `workflow_type` 流程类型表（`ProcessInfoEnum` 数据源，含种子）+ `bpmn_model` 流程模型表 |
-| ③ | **Demo 业务表** | 请假单（`leave_bill`）、订单单（`order_bill`）、流程参数键值表（`workflow_parameters`）、组织架构（`sys_*` 四张，含演示种子数据） |
+| ③ | **流程参数表** | `workflow_parameters` 流程参数键值表（「实例 × 参数名」）。表单与组织主数据由接入方自己的库承载，平台不再建 `leave_bill` / `order_bill` / `sys_*` |
 | ④ | **性能增强** | 运行期查询索引（执行树 / 任务 / 变量 / 关系 / 历史），幂等 |
 | ⑤ | **应用层扩展表** | `ACT_IDEMPOTENCY`（HTTP 幂等键）、`ACT_RU_TIMER_JOB`（边界定时作业）、`ACT_HI_MIGRATION`（实例迁移审计）、`bpmn_model_history`（模型版本历史）、`admin_audit_log` + `admin_history_archive`（管理审计与历史归档）、`ACT_RU_JOB`（异步作业）、`ACT_EVT_OUTBOX`（事务性事件外发队列）、`admin_user`（控制台账号密码登录，只存 PBKDF2 口令散列） |
 | ⑥ | **老库兼容补齐** | 模型大文本列扩容（MySQL `text` 64KB → `mediumtext`）、定时作业重试 / 死信列；新库执行为空操作 |
 | ⑦ | **表与列注释**（SQL Server） | `MS_Description` 扩展属性，判重 + 判存在；MySQL 为建表语句内联 `comment` |
+| ⑧ | **已下线表清理** | `SchemaCatalog.RetiredTables` 里的表逐个 `drop table if exists`（MySQL）/ `if object_id(...) is not null drop table`（SQL Server）。新库为空操作；老库里残留的 `leave_bill` / `order_bill` / `sys_dept` / `sys_emp` / `sys_emp_group` / `sys_emp_group_member` 由它清掉 |
 
+> **⚠️ ⑧ 段是脚本里唯一的破坏性语句**：表与数据一并删除，且每次迁移都会执行（幂等）。
+> 平台化后这些表已不属于平台，"下线一张表"的正确做法是 ① 从建表清单移除 ② 加进 `RetiredTables`，
+> 让老库在下次迁移时被清理 —— 只做 ① 的话，老库里那张表会一直留着。
+>
 > **其它 .NET 项目接入引擎**：整份脚本执行一次即可；只接引擎、不要业务表的项目，
-> 忽略 ② ③ 建出来的表就行（对引擎功能无影响）。
+> 忽略 ② 建出来的表就行（对引擎功能无影响）。
 
 ## 控制台账号表（admin_user）
 
@@ -139,7 +144,7 @@ dotnet run --project tools/NetBpm.DbMigrate -- users add --username admin --scop
 | 时间类型 | 引擎表 `datetime(3)` / `timestamp(3)` → SQL Server `datetime`；幂等表 → `datetime2(3)` |
 | 索引 | ① 段 = 上游 Activiti MySQL 的 22 个索引（两方言一致，`ACT_IDC_EXEC_ROOT` 保留上游拼写）；④ 段 = 两方言运行期索引并集（`ACT_IDX_IDENT_LNK_TASK` 去掉 INCLUDE 使定义一致） |
 | 外键 | 14 个外键两方言一致；新增 `ACT_FK_EXE_PROCINST`（`PROC_INST_ID_` 自引用）到 SQL Server。自引用执行树 FK：MySQL 渲染 `on delete cascade`（`ACT_FK_EXE_PROCINST` 另含 `on update cascade`），SQL Server 因「多重级联路径」限制渲染为 NO ACTION；引擎删除本身先子后父，不依赖 DB 级联 |
-| 注释 | SQL Server 补齐业务表（`workflow_type` / `leave_bill` / `sys_*` / `order_bill` / `workflow_parameters`）的表与列 `MS_Description`，与 MySQL `comment` 一一对应 |
+| 注释 | SQL Server 补齐业务表（`workflow_type` / `workflow_parameters`）的表与列 `MS_Description`，与 MySQL `comment` 一一对应 |
 | 约束命名 | SQL Server 统一 `pk_<table>` / `df_<table>_<column>` |
 | 顺序依赖 | 索引不再跨脚本引用「后面才建的表」：`ACT_HI_MIGRATION` 的索引放在该表的建表段里，老库由 ⑥ 段幂等补齐 |
 

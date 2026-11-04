@@ -504,172 +504,33 @@ internal static class SchemaCatalog
             EngineCharset: false),
     ];
 
-    // 0004 请假单
-    internal static readonly TableDef LeaveBillTable = new(
+    // ────────────────────────────────────────────────────────────────────────
+    //  已下线表（平台化改造后清理）
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// 平台化改造后下线的 Demo 业务表：脚本不再建它们，迁移时按需 <c>drop table if exists</c>。
+    /// <para>
+    /// 为什么要有这份清单：本平台没有迁移记录表，<c>Migrate()</c> 每次只重跑幂等脚本，
+    /// 删掉一个 <see cref="TableDef"/> 只能让「新库」不再建表，<b>老库里已存在的表不会被处理</b>。
+    /// 所以下线一张表 = ① 从建表清单移除 ② 加进这里，让 ⑧ 段在下次迁移时清掉。
+    /// </para>
+    /// <para>
+    /// ⚠️ 这里放的都是「纯业务/Demo」表，引擎与平台自身的数据（ACT_* / nb_* / 流程类型 / 模型）不在其列。
+    /// </para>
+    /// </summary>
+    internal static readonly IReadOnlyList<string> RetiredTables =
+    [
+        // 请假单 / 订单单：业务表单，平台只做流程，表单由接入方自己的库承载
         "leave_bill",
-        "请假单（业务表单；days/reason 对应请假流程参数；流程类型id=3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7）",
-        [
-            C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户id"),
-            C("business_id", ColType.BigInt, nullable: false, comment: "业务id（请假单号，由业务侧生成）"),
-            C("apply_user", ColType.Varchar, 50, false, comment: "申请人"),
-            C("apply_dept_id", ColType.Varchar, 50, false, comment: "申请部门"),
-            C("business_dept_id", ColType.Varchar, 50, comment: "业务部门"),
-            C("days", ColType.SmallInt, comment: "请假天数（对应流程参数 days）；NULL = 还没填"),
-            C("reason", ColType.Varchar, 500, comment: "请假事由（对应流程参数 reason）"),
-            C("ext_params", ColType.Varchar, 2000, comment: "扩展流程参数（JSON 对象）：除 days / reason 外的键值对"),
-            C("create_time", ColType.DateTime, nullable: false, comment: "创建时间"),
-            C("modify_time", ColType.DateTime, comment: "最后修改时间"),
-        ],
-        ["business_id"],
-        [new IndexDef("ix_leave_bill_apply_user", ["tenant_id", "apply_user"])],
-        [], [],
-        EngineCharset: false);
-
-    // ────────────────────────────────────────────────────────────────────────
-    //  组织架构表（0005，4 张，幂等）
-    // ────────────────────────────────────────────────────────────────────────
-
-    internal static readonly IReadOnlyList<TableDef> OrgTables =
-    [
-        new TableDef(
-            "sys_dept",
-            "部门信息表",
-            [
-                C("dept_id", ColType.BigInt, nullable: false, comment: "部门ID"),
-                C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户ID"),
-                C("dept_name", ColType.Varchar, 100, false, comment: "部门名称"),
-                C("parent_id", ColType.BigInt, comment: "上级部门ID（NULL=顶级）"),
-                C("sort_order", ColType.Int, nullable: false, def: "0", comment: "排序号"),
-                C("create_time", ColType.DateTime, nullable: false, comment: "创建时间"),
-            ],
-            ["dept_id"],
-            [new IndexDef("idx_sys_dept_tenant", ["tenant_id", "parent_id"])],
-            [], [],
-            EngineCharset: false),
-
-        new TableDef(
-            "sys_emp",
-            "员工信息表",
-            [
-                C("emp_id", ColType.BigInt, nullable: false, comment: "员工ID"),
-                C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户ID"),
-                C("emp_name", ColType.Varchar, 50, false, comment: "员工姓名"),
-                C("domain_account", ColType.Varchar, 50, false, comment: "域账号（审批人/申请人在流程里的用户ID）"),
-                C("dept_id", ColType.BigInt, nullable: false, comment: "所属部门ID（sys_dept.dept_id）"),
-                C("create_time", ColType.DateTime, nullable: false, comment: "创建时间"),
-            ],
-            ["emp_id"],
-            [new IndexDef("idx_sys_emp_dept", ["dept_id"])],
-            [new IndexDef("uk_sys_emp_account", ["tenant_id", "domain_account"], Unique: true)],
-            [],
-            EngineCharset: false),
-
-        new TableDef(
-            "sys_emp_group",
-            "用户组表（审批组）",
-            [
-                C("group_id", ColType.Varchar, 50, false, comment: "组标识（流程定义 candidateGroups 引用的就是它）"),
-                C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户ID"),
-                C("group_name", ColType.Varchar, 100, false, comment: "组名称（如：组长 / 经理）"),
-                C("sort_order", ColType.Int, nullable: false, def: "0", comment: "排序号"),
-                C("create_time", ColType.DateTime, nullable: false, comment: "创建时间"),
-            ],
-            ["group_id"],
-            [], [], [],
-            EngineCharset: false),
-
-        new TableDef(
-            "sys_emp_group_member",
-            "用户组成员表",
-            [
-                C("member_id", ColType.BigInt, nullable: false, comment: "成员行ID"),
-                C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户ID"),
-                C("group_id", ColType.Varchar, 50, false, comment: "组标识（sys_emp_group.group_id）"),
-                C("emp_id", ColType.BigInt, nullable: false, comment: "员工ID（sys_emp.emp_id）"),
-                C("create_time", ColType.DateTime, nullable: false, comment: "创建时间"),
-            ],
-            ["member_id"],
-            [new IndexDef("idx_sys_emp_group_member_emp", ["emp_id"])],
-            [new IndexDef("uk_sys_emp_group_member", ["group_id", "emp_id"], Unique: true)],
-            [],
-            EngineCharset: false),
-    ];
-
-    internal static readonly IReadOnlyList<SeedTable> OrgSeeds =
-    [
-        new SeedTable(
-            "sys_dept",
-            ["dept_id", "tenant_id", "dept_name", "parent_id", "sort_order", "create_time"],
-            [
-                [101L, 1L, "信息技术部", null, 1L, Now],
-                [102L, 1L, "成本管理部", null, 2L, Now],
-                [103L, 1L, "综合管理部", null, 3L, Now],
-            ],
-            ["dept_id"],
-            ["dept_name", "parent_id", "sort_order"]),
-
-        new SeedTable(
-            "sys_emp",
-            ["emp_id", "tenant_id", "emp_name", "domain_account", "dept_id", "create_time"],
-            [
-                [1001L, 1L, "王小爱", "alice", 101L, Now],
-                [1002L, 1L, "李小波", "bob", 101L, Now],
-                [1003L, 1L, "赵志强", "leader1", 101L, Now],
-                [1004L, 1L, "钱有为", "leader2", 102L, Now],
-                [1005L, 1L, "孙建国", "manager1", 103L, Now],
-            ],
-            ["emp_id"],
-            ["emp_name", "dept_id"]),
-
-        new SeedTable(
-            "sys_emp_group",
-            ["group_id", "tenant_id", "group_name", "sort_order", "create_time"],
-            [
-                ["leaders", 1L, "组长", 1L, Now],
-                ["managers", 1L, "经理", 2L, Now],
-            ],
-            ["group_id"],
-            ["group_name", "sort_order"]),
-
-        new SeedTable(
-            "sys_emp_group_member",
-            ["member_id", "tenant_id", "group_id", "emp_id", "create_time"],
-            [
-                [1L, 1L, "leaders", 1003L, Now],
-                [2L, 1L, "leaders", 1004L, Now],
-                [3L, 1L, "managers", 1005L, Now],
-            ],
-            ["group_id", "emp_id"],
-            []),
-    ];
-
-    // 0006 订单单
-    internal static readonly TableDef OrderBillTable = new(
         "order_bill",
-        "订单表（业务表单；状态随订单审批流程回写：1=审批中，-1=审批拒绝，100=审批通过；流程类型id=02830358-46ef-40e5-b3b9-4d5c4eb23f9f）",
-        [
-            C("tenant_id", ColType.BigInt, nullable: false, comment: "多租户id"),
-            C("business_id", ColType.BigInt, nullable: false, comment: "业务id（订单单号，由业务侧生成）"),
-            C("product_name", ColType.Varchar, 200, comment: "订购产品（对应流程参数 product_name）"),
-            C("amount", ColType.Money, comment: "订单金额（对应流程参数 amount）"),
-            C("remark", ColType.Varchar, 500, comment: "备注（对应流程参数 remark）"),
-            C("status", ColType.SmallInt, nullable: false, def: "1", comment: "状态：1=审批中，-1=审批拒绝，100=审批通过"),
-            C("approve_comment", ColType.Varchar, 500, comment: "最终审批意见（审批结束时随状态一起写回）"),
-            C("apply_user", ColType.Varchar, 50, false, comment: "申请人"),
-            C("apply_dept_id", ColType.Varchar, 50, false, comment: "申请部门"),
-            C("business_dept_id", ColType.Varchar, 50, comment: "业务部门"),
-            C("process_instance_id", ColType.Varchar, 64, comment: "流程实例 id（提交申请后回填，用于反查审批进度）"),
-            C("create_time", ColType.DateTime, nullable: false, comment: "创建时间"),
-            C("modify_time", ColType.DateTime, comment: "最后修改时间"),
-            C("deleted_flag", ColType.TinyInt, nullable: false, def: "0", comment: "伪删除标志（0 正常 / 1 已删除；公共数据操作接口 DeleteAsync 置位，列表与明细自动过滤）"),
-        ],
-        ["business_id"],
-        [
-            new IndexDef("ix_order_bill_apply_user", ["tenant_id", "apply_user"]),
-            new IndexDef("ix_order_bill_status", ["tenant_id", "status"]),
-        ],
-        [], [],
-        EngineCharset: false);
+
+        // 演示组织架构：平台不持有组织主数据，人员范围由接入方传入（startedBy / candidateUsers / 组由 IUserGroupManager 展开）
+        "sys_dept",
+        "sys_emp",
+        "sys_emp_group",
+        "sys_emp_group_member",
+    ];
 
     // 0007 流程参数表
     internal static readonly TableDef WorkflowParametersTable = new(
@@ -709,6 +570,12 @@ internal static class SchemaCatalog
         [], [],
         EngineCharset: false);
 
+    /// <summary>
+    /// 流程类型种子：**只在 workflow_type 为空时初始化**。
+    /// 这 5 个字段都能在控制台「流程类型」页里改（改名 / 改 URL / 拖排序 / 停用 / 删除），所以表里已有行时
+    /// 迁移整段跳过。写成 upsert 或「缺行就补」都会让改动在下次启动时被抹掉
+    /// （upsert 会刷回默认值并把 modify_time 置 NULL，补行会把删掉的流程类型插回来）。
+    /// </summary>
     internal static readonly SeedTable WorkflowTypeSeeds = new(
         "workflow_type",
         ["tenant_id", "id", "name", "describe", "view_url", "approve_url", "sort_order", "enabled", "create_time"],
@@ -716,10 +583,7 @@ internal static class SchemaCatalog
             [1L, "02830358-46ef-40e5-b3b9-4d5c4eb23f9f", "order_process", "订单审批流程", "/bill.html?process=order_process&businessId={businessId}", "/approve.html?process=order_process&taskId={taskId}", 1L, 1L, Now],
             [1L, "3a7c2f14-8d52-4b6e-9a01-c5d84f6e21b7", "leave_process", "请假申请流程", "/bill.html?process=leave_process&businessId={businessId}", "/approve.html?process=leave_process&taskId={taskId}", 2L, 1L, Now],
             [1L, "9d8e3a21-4c5f-4b6e-8a1c-6e7f2d9b0a31", "dept_approval_process", "部门审批流程", "/bill.html?process=dept_approval_process&businessId={businessId}", "/approve.html?process=dept_approval_process&taskId={taskId}", 3L, 1L, Now],
-        ],
-        ["id"],
-        // 流程类型是「配置型」种子：重复执行时把可变字段同步成脚本里的值（create_time 保留）
-        ["name", "describe", "view_url", "approve_url", "sort_order", "enabled", "modify_time"]);
+        ]);
 
     // 管理端 · 流程模型表（设计器草稿/模型的服务端落点，随 0002 业务表一起建）
     internal static readonly TableDef BpmnModelTable = new(

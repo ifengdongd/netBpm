@@ -1221,15 +1221,14 @@ dotnet run --project samples/NetBpm.Demo --urls http://localhost:5188
 `src/NetBpm.Engine/Behavior/ListenerContracts.cs` + `ListenerInvoker.cs` + `Services/EngineEventDispatcher.cs` | 监听器契约（IExecutionListener / ITaskListener / IEngineEventListener）、触发与事件分发 |
 | `src/NetBpm.Identity/IdentityContracts.cs` | 身份模块端口（`FindUserIdsByGroupAsync` 是候选组展开的入口） |
 | `db/mysql/netbpm_init.sql` ② 段 | 流程实例表（`instances` / `instance_current_task` / `deal_history`）+ 流程类型表（`workflow_type`）的建表脚本 |
-| `db/mysql/netbpm_init.sql` ③ 段 | Demo 业务表：请假单（`leave_bill`，`days` / `reason` 真列 + `ext_params` JSON 列）、订单单（`order_bill`）、流程参数键值表（`workflow_parameters`）、组织架构（`sys_*`） |
+| `db/mysql/netbpm_init.sql` ③ 段 | 流程参数键值表（`workflow_parameters`）。平台化后不再建 Demo 业务表：`leave_bill` / `order_bill` / `sys_dept` / `sys_emp` / `sys_emp_group` / `sys_emp_group_member` 已下线，由 ⑧ 段在老库上 `drop table if exists` 清理；对应的示例实现（`MySqlOrgDirectory` / `MySql·SqlServerOrderBillStore` 及 `Storage/DataAccess` 整层）**已删除**，示例改用 `InMemoryOrderBillStore` + `InMemoryOrgDirectory` |
 | `samples/NetBpm.Demo/Program.cs` | 组合根：`AddNetBpmWorkflow` + 委托扫描注册 + 身份模块替换 + 存储/流程信息切换 + 启动即部署 |
 | `samples/NetBpm.Demo/Common/ProcessInfo.cs` | **流程信息枚举**（id/name/describe/viewUrl/approveUrl；数据源 `workflow_type` 表） |
 | `samples/NetBpm.Demo/Common/WorkflowTypeLoader.cs` | 启动时从 `workflow_type` 表加载流程信息（失败回退内置默认） |
 | `samples/NetBpm.Demo/Common/TaskCenterEndpoints.cs` | 跨流程合并端点：待办中心 / 申请单列表 / 任务详情 / 组织架构 |
-| `samples/NetBpm.Demo/Storage/MySqlWorkflowDataStore.cs` | 业务数据端口的 **MySQL 实现**（两流程通用，参数落 `workflow_parameters`） |
-| `samples/NetBpm.Demo/Storage/MySqlOrderBillStore.cs` | 订单行的 MySQL 实现（`order_bill`，状态随审批回写） |
-| `samples/NetBpm.Demo/Order/OrderBillStore.cs` | 业务数据端口的 JSON 实现（零依赖、可打开核对） |
-| `samples/NetBpm.Demo/Leave/LeaveBusinessKey.cs` / `Order/OrderBusinessKey.cs`（在 OrderContracts.cs 内） | 业务单号校验与发号（业务表里是 `bigint`） |
+| `samples/NetBpm.Demo/Storage/MySqlWorkflowDataStore.cs` | 流程数据端口的 **MySQL 实现**（两流程通用，参数落 `workflow_parameters`） |
+| `samples/NetBpm.Demo/Storage/InMemoryOrderBillStore.cs` | 订单行的示例实现（内存字典；端口语义与原先那张业务表逐条对应，换成自己的库即可） |
+| `samples/NetBpm.Demo/Leave/LeaveBusinessKey.cs` / `Order/OrderBusinessKey.cs`（在 OrderContracts.cs 内） | 业务单号校验与发号（原先业务表里是 `bigint`） |
 | `samples/NetBpm.Demo/Leave/LeaveDelegates.cs` / `Order/OrderDelegates.cs` | 服务任务委托（审批结束后业务回写：请假只声明结论名；订单先回写状态再落结论） |
 | `samples/NetBpm.Demo/Leave/LeaveEndpoints.cs` / `Order/OrderEndpoints.cs` | HTTP 适配层：绑定请求、摊平 DTO、翻状态码 |
 | `samples/NetBpm.Demo/Order/OrderProcessBootstrapper.cs` / `Leave/LeaveProcessBootstrapper.cs` | 启动即部署 + 部署期自检（审批选项 / 委托解析） |

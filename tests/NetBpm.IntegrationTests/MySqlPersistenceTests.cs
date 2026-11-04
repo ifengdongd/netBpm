@@ -36,6 +36,190 @@ public sealed class MySqlPersistenceTests
         Assert.Contains(RepositoryLayout.DatabaseScriptFileName, result.AppliedScripts);
     }
 
+    /// <summary>
+    /// 流程类型是「配置型」种子：控制台的「流程类型」页可以改 URL / 排序 / 启用，
+    /// 而老库没有迁移记录表、每次 <c>Migrate()</c> 都整篇重跑脚本。
+    /// 这条用例守住「迁移不得覆盖用户配置」——种子若写成 <c>on duplicate key update</c>，
+    /// 每次 AutoMigrate 都会把配置刷回脚本默认值（现象就是「改了又还原」）。
+    /// </summary>
+    [Fact]
+    public void Migrator_ShouldNotOverwriteEditableProcessTypeConfiguration()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var sessionFactory = MySqlTestDatabase.CreateSessionFactory();
+        var migrator = new DatabaseMigrator(
+            sessionFactory,
+            DatabaseScripts.ResolveDirectory(DatabaseType.MySql));
+
+        // 种子行必须先存在：脚本只在「缺行」时插入
+        migrator.Migrate();
+
+        const string processKey = "leave_process";
+        const string customViewUrl = "/Leave/PageView?businessId={businessId}&processInstanceId={processInstanceId}";
+        const string customApproveUrl = "/Leave/Approve?taskId={taskId}&processInstanceId={processInstanceId}";
+
+        string originalViewUrl;
+        string originalApproveUrl;
+
+        using (var session = sessionFactory.Create())
+        {
+            originalViewUrl = session.Connection.ExecuteScalar<string>(
+                "select view_url from workflow_type where name = @Name", new { Name = processKey })!;
+            originalApproveUrl = session.Connection.ExecuteScalar<string>(
+                "select approve_url from workflow_type where name = @Name", new { Name = processKey })!;
+
+            session.Connection.Execute(
+                "update workflow_type set view_url = @ViewUrl, approve_url = @ApproveUrl where name = @Name",
+                new { ViewUrl = customViewUrl, ApproveUrl = customApproveUrl, Name = processKey });
+        }
+
+        try
+        {
+            migrator.Migrate();
+
+            using var session = sessionFactory.Create();
+
+            Assert.Equal(
+                customViewUrl,
+                session.Connection.ExecuteScalar<string>(
+                    "select view_url from workflow_type where name = @Name", new { Name = processKey }));
+            Assert.Equal(
+                customApproveUrl,
+                session.Connection.ExecuteScalar<string>(
+                    "select approve_url from workflow_type where name = @Name", new { Name = processKey }));
+        }
+        finally
+        {
+            // 共享库：无论如何都把行还原成迁移前的值
+            using var session = sessionFactory.Create();
+
+            session.Connection.Execute(
+                "update workflow_type set view_url = @ViewUrl, approve_url = @ApproveUrl where name = @Name",
+                new { ViewUrl = originalViewUrl, ApproveUrl = originalApproveUrl, Name = processKey });
+        }
+    }
+
+    /// <summary>
+    /// 种子是「表为空才初始化」，所以用户删掉的流程类型不会被下次 <c>Migrate()</c> 补回来。
+    /// 这条用例守住「删得掉」这个半边：只要种子还是「缺行就补」或 upsert，这里就会红。
+    /// </summary>
+    [Fact]
+    public void Migrator_ShouldNotReinsertDeletedSeedRow()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var sessionFactory = MySqlTestDatabase.CreateSessionFactory();
+        var migrator = new DatabaseMigrator(
+            sessionFactory,
+            DatabaseScripts.ResolveDirectory(DatabaseType.MySql));
+
+        migrator.Migrate();
+
+        // 挑最不常被引用的种子行：leave_process 有别的用例在用
+        const string processKey = "dept_approval_process";
+
+        SeedWorkflowTypeRow seed;
+        using (var session = sessionFactory.Create())
+        {
+            seed = session.Connection.QuerySingle<SeedWorkflowTypeRow>(
+                "select tenant_id as TenantId, id, name, `describe`, view_url as ViewUrl," +
+                " approve_url as ApproveUrl, cast(sort_order as signed) as SortOrder, cast(enabled as signed) as Enabled" +
+                " from workflow_type where name = @Name",
+                new { Name = processKey });
+
+            session.Connection.Execute(
+                "delete from workflow_type where name = @Name",
+                new { Name = processKey });
+        }
+
+        try
+        {
+            migrator.Migrate();
+
+            using var session = sessionFactory.Create();
+
+            Assert.True(
+                session.Connection.ExecuteScalar<int>(
+                    "select count(*) from workflow_type where name = @Name", new { Name = processKey }) == 0,
+                "种子只在表为空时插入：被删掉的流程类型不应被迁移补回来。");
+        }
+        finally
+        {
+            // 共享库：把行还原成删除前的样子
+            using var session = sessionFactory.Create();
+
+            session.Connection.Execute(
+                "insert into workflow_type (tenant_id, id, name, `describe`, view_url, approve_url, sort_order, enabled, create_time)" +
+                " values (@TenantId, @Id, @Name, @Describe, @ViewUrl, @ApproveUrl, @SortOrder, @Enabled, utc_timestamp())",
+                seed);
+        }
+    }
+
+    /// <summary>
+    /// 空表时种子必须真的插进去，而且**多行一次插入**。这条用例能抓到生成侧的两类事故：
+    /// ① 判空写成逐行（第一行插入后表就不空了，后面几行被自己的守卫挡掉）；
+    /// ② MySQL 派生表列名重复（<c>workflow_type</c> 首行 tenant_id / sort_order / enabled 都是 1）→ 1060。
+    /// 共享库上必须自己收尾：用例开始时记下全部行，结束时清空并原样写回。
+    /// </summary>
+    [Fact]
+    public void Migrator_ShouldSeedAllRowsIntoEmptyTable()
+    {
+        Assert.SkipUnless(MySqlTestDatabase.IsAvailable, MySqlTestDatabase.SkipReason);
+
+        var sessionFactory = MySqlTestDatabase.CreateSessionFactory();
+        var migrator = new DatabaseMigrator(
+            sessionFactory,
+            DatabaseScripts.ResolveDirectory(DatabaseType.MySql));
+
+        migrator.Migrate();
+
+        List<SeedWorkflowTypeRow> original;
+        using (var session = sessionFactory.Create())
+        {
+            original = session.Connection.Query<SeedWorkflowTypeRow>(
+                "select tenant_id as TenantId, id, name, `describe`, view_url as ViewUrl," +
+                " approve_url as ApproveUrl, cast(sort_order as signed) as SortOrder, cast(enabled as signed) as Enabled from workflow_type").ToList();
+
+            session.Connection.Execute("delete from workflow_type");
+        }
+
+        try
+        {
+            migrator.Migrate();
+
+            using var session = sessionFactory.Create();
+
+            var names = session.Connection.Query<string>(
+                "select name from workflow_type order by sort_order").ToList();
+
+            Assert.Equal(
+                new[] { "order_process", "leave_process", "dept_approval_process" },
+                names);
+        }
+        finally
+        {
+            using var session = sessionFactory.Create();
+
+            session.Connection.Execute("delete from workflow_type");
+            session.Connection.Execute(
+                "insert into workflow_type (tenant_id, id, name, `describe`, view_url, approve_url, sort_order, enabled, create_time)" +
+                " values (@TenantId, @Id, @Name, @Describe, @ViewUrl, @ApproveUrl, @SortOrder, @Enabled, utc_timestamp())",
+                original);
+        }
+    }
+
+    /// <summary>workflow_type 行（用例里用来原样搬回来，列名与库内一致）。</summary>
+    private sealed record SeedWorkflowTypeRow(
+        long TenantId,
+        string Id,
+        string Name,
+        string Describe,
+        string ViewUrl,
+        string ApproveUrl,
+        long SortOrder,
+        long Enabled);
+
     [Fact]
     public void SchemaVersion_ShouldMatchEngineExpectation()
     {

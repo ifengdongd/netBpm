@@ -52,6 +52,15 @@ public static class BpmnDiagramSvgRenderer
         var visited = new HashSet<string>(highlight?.VisitedActivityIds ?? [], StringComparer.Ordinal);
         var active = new HashSet<string>(highlight?.ActiveActivityIds ?? [], StringComparer.Ordinal);
         var nodes = model.Nodes.Values.Where(node => node.Bounds is not null).ToList();
+
+        // 没有 bpmndi（或 BPMNShape 全对不上）时没有任何坐标可画，正常流程只会得到
+        // 一张 20×20 的白图——调用方看到的是「图挂了」，却不知道该怪定义还是怪接口。
+        // 这种情况显式画一张带说明的占位图：说清缺什么、怎么补，比沉默的空白有用。
+        if (nodes.Count == 0)
+        {
+            return RenderUndrawable();
+        }
+
         var (width, height) = Measure(model);
 
         var svg = new StringBuilder();
@@ -78,6 +87,47 @@ public static class BpmnDiagramSvgRenderer
         }
 
         svg.Append("</svg>");
+        return svg.ToString();
+    }
+
+    // ───────────────────────── 无法绘制时的占位图 ─────────────────────────
+
+    /// <summary>占位画布：宽度取详情页图片的常见最小宽度，高度够放三行说明。</summary>
+    private const double UndrawableWidth = 680;
+
+    /// <inheritdoc cref="UndrawableWidth" />
+    private const double UndrawableHeight = 160;
+
+    /// <summary>
+    /// 定义里没有图形信息时的占位图：虚线框 + 三行说明。
+    /// </summary>
+    /// <remarks>
+    /// 文案写的是「缺什么、怎么补」，不是「渲染失败」——后者会让人去查平台，
+    /// 而真正要改的是那份 BPMN 定义。同时把同样的意思放进 <c>&lt;title&gt;</c>/<c>&lt;desc&gt;</c>，
+    /// 让调用方可以程序化识别（图片在页面里也许只是一块灰，日志里要说得清）。
+    /// </remarks>
+    private static string RenderUndrawable()
+    {
+        const string title = "当前流程定义缺少图形信息，无法绘制流程图";
+        const string reason = "BPMN 里没有 bpmndi:BPMNDiagram 的坐标（BPMNShape / BPMNEdge）。";
+        const string action = "请在设计器中重新导出带图形信息的 BPMN，或部署包含 BPMNDiagram 节点的版本。";
+
+        var centerX = Round(UndrawableWidth / 2);
+
+        var svg = new StringBuilder();
+        svg.Append(CultureInfo.InvariantCulture, $"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{Round(UndrawableWidth)}\" height=\"{Round(UndrawableHeight)}\" ")
+           .Append(CultureInfo.InvariantCulture, $"viewBox=\"0 0 {Round(UndrawableWidth)} {Round(UndrawableHeight)}\" ")
+           .Append("style=\"font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif\">")
+           .Append(CultureInfo.InvariantCulture, $"<title>{Escape(title)}</title>")
+           .Append(CultureInfo.InvariantCulture, $"<desc>{Escape(reason + action)}</desc>")
+           .Append(CultureInfo.InvariantCulture, $"<rect x=\"0\" y=\"0\" width=\"{Round(UndrawableWidth)}\" height=\"{Round(UndrawableHeight)}\" fill=\"#ffffff\"/>")
+           .Append(CultureInfo.InvariantCulture, $"<rect x=\"20\" y=\"20\" width=\"{Round(UndrawableWidth - 40)}\" height=\"{Round(UndrawableHeight - 40)}\" rx=\"10\" ")
+           .Append("fill=\"#fafafa\" stroke=\"#d0d5dd\" stroke-width=\"1.5\" stroke-dasharray=\"6 5\"/>")
+           .Append(CultureInfo.InvariantCulture, $"<text x=\"{centerX}\" y=\"76\" font-size=\"14\" font-weight=\"600\" fill=\"{TextColor}\" text-anchor=\"middle\">{Escape(title)}</text>")
+           .Append(CultureInfo.InvariantCulture, $"<text x=\"{centerX}\" y=\"100\" font-size=\"12\" fill=\"#7a828c\" text-anchor=\"middle\">{Escape(reason)}</text>")
+           .Append(CultureInfo.InvariantCulture, $"<text x=\"{centerX}\" y=\"120\" font-size=\"12\" fill=\"#7a828c\" text-anchor=\"middle\">{Escape(action)}</text>")
+           .Append("</svg>");
+
         return svg.ToString();
     }
 

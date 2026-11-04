@@ -99,15 +99,21 @@ internal sealed record TableDef(
     IReadOnlyList<ForeignKeyDef> ForeignKeys,
     bool EngineCharset);
 
-/// <summary>一张种子的定义（幂等/一次性插入数据）。</summary>
+/// <summary>一张种子的定义：**只在目标表为空时**初始化，一旦表里有行就整段跳过。</summary>
 /// <param name="TableName">表名。</param>
 /// <param name="Columns">插入列。</param>
 /// <param name="Rows">每行取值（字符串 / 数值 / null）。</param>
-/// <param name="GuardColumns">SQL Server <c>if not exists</c> 用的判重列。</param>
-/// <param name="UpsertUpdateColumns">MySQL <c>on duplicate key update</c> 的更新列。</param>
+/// <remarks>
+/// 语义刻意定为「表为空才初始化」，不是「缺行就补」，也不是 upsert。原因是本平台没有迁移记录表，
+/// <c>AutoMigrate</c> 每次启动都把整篇幂等脚本重跑一遍：
+/// <list type="bullet">
+/// <item>upsert（<c>on duplicate key update</c>）→ 每次重跑把用户在控制台改的列刷回脚本默认值；</item>
+/// <item>按主键补行（<c>insert ignore</c> / <c>if not exists (… where id = …)</c>）→ 用户删掉的种子行会被插回来；</item>
+/// <item>表为空才初始化 → 两种情况都不发生，用户对自己数据的增删改都留得住。</item>
+/// </list>
+/// 因此这里不再提供「更新列 / 判重列」参数：给出这类开关就等于给「重置用户数据」留了入口。
+/// </remarks>
 internal sealed record SeedTable(
     string TableName,
     IReadOnlyList<string> Columns,
-    IReadOnlyList<IReadOnlyList<object?>> Rows,
-    IReadOnlyList<string> GuardColumns,
-    IReadOnlyList<string> UpsertUpdateColumns);
+    IReadOnlyList<IReadOnlyList<object?>> Rows);
