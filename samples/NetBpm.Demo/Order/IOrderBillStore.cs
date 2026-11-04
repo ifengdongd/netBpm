@@ -5,9 +5,11 @@ namespace NetBpm.Demo.Order;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 🔑 它是<b>业务自己的表</b>（<c>order_bill</c>，见 db/mysql/0006）的落点，与流程引擎的业务数据端口
+/// 🔑 它是<b>业务自己的数据</b>的落点（原先是 <c>order_bill</c> 表，平台化后该表已下线），
+/// 与流程引擎的业务数据端口
 /// <c>IWorkflowDataStore</c>（instances / 审批结论 / 参数表…）是两回事。
-/// MySQL 实现见 <c>NetBpm.Demo.Storage.MySqlOrderBillStore</c>。
+/// 示例实现见 <c>NetBpm.Demo.Storage.InMemoryOrderBillStore</c>（内存字典）；
+/// 接自己的库时换掉这个实现即可，端口语义不变。
 /// </para>
 /// </remarks>
 public interface IOrderBillStore

@@ -7,7 +7,7 @@ namespace NetBpm.Demo.Order;
 // ─────────────────────────── 订单状态 ───────────────────────────
 
 /// <summary>
-/// 订单状态（<c>order_bill.status</c> 列，与 db/*/netbpm_init.sql 的注释一一对应）。
+/// 订单状态（原 <c>order_bill.status</c> 列的取值；表已下线，语义保留在订单行上）。
 /// </summary>
 public static class OrderBillStatus
 {
@@ -52,7 +52,7 @@ public static class OrderParameterNames
 // ─────────────────────────── 行与契约 ───────────────────────────
 
 /// <summary>
-/// 订单表的一行（与 <c>order_bill</c> 的列一一对应，落 MySQL 真库）。
+/// 订单表的一行（字段沿用原 <c>order_bill</c> 的列形状）。
 /// </summary>
 /// <param name="TenantId">多租户 id。</param>
 /// <param name="BusinessId">业务 id（订单单号，由业务侧生成，主键）。</param>

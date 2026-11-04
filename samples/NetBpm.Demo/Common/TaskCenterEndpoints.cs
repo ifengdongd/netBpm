@@ -192,7 +192,7 @@ public static class TaskCenterEndpoints
     /// <summary>全部申请单（可选按申请人过滤），两条流程合并、新的在前。</summary>
     /// <remarks>
     /// 已结束的实例拿不到流程定义 id（运行态行已删，见 <see cref="WorkflowInstanceViewBuilder"/>），
-    /// 归属判定先走定义 id，失败再按业务落点反查：订单号能在 <c>order_bill</c> 里找到就是订单流程，
+    /// 归属判定先走定义 id，失败再按业务落点反查：订单号能在订单存储里找到就是订单流程，
     /// 否则视为请假流程。
     /// </remarks>
     private static async Task<IResult> FindInstancesAsync(
@@ -258,7 +258,7 @@ public static class TaskCenterEndpoints
         return Results.Ok(items.OrderByDescending(item => item.StartedAt ?? DateTime.MinValue));
     }
 
-    /// <summary>按业务单号反查流程归属：order_bill 里有 → 订单流程；否则按请假流程。</summary>
+    /// <summary>按业务单号反查流程归属：订单存储里有 → 订单流程；否则按请假流程。</summary>
     private static async ValueTask<string> ResolveProcessKeyByBusinessAsync(
         IOrderBillStore orderBills,
         string? businessId,

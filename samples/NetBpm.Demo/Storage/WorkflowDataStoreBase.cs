@@ -4,6 +4,7 @@ using Dapper;
 using NetBpm.Demo.Common;
 using NetBpm.Persistence;
 using NetBpm.Workflow;
+using NetBpm.Workflow.Hosting;
 
 namespace NetBpm.Demo.Storage;
 
@@ -51,6 +52,7 @@ public abstract class WorkflowDataStoreBase : IWorkflowDataStore, IWorkflowStore
     private readonly IWorkflowStoreDialect _sql;
     private readonly IDbConnectionFactory _connections;
     private readonly WorkflowRuntimeContext _runtime;
+    private readonly IOrgDirectory _org;
     private readonly ILogger _logger;
     private readonly string _connectionString;
     private readonly long _tenantId;
@@ -60,18 +62,21 @@ public abstract class WorkflowDataStoreBase : IWorkflowDataStore, IWorkflowStore
         IWorkflowStoreDialect dialect,
         IDbConnectionFactory connections,
         WorkflowRuntimeContext runtime,
+        IOrgDirectory org,
         IConfiguration configuration,
         ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(dialect);
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(org);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(logger);
 
         _sql = dialect;
         _connections = connections;
         _runtime = runtime;
+        _org = org;
         _logger = logger;
         _connectionString = configuration["NetBpm:ConnectionString"] ?? "(未配置)";
         _tenantId = configuration.GetValue(ConstField.WorkflowTenantConfigKey, 1L);
@@ -387,7 +392,8 @@ public abstract class WorkflowDataStoreBase : IWorkflowDataStore, IWorkflowStore
     /// <inheritdoc />
     /// <remarks>
     /// 快照里真正能落的是 <c>result</c>（→ <c>deal_result</c>）与 <c>comment</c>（→ <c>deal_comment</c>）；
-    /// 其余键丢弃并打日志。审批人姓名从 sys_emp 联查，查不到只记域账号。
+    /// 其余键丢弃并打日志。审批人姓名走 <see cref="IOrgDirectory"/>（平台不持有组织主数据，
+    /// 原先的 <c>sys_emp</c> 联查随该表下线一并去掉），查不到只记域账号。
     /// </remarks>
     public async ValueTask SaveApprovalAsync(WorkflowApprovalRecord record, CancellationToken ct = default)
     {
@@ -425,11 +431,7 @@ public abstract class WorkflowDataStoreBase : IWorkflowDataStore, IWorkflowStore
             return;
         }
 
-        var approverName = await connection.QueryFirstOrDefaultAsync<string>(new CommandDefinition(
-            _sql.SelectApproverNameSql,
-            new { TenantId = _tenantId, DealEmpId = record.Assignee },
-            transaction,
-            cancellationToken: ct)).ConfigureAwait(false);
+        var approverName = await ResolveApproverNameAsync(record.Assignee, ct).ConfigureAwait(false);
 
         await connection.ExecuteAsync(new CommandDefinition(
             _sql.InsertDealHistorySql,
@@ -738,6 +740,19 @@ public abstract class WorkflowDataStoreBase : IWorkflowDataStore, IWorkflowStore
     /// <summary>库里的 datetime 无时区：统一按 UTC 解释（写进去的就是 DateTime.UtcNow）。</summary>
     private static DateTime? AsUtc(DateTime? value) =>
         value is { } moment ? DateTime.SpecifyKind(moment, DateTimeKind.Utc) : null;
+
+    /// <summary>域账号 → 姓名（查不到返回 <see langword="null"/>，视图层退回展示域账号）。</summary>
+    private async ValueTask<string?> ResolveApproverNameAsync(string? domainAccount, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(domainAccount))
+        {
+            return null;
+        }
+
+        var employee = await _org.FindEmployeeAsync(domainAccount, ct).ConfigureAwait(false);
+
+        return employee?.Name;
+    }
 
     /// <summary>发一个业务主键：毫秒时间戳 &lt;&lt; 20 | 同毫秒序号（单进程唯一；多实例部署要换统一发号）。</summary>
     private static long NextId()

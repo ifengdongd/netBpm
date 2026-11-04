@@ -15,15 +15,16 @@ dotnet run --project samples/NetBpm.Demo
 
 **存储落真库（默认 MySQL 127.0.0.1，库 `netbpm_demo`；可切 SQL Server）**：
 方言随 `NetBpm:DatabaseType`，引擎落 ACT_* 表（`UseInMemoryExecutionTree=false`），
-业务数据落 `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` + `order_bill`
-（双方言同库同 schema：业务表与引擎 ACT_* 表表名逐字相同）。启动时自动建库（若缺）并执行
+流程数据落 `instances` / `instance_current_task` / `deal_history` / `workflow_parameters` 四张视图表
+（与引擎 ACT_* 表同库同 schema、表名逐字相同）；**订单行与组织架构用示例自带的内存实现** ——
+业务单表（`order_bill`）与组织主数据（`sys_*`）归接入方自己的库，平台脚本不再建。启动时自动建库（若缺）并执行
 `db/<dialect>/netbpm_init.sql` 一份脚本（建表 + 初值，全幂等），重复启动只补齐缺失结构。
 ⚠️ 引擎与业务数据是一体的 —— 内存执行树的流程实例 id 每次重启从 1 重新开始，会与真库累积行撞号。
 ⚠️ 数据库连接要求 **TLS 1.2 及以上**：MySQL 客户端已锁定 `TlsVersion=TLS 1.2, TLS 1.3`（连接串显式写 1.0/1.1 会启动失败）；
 SQL Server 请使用支持 TLS 1.2+ 的实例（只支持 TLS 1.0 的老实例会产生「非安全协议」告警并建议淘汰）。
 
 前置脚本（现由启动序列自动执行，也可手工跑）：`db/<dialect>/netbpm_init.sql`
-（引擎 ACT_* 表 + 业务表 + 流程类型 / 模型表 + Demo 业务表与组织架构，含演示种子数据）。
+（引擎 ACT_* 表 + 四张流程视图表 + 流程类型表，含流程类型种子；业务表与组织主数据不在此列）。
 
 ## 流程设计
 
@@ -98,8 +99,8 @@ StartupInitializer.InitializeAsync(app)        启动序列：建库迁移 → �
    并与 BPMN 的 `delegateExpression` 对应；
 3. **BPMN 定义 + workflow_type 表插一行**（id / name / describe / view_url / approve_url）。
 
-参照实现：`Order/OrderBusinessProcess.cs`（有业务单表 + 状态回写）与
-`Leave/LeaveBusinessProcess.cs`（无业务单表，参数落流程参数表）。
+参照实现：`Order/OrderBusinessProcess.cs`（有业务单 + 状态回写，示例用内存存储）与
+`Leave/LeaveBusinessProcess.cs`（无业务单，参数落流程参数表）。
 
 ### 外部任务用例（注册 + 调用，自证闭环）
 
@@ -143,7 +144,7 @@ Demo 里还带了一条**外部任务**（`activiti:topic`）的可执行用例�
 ### 审批结束后的业务回写（拒绝/通过的数据处理）
 
 - **订单**：`OrderCompletionDelegate` 基类 —— 先按流程变量 `businessId` 找到订单行、
-  回写 `order_bill.status`（1=审批中，100=通过，-1=拒绝）与最终审批意见，再调
+  回写订单行的 `status`（1=审批中，100=通过，-1=拒绝）与最终审批意见，再调
   `IWorkflowService.CompleteAsync` 落审批结论（顺序保证：业务事实先落，结论留痕可重试）；
 - **请假**：`WorkflowCompletionDelegate` 派生两个委托（`leave.ApproveComplete` / `leave.RefuseComplete`），
   每个只剩「类名 + 结论」一行，落盘逻辑统一在 `CompleteAsync`。
@@ -155,29 +156,31 @@ Demo 在业务入口自动填 `ProcessInfoEnum` 的 GUID；
 `instances.workflow_type_id`（MySQL `varchar(64)` / SQL Server `nvarchar(64)`）写入该值，
 兜底用流程定义 key；同时落扁平变量 `workflowTypeId`。
 
-### 业务表（netbpm_demo；双方言同库同 schema、表名逐字相同）
+### 数据表（netbpm_demo；双方言同库同 schema、表名逐字相同）
 
 | 表 | 职责 |
 |---|---|
 | `instances` | 实例登记：申请人 / 业务单 / 状态 / 当前环节 / `workflow_type_id` |
 | `instance_current_task` | 当前待办（每到达一个环节整体替换） |
 | `deal_history` | 审批流水（每次提交追加；`deal_result`=BPMN 选项 id） |
-| `workflow_parameters` | 流程参数（0003 新增：「实例 × 参数名」键值表，两条流程共用） |
-| `workflow_type` | 流程类型表（0002：ProcessInfoEnum 的数据源，启动时加载） |
-| `order_bill` | 订单业务行（`status` 随审批回写） |
-| `sys_dept` / `sys_emp` / `sys_emp_group` / `sys_emp_group_member` | 组织架构四张表（0003，幂等带种子）：MySQL 模式的 `MySqlOrgDirectory` 直接读 |
+| `workflow_parameters` | 流程参数（「实例 × 参数名」键值表，两条流程共用） |
+| `workflow_type` | 流程类型表（ProcessInfoEnum 的数据源，启动时加载） |
 | `ACT_*` | 引擎 13 张表（执行树 / 任务 / 变量 / 历史 / 部署） |
+
+> 平台化之后**不再有业务表**：`order_bill`（订单行）与 `sys_dept` / `sys_emp` / `sys_emp_group` /
+> `sys_emp_group_member`（组织架构）已从建表脚本里下线，老库由脚本 ⑧ 段 `drop` 掉。
+> 示例对应改成 `Storage/InMemoryOrderBillStore`（内存字典）与 `InMemoryOrgDirectory`（内置演示数据）——
+> 换自己的库时只改这两个端口的实现，其余代码不动。
 
 ### 组织架构（IOrgDirectory + IUserGroupManager）
 
-`Storage/MySqlOrgDirectory.cs`：MySQL 模式的组织架构 —— 直接读 0003 建的四张 `sys_*` 表
-（按租户过滤，租户 id 取 `Workflow:TenantId`，缺省 1；种子数据 = 部门 101-103、
-员工 1001-1005、组 leaders/managers），同时实现 `IOrgDirectory`（业务查询）与
-`IUserGroupManager`（引擎查候选组待办的「用户 ↔ 组」展开）。
-语义与内存版对齐（换库不换人：请假审批人仍是 leader1、订单审批人仍是 manager1）；
-员工按部门 `sort_order` + `emp_id` 排、组成员按域账号序排（待办展开顺序稳定）。
-注册随 `AddDemoStores` 按方言切换：SqlServer / JSON 演示模式沿用 `InMemoryOrgDirectory`
-（SqlServer 的 `sys_*` 表结构相同，需要真表版照 `MySqlOrgDirectory` 平移一份即可）。
+`InMemoryOrgDirectory`（`NetBpm.Workflow/Hosting/OrgDirectory.cs`）：内置演示数据 ——
+部门 101-103、员工 alice / bob / leader1 / leader2 / manager1、组 leaders / managers，
+同时实现 `IOrgDirectory`（业务查询）与 `IUserGroupManager`（引擎查候选组待办的「用户 ↔ 组」展开）。
+语义不变：请假审批人 = `candidateGroups="leaders"` → leader1（赵志强）；
+订单审批人 = `managers` → manager1（孙建国）。
+平台不持有组织主数据 —— 接真库时自己实现这两个端口（原先读 `sys_*` 四张表的
+`MySqlOrgDirectory` 已随这些表一起删除）。
 
 ### HTTP 端点
 
@@ -230,18 +233,14 @@ NetBpm.Demo/
 ├── ExternalTasks/        外部任务用例：handler 契约与两个示例 handler（topic → 实现）、
 │                         进程内 worker（领取→执行→回执，可暂停）、用例执行器与端点
 ├── processes/            外部任务用例的 BPMN（业务流的 BPMN 仍链接自 web/designer/examples）
-├── Order/                订单契约 / JSON 业务存储 / 端点
+├── Order/                订单契约 / 内存业务存储的使用 / 端点
 ├── Leave/                请假契约 / 端点
-├── Storage/              双方言业务存储（逻辑下沉基类，方言收敛 SQL 常量层）：
-│                         WorkflowDataStoreBase（四张流程表全部端口逻辑）+
+├── Storage/              流程数据存储（逻辑下沉基类，方言收敛 SQL 常量层）：
+│                         WorkflowDataStoreBase（四张流程视图表全部端口逻辑）+
 │                         WorkflowStoreDialect（IWorkflowStoreDialect + MySQL/SqlServer 两个实现）+
 │                         WorkflowStoreRows（共用行映射）；
-│                         DataAccess/（公共数据操作接口：IDataAccessor 五件套 —— 按条件查列表 /
-│                         按 id 查明细 / 新增返回 id / 修改返回影响行数 / 伪删除改状态列；
-│                         DataAccessorBase 公共拼装 + MySql/SqlServerDataAccessor 两个方言实现；
-│                         EntityTableSpec 列白名单 + IEntityMapper 实体映射 + OrderBillMapper 示范）；
-│                         OrderBillStoreBase（订单 CRUD 委托 IDataAccessor）；
-│                         四个薄子类：MySql/SqlServerWorkflowDataStore、MySql/SqlServerOrderBillStore；
+│                         两个薄子类：MySqlWorkflowDataStore / SqlServerWorkflowDataStore；
+│                         InMemoryOrderBillStore（订单行 —— 业务表归接入方，示例不落库）；
 │                         DemoSchemaInitializer（建库+迁移）；AddDemoStores 按 DatabaseType 注册
 └── wwwroot/              七个独立页面 + diagrams/（发布生成的流程图）+ 共享 css/js
 ```

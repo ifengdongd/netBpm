@@ -5,8 +5,8 @@ namespace NetBpm.Demo.Storage;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 四张流程表（instances / instance_current_task / deal_history / workflow_parameters）与
-/// 审批人联查（sys_emp）的表结构双方言完全一致，只有 SQL 写法不同：
+/// 四张流程表（instances / instance_current_task / deal_history / workflow_parameters）的表结构
+/// 双方言完全一致，只有 SQL 写法不同：
 /// </para>
 /// <list type="bullet">
 ///   <item><description><b>schema</b>：双方言一致 —— 业务表与引擎 ACT_* 同库同 schema
@@ -72,11 +72,6 @@ public interface IWorkflowStoreDialect
 
     /// <summary>按实例清空当前待办（整体替换前调用）。</summary>
     string DeleteCurrentTasksSql { get; }
-
-    // ───────────────────────── sys_emp ─────────────────────────
-
-    /// <summary>按域账号查审批人姓名（单行，查不到返回 null）。</summary>
-    string SelectApproverNameSql { get; }
 
     // ───────────────────────── 快照 ─────────────────────────
 
@@ -261,10 +256,6 @@ public sealed class MySqlWorkflowStoreDialect : IWorkflowStoreDialect
     /// <inheritdoc />
     public string DeleteCurrentTasksSql =>
         "delete from instance_current_task where apply_id = @applyId";
-
-    /// <inheritdoc />
-    public string SelectApproverNameSql =>
-        "select emp_name from sys_emp where tenant_id = @TenantId and domain_account = @DealEmpId limit 1";
 
     /// <inheritdoc />
     public string SelectInstanceSnapshotSql => """
@@ -506,11 +497,6 @@ public sealed class SqlServerWorkflowStoreDialect : IWorkflowStoreDialect
     /// <inheritdoc />
     public string DeleteCurrentTasksSql =>
         "delete from instance_current_task where apply_id = @applyId";
-
-    /// <inheritdoc />
-    public string SelectApproverNameSql =>
-        "select top (1) emp_name from sys_emp "
-        + "where tenant_id = @TenantId and domain_account = @DealEmpId";
 
     /// <inheritdoc />
     public string SelectInstanceSnapshotSql => """

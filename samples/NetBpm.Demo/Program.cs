@@ -28,7 +28,8 @@ builder.Services.AddNetBpm(builder.Configuration);
 // 定时边界事件：后台轮询 ACT_RU_TIMER_JOB（NetBpm:Timer 可调间隔 / 关闭）
 builder.Services.AddNetBpmTimerScheduler(builder.Configuration);
 
-// 业务数据存储：方言随 NetBpm:DatabaseType（引擎同一个库，双方言业务表与 ACT_* 表同库同 schema、表名逐字相同）
+// 业务数据存储：流程数据（四张视图表）方言随 NetBpm:DatabaseType；订单行与组织架构用示例自带内存实现
+//（平台化之后业务单表 / 组织主数据都归接入方自己的库，平台脚本不再建）
 builder.Services.AddDemoStores(builder.Configuration);
 
 // 业务流程接入：新建业务流程只需实现 IBusinessProcess（+ 两个收口委托 + BPMN + workflow_type 行）
@@ -41,11 +42,10 @@ builder.Services.AddSingleton<IBusinessProcess, DeptApprovalBusinessProcess>();
 // 这里用 DemoExternalApproverDirectory 当「假外部系统」；真实场景换成 HTTP/SQL 查询。
 builder.Services.AddNetBpmApproverResolver(new DynamicApproverResolver(DemoExternalApproverDirectory.FindAsync));
 
-// 身份与组织架构：随 AddDemoStores 按方言切换 ——
-//   MySQL：MySqlOrgDirectory 读真表（sys_dept / sys_emp / sys_emp_group / sys_emp_group_member）；
-//   SqlServer：InMemoryOrgDirectory 内置演示数据。
-// 两者都同时实现 IOrgDirectory（业务查询）与 IUserGroupManager（引擎查候选组待办的「用户 ↔ 组」展开），
-// 数据语义一致：请假审批人 = candidateGroups="leaders" → leader1（赵志强）；订单审批人 = managers → manager1（孙建国）。
+// 身份与组织架构：InMemoryOrgDirectory 内置演示数据（两种方言一致 —— 平台不持有组织主数据，
+// 原先读 sys_* 四张表的 MySqlOrgDirectory 已随这些表下线删除）。
+// 它同时实现 IOrgDirectory（业务查询）与 IUserGroupManager（引擎查候选组待办的「用户 ↔ 组」展开），
+// 数据语义：请假审批人 = candidateGroups="leaders" → leader1（赵志强）；订单审批人 = managers → manager1（孙建国）。
 
 // 监听器触发计数（观测用单例）：请假流程的监听器往里计数
 builder.Services.AddSingleton<ListenerStats>();
