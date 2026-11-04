@@ -525,6 +525,18 @@ dotnet run --project tools/NetBpm.DbInit -- \
 运维动作（探库 / 清库 / 校验 / 单脚本执行）用
 `NetBpm.DbMigrate` 的 `probe` / `purge` / `check` / `apply` 子命令，`--provider` 可选 `mysql` 或 `sqlserver`。
 
+### 初始化数据库 / 只启动控制台（根目录 `*.bat`）
+
+| 脚本 | 作用 |
+|---|---|
+| `init-db-mysql.bat` | 生成 `db/mysql` 脚本并初始化 MySQL（建库 + 建表 + 索引外键 + 种子 + 版本校验），幂等可重复跑 |
+| `init-db-sqlserver.bat` | 同上，SQL Server 方言；不带参数时逐项询问主机 / 库名 / 账号 / 口令 |
+| `start-admin.bat` | 只发布并启动管理控制台（5081）；支持 `--no-publish` / `--no-browser` / `stop` |
+| `start.bat` | 发布并启动 Rest(5080) + 控制台(5081) |
+
+这三个批处理按 **GBK + CRLF** 保存（cmd.exe 按字节偏移读批次，改成 UTF-8 或只留 LF 会让脚本读串行）；
+初始化脚本额外支持 `--no-pause`，方便被 CI 或其它脚本调用。
+
 ### 一键启动两个宿主（根目录 `start.bat`）
 
 ```bat

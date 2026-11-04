@@ -8,10 +8,10 @@ setlocal EnableExtensions
 rem ============================================================================
 rem  NetBpm 本地开发一键启动（双击运行，或在终端里执行 start.bat）
 rem
-rem    5080  NetBpm.Rest    引擎 REST 宿主（库 netbpm）
-rem    5081  NetBpm.Admin   管理控制台 + 平台面 /admin/v1（库 netbpm_admin）
+rem    5080  NetBpm.Rest    引擎 REST 宿主
+rem    5081  NetBpm.Admin   管理控制台 + 平台面 /admin/v1
 rem
-rem  依赖：.NET 10 SDK + 本机 MySQL（两个库由 AutoMigrate 自动建表）
+rem  依赖：.NET 10 SDK + 本机 MySQL（两个宿主共用库 netbpm_admin，AutoMigrate 自动建表）
 rem
 rem  用法：
 rem    start.bat          发布并启动两个服务，各自开一个窗口
